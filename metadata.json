@@ -1,0 +1,6 @@
+{
+  "name": "HR & Payroll Management System",
+  "description": "Multi-tenant HR, Attendance, and Payroll management portal with Pakistan statutory compliance (Income Tax, EOBI, PESSI, PF/Provident Fund, and Gratuity).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
