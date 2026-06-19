@@ -4,12 +4,14 @@
  */
 
 import React, { useState } from 'react';
-import { Monitor, Cpu, Smartphone, Layers, ShieldCheck, HeartHandshake, Briefcase, Info } from 'lucide-react';
+import { Monitor, Cpu, Smartphone, Layers, ShieldCheck, HeartHandshake, Briefcase, Info, Scan } from 'lucide-react';
 import { WebPortal } from './WebPortal';
 import { WindowsApp } from './WindowsApp';
 import { MobileApp } from './MobileApp';
+import { KioskTerminal } from './KioskTerminal';
 import { 
-  Employee, AttendanceLog, LeaveRequest, StatutoryConfig, TaxSlab, PayrollRun, Designation, Branch, Department
+  Employee, AttendanceLog, LeaveRequest, StatutoryConfig, TaxSlab, PayrollRun, Designation, Branch, Department,
+  Role, UserAccount
 } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -32,9 +34,22 @@ interface DeviceEmulatorProps {
   onSimulatePunch: (employeeId: string, punchIn: string, punchOut: string, method: string) => void;
   onApplyLeave: (leave: LeaveRequest) => void;
   onAddRegularization: (employeeId: string, date: string, reason: string) => void;
+  onAddAttendance: (log: AttendanceLog) => void;
   branches: Branch[];
   departments: Department[];
   designations: Designation[];
+  roles: Role[];
+  users: UserAccount[];
+  currentUserAccount: UserAccount;
+  onSetCurrentUserAccount: (user: UserAccount) => void;
+  onAddRole: (role: Role) => void;
+  onAddUser: (user: UserAccount) => void;
+  onUpdateUserRole: (userId: string, roleId: string) => void;
+  loggedInUser: UserAccount;
+  onLogout: () => void;
+  onAddBranch?: (branch: Branch) => void;
+  onAddDepartment?: (dept: Department) => void;
+  onAddDesignation?: (desg: Designation) => void;
 }
 
 export function DeviceEmulator({
@@ -56,76 +71,157 @@ export function DeviceEmulator({
   onSimulatePunch,
   onApplyLeave,
   onAddRegularization,
+  onAddAttendance,
   branches,
   departments,
-  designations
+  designations,
+  roles,
+  users,
+  currentUserAccount,
+  onSetCurrentUserAccount,
+  onAddRole,
+  onAddUser,
+  onUpdateUserRole,
+  loggedInUser,
+  onLogout,
+  onAddBranch,
+  onAddDepartment,
+  onAddDesignation
 }: DeviceEmulatorProps) {
-  const [deviceMode, setDeviceMode] = useState<'web' | 'windows' | 'mobile'>('web');
-  const [showComplianceOverview, setShowComplianceOverview] = useState(true);
+  const isKioskUser = loggedInUser?.username === 'kiosk' || loggedInUser?.roleId === 'role-kiosk';
+
+  const [deviceMode, setDeviceMode] = useState<'web' | 'windows' | 'mobile' | 'kiosk'>(() => {
+    return isKioskUser ? 'kiosk' : 'web';
+  });
+  const [showComplianceOverview, setShowComplianceOverview] = useState(false);
+
+  if (isKioskUser) {
+    return (
+      <div className="h-screen overflow-hidden bg-slate-900 text-slate-100 flex flex-col font-sans select-none" id="kiosk-locked-container">
+        {/* Sleek top status bar for Kiosk */}
+        <div className="bg-slate-950 px-6 py-4 flex items-center justify-between border-b border-slate-800">
+          <div className="flex items-center space-x-3">
+            <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></div>
+            <span className="text-xs font-mono font-bold uppercase tracking-wider text-slate-350">
+              Bin Ishaq Attendance Terminal Locked Mode
+            </span>
+          </div>
+          <button 
+            onClick={onLogout}
+            className="text-xs bg-rose-650 hover:bg-rose-700 text-white font-bold px-3 py-1.5 rounded-lg flex items-center space-x-1.5 transition"
+          >
+            <span>Exit Kiosk Terminal</span>
+          </button>
+        </div>
+        <div className="flex-1 flex items-center justify-center p-2 h-full overflow-hidden">
+          <KioskTerminal 
+            employees={employees}
+            attendances={attendances}
+            onSimulatePunch={onSimulatePunch}
+          />
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans" id="emulator-container">
+    <div className="h-screen overflow-hidden bg-slate-900 text-slate-100 flex flex-col font-sans" id="emulator-container">
       
-      {/* 1. Global Emulator Device Selector Bar */}
-      <div className="bg-slate-950 border-b border-slate-800 px-6 py-4 flex flex-col md:flex-row items-center justify-between space-y-4 md:space-y-0" id="emulator-selector-bar">
-        
-        <div className="flex items-center space-x-3.5">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-emerald-600 to-green-500 flex items-center justify-center shadow-lg text-white">
-            <Layers className="w-5 h-5" />
+      {/* 1. Global Emulator Device Selector Bar (Only visible to Super Admin for simulation) */}
+      {loggedInUser?.roleId === 'role-admin' ? (
+        <div className="bg-slate-950 border-b border-slate-800 px-6 py-4 flex flex-col md:flex-row items-center justify-between space-y-4 md:space-y-0" id="emulator-selector-bar">
+          
+          <div className="flex items-center space-x-3.5">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-emerald-600 to-green-500 flex items-center justify-center shadow-lg text-white">
+              <Layers className="w-5 h-5" />
+            </div>
+            <div>
+              <h1 className="font-bold text-xs md:text-sm text-white tracking-wider uppercase flex flex-wrap items-center gap-2">
+                <span>Bin Ishaq HR &amp; Payroll Management System</span>
+                <span className="font-mono text-[9px] px-1.5 py-0.5 bg-emerald-950 text-emerald-400 rounded-full border border-emerald-900 leading-none">v1.2</span>
+              </h1>
+              <p className="text-xs text-slate-400 font-sans mt-0.5">FBR High-Compliance Multi-Tenant Engine</p>
+            </div>
           </div>
-          <div>
-            <h1 className="font-bold text-sm text-white tracking-widest uppercase flex items-center">
-              Indus Cross-Platform Suite <span className="ml-2 font-mono text-[9px] px-1.5 py-0.5 bg-emerald-950 text-emerald-400 rounded-full border border-emerald-900 leading-none">v1.2</span>
-            </h1>
-            <p className="text-xs text-slate-400 font-sans mt-0.5">FBR High-Compliance Multi-Tenant Engine</p>
+
+          {/* Quadruple Switch Controller */}
+          <div className="bg-slate-900 p-1 rounded-2xl flex border border-slate-850 shadow-inner" id="emulator-buttons">
+            <button 
+              onClick={() => setDeviceMode('web')}
+              className={`px-3 py-2 rounded-xl text-xs font-bold leading-none flex items-center space-x-1.5 transition ${deviceMode === 'web' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}
+            >
+              <Monitor className="w-3.5 h-3.5" />
+              <span>🖥️ Web Admin</span>
+            </button>
+
+            <button 
+              onClick={() => setDeviceMode('windows')}
+              className={`px-3 py-2 rounded-xl text-xs font-bold leading-none flex items-center space-x-1.5 transition ${deviceMode === 'windows' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}
+            >
+              <Cpu className="w-3.5 h-3.5" />
+              <span>💻 Windows Client</span>
+            </button>
+
+            <button 
+              onClick={() => setDeviceMode('mobile')}
+              className={`px-3 py-2 rounded-xl text-xs font-bold leading-none flex items-center space-x-1.5 transition ${deviceMode === 'mobile' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}
+            >
+              <Smartphone className="w-3.5 h-3.5" />
+              <span>📱 Mobile ESS</span>
+            </button>
+
+            <button 
+              onClick={() => setDeviceMode('kiosk')}
+              className={`px-3 py-2 rounded-xl text-xs font-bold leading-none flex items-center space-x-1.5 transition ${deviceMode === 'kiosk' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}
+            >
+              <Scan className="w-3.5 h-3.5" />
+              <span>⏰ Kiosk Terminal</span>
+            </button>
           </div>
+
+          {/* Quick diagnostic view */}
+          <div className="hidden lg:flex items-center space-x-4 font-mono text-xs">
+            <div className="text-right">
+              <span className="text-slate-400">Total Staff:</span> <span className="text-white font-bold">{employees.length}</span>
+            </div>
+            <div className="h-4 border-r border-slate-800"></div>
+            <div className="text-right">
+              <span className="text-slate-400">Active Logs:</span> <span className="text-emerald-400 font-bold">{attendances.length} Synced</span>
+            </div>
+          </div>
+
         </div>
-
-        {/* Triple Switch Controller */}
-        <div className="bg-slate-900 p-1 rounded-2xl flex border border-slate-850 shadow-inner" id="emulator-buttons">
-          <button 
-            onClick={() => setDeviceMode('web')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold leading-none flex items-center space-x-2 transition ${deviceMode === 'web' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}
-          >
-            <Monitor className="w-3.5 h-3.5" />
-            <span>🖥️ Web Admin</span>
-          </button>
-
-          <button 
-            onClick={() => setDeviceMode('windows')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold leading-none flex items-center space-x-2 transition ${deviceMode === 'windows' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}
-          >
-            <Cpu className="w-3.5 h-3.5" />
-            <span>💻 Windows Client</span>
-          </button>
-
-          <button 
-            onClick={() => setDeviceMode('mobile')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold leading-none flex items-center space-x-2 transition ${deviceMode === 'mobile' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}
-          >
-            <Smartphone className="w-3.5 h-3.5" />
-            <span>📱 Mobile ESS</span>
-          </button>
-        </div>
-
-        {/* Quick diagnostic view */}
-        <div className="hidden lg:flex items-center space-x-4 font-mono text-xs">
-          <div className="text-right">
-            <span className="text-slate-400">Total Staff:</span> <span className="text-white font-bold">{employees.length}</span>
+      ) : (
+        <div className="bg-slate-950 border-b border-slate-800 px-6 py-4 flex items-center justify-between" id="locked-client-header">
+          <div className="flex items-center space-x-3.5">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-emerald-600 to-green-500 flex items-center justify-center shadow-lg text-white">
+              <Layers className="w-5 h-5" />
+            </div>
+            <div>
+              <h1 className="font-bold text-xs md:text-sm text-white tracking-wider uppercase flex flex-wrap items-center gap-2">
+                <span>Bin Ishaq HR Suite</span>
+              </h1>
+              <p className="text-xs text-slate-450 font-sans mt-0.5">
+                Logged in: <span className="text-emerald-400 font-bold">{loggedInUser?.username}</span> ({roles.find(r => r.id === loggedInUser?.roleId)?.name})
+              </p>
+            </div>
           </div>
-          <div className="h-4 border-r border-slate-800"></div>
-          <div className="text-right">
-            <span className="text-slate-400">Active Logs:</span> <span className="text-emerald-400 font-bold">{attendances.length} Synced</span>
-          </div>
+          {deviceMode !== 'web' && (
+            <button 
+              onClick={onLogout}
+              className="text-xs bg-slate-900 border border-slate-800 hover:bg-rose-700 text-slate-350 hover:text-white font-bold px-3 py-1.5 rounded-lg transition cursor-pointer"
+            >
+              Log Out
+            </button>
+          )}
         </div>
-
-      </div>
+      )}
 
       {/* 2. Interactive Main Workspace Area */}
       <div className="flex-1 flex flex-col lg:flex-row overflow-hidden" id="emulator-main">
         
         {/* Main Content Area */}
-        <div className="flex-1 p-4 lg:p-6 flex items-center justify-center overflow-auto" id="emulator-canvas">
+        <div className="flex-1 p-2 flex items-center justify-center overflow-auto" id="emulator-canvas">
           <div className="w-full h-full max-w-7xl">
             <AnimatePresence mode="wait">
               {deviceMode === 'web' && (
@@ -134,7 +230,7 @@ export function DeviceEmulator({
                   initial={{ opacity: 0, scale: 0.99 }}
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.99 }}
-                  className="w-full h-[660px] rounded-3xl overflow-hidden shadow-2xl border border-slate-800"
+                  className="w-full h-full rounded-3xl overflow-hidden shadow-2xl border border-slate-800"
                 >
                   <WebPortal 
                     employees={employees}
@@ -152,9 +248,22 @@ export function DeviceEmulator({
                     onApproveRegularization={onApproveRegularization}
                     onRejectRegularization={onRejectRegularization}
                     onCreatePayrollRun={onCreatePayrollRun}
+                    onApplyLeave={onApplyLeave}
+                    onAddAttendance={onAddAttendance}
                     branches={branches}
                     departments={departments}
                     designations={designations}
+                    roles={roles}
+                    users={users}
+                    currentUserAccount={currentUserAccount}
+                    onSetCurrentUserAccount={onSetCurrentUserAccount}
+                    onAddRole={onAddRole}
+                    onAddUser={onAddUser}
+                    onUpdateUserRole={onUpdateUserRole}
+                    onLogout={onLogout}
+                    onAddBranch={onAddBranch}
+                    onAddDepartment={onAddDepartment}
+                    onAddDesignation={onAddDesignation}
                   />
                 </motion.div>
               )}
@@ -165,7 +274,7 @@ export function DeviceEmulator({
                   initial={{ opacity: 0, scale: 0.99 }}
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.99 }}
-                  className="w-full h-[640px] rounded-2xl overflow-hidden shadow-2xl"
+                  className="w-full h-full rounded-2xl overflow-hidden shadow-2xl"
                 >
                   <WindowsApp 
                     employees={employees}
@@ -184,7 +293,7 @@ export function DeviceEmulator({
                   initial={{ opacity: 0, scale: 0.98 }}
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.98 }}
-                  className="w-full flex items-center justify-center p-4"
+                  className="w-full h-full flex items-center justify-center p-2 overflow-hidden"
                 >
                   <MobileApp 
                     employees={employees}
@@ -196,9 +305,39 @@ export function DeviceEmulator({
                   />
                 </motion.div>
               )}
+
+              {deviceMode === 'kiosk' && (
+                <motion.div 
+                  key="kiosk-view"
+                  initial={{ opacity: 0, scale: 0.98 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.98 }}
+                  className="w-full h-full flex items-center justify-center p-2 overflow-hidden"
+                >
+                  <KioskTerminal 
+                    employees={employees}
+                    attendances={attendances}
+                    onSimulatePunch={onSimulatePunch}
+                  />
+                </motion.div>
+              )}
             </AnimatePresence>
           </div>
         </div>
+
+        {/* Floating toggle button for the compliance overview rail */}
+        {!showComplianceOverview && (
+          <button 
+            onClick={() => setShowComplianceOverview(true)}
+            className="fixed right-0 top-1/2 transform -translate-y-1/2 bg-emerald-600 hover:bg-emerald-700 text-white px-2 py-4 rounded-l-xl shadow-xl flex flex-col items-center justify-center space-y-2 cursor-pointer z-40 transition border border-emerald-500 border-r-0"
+            id="compliance-toggle-btn"
+          >
+            <ShieldCheck className="w-4 h-4" />
+            <span className="text-[9px] font-bold tracking-widest uppercase" style={{ writingMode: 'vertical-lr' }}>
+              Compliance
+            </span>
+          </button>
+        )}
 
         {/* Absolute High-Compliance Explanatory Guide Rail */}
         {showComplianceOverview && (

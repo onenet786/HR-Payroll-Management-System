@@ -80,11 +80,11 @@ export function WindowsApp({
       <div className="bg-gradient-to-r from-slate-750 to-slate-850 text-white px-2.5 py-1.5 flex items-center justify-between pointer-events-none select-none bg-slate-900 border-b border-slate-950" id="win-title">
         <div className="flex items-center space-x-2">
           {/* Simulated tiny app insignia */}
-          <div className="w-4 h-4 rounded-xs bg-emerald-600 flex items-center justify-center text-[10px] font-bold text-white leading-none">
-            I
+          <div className="w-4 h-4 rounded-xs bg-emerald-600 flex items-center justify-center text-[9px] font-bold text-white leading-none">
+            B
           </div>
           <span className="font-sans font-medium text-xs tracking-wide">
-            Indus Enterprise HR client v2.4.1 (64-bit) - [Production Node: 42.10.x]
+            Bin Ishaq Enterprise HR client v2.4.1 (64-bit) - [Production Node: 42.10.x]
           </span>
         </div>
         
@@ -103,7 +103,7 @@ export function WindowsApp({
         <span className="hover:bg-slate-200 px-1.5 py-0.5 rounded cursor-pointer transition" onClick={() => alert('Connected Biometric machine is in full sync mode.')}>Tools</span>
         <span className="hover:bg-slate-200 px-1.5 py-0.5 rounded cursor-pointer transition">Config</span>
         <span className="hover:bg-slate-200 px-1.5 py-0.5 rounded cursor-pointer transition">View</span>
-        <span className="hover:bg-slate-200 px-1.5 py-0.5 rounded cursor-pointer transition" onClick={() => alert('Indus Enterprise client builds on React framework for cross-system standardizations.')}>Help</span>
+        <span className="hover:bg-slate-200 px-1.5 py-0.5 rounded cursor-pointer transition" onClick={() => alert('Bin Ishaq Enterprise client builds on React framework for cross-system standardizations.')}>Help</span>
       </div>
 
       {/* 3. Classic High density Toolbar */}
@@ -356,7 +356,7 @@ export function WindowsApp({
               </div>
 
               <div className="bg-slate-900 text-slate-300 p-4 rounded font-mono text-[11px] leading-relaxed space-y-1 h-80 overflow-y-auto">
-                <p className="text-yellow-500">[SYSTEM_INFO] IN-HR client local runtime booted at {new Date().toISOString()}</p>
+                <p className="text-yellow-500">[SYSTEM_INFO] BI-HR client local runtime booted at {new Date().toISOString()}</p>
                 <p className="text-slate-400">[PORT_SETUP] Initializing Serial connection on default COM3...</p>
                 <p className="text-emerald-500">[PORT_OK] COM3 responding with baudrate 115200. ZKTeco firmware v4.11</p>
                 <p className="text-blue-400">[SOCKET] Established persistent websocket handshake to Firestore ai-studio-0ab7c3a1...</p>

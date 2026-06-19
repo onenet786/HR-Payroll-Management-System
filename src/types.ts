@@ -68,7 +68,7 @@ export interface Employee {
   status: 'Active' | 'On Leave' | 'Suspended' | 'Terminated';
   
   // Employment Details
-  wageType: 'Salaried' | 'Daily Wager';
+  wageType: 'Salaried' | 'Daily Wager' | string;
   basicSalary: number; // Basic Monthly Wage or Daily Wage Rate
   providentFundOptIn: boolean;
   providentFundRate: number; // Percentage e.g. 5% or 8.33%
@@ -83,6 +83,19 @@ export interface Employee {
   // Statutory IDs
   eobiNumber?: string;
   socialSecurityNumber?: string;
+
+  // New onboarding and custom payroll configuration fields
+  pictureUrl?: string;
+  isZoneInCharge?: boolean;
+  zoneInChargeName?: string;
+  zone?: string;
+  ucTown?: string;
+  houseRentAllowance?: number;
+  conveyanceAllowance?: number;
+  medicalAllowance?: number;
+  otherAllowances?: number;
+  eobiEnabled?: boolean;
+  fbrEnabled?: boolean;
 }
 
 // Attendance Logs
@@ -223,4 +236,22 @@ export interface BankAdviceItem {
   bankAccountNumber: string;
   iban: string;
   netSalary: number;
+}
+
+// User management and role-based access control (RBAC)
+export interface Role {
+  id: string;
+  name: string;
+  description: string;
+  permissions: string[]; // e.g. ['view_dashboard', 'manage_employees', 'manage_attendance', 'manage_leaves', 'manage_payroll', 'manage_settings', 'manage_access']
+}
+
+export interface UserAccount {
+  id: string;
+  username: string;
+  email: string;
+  roleId: string;
+  employeeId?: string; // Links to Employee if they represent an internal worker
+  status: 'Active' | 'Inactive';
+  password?: string;
 }

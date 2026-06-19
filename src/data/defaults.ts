@@ -5,7 +5,8 @@
 
 import { 
   Branch, Company, Department, Designation, Employee, 
-  AttendanceLog, LeaveRequest, StatutoryConfig, TaxSlab, Payslip
+  AttendanceLog, LeaveRequest, StatutoryConfig, TaxSlab, Payslip,
+  Role, UserAccount
 } from '../types';
 
 // Default FBR Income Tax Slabs for Salaried Individuals (Annual)
@@ -34,7 +35,7 @@ export const DEFAULT_STATUTORY_CONFIG: StatutoryConfig = {
 export const DEFAULT_COMPANIES: Company[] = [
   {
     id: 'c1',
-    name: 'Indus Logistics Ltd.',
+    name: 'Bin Ishaq Logistics Ltd.',
     industry: 'Trading & Services',
     taxRegistrationNumber: 'NTN-4567891-2',
     eobiRegistrationNumber: 'EOBI- Karachi-987654',
@@ -103,7 +104,13 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
     bankAccountNumber: '12345678901234',
     iban: 'PK42HABB0012345678901234',
     eobiNumber: '1090123456',
-    socialSecurityNumber: 'SS-42-998877'
+    socialSecurityNumber: 'SS-42-998877',
+    pictureUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=200',
+    isZoneInCharge: true,
+    zone: 'East Zone',
+    ucTown: 'UC-2 Clifton Town',
+    eobiEnabled: true,
+    fbrEnabled: true
   },
   {
     id: 'emp2',
@@ -130,7 +137,14 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
     bankAccountNumber: '99021234567',
     iban: 'PK12MEZN0099021234567',
     eobiNumber: '1090123499',
-    socialSecurityNumber: 'SS-42-991122'
+    socialSecurityNumber: 'SS-42-991122',
+    pictureUrl: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=200',
+    isZoneInCharge: false,
+    zoneInChargeName: 'Ali Raza Khan',
+    zone: 'East Zone',
+    ucTown: 'UC-2 Clifton Town',
+    eobiEnabled: true,
+    fbrEnabled: true
   },
   {
     id: 'emp3',
@@ -157,7 +171,13 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
     bankAccountNumber: '4455889901',
     iban: 'PK52ALFH004455889901',
     eobiNumber: '3590558899',
-    socialSecurityNumber: 'SS-35-123456'
+    socialSecurityNumber: 'SS-35-123456',
+    pictureUrl: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?auto=format&fit=crop&q=80&w=200',
+    isZoneInCharge: true,
+    zone: 'West Zone',
+    ucTown: 'UC-9 Gulberg Town',
+    eobiEnabled: true,
+    fbrEnabled: false // testing FBR disabled
   },
   {
     id: 'emp4',
@@ -184,7 +204,18 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
     bankAccountNumber: '9876123456',
     iban: 'PK86NBPA009876123456',
     eobiNumber: '3590443322',
-    socialSecurityNumber: 'SS-35-987654'
+    socialSecurityNumber: 'SS-35-987654',
+    pictureUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=200',
+    isZoneInCharge: false,
+    zoneInChargeName: 'Muhammad Usman',
+    zone: 'West Zone',
+    ucTown: 'UC-9 Gulberg Town',
+    houseRentAllowance: 20000,
+    conveyanceAllowance: 6500,
+    medicalAllowance: 6500,
+    otherAllowances: 2000,
+    eobiEnabled: false, // testing EOBI disabled
+    fbrEnabled: true
   },
   {
     id: 'emp5',
@@ -211,7 +242,48 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
     bankAccountNumber: '03454455667',
     iban: 'PK24JAZZ03454455667',
     eobiNumber: '',
-    socialSecurityNumber: ''
+    socialSecurityNumber: '',
+    pictureUrl: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=200',
+    isZoneInCharge: false,
+    zoneInChargeName: 'Muhammad Usman',
+    zone: 'West Zone',
+    ucTown: 'UC-12 Town-C',
+    eobiEnabled: true,
+    fbrEnabled: true
+  },
+  {
+    id: 'emp6',
+    companyId: 'c1',
+    branchId: 'b1',
+    departmentId: 'd1',
+    designationId: 'ds1',
+    employeeCode: 'BINISHAQ-IT-00002',
+    fullName: 'Aqeel Ur Rehman',
+    email: 'aaqueel@gmail.com',
+    contactNumber: '0300-1234567',
+    cnic: '35201-1599874-1',
+    gender: 'Male',
+    dateOfBirth: '1990-05-15',
+    dateOfJoining: '2026-06-01',
+    status: 'Active',
+    wageType: 'Salaried',
+    basicSalary: 180000,
+    providentFundOptIn: true,
+    providentFundRate: 5.0,
+    gratuityOptIn: true,
+    bankName: 'Askari Bank',
+    bankBranchName: 'Main Branch, Karachi',
+    bankAccountNumber: '12345678901234',
+    iban: 'PK42ASCB0012345678901234',
+    eobiNumber: '1090123000',
+    socialSecurityNumber: 'SS-42-000111',
+    pictureUrl: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&q=80&w=200',
+    isZoneInCharge: false,
+    zoneInChargeName: 'Ali Raza Khan',
+    zone: 'East Zone',
+    ucTown: 'UC-2 Clifton Town',
+    eobiEnabled: true,
+    fbrEnabled: true
   }
 ];
 
@@ -253,6 +325,19 @@ export const DEFAULT_LEAVE_REQUESTS: LeaveRequest[] = [
     reason: 'Home renovation work',
     status: 'Pending',
     appliedOn: '2026-06-16'
+  },
+  {
+    id: 'lv4',
+    employeeId: 'emp6',
+    leaveType: 'Annual',
+    startDate: '2026-06-22',
+    endDate: '2026-06-30',
+    totalDays: 9,
+    reason: 'Annaual Leaves',
+    status: 'Approved',
+    appliedOn: '2026-06-18',
+    approvedBy: 'Sara Ahmed',
+    approvedOn: '2026-06-18'
   }
 ];
 
@@ -368,17 +453,34 @@ export function computePayslipDetails(
     hourlyRate = baseContractSalary / 8;
     overtimePay = overtimeHours * hourlyRate * 1.5; // 1.5x OT multiplier for daily wagers
   } else {
-    // Salaried worker breakdown
-    const basicComponent = baseContractSalary * 0.50; // 50% of contract wage is Basic
-    houseRentAllowance = baseContractSalary * 0.30;
-    conveyanceAllowance = baseContractSalary * 0.10;
-    medicalAllowance = baseContractSalary * 0.10;
+    // Check if custom allowances are set on employee record
+    const hasCustomAllowances = 
+      employee.houseRentAllowance !== undefined || 
+      employee.conveyanceAllowance !== undefined || 
+      employee.medicalAllowance !== undefined || 
+      employee.otherAllowances !== undefined;
+
+    let basicComponent = baseContractSalary;
+    if (hasCustomAllowances) {
+      // Use custom allowance values
+      houseRentAllowance = employee.houseRentAllowance ?? 0;
+      conveyanceAllowance = employee.conveyanceAllowance ?? 0;
+      medicalAllowance = employee.medicalAllowance ?? 0;
+      otherAllowances = employee.otherAllowances ?? 0;
+      basicComponent = baseContractSalary;
+    } else {
+      // Fallback to standard 50/30/10/10 split
+      basicComponent = baseContractSalary * 0.50;
+      houseRentAllowance = baseContractSalary * 0.30;
+      conveyanceAllowance = baseContractSalary * 0.10;
+      medicalAllowance = baseContractSalary * 0.10;
+    }
     
-    // Standard standard calendar day deduction for absences & unpaid leaves
+    // Standard calendar day deduction for absences & unpaid leaves
     const standardDailyDeduction = baseContractSalary / totalDaysInMonth;
     unpaidLeaveDeduction = unpaidLeaveDays * standardDailyDeduction;
     
-    // Abstract base basic earnings
+    // Base basic earnings
     basicEarnings = basicComponent;
     
     // Calculate overtime base (basic component / 208 working standard hours per month in Pakistan)
@@ -390,21 +492,23 @@ export function computePayslipDetails(
     basicEarnings + houseRentAllowance + conveyanceAllowance + medicalAllowance + otherAllowances + overtimePay - unpaidLeaveDeduction
   );
   
-  // 1. Income Tax Calculation
-  // Annualized taxable income estimate = Gross Salary * 12
-  const estimatedAnnualGross = grossSalary * 12;
-  const annualTax = calculateAnnualTax(estimatedAnnualGross, taxSlabs);
-  const incomeTaxDeduction = Math.round(annualTax / 12);
+  // 1. Income Tax Calculation (FBR)
+  let incomeTaxDeduction = 0;
+  if (employee.fbrEnabled !== false) {
+    const estimatedAnnualGross = grossSalary * 12;
+    const annualTax = calculateAnnualTax(estimatedAnnualGross, taxSlabs);
+    incomeTaxDeduction = Math.round(annualTax / 12);
+  }
   
   // 2. EOBI Calculation (Employees' Old-Age Benefits Institution)
-  // Employer pays 5% of Government Minimum Wage
-  // Employee pays 1% of Government Minimum Wage
   let eobiEmployeeDeduction = 0;
   let eobiEmployerContribution = 0;
   
-  if (employee.eobiNumber || !isDailyWager) {
-    eobiEmployeeDeduction = Math.round((statConfigs.minimumWage * (statConfigs.eobiEmployeeRate / 100)));
-    eobiEmployerContribution = Math.round((statConfigs.minimumWage * (statConfigs.eobiEmployerRate / 100)));
+  if (employee.eobiEnabled !== false) {
+    if (employee.eobiNumber || !isDailyWager) {
+      eobiEmployeeDeduction = Math.round((statConfigs.minimumWage * (statConfigs.eobiEmployeeRate / 100)));
+      eobiEmployerContribution = Math.round((statConfigs.minimumWage * (statConfigs.eobiEmployerRate / 100)));
+    }
   }
   
   // 3. PESSI / SESSI (Provincial Social Security)
@@ -472,3 +576,82 @@ export function computePayslipDetails(
     providentFundEmployerContribution
   };
 }
+
+export const DEFAULT_ROLES: Role[] = [
+  {
+    id: 'role-admin',
+    name: 'Super Admin',
+    description: 'Full administrative control of the system, including access permissions and roles.',
+    permissions: ['view_dashboard', 'manage_employees', 'manage_attendance', 'manage_leaves', 'manage_payroll', 'manage_settings', 'manage_access']
+  },
+  {
+    id: 'role-hr',
+    name: 'HR Manager',
+    description: 'Manages employee directories, leaves, and attendance records.',
+    permissions: ['view_dashboard', 'manage_employees', 'manage_attendance', 'manage_leaves']
+  },
+  {
+    id: 'role-payroll',
+    name: 'Payroll Specialist',
+    description: 'Processes payroll run cycles, statutory calculations, and bank advice sheets.',
+    permissions: ['view_dashboard', 'manage_payroll']
+  },
+  {
+    id: 'role-employee',
+    name: 'Employee',
+    description: 'Standard access to personal dashboard and attendance simulation.',
+    permissions: ['view_dashboard']
+  },
+  {
+    id: 'role-kiosk',
+    name: 'Kiosk Terminal',
+    description: 'Dedicated account for locking a device into Kiosk Attendance Terminal mode.',
+    permissions: ['use_kiosk']
+  }
+];
+
+export const DEFAULT_USERS: UserAccount[] = [
+  {
+    id: 'usr-1',
+    username: 'admin',
+    email: 'admin@binishaq.com',
+    roleId: 'role-admin',
+    status: 'Active',
+    password: 'admin123'
+  },
+  {
+    id: 'usr-2',
+    username: 'sara.hr',
+    email: 'sara.ahmed@induslog.com',
+    roleId: 'role-hr',
+    employeeId: 'emp2',
+    status: 'Active',
+    password: 'sara123'
+  },
+  {
+    id: 'usr-3',
+    username: 'usman.payroll',
+    email: 'usman.m@induslog.com',
+    roleId: 'role-payroll',
+    employeeId: 'emp3',
+    status: 'Active',
+    password: 'usman123'
+  },
+  {
+    id: 'usr-4',
+    username: 'ali.raza',
+    email: 'ali.raza@induslog.com',
+    roleId: 'role-employee',
+    employeeId: 'emp1',
+    status: 'Active',
+    password: 'ali123'
+  },
+  {
+    id: 'usr-kiosk',
+    username: 'kiosk',
+    email: 'kiosk@binishaq.com',
+    roleId: 'role-kiosk',
+    status: 'Active',
+    password: 'kiosk123'
+  }
+];

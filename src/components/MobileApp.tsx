@@ -19,6 +19,7 @@ interface MobileAppProps {
   onApplyLeave: (leave: LeaveRequest) => void;
   onSimulatePunch: (employeeId: string, punchIn: string, punchOut: string, method: string) => void;
   onAddRegularization: (employeeId: string, date: string, reason: string) => void;
+  hideMockPhoneFrame?: boolean;
 }
 
 export function MobileApp({
@@ -27,7 +28,8 @@ export function MobileApp({
   leaves,
   onApplyLeave,
   onSimulatePunch,
-  onAddRegularization
+  onAddRegularization,
+  hideMockPhoneFrame
 }: MobileAppProps) {
   const [selectedMobileEmpId, setSelectedMobileEmpId] = useState(employees[0]?.id || '');
   const [mobileTab, setMobileTab] = useState<'home' | 'punch' | 'leave' | 'payslips'>('home');
