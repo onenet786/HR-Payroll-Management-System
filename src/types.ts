@@ -96,6 +96,7 @@ export interface Employee {
   otherAllowances?: number;
   eobiEnabled?: boolean;
   fbrEnabled?: boolean;
+  maritalStatus?: 'Single' | 'Married' | 'Divorced' | 'Widowed';
 }
 
 // Attendance Logs

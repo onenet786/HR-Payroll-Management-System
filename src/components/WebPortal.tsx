@@ -35,6 +35,17 @@ const PAKISTAN_BANKS = [
   { name: 'Al Baraka Bank', code: 'ALBK' }
 ];
 
+const formatCNIC = (val: string): string => {
+  const digits = val.replace(/\D/g, '').slice(0, 13);
+  if (digits.length <= 5) {
+    return digits;
+  }
+  if (digits.length <= 12) {
+    return `${digits.slice(0, 5)}-${digits.slice(5)}`;
+  }
+  return `${digits.slice(0, 5)}-${digits.slice(5, 12)}-${digits.slice(12, 13)}`;
+};
+
 interface WebPortalProps {
   employees: Employee[];
   attendances: AttendanceLog[];
@@ -163,7 +174,8 @@ export function WebPortal({
     otherAllowances: 0,
     eobiEnabled: true,
     fbrEnabled: true,
-    employeeCode: ''
+    employeeCode: '',
+    maritalStatus: 'Single'
   });
 
   const [editEmpForm, setEditEmpForm] = useState({
@@ -197,7 +209,8 @@ export function WebPortal({
     otherAllowances: 0,
     eobiEnabled: true,
     fbrEnabled: true,
-    employeeCode: ''
+    employeeCode: '',
+    maritalStatus: 'Single'
   });
 
   const [payrollTitle, setPayrollTitle] = useState('Payroll - June 2026');
@@ -476,7 +489,8 @@ export function WebPortal({
       medicalAllowance: newEmpForm.medicalAllowance > 0 ? Number(newEmpForm.medicalAllowance) : undefined,
       otherAllowances: newEmpForm.otherAllowances > 0 ? Number(newEmpForm.otherAllowances) : undefined,
       eobiEnabled: newEmpForm.eobiEnabled,
-      fbrEnabled: newEmpForm.fbrEnabled
+      fbrEnabled: newEmpForm.fbrEnabled,
+      maritalStatus: newEmpForm.maritalStatus as 'Single' | 'Married' | 'Divorced' | 'Widowed'
     };
 
     onAddEmployee(newEmp);
@@ -513,7 +527,8 @@ export function WebPortal({
       otherAllowances: 0,
       eobiEnabled: true,
       fbrEnabled: true,
-      employeeCode: ''
+      employeeCode: '',
+      maritalStatus: 'Single'
     });
   };
 
@@ -566,7 +581,8 @@ export function WebPortal({
       medicalAllowance: editEmpForm.medicalAllowance > 0 ? Number(editEmpForm.medicalAllowance) : undefined,
       otherAllowances: editEmpForm.otherAllowances > 0 ? Number(editEmpForm.otherAllowances) : undefined,
       eobiEnabled: editEmpForm.eobiEnabled,
-      fbrEnabled: editEmpForm.fbrEnabled
+      fbrEnabled: editEmpForm.fbrEnabled,
+      maritalStatus: editEmpForm.maritalStatus as 'Single' | 'Married' | 'Divorced' | 'Widowed'
     };
 
     onUpdateEmployee(updatedEmp);
@@ -607,7 +623,8 @@ export function WebPortal({
       otherAllowances: emp.otherAllowances || 0,
       eobiEnabled: emp.eobiEnabled !== false,
       fbrEnabled: emp.fbrEnabled !== false,
-      employeeCode: emp.employeeCode
+      employeeCode: emp.employeeCode,
+      maritalStatus: emp.maritalStatus || 'Single'
     });
     setShowEditEmpModal(true);
   };
@@ -2645,7 +2662,7 @@ export function WebPortal({
                         type="text" required
                         placeholder="e.g. 42101-1234567-3"
                         value={newEmpForm.cnic}
-                        onChange={(e) => setNewEmpForm({ ...newEmpForm, cnic: e.target.value })}
+                        onChange={(e) => setNewEmpForm({ ...newEmpForm, cnic: formatCNIC(e.target.value) })}
                         className="w-full p-1.5 border border-slate-300 rounded font-mono focus:ring-1 focus:ring-emerald-500 focus:outline-none"
                       />
                     </div>
@@ -2675,6 +2692,19 @@ export function WebPortal({
                       </select>
                     </div>
                     <div>
+                      <label className="block font-bold mb-1 text-slate-600 font-sans">Marital Status:</label>
+                      <select 
+                        value={newEmpForm.maritalStatus}
+                        onChange={(e) => setNewEmpForm({ ...newEmpForm, maritalStatus: e.target.value })}
+                        className="w-full p-1.5 bg-white border border-slate-300 rounded focus:ring-1"
+                      >
+                        <option value="Single">Single</option>
+                        <option value="Married">Married</option>
+                        <option value="Divorced">Divorced</option>
+                        <option value="Widowed">Widowed</option>
+                      </select>
+                    </div>
+                    <div>
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Date of Birth:</label>
                       <input 
                         type="date" required
@@ -2683,7 +2713,7 @@ export function WebPortal({
                         className="w-full p-1.5 border border-slate-300 rounded focus:ring-1 focus:outline-none"
                       />
                     </div>
-                    <div>
+                    <div className="col-span-2">
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Picture URL / Upload:</label>
                       <div className="flex space-x-1 items-center">
                         <input 
@@ -3214,7 +3244,7 @@ export function WebPortal({
                         type="text" required
                         placeholder="e.g. 42101-1234567-3"
                         value={editEmpForm.cnic}
-                        onChange={(e) => setEditEmpForm({ ...editEmpForm, cnic: e.target.value })}
+                        onChange={(e) => setEditEmpForm({ ...editEmpForm, cnic: formatCNIC(e.target.value) })}
                         className="w-full p-1.5 border border-slate-300 rounded font-mono focus:ring-1 focus:ring-indigo-500 focus:outline-none"
                       />
                     </div>
@@ -3244,6 +3274,19 @@ export function WebPortal({
                       </select>
                     </div>
                     <div>
+                      <label className="block font-bold mb-1 text-slate-600 font-sans">Marital Status:</label>
+                      <select 
+                        value={editEmpForm.maritalStatus}
+                        onChange={(e) => setEditEmpForm({ ...editEmpForm, maritalStatus: e.target.value })}
+                        className="w-full p-1.5 bg-white border border-slate-300 rounded focus:ring-1"
+                      >
+                        <option value="Single">Single</option>
+                        <option value="Married">Married</option>
+                        <option value="Divorced">Divorced</option>
+                        <option value="Widowed">Widowed</option>
+                      </select>
+                    </div>
+                    <div>
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Date of Birth:</label>
                       <input 
                         type="date" required
@@ -3252,7 +3295,7 @@ export function WebPortal({
                         className="w-full p-1.5 border border-slate-300 rounded focus:ring-1 focus:outline-none"
                       />
                     </div>
-                    <div>
+                    <div className="col-span-2">
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Picture URL / Upload:</label>
                       <div className="flex space-x-1 items-center">
                         <input 

@@ -129,24 +129,8 @@ export function MobileApp({
     currentEmp, 6, 2026, attendances, leaves
   ) : null;
 
-  return (
-    <div className="w-full max-w-sm mx-auto h-[610px] bg-slate-900 rounded-[40px] p-3 shadow-2xl relative border-4 border-slate-800 flex flex-col font-sans text-xs text-slate-800" id="mob-emulate-container">
-      
-      {/* 1. Phone Top Notch Speaker & Camera bar */}
-      <div className="absolute top-2.5 left-1/2 transform -translate-x-1/2 bg-slate-800 rounded-full h-4 w-28 flex items-center justify-between px-3 z-10">
-        <span className="w-1.5 h-1.5 bg-slate-700 rounded-full"></span>
-        <span className="w-12 h-1 bg-slate-900 rounded-full"></span>
-        <span className="w-1.5 h-1.5 bg-slate-700 rounded-full"></span>
-      </div>
-
-      {/* 2. Emulated OS Status bar */}
-      <div className="bg-slate-50 text-slate-900 rounded-t-3xl pt-5 pb-1 px-5 flex justify-between items-center text-[10px] font-mono leading-none flex-shrink-0 border-b border-slate-100 select-none">
-        <span>11:37 AM</span>
-        <div className="flex space-x-1 items-center">
-          <span>Mobilink LTE</span>
-          <span className="text-[9px]">🔋 84%</span>
-        </div>
-      </div>
+  const innerContent = (
+    <>
 
       {/* Employee Context Selector (Emulating logging in as different employees on ESS) */}
       <div className="bg-slate-100 p-2 border-b flex items-center justify-between text-[11px] select-none flex-shrink-0">
@@ -492,6 +476,36 @@ export function MobileApp({
         </button>
       </div>
 
+    </>
+  );
+
+  if (hideMockPhoneFrame) {
+    return (
+      <div className="w-full h-full bg-white flex flex-col font-sans text-xs text-slate-800" id="native-mobile-container">
+        {innerContent}
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full max-w-sm mx-auto h-[610px] bg-slate-900 rounded-[40px] p-3 shadow-2xl relative border-4 border-slate-800 flex flex-col font-sans text-xs text-slate-800" id="mob-emulate-container">
+      {/* 1. Phone Top Notch Speaker & Camera bar */}
+      <div className="absolute top-2.5 left-1/2 transform -translate-x-1/2 bg-slate-800 rounded-full h-4 w-28 flex items-center justify-between px-3 z-10">
+        <span className="w-1.5 h-1.5 bg-slate-700 rounded-full"></span>
+        <span className="w-12 h-1 bg-slate-900 rounded-full"></span>
+        <span className="w-1.5 h-1.5 bg-slate-700 rounded-full"></span>
+      </div>
+
+      {/* 2. Emulated OS Status bar */}
+      <div className="bg-slate-50 text-slate-900 rounded-t-3xl pt-5 pb-1 px-5 flex justify-between items-center text-[10px] font-mono leading-none flex-shrink-0 border-b border-slate-100 select-none">
+        <span>11:37 AM</span>
+        <div className="flex space-x-1 items-center">
+          <span>Mobilink LTE</span>
+          <span className="text-[9px]">🔋 84%</span>
+        </div>
+      </div>
+
+      {innerContent}
     </div>
   );
 }
