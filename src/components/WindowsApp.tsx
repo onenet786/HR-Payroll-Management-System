@@ -4,29 +4,25 @@
  */
 
 import React, { useState } from 'react';
-import { 
-  Monitor, Play, Cpu, ShieldAlert, Server, HardDrive, Search, Terminal,
-  RefreshCw, Settings, FileSpreadsheet, KeyRound, Smartphone, Layers, HelpCircle, UserCheck
+import {
+  Play, Cpu, Server, Search, Terminal,
+  Layers, UserCheck
 } from 'lucide-react';
 import { Employee, AttendanceLog, LeaveRequest, StatutoryConfig } from '../types';
-import { motion } from 'motion/react';
 
 interface WindowsAppProps {
   employees: Employee[];
   attendances: AttendanceLog[];
   leaves: LeaveRequest[];
   statConfig: StatutoryConfig;
-  onSimulatePunch: (employeeId: string, punchIn: string, punchOut: string, method: string) => void;
+  onSimulatePunch: (employeeId: string, punchIn: string, punchOut: string, method: string, lat?: number, lon?: number) => void;
   onApproveLeave: (id: string) => void;
 }
 
 export function WindowsApp({
   employees,
   attendances,
-  leaves,
-  statConfig,
   onSimulatePunch,
-  onApproveLeave
 }: WindowsAppProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedEmpId, setSelectedEmpId] = useState(employees[0]?.id || '');
@@ -63,8 +59,6 @@ export function WindowsApp({
         'Biometric'
       );
       setHardwareStatus('SUCCESS');
-      
-      const empName = employees.find(e => e.id === selectedEmpId)?.fullName;
       
       // Quick clean alert notification
       setTimeout(() => {
@@ -294,7 +288,8 @@ export function WindowsApp({
                 <div className="space-y-3">
                   <div>
                     <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Active Machine Port:</label>
-                    <select 
+                    <select
+                      aria-label="Active machine port"
                       value={hardwarePort}
                       onChange={(e) => setHardwarePort(e.target.value)}
                       className="w-full font-mono p-1.5 border border-slate-300 bg-white text-xs"
@@ -308,6 +303,7 @@ export function WindowsApp({
                   <div>
                     <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Employee selection to register fingerprint scan:</label>
                     <select
+                      aria-label="Employee to register fingerprint scan"
                       value={selectedEmpId}
                       onChange={(e) => setSelectedEmpId(e.target.value)}
                       className="w-full font-sans p-1.5 border border-slate-300 bg-white text-xs"

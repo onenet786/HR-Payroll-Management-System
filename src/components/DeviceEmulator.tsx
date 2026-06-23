@@ -3,15 +3,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
-import { Monitor, Cpu, Smartphone, Layers, ShieldCheck, HeartHandshake, Briefcase, Info, Scan } from 'lucide-react';
+import { useState } from 'react';
+import { Monitor, Cpu, Smartphone, Layers, ShieldCheck, Briefcase, Info, Scan } from 'lucide-react';
+import './DeviceEmulator.css';
 import { WebPortal } from './WebPortal';
 import { WindowsApp } from './WindowsApp';
 import { MobileApp } from './MobileApp';
 import { KioskTerminal } from './KioskTerminal';
-import { 
+import {
   Employee, AttendanceLog, LeaveRequest, StatutoryConfig, TaxSlab, PayrollRun, Designation, Branch, Department,
-  Role, UserAccount
+  Role, UserAccount, Holiday, LoanAdvance, SalaryRevision,
+  PerformanceReview, CompanyAsset, JobPosting, JobApplication, GratuitySettlement, AppNotification
 } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -50,6 +52,36 @@ interface DeviceEmulatorProps {
   onAddBranch?: (branch: Branch) => void;
   onAddDepartment?: (dept: Department) => void;
   onAddDesignation?: (desg: Designation) => void;
+  holidays: Holiday[];
+  onAddHoliday: (holiday: Holiday) => void;
+  onUpdateHoliday: (holiday: Holiday) => void;
+  onDeleteHoliday: (id: string) => void;
+  loanAdvances: LoanAdvance[];
+  onApplyLoan: (loan: LoanAdvance) => void;
+  onApproveLoan: (id: string) => void;
+  onRejectLoan: (id: string) => void;
+  salaryRevisions: SalaryRevision[];
+  onAddSalaryRevision: (revision: SalaryRevision) => void;
+  performanceReviews: PerformanceReview[];
+  onAddPerformanceReview: (review: PerformanceReview) => void;
+  onUpdatePerformanceReview: (review: PerformanceReview) => void;
+  companyAssets: CompanyAsset[];
+  onAddAsset: (asset: CompanyAsset) => void;
+  onUpdateAsset: (asset: CompanyAsset) => void;
+  jobPostings: JobPosting[];
+  onAddJobPosting: (posting: JobPosting) => void;
+  onUpdateJobPosting: (posting: JobPosting) => void;
+  jobApplications: JobApplication[];
+  onAddJobApplication: (app: JobApplication) => void;
+  onUpdateJobApplication: (app: JobApplication) => void;
+  gratuitySettlements: GratuitySettlement[];
+  onAddGratuitySettlement: (settlement: GratuitySettlement) => void;
+  onUpdateGratuitySettlement: (settlement: GratuitySettlement) => void;
+  notifications: AppNotification[];
+  onAddNotification: (n: AppNotification) => void;
+  onMarkNotificationRead: (id: string) => void;
+  onMarkAllNotificationsRead: () => void;
+  onDeleteNotification: (id: string) => void;
 }
 
 export function DeviceEmulator({
@@ -86,7 +118,37 @@ export function DeviceEmulator({
   onLogout,
   onAddBranch,
   onAddDepartment,
-  onAddDesignation
+  onAddDesignation,
+  holidays,
+  onAddHoliday,
+  onUpdateHoliday,
+  onDeleteHoliday,
+  loanAdvances,
+  onApplyLoan,
+  onApproveLoan,
+  onRejectLoan,
+  salaryRevisions,
+  onAddSalaryRevision,
+  performanceReviews,
+  onAddPerformanceReview,
+  onUpdatePerformanceReview,
+  companyAssets,
+  onAddAsset,
+  onUpdateAsset,
+  jobPostings,
+  onAddJobPosting,
+  onUpdateJobPosting,
+  jobApplications,
+  onAddJobApplication,
+  onUpdateJobApplication,
+  gratuitySettlements,
+  onAddGratuitySettlement,
+  onUpdateGratuitySettlement,
+  notifications,
+  onAddNotification,
+  onMarkNotificationRead,
+  onMarkAllNotificationsRead,
+  onDeleteNotification
 }: DeviceEmulatorProps) {
   const isKioskUser = loggedInUser?.username === 'kiosk' || loggedInUser?.roleId === 'role-kiosk';
 
@@ -264,6 +326,38 @@ export function DeviceEmulator({
                     onAddBranch={onAddBranch}
                     onAddDepartment={onAddDepartment}
                     onAddDesignation={onAddDesignation}
+                    holidays={holidays}
+                    onAddHoliday={onAddHoliday}
+                    onUpdateHoliday={onUpdateHoliday}
+                    onDeleteHoliday={onDeleteHoliday}
+                    loanAdvances={loanAdvances}
+                    onApplyLoan={onApplyLoan}
+                    onApproveLoan={onApproveLoan}
+                    onRejectLoan={onRejectLoan}
+                    salaryRevisions={salaryRevisions}
+                    onAddSalaryRevision={onAddSalaryRevision}
+                    loggedInUser={loggedInUser}
+                    performanceReviews={performanceReviews}
+                    onAddPerformanceReview={onAddPerformanceReview}
+                    onUpdatePerformanceReview={onUpdatePerformanceReview}
+                    companyAssets={companyAssets}
+                    onAddAsset={onAddAsset}
+                    onUpdateAsset={onUpdateAsset}
+                    jobPostings={jobPostings}
+                    onAddJobPosting={onAddJobPosting}
+                    onUpdateJobPosting={onUpdateJobPosting}
+                    jobApplications={jobApplications}
+                    onAddJobApplication={onAddJobApplication}
+                    onUpdateJobApplication={onUpdateJobApplication}
+                    gratuitySettlements={gratuitySettlements}
+                    onAddGratuitySettlement={onAddGratuitySettlement}
+                    onUpdateGratuitySettlement={onUpdateGratuitySettlement}
+                    notifications={notifications}
+                    onAddNotification={onAddNotification}
+                    onMarkNotificationRead={onMarkNotificationRead}
+                    onMarkAllNotificationsRead={onMarkAllNotificationsRead}
+                    onDeleteNotification={onDeleteNotification}
+                    onSimulatePunch={onSimulatePunch}
                   />
                 </motion.div>
               )}
@@ -295,13 +389,15 @@ export function DeviceEmulator({
                   exit={{ opacity: 0, scale: 0.98 }}
                   className="w-full h-full flex items-center justify-center p-2 overflow-hidden"
                 >
-                  <MobileApp 
+                  <MobileApp
                     employees={employees}
                     attendances={attendances}
                     leaves={leaves}
                     onApplyLeave={onApplyLeave}
                     onSimulatePunch={onSimulatePunch}
                     onAddRegularization={onAddRegularization}
+                    loggedInUser={loggedInUser}
+                    onLogout={onLogout}
                   />
                 </motion.div>
               )}
@@ -327,13 +423,14 @@ export function DeviceEmulator({
 
         {/* Floating toggle button for the compliance overview rail */}
         {!showComplianceOverview && (
-          <button 
+          <button
+            type="button"
             onClick={() => setShowComplianceOverview(true)}
             className="fixed right-0 top-1/2 transform -translate-y-1/2 bg-emerald-600 hover:bg-emerald-700 text-white px-2 py-4 rounded-l-xl shadow-xl flex flex-col items-center justify-center space-y-2 cursor-pointer z-40 transition border border-emerald-500 border-r-0"
             id="compliance-toggle-btn"
           >
             <ShieldCheck className="w-4 h-4" />
-            <span className="text-[9px] font-bold tracking-widest uppercase" style={{ writingMode: 'vertical-lr' }}>
+            <span className="text-[9px] font-bold tracking-widest uppercase vertical-text">
               Compliance
             </span>
           </button>
@@ -347,7 +444,8 @@ export function DeviceEmulator({
                 <Briefcase className="w-4 h-4 mr-1.5" />
                 Pakistan Payroll Compliance
               </h3>
-              <button 
+              <button
+                type="button"
                 onClick={() => setShowComplianceOverview(false)}
                 className="text-slate-500 hover:text-white text-xs font-mono"
               >

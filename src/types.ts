@@ -68,7 +68,7 @@ export interface Employee {
   status: 'Active' | 'On Leave' | 'Suspended' | 'Terminated';
   
   // Employment Details
-  wageType: 'Salaried' | 'Daily Wager' | string;
+  wageType: string;
   basicSalary: number; // Basic Monthly Wage or Daily Wage Rate
   providentFundOptIn: boolean;
   providentFundRate: number; // Percentage e.g. 5% or 8.33%
@@ -97,6 +97,7 @@ export interface Employee {
   eobiEnabled?: boolean;
   fbrEnabled?: boolean;
   maritalStatus?: 'Single' | 'Married' | 'Divorced' | 'Widowed';
+  fingerprintTemplates?: string[]; // base64 FMD templates from Digital Persona URU 4500
 }
 
 // Attendance Logs
@@ -106,7 +107,7 @@ export interface AttendanceLog {
   date: string; // YYYY-MM-DD
   punchIn?: string; // HH:MM:SS
   punchOut?: string; // HH:MM:SS
-  method: 'Biometric' | 'Mobile GPS' | 'RFID' | 'Manual' | 'Web Punch';
+  method: 'Biometric' | 'Camera' | 'Mobile GPS' | 'RFID' | 'Manual' | 'Web Punch';
   status: 'Present' | 'Late' | 'Half Day' | 'Absent' | 'On Leave' | 'Holiday';
   overtimeMinutes: number;
   latitude?: number;
@@ -255,4 +256,167 @@ export interface UserAccount {
   employeeId?: string; // Links to Employee if they represent an internal worker
   status: 'Active' | 'Inactive';
   password?: string;
+}
+
+// Holiday Management
+export interface Holiday {
+  id: string;
+  name: string;
+  date: string; // YYYY-MM-DD
+  type: 'Public' | 'Company' | 'Optional';
+  isRecurring: boolean; // repeats annually
+  description?: string;
+}
+
+// Loan & Salary Advance Management
+export interface LoanAdvance {
+  id: string;
+  employeeId: string;
+  type: 'Loan' | 'Advance';
+  principalAmount: number;
+  approvedAmount: number;
+  disbursedDate: string;
+  totalInstallments: number;
+  remainingInstallments: number;
+  monthlyInstallment: number;
+  totalRepaid: number;
+  reason: string;
+  status: 'Pending' | 'Approved' | 'Active' | 'Closed' | 'Rejected';
+  appliedOn: string;
+  approvedBy?: string;
+  approvedOn?: string;
+}
+
+// Salary Revision / Increment History
+export interface SalaryRevision {
+  id: string;
+  employeeId: string;
+  previousSalary: number;
+  newSalary: number;
+  incrementAmount: number;
+  incrementPercentage: number;
+  effectiveDate: string; // YYYY-MM-DD
+  reason: string;
+  approvedBy: string;
+  approvedOn: string;
+  type: 'Annual Increment' | 'Promotion' | 'Adjustment' | 'Market Correction';
+}
+
+// ─── Performance Appraisal ────────────────────────────────────────────────────
+
+export interface KpiScore {
+  kpi: string;
+  weight: number;      // e.g. 30 (%)
+  selfScore: number;   // 1-5
+  managerScore: number;
+  comment?: string;
+}
+
+export interface PerformanceReview {
+  id: string;
+  employeeId: string;
+  reviewerId: string;   // employeeId of reviewer / manager username
+  period: string;       // e.g. "H1-2026", "Annual-2025"
+  reviewDate: string;
+  kpis: KpiScore[];
+  overallSelfRating: number;    // 1-5
+  overallManagerRating: number; // 1-5
+  strengths: string;
+  areasOfImprovement: string;
+  managerComments: string;
+  status: 'Draft' | 'Submitted' | 'Reviewed' | 'Acknowledged';
+  incrementRecommended: boolean;
+  incrementPercent?: number;
+}
+
+// ─── Asset Management ─────────────────────────────────────────────────────────
+
+export interface CompanyAsset {
+  id: string;
+  assetTag: string;          // e.g. ASSET-LPT-001
+  name: string;              // e.g. "Dell Latitude 5420"
+  category: 'Laptop' | 'Mobile' | 'SIM Card' | 'Vehicle' | 'Furniture' | 'Tool' | 'Other';
+  serialNumber?: string;
+  purchaseDate: string;
+  purchaseCost: number;
+  condition: 'New' | 'Good' | 'Fair' | 'Poor';
+  assignedTo?: string;       // employeeId
+  assignedDate?: string;
+  returnDate?: string;
+  status: 'Available' | 'Assigned' | 'Under Repair' | 'Retired';
+  notes?: string;
+}
+
+// ─── Recruitment ──────────────────────────────────────────────────────────────
+
+export interface JobPosting {
+  id: string;
+  title: string;
+  departmentId: string;
+  branchId: string;
+  vacancies: number;
+  experienceRequired: string;  // e.g. "2-4 years"
+  qualificationRequired: string;
+  salaryRange: string;         // e.g. "PKR 80,000 – 120,000"
+  jobType: 'Full Time' | 'Part Time' | 'Contract' | 'Internship';
+  postedDate: string;
+  closingDate: string;
+  status: 'Open' | 'Closed' | 'On Hold' | 'Filled';
+  description: string;
+}
+
+export type AppStage = 'Applied' | 'Shortlisted' | 'Interview Scheduled' | 'Interviewed' | 'Offer Extended' | 'Hired' | 'Rejected';
+
+export interface JobApplication {
+  id: string;
+  jobPostingId: string;
+  applicantName: string;
+  applicantEmail: string;
+  applicantPhone: string;
+  cnic?: string;
+  currentSalary?: number;
+  expectedSalary?: number;
+  appliedDate: string;
+  stage: AppStage;
+  interviewDate?: string;
+  interviewNotes?: string;
+  offerAmount?: number;
+  rejectionReason?: string;
+  resumeUrl?: string;
+}
+
+// ─── Gratuity / Terminal Settlement ──────────────────────────────────────────
+
+export interface GratuitySettlement {
+  id: string;
+  employeeId: string;
+  separationType: 'Resignation' | 'Termination' | 'Retirement' | 'Death' | 'Redundancy';
+  lastWorkingDate: string;
+  separationDate: string;
+  yearsOfService: number;        // calculated
+  basicSalaryAtSeparation: number;
+  gratuityAmount: number;        // (basic/26 * 30) * years
+  encashableLeaveDays: number;
+  leaveEncashmentAmount: number;
+  noticePayDays: number;
+  noticePayAmount: number;
+  pendingSalaryDays: number;
+  pendingSalaryAmount: number;
+  totalSettlementAmount: number;
+  paidDate?: string;
+  status: 'Pending' | 'Processed' | 'Paid';
+  notes?: string;
+}
+
+// ─── In-App Notifications ─────────────────────────────────────────────────────
+
+export interface AppNotification {
+  id: string;
+  type: 'leave_approved' | 'leave_rejected' | 'payroll_processed' | 'loan_approved' | 'loan_rejected' | 'asset_assigned' | 'review_due' | 'holiday_reminder' | 'system';
+  title: string;
+  message: string;
+  targetEmployeeId?: string;   // null = broadcast to all
+  createdAt: string;
+  readBy: string[];            // array of employeeIds who have read it
+  priority: 'low' | 'medium' | 'high';
 }

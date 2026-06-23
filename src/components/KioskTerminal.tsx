@@ -5,7 +5,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { 
-  Scan, User, Cpu, ShieldCheck, AlertCircle, Camera, CheckCircle, Clock, VideoOff
+  Scan, User, Cpu, ShieldCheck, AlertCircle, Camera, CheckCircle, VideoOff
 } from 'lucide-react';
 import { Employee, AttendanceLog } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
@@ -13,7 +13,7 @@ import { motion, AnimatePresence } from 'motion/react';
 interface KioskTerminalProps {
   employees: Employee[];
   attendances: AttendanceLog[];
-  onSimulatePunch: (employeeId: string, punchIn: string, punchOut: string, method: string) => void;
+  onSimulatePunch: (employeeId: string, punchIn: string, punchOut: string, method: string, lat?: number, lon?: number) => void;
 }
 
 export function KioskTerminal({
@@ -349,8 +349,9 @@ export function KioskTerminal({
                 <div>
                   <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Enter Employee ID Code:</label>
                   <form onSubmit={handleIdSubmit} className="flex space-x-2">
-                    <input 
+                    <input
                       type="text"
+                      aria-label="Employee ID Code"
                       placeholder="e.g. IND-KHI-001"
                       value={empIdInput}
                       onChange={(e) => setEmpIdInput(e.target.value)}

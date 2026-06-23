@@ -4,15 +4,26 @@
  */
 
 import React, { useState } from 'react';
-import { 
-  Users, Calendar, CreditCard, ShieldCheck, FileText, Download, UserPlus, 
-  CheckCircle, XCircle, AlertTriangle, Building, MapPin, RefreshCw, Layers, Sliders, Info
+import {
+  Users, Calendar, CreditCard, ShieldCheck, FileText, Download, UserPlus,
+  CheckCircle, AlertTriangle, Building, MapPin, Layers, Sliders, Info,
+  CalendarDays, Banknote, TrendingUp, Star, Package, Briefcase, Calculator, Bell, Fingerprint
 } from 'lucide-react';
-import { 
+import {
   Employee, AttendanceLog, LeaveRequest, StatutoryConfig, TaxSlab, PayrollRun, Payslip,
-  Role, UserAccount, Branch, Department, Designation
+  Role, UserAccount, Branch, Department, Designation, Holiday, LoanAdvance, SalaryRevision,
+  PerformanceReview, CompanyAsset, JobPosting, JobApplication, GratuitySettlement, AppNotification
 } from '../types';
-import { computePayslipDetails, DEFAULT_TAX_SLABS } from '../data/defaults';
+import { computePayslipDetails } from '../data/defaults';
+import { HolidayModule } from './HolidayModule';
+import { LoansModule } from './LoansModule';
+import { SalaryRevisionModule } from './SalaryRevisionModule';
+import { PerformanceModule } from './PerformanceModule';
+import { AssetModule } from './AssetModule';
+import { RecruitmentModule } from './RecruitmentModule';
+import { GratuityModule } from './GratuityModule';
+import { NotificationCenter } from './NotificationCenter';
+import { BiometricDeviceModule } from './BiometricDeviceModule';
 import { motion, AnimatePresence } from 'motion/react';
 
 const PAKISTAN_BANKS = [
@@ -78,6 +89,38 @@ interface WebPortalProps {
   onAddBranch?: (branch: Branch) => void;
   onAddDepartment?: (dept: Department) => void;
   onAddDesignation?: (desg: Designation) => void;
+  holidays: Holiday[];
+  onAddHoliday: (holiday: Holiday) => void;
+  onUpdateHoliday: (holiday: Holiday) => void;
+  onDeleteHoliday: (id: string) => void;
+  loanAdvances: LoanAdvance[];
+  onApplyLoan: (loan: LoanAdvance) => void;
+  onApproveLoan: (id: string) => void;
+  onRejectLoan: (id: string) => void;
+  salaryRevisions: SalaryRevision[];
+  onAddSalaryRevision: (revision: SalaryRevision) => void;
+  loggedInUser: UserAccount;
+  performanceReviews: PerformanceReview[];
+  onAddPerformanceReview: (review: PerformanceReview) => void;
+  onUpdatePerformanceReview: (review: PerformanceReview) => void;
+  companyAssets: CompanyAsset[];
+  onAddAsset: (asset: CompanyAsset) => void;
+  onUpdateAsset: (asset: CompanyAsset) => void;
+  jobPostings: JobPosting[];
+  onAddJobPosting: (posting: JobPosting) => void;
+  onUpdateJobPosting: (posting: JobPosting) => void;
+  jobApplications: JobApplication[];
+  onAddJobApplication: (app: JobApplication) => void;
+  onUpdateJobApplication: (app: JobApplication) => void;
+  gratuitySettlements: GratuitySettlement[];
+  onAddGratuitySettlement: (settlement: GratuitySettlement) => void;
+  onUpdateGratuitySettlement: (settlement: GratuitySettlement) => void;
+  notifications: AppNotification[];
+  onAddNotification: (n: AppNotification) => void;
+  onMarkNotificationRead: (id: string) => void;
+  onMarkAllNotificationsRead: () => void;
+  onDeleteNotification: (id: string) => void;
+  onSimulatePunch: (employeeId: string, punchIn: string, punchOut: string, method: string, lat?: number, lon?: number) => void;
 }
 
 export function WebPortal({
@@ -90,7 +133,7 @@ export function WebPortal({
   onAddEmployee,
   onUpdateEmployee,
   onUpdateStatConfig,
-  onUpdateTaxSlabs,
+  onUpdateTaxSlabs: _onUpdateTaxSlabs,
   onApproveLeave,
   onRejectLeave,
   onApproveRegularization,
@@ -104,16 +147,48 @@ export function WebPortal({
   roles,
   users,
   currentUserAccount,
-  onSetCurrentUserAccount,
+  onSetCurrentUserAccount: _onSetCurrentUserAccount,
   onAddRole,
   onAddUser,
   onUpdateUserRole,
   onLogout,
   onAddBranch,
   onAddDepartment,
-  onAddDesignation
+  onAddDesignation,
+  holidays,
+  onAddHoliday,
+  onUpdateHoliday,
+  onDeleteHoliday,
+  loanAdvances,
+  onApplyLoan,
+  onApproveLoan,
+  onRejectLoan,
+  salaryRevisions,
+  onAddSalaryRevision,
+  loggedInUser,
+  performanceReviews,
+  onAddPerformanceReview,
+  onUpdatePerformanceReview,
+  companyAssets,
+  onAddAsset,
+  onUpdateAsset,
+  jobPostings,
+  onAddJobPosting,
+  onUpdateJobPosting,
+  jobApplications,
+  onAddJobApplication,
+  onUpdateJobApplication,
+  gratuitySettlements,
+  onAddGratuitySettlement,
+  onUpdateGratuitySettlement,
+  notifications,
+  onAddNotification,
+  onMarkNotificationRead,
+  onMarkAllNotificationsRead,
+  onDeleteNotification,
+  onSimulatePunch
 }: WebPortalProps) {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'employees' | 'attendance' | 'leaves' | 'payroll' | 'settings' | 'access'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'employees' | 'attendance' | 'leaves' | 'payroll' | 'settings' | 'access' | 'holidays' | 'loans' | 'revisions' | 'performance' | 'assets' | 'recruitment' | 'gratuity' | 'notifications' | 'biometric'>('dashboard');
 
   const existingUcs = Array.from(new Set(employees.map(e => e.ucTown).filter(Boolean))) as string[];
   const existingZones = Array.from(new Set(employees.map(e => e.zone).filter(Boolean))) as string[];
@@ -129,6 +204,15 @@ export function WebPortal({
     if (tab === 'payroll') return userPermissions.includes('manage_payroll');
     if (tab === 'settings') return userPermissions.includes('manage_settings');
     if (tab === 'access') return userPermissions.includes('manage_access');
+    if (tab === 'holidays') return userPermissions.includes('manage_attendance') || userPermissions.includes('manage_settings');
+    if (tab === 'loans') return userPermissions.includes('manage_payroll') || userPermissions.includes('manage_employees');
+    if (tab === 'revisions') return userPermissions.includes('manage_payroll') || userPermissions.includes('manage_employees');
+    if (tab === 'performance') return userPermissions.includes('manage_employees') || userPermissions.includes('view_dashboard');
+    if (tab === 'assets') return userPermissions.includes('manage_employees') || userPermissions.includes('manage_settings');
+    if (tab === 'recruitment') return userPermissions.includes('manage_employees');
+    if (tab === 'gratuity') return userPermissions.includes('manage_payroll');
+    if (tab === 'notifications') return true;
+    if (tab === 'biometric') return userPermissions.includes('manage_attendance') || userPermissions.includes('manage_employees');
     return false;
   };
   
@@ -138,7 +222,6 @@ export function WebPortal({
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
   const [showBankFileModal, setShowBankFileModal] = useState<PayrollRun | null>(null);
   const [showPayslipModal, setShowPayslipModal] = useState<Payslip | null>(null);
-  const [showCreatePayrollModal, setShowCreatePayrollModal] = useState(false);
   const [showOffboardModal, setShowOffboardModal] = useState<Employee | null>(null);
   
   // Forms local state
@@ -152,7 +235,7 @@ export function WebPortal({
     branchId: 'b1',
     departmentId: 'd1',
     designationId: 'ds1',
-    wageType: 'Salaried' as 'Salaried' | 'Daily Wager',
+    wageType: 'Salaried' as string,
     basicSalary: 85000,
     providentFundOptIn: true,
     providentFundRate: 5.0,
@@ -188,7 +271,7 @@ export function WebPortal({
     branchId: 'b1',
     departmentId: 'd1',
     designationId: 'ds1',
-    wageType: 'Salaried' as 'Salaried' | 'Daily Wager',
+    wageType: 'Salaried' as string,
     basicSalary: 85000,
     providentFundOptIn: true,
     providentFundRate: 5.0,
@@ -213,12 +296,10 @@ export function WebPortal({
     maritalStatus: 'Single'
   });
 
-  const [payrollTitle, setPayrollTitle] = useState('Payroll - June 2026');
-  const [payrollMonth, setPayrollMonth] = useState(6);
-  const [payrollYear, setPayrollYear] = useState(2026);
+  const payrollMonth = 6;
+  const payrollYear = 2026;
 
   // Settlement manual additions for offboarding
-  const [settlementDaysGr, setSettlementDaysGr] = useState(15);
   const [settlementLeavesEncash, setSettlementLeavesEncash] = useState(10);
 
   // System country settings (defaulting to Pakistan)
@@ -242,7 +323,7 @@ export function WebPortal({
   const [autoGenNewCode, setAutoGenNewCode] = useState(false);
   const [autoGenEditCode, setAutoGenEditCode] = useState(false);
 
-  const getAutoEmployeeCode = (branchId: string, departmentId: string) => {
+  const getAutoEmployeeCode = (_branchId: string, departmentId: string) => {
     const dept = localDepartments.find(d => d.id === departmentId);
     const deptCode = dept?.code || 'GEN';
     const matchingCount = employees.filter(e => e.departmentId === departmentId).length;
@@ -436,7 +517,7 @@ export function WebPortal({
     return sum + emp.basicSalary;
   }, 0);
 
-  const handleCreateEmployeeSubmit = (e: React.FormEvent) => {
+  const handleCreateEmployeeSubmit = (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!newEmpForm.fullName || !newEmpForm.email || !newEmpForm.cnic) {
       alert('Kindly fill in all required fields.');
@@ -532,7 +613,7 @@ export function WebPortal({
     });
   };
 
-  const handleEditEmployeeSubmit = (e: React.FormEvent) => {
+  const handleEditEmployeeSubmit = (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!editEmpForm.fullName || !editEmpForm.email || !editEmpForm.cnic) {
       alert('Kindly fill in all required fields.');
@@ -629,7 +710,7 @@ export function WebPortal({
     setShowEditEmpModal(true);
   };
 
-  const handleCreateAttendanceSubmit = (e: React.FormEvent) => {
+  const handleCreateAttendanceSubmit = (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!newAttendanceForm.employeeId || !newAttendanceForm.date) {
       alert('Kindly select an employee and date.');
@@ -649,7 +730,7 @@ export function WebPortal({
     setShowAddAttendanceModal(false);
   };
 
-  const handleCreateLeaveSubmit = (e: React.FormEvent) => {
+  const handleCreateLeaveSubmit = (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!newLeaveForm.employeeId || !newLeaveForm.startDate || !newLeaveForm.endDate || !newLeaveForm.reason) {
       alert('Kindly fill in all fields.');
@@ -821,7 +902,7 @@ export function WebPortal({
         
         {/* Sidebar Nav */}
         <nav className="w-64 bg-slate-900 text-slate-300 flex flex-col p-4 border-r border-slate-800" id="web-sidebar">
-          <div className="space-y-1 flex-1">
+          <div className="space-y-1 flex-1 overflow-y-auto">
             {userPermissions.includes('view_dashboard') && (
               <button 
                 onClick={() => setActiveTab('dashboard')}
@@ -893,12 +974,129 @@ export function WebPortal({
             )}
 
             {userPermissions.includes('manage_access') && (
-              <button 
+              <button
                 onClick={() => setActiveTab('access')}
                 className={`w-full text-left px-3.5 py-3 rounded-lg text-sm font-medium flex items-center space-x-3 transition ${activeTab === 'access' ? 'bg-emerald-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
               >
                 <ShieldCheck className="w-4 h-4" />
                 <span>Access Control</span>
+              </button>
+            )}
+
+            {hasPermission('biometric') && (
+              <button
+                onClick={() => setActiveTab('biometric')}
+                className={`w-full text-left px-3.5 py-3 rounded-lg text-sm font-medium flex items-center space-x-3 transition ${activeTab === 'biometric' ? 'bg-emerald-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
+              >
+                <Fingerprint className="w-4 h-4" />
+                <span>Fingerprint Device</span>
+                <span className="ml-auto text-[10px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded-md font-bold">URU 4500</span>
+              </button>
+            )}
+
+            <div className="border-t border-slate-700 my-1 pt-1">
+              <p className="text-[10px] text-slate-500 uppercase tracking-widest px-3 pb-1">Advanced</p>
+            </div>
+
+            {hasPermission('holidays') && (
+              <button
+                onClick={() => setActiveTab('holidays')}
+                className={`w-full text-left px-3.5 py-3 rounded-lg text-sm font-medium flex items-center space-x-3 transition ${activeTab === 'holidays' ? 'bg-emerald-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
+              >
+                <CalendarDays className="w-4 h-4" />
+                <span>Holiday Calendar</span>
+                <span className="ml-auto text-[10px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded-md font-bold">{holidays.length}</span>
+              </button>
+            )}
+
+            {hasPermission('loans') && (
+              <button
+                onClick={() => setActiveTab('loans')}
+                className={`w-full text-left px-3.5 py-3 rounded-lg text-sm font-medium flex items-center space-x-3 transition ${activeTab === 'loans' ? 'bg-emerald-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
+              >
+                <Banknote className="w-4 h-4" />
+                <span>Loans & Advances</span>
+                {loanAdvances.filter(l => l.status === 'Pending').length > 0 && (
+                  <span className="ml-auto text-[10px] bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded-md font-bold">
+                    {loanAdvances.filter(l => l.status === 'Pending').length} pending
+                  </span>
+                )}
+              </button>
+            )}
+
+            {hasPermission('revisions') && (
+              <button
+                onClick={() => setActiveTab('revisions')}
+                className={`w-full text-left px-3.5 py-3 rounded-lg text-sm font-medium flex items-center space-x-3 transition ${activeTab === 'revisions' ? 'bg-emerald-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
+              >
+                <TrendingUp className="w-4 h-4" />
+                <span>Salary Revisions</span>
+              </button>
+            )}
+
+            <div className="border-t border-slate-700 my-1 pt-1">
+              <p className="text-[10px] text-slate-500 uppercase tracking-widest px-3 pb-1">People Ops</p>
+            </div>
+
+            {hasPermission('performance') && (
+              <button
+                onClick={() => setActiveTab('performance')}
+                className={`w-full text-left px-3.5 py-3 rounded-lg text-sm font-medium flex items-center space-x-3 transition ${activeTab === 'performance' ? 'bg-emerald-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
+              >
+                <Star className="w-4 h-4" />
+                <span>Performance</span>
+                <span className="ml-auto text-[10px] bg-slate-700 text-slate-400 px-1.5 py-0.5 rounded-md font-bold">{performanceReviews.length}</span>
+              </button>
+            )}
+
+            {hasPermission('assets') && (
+              <button
+                onClick={() => setActiveTab('assets')}
+                className={`w-full text-left px-3.5 py-3 rounded-lg text-sm font-medium flex items-center space-x-3 transition ${activeTab === 'assets' ? 'bg-emerald-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
+              >
+                <Package className="w-4 h-4" />
+                <span>Asset Management</span>
+                <span className="ml-auto text-[10px] bg-slate-700 text-slate-400 px-1.5 py-0.5 rounded-md font-bold">{companyAssets.length}</span>
+              </button>
+            )}
+
+            {hasPermission('recruitment') && (
+              <button
+                onClick={() => setActiveTab('recruitment')}
+                className={`w-full text-left px-3.5 py-3 rounded-lg text-sm font-medium flex items-center space-x-3 transition ${activeTab === 'recruitment' ? 'bg-emerald-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
+              >
+                <Briefcase className="w-4 h-4" />
+                <span>Recruitment</span>
+                {jobPostings.filter(j => j.status === 'Open').length > 0 && (
+                  <span className="ml-auto text-[10px] bg-violet-500/20 text-violet-400 px-1.5 py-0.5 rounded-md font-bold">
+                    {jobPostings.filter(j => j.status === 'Open').length} open
+                  </span>
+                )}
+              </button>
+            )}
+
+            {hasPermission('gratuity') && (
+              <button
+                onClick={() => setActiveTab('gratuity')}
+                className={`w-full text-left px-3.5 py-3 rounded-lg text-sm font-medium flex items-center space-x-3 transition ${activeTab === 'gratuity' ? 'bg-emerald-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
+              >
+                <Calculator className="w-4 h-4" />
+                <span>Gratuity & Settlement</span>
+              </button>
+            )}
+
+            {hasPermission('notifications') && (
+              <button
+                onClick={() => setActiveTab('notifications')}
+                className={`w-full text-left px-3.5 py-3 rounded-lg text-sm font-medium flex items-center space-x-3 transition ${activeTab === 'notifications' ? 'bg-emerald-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
+              >
+                <Bell className="w-4 h-4" />
+                <span>Notifications</span>
+                {notifications.filter(n => !n.readBy.includes(loggedInUser?.employeeId || loggedInUser?.username || '')).length > 0 && (
+                  <span className="ml-auto text-[10px] bg-rose-500/20 text-rose-400 px-1.5 py-0.5 rounded-md font-bold">
+                    {notifications.filter(n => !n.readBy.includes(loggedInUser?.employeeId || loggedInUser?.username || '')).length}
+                  </span>
+                )}
               </button>
             )}
           </div>
@@ -1546,8 +1744,9 @@ export function WebPortal({
                         {attPeriodType === 'daily' && (
                           <div className="flex items-center space-x-2 text-xs">
                             <span className="text-slate-500 font-medium">Select Register Date:</span>
-                            <input 
+                            <input
                               type="date"
+                              aria-label="Select Attendance Register Date"
                               value={selectedAttDate}
                               onChange={(e) => setSelectedAttDate(e.target.value)}
                               className="p-1.5 border rounded font-mono text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500"
@@ -1913,8 +2112,9 @@ export function WebPortal({
                         {leavePeriodType === 'daily' && (
                           <div className="flex items-center space-x-2 text-xs">
                             <span className="text-slate-500 font-medium">Select Register Date:</span>
-                            <input 
+                            <input
                               type="date"
+                              aria-label="Select Leave Register Date"
                               value={selectedLeaveDate}
                               onChange={(e) => setSelectedLeaveDate(e.target.value)}
                               className="p-1.5 border rounded font-mono text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500"
@@ -2138,7 +2338,7 @@ export function WebPortal({
                     </div>
                     <div>
                       <button 
-                        onClick={() => setShowCreatePayrollModal(true)}
+                        onClick={() => onCreatePayrollRun('Payroll - June 2026', payrollMonth, payrollYear)}
                         className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3 py-2 rounded-lg flex items-center space-x-1 shadow transition"
                       >
                         <span>Run New Payroll Cycle</span>
@@ -2213,7 +2413,7 @@ export function WebPortal({
                           <tbody className="divide-y divide-slate-200 text-slate-700 font-mono">
                             {employees.map(emp => {
                               const sheet = computePayslipDetails(
-                                emp, 6, 2026, attendances, leaves, statConfig, taxSlabs
+                                emp, payrollMonth, payrollYear, attendances, leaves, statConfig, taxSlabs, departments, designations, branches, loanAdvances
                               );
                               return (
                                 <tr key={emp.id} className="hover:bg-slate-50/50">
@@ -2311,7 +2511,8 @@ export function WebPortal({
                       <div className="space-y-4">
                         <div>
                           <label className="block text-xs font-semibold text-slate-700 uppercase tracking-widest mb-1.5">System Country Setting:</label>
-                          <select 
+                          <select
+                            aria-label="System Country Setting"
                             value={selectedCountry}
                             onChange={(e) => setSelectedCountry(e.target.value)}
                             className="w-full text-xs p-2 bg-white border border-slate-300 rounded focus:ring-1 focus:ring-emerald-500 focus:outline-none"
@@ -2326,8 +2527,9 @@ export function WebPortal({
 
                         <div>
                           <label className="block text-xs font-semibold text-slate-700 uppercase tracking-widest mb-1.5">Government Minimum Wage (PKR):</label>
-                          <input 
+                          <input
                             type="number"
+                            aria-label="Government Minimum Wage (PKR)"
                             value={statConfig.minimumWage}
                             onChange={(e) => onUpdateStatConfig({ ...statConfig, minimumWage: Number(e.target.value) })}
                             className="w-full text-xs font-mono p-2 border border-slate-300 rounded focus:ring-1 focus:ring-emerald-500 focus:outline-none"
@@ -2337,8 +2539,9 @@ export function WebPortal({
 
                         <div>
                           <label className="block text-xs font-semibold text-slate-700 uppercase tracking-widest mb-1.5">PESSI Employer Contribution %:</label>
-                          <input 
+                          <input
                             type="number"
+                            aria-label="PESSI Employer Contribution %"
                             value={statConfig.pessiEmployerRate}
                             onChange={(e) => onUpdateStatConfig({ ...statConfig, pessiEmployerRate: Number(e.target.value) })}
                             className="w-full text-xs font-mono p-2 border border-slate-300 rounded focus:ring-1 focus:ring-emerald-500 focus:outline-none"
@@ -2347,8 +2550,9 @@ export function WebPortal({
 
                         <div>
                           <label className="block text-xs font-semibold text-slate-700 uppercase tracking-widest mb-1.5">Gratuity Entitlement rate (annual):</label>
-                          <input 
+                          <input
                             type="number"
+                            aria-label="Gratuity Entitlement Rate (annual days)"
                             min="1"
                             max="365"
                             value={statConfig.gratuityRateDaysPerYear}
@@ -2395,7 +2599,6 @@ export function WebPortal({
                           </thead>
                           <tbody className="divide-y divide-slate-100 text-slate-700">
                             {users.map(u => {
-                              const role = roles.find(r => r.id === u.roleId);
                               const linkedEmp = employees.find(e => e.id === u.employeeId);
                               return (
                                 <tr key={u.id} className="hover:bg-slate-50/50">
@@ -2407,7 +2610,8 @@ export function WebPortal({
                                     {linkedEmp ? `${linkedEmp.fullName} (${linkedEmp.employeeCode})` : 'Not Linked'}
                                   </td>
                                   <td className="px-4 py-3">
-                                    <select 
+                                    <select
+                                      aria-label={`Assigned Role for ${u.username}`}
                                       value={u.roleId}
                                       onChange={(e) => onUpdateUserRole(u.id, e.target.value)}
                                       className="p-1 bg-white border border-slate-300 rounded text-xs text-slate-805"
@@ -2475,28 +2679,28 @@ export function WebPortal({
                           alert('Success: User account created successfully.');
                         }} className="space-y-3">
                           <div>
-                            <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Username:</label>
-                            <input name="username" type="text" required placeholder="e.g. jahanzaib.hr" className="w-full text-xs p-2 border border-slate-300 rounded focus:ring-1 focus:ring-emerald-500 focus:outline-none" />
+                            <label htmlFor="username" className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Username:</label>
+                            <input id="username" name="username" type="text" required placeholder="e.g. jahanzaib.hr" className="w-full text-xs p-2 border border-slate-300 rounded focus:ring-1 focus:ring-emerald-500 focus:outline-none" />
                           </div>
                           <div>
-                            <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Email:</label>
-                            <input name="email" type="email" required placeholder="e.g. jahanzaib@binishaq.com" className="w-full text-xs p-2 border border-slate-300 rounded focus:ring-1 focus:ring-emerald-500 focus:outline-none" />
+                            <label htmlFor="email" className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Email:</label>
+                            <input id="email" name="email" type="email" required placeholder="e.g. jahanzaib@binishaq.com" className="w-full text-xs p-2 border border-slate-300 rounded focus:ring-1 focus:ring-emerald-500 focus:outline-none" />
                           </div>
                           <div>
-                            <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Password:</label>
-                            <input name="password" type="password" required placeholder="Assign system password" className="w-full text-xs p-2 border border-slate-300 rounded focus:ring-1 focus:ring-emerald-500 focus:outline-none" />
+                            <label htmlFor="password" className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Password:</label>
+                            <input id="password" name="password" type="password" required placeholder="Assign system password" className="w-full text-xs p-2 border border-slate-300 rounded focus:ring-1 focus:ring-emerald-500 focus:outline-none" />
                           </div>
                           <div>
-                            <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Assign Initial Role:</label>
-                            <select name="roleId" className="w-full text-xs p-2 bg-white border border-slate-300 rounded focus:ring-1">
+                            <label htmlFor="roleId" className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Assign Initial Role:</label>
+                            <select id="roleId" name="roleId" className="w-full text-xs p-2 bg-white border border-slate-300 rounded focus:ring-1">
                               {roles.map(r => (
                                 <option key={r.id} value={r.id}>{r.name}</option>
                               ))}
                             </select>
                           </div>
                           <div>
-                            <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Link Employee (Optional):</label>
-                            <select name="employeeId" className="w-full text-xs p-2 bg-white border border-slate-300 rounded focus:ring-1">
+                            <label htmlFor="employeeId" className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Link Employee (Optional):</label>
+                            <select id="employeeId" name="employeeId" className="w-full text-xs p-2 bg-white border border-slate-300 rounded focus:ring-1">
                               <option value="">-- No Link --</option>
                               {employees.map(e => (
                                 <option key={e.id} value={e.id}>{e.fullName} ({e.employeeCode})</option>
@@ -2544,12 +2748,12 @@ export function WebPortal({
                           alert(`Success: Role "${roleName}" has been created.`);
                         }} className="space-y-3">
                           <div>
-                            <label className="block text-[10px] font-bold text-slate-505 uppercase mb-1">Role Name:</label>
-                            <input name="roleName" type="text" required placeholder="e.g. Auditor" className="w-full text-xs p-2 border border-slate-300 rounded focus:ring-1 focus:ring-emerald-500 focus:outline-none" />
+                            <label htmlFor="roleName" className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Role Name:</label>
+                            <input id="roleName" name="roleName" type="text" required placeholder="e.g. Auditor" className="w-full text-xs p-2 border border-slate-300 rounded focus:ring-1 focus:ring-emerald-500 focus:outline-none" />
                           </div>
                           <div>
                             <label className="block text-[10px] font-bold text-slate-505 uppercase mb-1">Description:</label>
-                            <textarea name="description" placeholder="Role description..." className="w-full text-xs p-2 border border-slate-300 rounded h-12 focus:ring-1 focus:ring-emerald-500 focus:outline-none" />
+                            <textarea name="description" aria-label="Role description" placeholder="Role description..." className="w-full text-xs p-2 border border-slate-300 rounded h-12 focus:ring-1 focus:ring-emerald-500 focus:outline-none" />
                           </div>
                           <div>
                             <label className="block text-[10px] font-bold text-slate-505 uppercase mb-1">Permissions Scope:</label>
@@ -2586,6 +2790,131 @@ export function WebPortal({
 
                 </motion.div>
               )}
+
+              {/* TAB 8: HOLIDAY CALENDAR */}
+              {activeTab === 'holidays' && (
+                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+                  <HolidayModule
+                    holidays={holidays}
+                    onAddHoliday={onAddHoliday}
+                    onUpdateHoliday={onUpdateHoliday}
+                    onDeleteHoliday={onDeleteHoliday}
+                  />
+                </motion.div>
+              )}
+
+              {/* TAB 9: LOANS & ADVANCES */}
+              {activeTab === 'loans' && (
+                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+                  <LoansModule
+                    loanAdvances={loanAdvances}
+                    employees={employees}
+                    currentUserEmployeeId={loggedInUser?.employeeId}
+                    canApprove={userPermissions.includes('manage_payroll') || userPermissions.includes('manage_employees')}
+                    onApplyLoan={onApplyLoan}
+                    onApproveLoan={onApproveLoan}
+                    onRejectLoan={onRejectLoan}
+                  />
+                </motion.div>
+              )}
+
+              {/* TAB 10: SALARY REVISIONS */}
+              {activeTab === 'revisions' && (
+                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+                  <SalaryRevisionModule
+                    salaryRevisions={salaryRevisions}
+                    employees={employees}
+                    currentUserAccount={currentUserAccount}
+                    onAddSalaryRevision={onAddSalaryRevision}
+                  />
+                </motion.div>
+              )}
+
+              {/* TAB 11: PERFORMANCE APPRAISALS */}
+              {activeTab === 'performance' && (
+                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+                  <PerformanceModule
+                    reviews={performanceReviews}
+                    employees={employees}
+                    currentUserAccount={currentUserAccount}
+                    canManage={userPermissions.includes('manage_employees')}
+                    onAddReview={onAddPerformanceReview}
+                    onUpdateReview={onUpdatePerformanceReview}
+                  />
+                </motion.div>
+              )}
+
+              {/* TAB 12: ASSET MANAGEMENT */}
+              {activeTab === 'assets' && (
+                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+                  <AssetModule
+                    assets={companyAssets}
+                    employees={employees}
+                    canManage={userPermissions.includes('manage_employees') || userPermissions.includes('manage_settings')}
+                    onAddAsset={onAddAsset}
+                    onUpdateAsset={onUpdateAsset}
+                  />
+                </motion.div>
+              )}
+
+              {/* TAB 13: RECRUITMENT */}
+              {activeTab === 'recruitment' && (
+                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+                  <RecruitmentModule
+                    jobPostings={jobPostings}
+                    applications={jobApplications}
+                    departments={departments}
+                    branches={branches}
+                    canManage={userPermissions.includes('manage_employees')}
+                    onAddPosting={onAddJobPosting}
+                    onUpdatePosting={onUpdateJobPosting}
+                    onAddApplication={onAddJobApplication}
+                    onUpdateApplication={onUpdateJobApplication}
+                  />
+                </motion.div>
+              )}
+
+              {/* TAB 14: GRATUITY & TERMINAL SETTLEMENT */}
+              {activeTab === 'gratuity' && (
+                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+                  <GratuityModule
+                    settlements={gratuitySettlements}
+                    employees={employees}
+                    statConfig={statConfig}
+                    canManage={userPermissions.includes('manage_payroll')}
+                    onAddSettlement={onAddGratuitySettlement}
+                    onUpdateSettlement={onUpdateGratuitySettlement}
+                  />
+                </motion.div>
+              )}
+
+              {/* TAB 16: FINGERPRINT DEVICE — Digital Persona URU 4500 */}
+              {activeTab === 'biometric' && (
+                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+                  <BiometricDeviceModule
+                    employees={employees}
+                    attendances={attendances}
+                    onUpdateEmployee={onUpdateEmployee}
+                    onSimulatePunch={onSimulatePunch}
+                  />
+                </motion.div>
+              )}
+
+              {/* TAB 15: NOTIFICATION CENTER */}
+              {activeTab === 'notifications' && (
+                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+                  <NotificationCenter
+                    notifications={notifications}
+                    employees={employees}
+                    currentEmployeeId={loggedInUser?.employeeId || loggedInUser?.username}
+                    canManage={userPermissions.includes('manage_employees') || userPermissions.includes('manage_payroll')}
+                    onAddNotification={onAddNotification}
+                    onMarkRead={onMarkNotificationRead}
+                    onMarkAllRead={onMarkAllNotificationsRead}
+                    onDeleteNotification={onDeleteNotification}
+                  />
+                </motion.div>
+              )}
             </>
           )}
         </main>
@@ -2616,8 +2945,9 @@ export function WebPortal({
                   <div className="grid grid-cols-4 gap-3 mb-2.5">
                     <div>
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Full Name <span className="text-slate-400 font-normal">(e.g. Ali Ahmed)</span>:</label>
-                      <input 
+                      <input
                         type="text" required
+                        aria-label="Full Name"
                         placeholder="e.g. Ali Ahmed"
                         value={newEmpForm.fullName}
                         onChange={(e) => setNewEmpForm({ ...newEmpForm, fullName: e.target.value })}
@@ -2626,8 +2956,9 @@ export function WebPortal({
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Official Email ID <span className="text-slate-400 font-normal">(e.g. ahmed@binishaqsoft.com)</span>:</label>
-                      <input 
+                      <input
                         type="email" required
+                        aria-label="Official Email ID"
                         placeholder="e.g. ahmed@binishaqsoft.com"
                         value={newEmpForm.email}
                         onChange={(e) => setNewEmpForm({ ...newEmpForm, email: e.target.value })}
@@ -2637,8 +2968,9 @@ export function WebPortal({
                     <div>
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Employee Code:</label>
                       <div className="flex space-x-1 items-center">
-                        <input 
+                        <input
                           type="text"
+                          aria-label="Employee Code"
                           placeholder="e.g. BINISHAQ-HR-00001"
                           disabled={autoGenNewCode}
                           value={newEmpForm.employeeCode}
@@ -2646,8 +2978,9 @@ export function WebPortal({
                           className="flex-1 p-1.5 border border-slate-300 rounded font-mono focus:ring-1 focus:ring-emerald-500 focus:outline-none disabled:bg-slate-100 disabled:text-slate-500"
                         />
                         <label className="flex items-center space-x-1 whitespace-nowrap bg-slate-55 border border-slate-300 rounded p-1.5 hover:bg-slate-100 cursor-pointer select-none">
-                          <input 
+                          <input
                             type="checkbox"
+                            aria-label="Auto-generate Employee Code"
                             checked={autoGenNewCode}
                             onChange={(e) => setAutoGenNewCode(e.target.checked)}
                             className="rounded text-emerald-600"
@@ -2658,8 +2991,9 @@ export function WebPortal({
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Pakistan CNIC <span className="text-slate-400 font-normal">(e.g. 42101-1234567-3)</span>:</label>
-                      <input 
+                      <input
                         type="text" required
+                        aria-label="Pakistan CNIC"
                         placeholder="e.g. 42101-1234567-3"
                         value={newEmpForm.cnic}
                         onChange={(e) => setNewEmpForm({ ...newEmpForm, cnic: formatCNIC(e.target.value) })}
@@ -2671,8 +3005,9 @@ export function WebPortal({
                   <div className="grid grid-cols-4 gap-3">
                     <div>
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Mobile Contact <span className="text-slate-400 font-normal">(e.g. 0300-1234567)</span>:</label>
-                      <input 
+                      <input
                         type="text" required
+                        aria-label="Mobile Contact Number"
                         placeholder="e.g. 0300-1234567"
                         value={newEmpForm.contactNumber}
                         onChange={(e) => setNewEmpForm({ ...newEmpForm, contactNumber: e.target.value })}
@@ -2681,7 +3016,8 @@ export function WebPortal({
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Gender:</label>
-                      <select 
+                      <select
+                        aria-label="Gender"
                         value={newEmpForm.gender}
                         onChange={(e) => setNewEmpForm({ ...newEmpForm, gender: e.target.value })}
                         className="w-full p-1.5 bg-white border border-slate-300 rounded focus:ring-1"
@@ -2693,7 +3029,8 @@ export function WebPortal({
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Marital Status:</label>
-                      <select 
+                      <select
+                        aria-label="Marital Status"
                         value={newEmpForm.maritalStatus}
                         onChange={(e) => setNewEmpForm({ ...newEmpForm, maritalStatus: e.target.value })}
                         className="w-full p-1.5 bg-white border border-slate-300 rounded focus:ring-1"
@@ -2706,8 +3043,9 @@ export function WebPortal({
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Date of Birth:</label>
-                      <input 
+                      <input
                         type="date" required
+                        aria-label="Date of Birth"
                         value={newEmpForm.dateOfBirth}
                         onChange={(e) => setNewEmpForm({ ...newEmpForm, dateOfBirth: e.target.value })}
                         className="w-full p-1.5 border border-slate-300 rounded focus:ring-1 focus:outline-none"
@@ -2716,15 +3054,17 @@ export function WebPortal({
                     <div className="col-span-2">
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Picture URL / Upload:</label>
                       <div className="flex space-x-1 items-center">
-                        <input 
+                        <input
                           type="text"
+                          aria-label="Picture URL"
                           placeholder="e.g. https://domain.com/pic.jpg"
                           value={newEmpForm.pictureUrl}
                           onChange={(e) => setNewEmpForm({ ...newEmpForm, pictureUrl: e.target.value })}
                           className="flex-1 p-1.5 border border-slate-300 rounded focus:ring-1 focus:outline-none font-mono text-[9px]"
                         />
-                        <input 
+                        <input
                           type="file"
+                          aria-label="Upload Profile Picture"
                           accept="image/*"
                           className="hidden"
                           id="add-emp-pic-file"
@@ -2749,7 +3089,8 @@ export function WebPortal({
                     <div>
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Assigned Branch:</label>
                       <div className="flex space-x-1 items-center">
-                        <select 
+                        <select
+                          aria-label="Assigned Branch"
                           value={newEmpForm.branchId}
                           onChange={(e) => handleAddBranchChange(e.target.value)}
                           className="flex-1 p-1.5 bg-white border border-slate-300 rounded focus:ring-1"
@@ -2780,7 +3121,8 @@ export function WebPortal({
                     <div>
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Department:</label>
                       <div className="flex space-x-1 items-center">
-                        <select 
+                        <select
+                          aria-label="Department"
                           value={newEmpForm.departmentId}
                           onChange={(e) => handleAddDeptChange(e.target.value)}
                           className="flex-1 p-1.5 bg-white border border-slate-300 rounded focus:ring-1"
@@ -2809,7 +3151,8 @@ export function WebPortal({
                     <div className="col-span-2">
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Designation:</label>
                       <div className="flex space-x-1 items-center">
-                        <select 
+                        <select
+                          aria-label="Designation"
                           value={newEmpForm.designationId}
                           onChange={(e) => setNewEmpForm({ ...newEmpForm, designationId: e.target.value })}
                           className="flex-1 p-1.5 bg-white border border-slate-300 rounded focus:ring-1"
@@ -2845,7 +3188,8 @@ export function WebPortal({
                     <div>
                       <label className="block font-bold mb-1 text-slate-600 font-sans">UC / Town Information:</label>
                       <div className="flex space-x-1 items-center">
-                        <select 
+                        <select
+                          aria-label="UC / Town"
                           value={newEmpForm.ucTown}
                           onChange={(e) => setNewEmpForm({ ...newEmpForm, ucTown: e.target.value })}
                           className="flex-1 p-1.5 bg-white border border-slate-300 rounded focus:ring-1 focus:outline-none"
@@ -2877,7 +3221,8 @@ export function WebPortal({
                     <div>
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Zone:</label>
                       <div className="flex space-x-1 items-center">
-                        <select 
+                        <select
+                          aria-label="Zone"
                           value={newEmpForm.zone}
                           onChange={(e) => setNewEmpForm({ ...newEmpForm, zone: e.target.value })}
                           className="flex-1 p-1.5 bg-white border border-slate-300 rounded focus:ring-1 focus:outline-none"
@@ -2908,8 +3253,9 @@ export function WebPortal({
                     </div>
                     <div className="col-span-2 flex items-center space-x-3 pt-3">
                       <label className="flex items-center space-x-1.5 font-medium select-none">
-                        <input 
+                        <input
                           type="checkbox"
+                          aria-label="Is Zone In Charge?"
                           checked={newEmpForm.isZoneInCharge}
                           onChange={(e) => setNewEmpForm({ ...newEmpForm, isZoneInCharge: e.target.checked })}
                           className="rounded text-emerald-600 text-xs"
@@ -2918,8 +3264,9 @@ export function WebPortal({
                       </label>
                       {!newEmpForm.isZoneInCharge && (
                         <div className="flex-1">
-                          <input 
+                          <input
                             type="text"
+                            aria-label="Zone In Charge Name"
                             placeholder="Zone In Charge Name"
                             value={newEmpForm.zoneInChargeName}
                             onChange={(e) => setNewEmpForm({ ...newEmpForm, zoneInChargeName: e.target.value })}
@@ -2939,7 +3286,8 @@ export function WebPortal({
                     <div>
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Wage Type:</label>
                       <div className="flex space-x-1 items-center">
-                        <select 
+                        <select
+                          aria-label="Wage Type"
                           value={newEmpForm.wageType}
                           onChange={(e) => setNewEmpForm({ ...newEmpForm, wageType: e.target.value })}
                           className="flex-1 p-1.5 bg-white border border-slate-300 rounded focus:ring-1"
@@ -2966,8 +3314,9 @@ export function WebPortal({
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Basic Monthly Wage / Daily Rate (PKR) <span className="text-slate-400 font-normal">(e.g. 85000)</span>:</label>
-                      <input 
+                      <input
                         type="number" required
+                        aria-label="Basic Monthly Wage / Daily Rate (PKR)"
                         placeholder="e.g. 85000"
                         value={newEmpForm.basicSalary}
                         onChange={(e) => setNewEmpForm({ ...newEmpForm, basicSalary: Number(e.target.value) })}
@@ -2977,7 +3326,8 @@ export function WebPortal({
                     <div>
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Disbursal Bank:</label>
                       <div className="flex space-x-1 items-center">
-                        <select 
+                        <select
+                          aria-label="Disbursal Bank"
                           value={newEmpForm.bankName}
                           onChange={(e) => handleBankChange(e.target.value, false)}
                           className="flex-1 p-1.5 bg-white border border-slate-300 rounded focus:ring-1 focus:outline-none text-[11px]"
@@ -3008,8 +3358,9 @@ export function WebPortal({
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Account Number <span className="text-slate-400 font-normal">(e.g. 12345678901234)</span>:</label>
-                      <input 
+                      <input
                         type="text" required
+                        aria-label="Bank Account Number"
                         placeholder="e.g. 12345678901234"
                         value={newEmpForm.bankAccountNumber}
                         onChange={(e) => handleAccountNumberChange(e.target.value, false)}
@@ -3021,8 +3372,9 @@ export function WebPortal({
                   <div className="grid grid-cols-4 gap-3 mb-2.5">
                     <div className="col-span-2">
                       <label className="block font-bold mb-1 text-slate-600 font-sans">PKR IBAN Number <span className="text-slate-400 font-normal">(e.g. PK42HABB0012345678901234)</span>:</label>
-                      <input 
+                      <input
                         type="text" required
+                        aria-label="PKR IBAN Number"
                         placeholder="e.g. PK42HABB0012345678901234"
                         value={newEmpForm.iban}
                         onChange={(e) => setNewEmpForm({ ...newEmpForm, iban: e.target.value })}
@@ -3036,8 +3388,9 @@ export function WebPortal({
                           <div className="grid grid-cols-4 gap-1.5">
                             <div>
                               <label className="block text-[8px] font-semibold text-slate-500 font-sans">Rent:</label>
-                              <input 
+                              <input
                                 type="number"
+                                aria-label="House Rent Allowance"
                                 placeholder="Rent"
                                 value={newEmpForm.houseRentAllowance}
                                 onChange={(e) => setNewEmpForm({ ...newEmpForm, houseRentAllowance: Number(e.target.value) })}
@@ -3046,8 +3399,9 @@ export function WebPortal({
                             </div>
                             <div>
                               <label className="block text-[8px] font-semibold text-slate-500 font-sans">Conveyance:</label>
-                              <input 
+                              <input
                                 type="number"
+                                aria-label="Conveyance Allowance"
                                 placeholder="Conv"
                                 value={newEmpForm.conveyanceAllowance}
                                 onChange={(e) => setNewEmpForm({ ...newEmpForm, conveyanceAllowance: Number(e.target.value) })}
@@ -3056,8 +3410,9 @@ export function WebPortal({
                             </div>
                             <div>
                               <label className="block text-[8px] font-semibold text-slate-500 font-sans">Medical:</label>
-                              <input 
+                              <input
                                 type="number"
+                                aria-label="Medical Allowance"
                                 placeholder="Med"
                                 value={newEmpForm.medicalAllowance}
                                 onChange={(e) => setNewEmpForm({ ...newEmpForm, medicalAllowance: Number(e.target.value) })}
@@ -3066,8 +3421,9 @@ export function WebPortal({
                             </div>
                             <div>
                               <label className="block text-[8px] font-semibold text-slate-500 font-sans">Other:</label>
-                              <input 
+                              <input
                                 type="number"
+                                aria-label="Other Allowances"
                                 placeholder="Other"
                                 value={newEmpForm.otherAllowances}
                                 onChange={(e) => setNewEmpForm({ ...newEmpForm, otherAllowances: Number(e.target.value) })}
@@ -3088,8 +3444,9 @@ export function WebPortal({
                   <div className="grid grid-cols-4 gap-3 bg-slate-50 p-2.5 rounded-lg border border-slate-200 items-start">
                     <div className="flex flex-col space-y-1">
                       <label className="flex items-center space-x-1.5 font-medium select-none">
-                        <input 
+                        <input
                           type="checkbox"
+                          aria-label="Enable EOBI"
                           checked={newEmpForm.eobiEnabled}
                           onChange={(e) => setNewEmpForm({ ...newEmpForm, eobiEnabled: e.target.checked })}
                           className="rounded text-emerald-600 text-xs"
@@ -3097,8 +3454,9 @@ export function WebPortal({
                         <span className="font-semibold text-slate-650">Enable EOBI</span>
                       </label>
                       {newEmpForm.eobiEnabled && (
-                        <input 
+                        <input
                           type="text"
+                          aria-label="EOBI Registration Number"
                           placeholder="EOBI No (e.g. 1090123000)"
                           value={newEmpForm.eobiNumber}
                           onChange={(e) => setNewEmpForm({ ...newEmpForm, eobiNumber: e.target.value })}
@@ -3109,16 +3467,18 @@ export function WebPortal({
 
                     <div className="flex flex-col space-y-1">
                       <label className="flex items-center space-x-1.5 font-medium select-none">
-                        <input 
+                        <input
                           type="checkbox"
+                          aria-label="Enable FBR Tax"
                           checked={newEmpForm.fbrEnabled}
                           onChange={(e) => setNewEmpForm({ ...newEmpForm, fbrEnabled: e.target.checked })}
                           className="rounded text-emerald-600 text-xs"
                         />
                         <span className="font-semibold text-slate-650">Enable FBR Tax</span>
                       </label>
-                      <input 
+                      <input
                         type="text"
+                        aria-label="PESSI Social Security Number"
                         placeholder="PESSI SSN (e.g. SS-42-000)"
                         value={newEmpForm.socialSecurityNumber}
                         onChange={(e) => setNewEmpForm({ ...newEmpForm, socialSecurityNumber: e.target.value })}
@@ -3128,8 +3488,9 @@ export function WebPortal({
 
                     <div className="pt-1 select-none">
                       <label className="flex items-center space-x-1.5 font-medium">
-                        <input 
+                        <input
                           type="checkbox"
+                          aria-label="Opt In Provident Fund"
                           checked={newEmpForm.providentFundOptIn}
                           onChange={(e) => setNewEmpForm({ ...newEmpForm, providentFundOptIn: e.target.checked })}
                           className="rounded text-emerald-600 text-xs"
@@ -3140,8 +3501,9 @@ export function WebPortal({
 
                     <div className="pt-1 select-none">
                       <label className="flex items-center space-x-1.5 font-medium">
-                        <input 
+                        <input
                           type="checkbox"
+                          aria-label="Opt In Gratuity"
                           checked={newEmpForm.gratuityOptIn}
                           onChange={(e) => setNewEmpForm({ ...newEmpForm, gratuityOptIn: e.target.checked })}
                           className="rounded text-emerald-600 text-xs"
@@ -3153,7 +3515,7 @@ export function WebPortal({
                 </div>
 
                 <div className="flex justify-end space-x-2.5 pt-3 border-t border-slate-200 flex-shrink-0">
-                  <button 
+                  <button
                     type="button"
                     onClick={() => setShowAddEmpModal(false)}
                     className="px-4 py-2 border border-slate-300 text-slate-700 hover:bg-slate-50 rounded-lg font-medium"
@@ -3198,8 +3560,9 @@ export function WebPortal({
                   <div className="grid grid-cols-4 gap-3 mb-2.5">
                     <div>
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Full Name <span className="text-slate-400 font-normal">(e.g. Ali Ahmed)</span>:</label>
-                      <input 
+                      <input
                         type="text" required
+                        aria-label="Full Name"
                         placeholder="e.g. Ali Ahmed"
                         value={editEmpForm.fullName}
                         onChange={(e) => setEditEmpForm({ ...editEmpForm, fullName: e.target.value })}
@@ -3208,8 +3571,9 @@ export function WebPortal({
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Official Email ID <span className="text-slate-400 font-normal">(e.g. ahmed@binishaqsoft.com)</span>:</label>
-                      <input 
+                      <input
                         type="email" required
+                        aria-label="Official Email ID"
                         placeholder="e.g. ahmed@binishaqsoft.com"
                         value={editEmpForm.email}
                         onChange={(e) => setEditEmpForm({ ...editEmpForm, email: e.target.value })}
@@ -3219,8 +3583,9 @@ export function WebPortal({
                     <div>
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Employee Code:</label>
                       <div className="flex space-x-1 items-center">
-                        <input 
+                        <input
                           type="text"
+                          aria-label="Employee Code"
                           placeholder="e.g. BINISHAQ-HR-00001"
                           disabled={autoGenEditCode}
                           value={editEmpForm.employeeCode}
@@ -3228,8 +3593,9 @@ export function WebPortal({
                           className="flex-1 p-1.5 border border-slate-300 rounded font-mono focus:ring-1 focus:ring-indigo-500 focus:outline-none disabled:bg-slate-100 disabled:text-slate-500"
                         />
                         <label className="flex items-center space-x-1 whitespace-nowrap bg-slate-55 border border-slate-300 rounded p-1.5 hover:bg-slate-100 cursor-pointer select-none">
-                          <input 
+                          <input
                             type="checkbox"
+                            aria-label="Auto-generate Employee Code"
                             checked={autoGenEditCode}
                             onChange={(e) => setAutoGenEditCode(e.target.checked)}
                             className="rounded text-indigo-600"
@@ -3240,8 +3606,9 @@ export function WebPortal({
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Pakistan CNIC <span className="text-slate-400 font-normal">(e.g. 42101-1234567-3)</span>:</label>
-                      <input 
+                      <input
                         type="text" required
+                        aria-label="Pakistan CNIC"
                         placeholder="e.g. 42101-1234567-3"
                         value={editEmpForm.cnic}
                         onChange={(e) => setEditEmpForm({ ...editEmpForm, cnic: formatCNIC(e.target.value) })}
@@ -3253,8 +3620,9 @@ export function WebPortal({
                   <div className="grid grid-cols-4 gap-3">
                     <div>
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Mobile Contact <span className="text-slate-400 font-normal">(e.g. 0300-1234567)</span>:</label>
-                      <input 
+                      <input
                         type="text" required
+                        aria-label="Mobile Contact Number"
                         placeholder="e.g. 0300-1234567"
                         value={editEmpForm.contactNumber}
                         onChange={(e) => setEditEmpForm({ ...editEmpForm, contactNumber: e.target.value })}
@@ -3263,7 +3631,8 @@ export function WebPortal({
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Gender:</label>
-                      <select 
+                      <select
+                        aria-label="Gender"
                         value={editEmpForm.gender}
                         onChange={(e) => setEditEmpForm({ ...editEmpForm, gender: e.target.value })}
                         className="w-full p-1.5 bg-white border border-slate-300 rounded focus:ring-1"
@@ -3275,7 +3644,8 @@ export function WebPortal({
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Marital Status:</label>
-                      <select 
+                      <select
+                        aria-label="Marital Status"
                         value={editEmpForm.maritalStatus}
                         onChange={(e) => setEditEmpForm({ ...editEmpForm, maritalStatus: e.target.value })}
                         className="w-full p-1.5 bg-white border border-slate-300 rounded focus:ring-1"
@@ -3288,8 +3658,9 @@ export function WebPortal({
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Date of Birth:</label>
-                      <input 
+                      <input
                         type="date" required
+                        aria-label="Date of Birth"
                         value={editEmpForm.dateOfBirth}
                         onChange={(e) => setEditEmpForm({ ...editEmpForm, dateOfBirth: e.target.value })}
                         className="w-full p-1.5 border border-slate-300 rounded focus:ring-1 focus:outline-none"
@@ -3298,15 +3669,17 @@ export function WebPortal({
                     <div className="col-span-2">
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Picture URL / Upload:</label>
                       <div className="flex space-x-1 items-center">
-                        <input 
+                        <input
                           type="text"
+                          aria-label="Picture URL"
                           placeholder="e.g. https://domain.com/pic.jpg"
                           value={editEmpForm.pictureUrl}
                           onChange={(e) => setEditEmpForm({ ...editEmpForm, pictureUrl: e.target.value })}
                           className="flex-1 p-1.5 border border-slate-300 rounded focus:ring-1 focus:outline-none font-mono text-[9px]"
                         />
-                        <input 
+                        <input
                           type="file"
+                          aria-label="Upload Profile Picture"
                           accept="image/*"
                           className="hidden"
                           id="edit-emp-pic-file"
@@ -3331,7 +3704,8 @@ export function WebPortal({
                     <div>
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Assigned Branch:</label>
                       <div className="flex space-x-1 items-center">
-                        <select 
+                        <select
+                          aria-label="Assigned Branch"
                           value={editEmpForm.branchId}
                           onChange={(e) => handleEditBranchChange(e.target.value)}
                           className="flex-1 p-1.5 bg-white border border-slate-300 rounded focus:ring-1"
@@ -3362,7 +3736,8 @@ export function WebPortal({
                     <div>
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Department:</label>
                       <div className="flex space-x-1 items-center">
-                        <select 
+                        <select
+                          aria-label="Department"
                           value={editEmpForm.departmentId}
                           onChange={(e) => handleEditDeptChange(e.target.value)}
                           className="flex-1 p-1.5 bg-white border border-slate-300 rounded focus:ring-1"
@@ -3391,7 +3766,8 @@ export function WebPortal({
                     <div className="col-span-2">
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Designation:</label>
                       <div className="flex space-x-1 items-center">
-                        <select 
+                        <select
+                          aria-label="Designation"
                           value={editEmpForm.designationId}
                           onChange={(e) => setEditEmpForm({ ...editEmpForm, designationId: e.target.value })}
                           className="flex-1 p-1.5 bg-white border border-slate-300 rounded focus:ring-1"
@@ -3427,7 +3803,8 @@ export function WebPortal({
                     <div>
                       <label className="block font-bold mb-1 text-slate-600 font-sans">UC / Town Information:</label>
                       <div className="flex space-x-1 items-center">
-                        <select 
+                        <select
+                          aria-label="UC / Town"
                           value={editEmpForm.ucTown}
                           onChange={(e) => setEditEmpForm({ ...editEmpForm, ucTown: e.target.value })}
                           className="flex-1 p-1.5 bg-white border border-slate-300 rounded focus:ring-1 focus:outline-none"
@@ -3459,7 +3836,8 @@ export function WebPortal({
                     <div>
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Zone:</label>
                       <div className="flex space-x-1 items-center">
-                        <select 
+                        <select
+                          aria-label="Zone"
                           value={editEmpForm.zone}
                           onChange={(e) => setEditEmpForm({ ...editEmpForm, zone: e.target.value })}
                           className="flex-1 p-1.5 bg-white border border-slate-300 rounded focus:ring-1 focus:outline-none"
@@ -3490,8 +3868,9 @@ export function WebPortal({
                     </div>
                     <div className="col-span-2 flex items-center space-x-3 pt-3">
                       <label className="flex items-center space-x-1.5 font-medium select-none">
-                        <input 
+                        <input
                           type="checkbox"
+                          aria-label="Is Zone In Charge?"
                           checked={editEmpForm.isZoneInCharge}
                           onChange={(e) => setEditEmpForm({ ...editEmpForm, isZoneInCharge: e.target.checked })}
                           className="rounded text-indigo-600 text-xs"
@@ -3500,8 +3879,9 @@ export function WebPortal({
                       </label>
                       {!editEmpForm.isZoneInCharge && (
                         <div className="flex-1">
-                          <input 
+                          <input
                             type="text"
+                            aria-label="Zone In Charge Name"
                             placeholder="Zone In Charge Name"
                             value={editEmpForm.zoneInChargeName || ''}
                             onChange={(e) => setEditEmpForm({ ...editEmpForm, zoneInChargeName: e.target.value })}
@@ -3521,7 +3901,8 @@ export function WebPortal({
                     <div>
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Wage Type:</label>
                       <div className="flex space-x-1 items-center">
-                        <select 
+                        <select
+                          aria-label="Wage Type"
                           value={editEmpForm.wageType}
                           onChange={(e) => setEditEmpForm({ ...editEmpForm, wageType: e.target.value })}
                           className="flex-1 p-1.5 bg-white border border-slate-300 rounded focus:ring-1"
@@ -3548,8 +3929,9 @@ export function WebPortal({
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Basic Monthly Wage / Daily Rate (PKR) <span className="text-slate-400 font-normal">(e.g. 85000)</span>:</label>
-                      <input 
+                      <input
                         type="number" required
+                        aria-label="Basic Monthly Wage / Daily Rate (PKR)"
                         placeholder="e.g. 85000"
                         value={editEmpForm.basicSalary}
                         onChange={(e) => setEditEmpForm({ ...editEmpForm, basicSalary: Number(e.target.value) })}
@@ -3559,7 +3941,8 @@ export function WebPortal({
                     <div>
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Disbursal Bank:</label>
                       <div className="flex space-x-1 items-center">
-                        <select 
+                        <select
+                          aria-label="Disbursal Bank"
                           value={editEmpForm.bankName}
                           onChange={(e) => handleBankChange(e.target.value, true)}
                           className="flex-1 p-1.5 bg-white border border-slate-300 rounded focus:ring-1 focus:outline-none text-[11px]"
@@ -3590,8 +3973,9 @@ export function WebPortal({
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Account Number <span className="text-slate-400 font-normal">(e.g. 12345678901234)</span>:</label>
-                      <input 
+                      <input
                         type="text" required
+                        aria-label="Bank Account Number"
                         placeholder="e.g. 12345678901234"
                         value={editEmpForm.bankAccountNumber}
                         onChange={(e) => handleAccountNumberChange(e.target.value, true)}
@@ -3603,8 +3987,9 @@ export function WebPortal({
                   <div className="grid grid-cols-4 gap-3 mb-2.5">
                     <div className="col-span-2">
                       <label className="block font-bold mb-1 text-slate-600 font-sans">PKR IBAN Number <span className="text-slate-400 font-normal">(e.g. PK42HABB0012345678901234)</span>:</label>
-                      <input 
+                      <input
                         type="text" required
+                        aria-label="PKR IBAN Number"
                         placeholder="e.g. PK42HABB0012345678901234"
                         value={editEmpForm.iban}
                         onChange={(e) => setEditEmpForm({ ...editEmpForm, iban: e.target.value })}
@@ -3618,8 +4003,9 @@ export function WebPortal({
                           <div className="grid grid-cols-4 gap-1.5">
                             <div>
                               <label className="block text-[8px] font-semibold text-slate-500 font-sans">Rent:</label>
-                              <input 
+                              <input
                                 type="number"
+                                aria-label="House Rent Allowance"
                                 placeholder="Rent"
                                 value={editEmpForm.houseRentAllowance}
                                 onChange={(e) => setEditEmpForm({ ...editEmpForm, houseRentAllowance: Number(e.target.value) })}
@@ -3628,8 +4014,9 @@ export function WebPortal({
                             </div>
                             <div>
                               <label className="block text-[8px] font-semibold text-slate-500 font-sans">Conveyance:</label>
-                              <input 
+                              <input
                                 type="number"
+                                aria-label="Conveyance Allowance"
                                 placeholder="Conv"
                                 value={editEmpForm.conveyanceAllowance}
                                 onChange={(e) => setEditEmpForm({ ...editEmpForm, conveyanceAllowance: Number(e.target.value) })}
@@ -3638,8 +4025,9 @@ export function WebPortal({
                             </div>
                             <div>
                               <label className="block text-[8px] font-semibold text-slate-500 font-sans">Medical:</label>
-                              <input 
+                              <input
                                 type="number"
+                                aria-label="Medical Allowance"
                                 placeholder="Med"
                                 value={editEmpForm.medicalAllowance}
                                 onChange={(e) => setEditEmpForm({ ...editEmpForm, medicalAllowance: Number(e.target.value) })}
@@ -3648,8 +4036,9 @@ export function WebPortal({
                             </div>
                             <div>
                               <label className="block text-[8px] font-semibold text-slate-500 font-sans">Other:</label>
-                              <input 
+                              <input
                                 type="number"
+                                aria-label="Other Allowances"
                                 placeholder="Other"
                                 value={editEmpForm.otherAllowances}
                                 onChange={(e) => setEditEmpForm({ ...editEmpForm, otherAllowances: Number(e.target.value) })}
@@ -3670,8 +4059,9 @@ export function WebPortal({
                   <div className="grid grid-cols-4 gap-3 bg-slate-50 p-2.5 rounded-lg border border-slate-200 items-start">
                     <div className="flex flex-col space-y-1">
                       <label className="flex items-center space-x-1.5 font-medium select-none">
-                        <input 
+                        <input
                           type="checkbox"
+                          aria-label="Enable EOBI"
                           checked={editEmpForm.eobiEnabled}
                           onChange={(e) => setEditEmpForm({ ...editEmpForm, eobiEnabled: e.target.checked })}
                           className="rounded text-indigo-600 text-xs"
@@ -3679,8 +4069,9 @@ export function WebPortal({
                         <span className="font-semibold text-slate-650">Enable EOBI</span>
                       </label>
                       {editEmpForm.eobiEnabled && (
-                        <input 
+                        <input
                           type="text"
+                          aria-label="EOBI Registration Number"
                           placeholder="EOBI No (e.g. 1090123000)"
                           value={editEmpForm.eobiNumber}
                           onChange={(e) => setEditEmpForm({ ...editEmpForm, eobiNumber: e.target.value })}
@@ -3691,16 +4082,18 @@ export function WebPortal({
 
                     <div className="flex flex-col space-y-1">
                       <label className="flex items-center space-x-1.5 font-medium select-none">
-                        <input 
+                        <input
                           type="checkbox"
+                          aria-label="Enable FBR Tax"
                           checked={editEmpForm.fbrEnabled}
                           onChange={(e) => setEditEmpForm({ ...editEmpForm, fbrEnabled: e.target.checked })}
                           className="rounded text-indigo-600 text-xs"
                         />
                         <span className="font-semibold text-slate-650">Enable FBR Tax</span>
                       </label>
-                      <input 
+                      <input
                         type="text"
+                        aria-label="PESSI Social Security Number"
                         placeholder="PESSI SSN (e.g. SS-42-000)"
                         value={editEmpForm.socialSecurityNumber}
                         onChange={(e) => setEditEmpForm({ ...editEmpForm, socialSecurityNumber: e.target.value })}
@@ -3710,8 +4103,9 @@ export function WebPortal({
 
                     <div className="pt-1 select-none">
                       <label className="flex items-center space-x-1.5 font-medium">
-                        <input 
+                        <input
                           type="checkbox"
+                          aria-label="Opt In Provident Fund"
                           checked={editEmpForm.providentFundOptIn}
                           onChange={(e) => setEditEmpForm({ ...editEmpForm, providentFundOptIn: e.target.checked })}
                           className="rounded text-indigo-600 text-xs"
@@ -3722,8 +4116,9 @@ export function WebPortal({
 
                     <div className="pt-1 select-none">
                       <label className="flex items-center space-x-1.5 font-medium">
-                        <input 
+                        <input
                           type="checkbox"
+                          aria-label="Opt In Gratuity"
                           checked={editEmpForm.gratuityOptIn}
                           onChange={(e) => setEditEmpForm({ ...editEmpForm, gratuityOptIn: e.target.checked })}
                           className="rounded text-indigo-600 text-xs"
@@ -3804,8 +4199,9 @@ export function WebPortal({
 
                 <div className="space-y-3">
                   <div>
-                    <label className="block font-bold text-slate-705 mb-1">Encashable Leaves (Days):</label>
+                    <label htmlFor="encashable-leaves" className="block font-bold text-slate-700 mb-1">Encashable Leaves (Days):</label>
                     <input 
+                      id="encashable-leaves"
                       type="number"
                       min="0"
                       max="30"
@@ -3908,11 +4304,18 @@ export function WebPortal({
                     <p>Employee Code: <strong className="text-slate-900">{showPayslipModal.employeeCode}</strong></p>
                     <p>CNIC Number: <strong className="text-slate-900">{showPayslipModal.cnic}</strong></p>
                   </div>
-                  <div>
-                    <p>Bank: <strong className="text-slate-900 font-sans">{showPayslipModal.bankName}</strong></p>
-                    <p>IBAN: <strong className="text-slate-900">{showPayslipModal.iban}</strong></p>
-                    <p>Joining Date: <strong className="text-slate-900">01-Feb-2021</strong></p>
-                  </div>
+                  {(() => {
+                    const pe = employees.find(e => e.id === showPayslipModal.employeeId);
+                    return (
+                      <div>
+                        <p>Bank: <strong className="text-slate-900 font-sans">{pe?.bankName || '—'}</strong></p>
+                        <p>IBAN: <strong className="text-slate-900">{pe?.iban || '—'}</strong></p>
+                        <p>Joining Date: <strong className="text-slate-900">{pe?.dateOfJoining || '—'}</strong></p>
+                        <p>Branch: <strong className="text-slate-900">{showPayslipModal.branchName}</strong></p>
+                        <p>Dept: <strong className="text-slate-900">{showPayslipModal.departmentName}</strong></p>
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {/* Earnings & Deductions breakdown side by side */}
@@ -4023,15 +4426,41 @@ export function WebPortal({
 
               </div>
 
-              <div className="px-6 py-4 bg-slate-50 border-t flex justify-end space-x-2">
-                <button 
-                  onClick={() => {
-                    alert('PDF advice download simulated successfully.');
-                    setShowPayslipModal(null);
-                  }}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-4 py-2 rounded shadow"
+              <div className="px-6 py-4 bg-slate-50 border-t flex justify-between items-center">
+                <button
+                  onClick={() => setShowPayslipModal(null)}
+                  className="text-slate-500 hover:text-slate-700 text-xs font-semibold px-4 py-2 rounded border border-slate-300 hover:bg-slate-100 transition"
                 >
-                  Download Formal PDF Payslip
+                  Close
+                </button>
+                <button
+                  onClick={() => {
+                    const style = document.createElement('style');
+                    style.id = '__payslip-print-style';
+                    style.innerHTML = `
+                      @media print {
+                        body > *:not(.fixed) { display: none !important; }
+                        .fixed { display: none !important; }
+                        #payslip-print-root { display: block !important; position: fixed; inset: 0; background: white; z-index: 99999; padding: 24px; }
+                      }
+                    `;
+                    document.head.appendChild(style);
+                    const root = document.createElement('div');
+                    root.id = 'payslip-print-root';
+                    root.style.display = 'none';
+                    const src = document.getElementById('payslip-pdf-view');
+                    if (src) root.innerHTML = src.innerHTML;
+                    document.body.appendChild(root);
+                    window.print();
+                    setTimeout(() => {
+                      document.body.removeChild(root);
+                      const s = document.getElementById('__payslip-print-style');
+                      if (s) document.head.removeChild(s);
+                    }, 1000);
+                  }}
+                  className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-4 py-2 rounded shadow transition"
+                >
+                  <Download size={13} /> Print / Save as PDF
                 </button>
               </div>
             </motion.div>
@@ -4084,7 +4513,7 @@ export function WebPortal({
                     <tbody className="divide-y divide-slate-200 text-slate-705">
                       {employees.map(emp => {
                         const sheet = computePayslipDetails(
-                          emp, 6, 2026, attendances, leaves, statConfig, taxSlabs
+                          emp, showBankFileModal!.periodMonth, showBankFileModal!.periodYear, attendances, leaves, statConfig, taxSlabs, departments, designations, branches, loanAdvances
                         );
                         return (
                           <tr key={emp.id} className="hover:bg-slate-50">
@@ -4140,7 +4569,8 @@ export function WebPortal({
               <form onSubmit={handleCreateAttendanceSubmit} className="p-6 space-y-4 text-slate-700">
                 <div>
                   <label className="block font-bold mb-1 text-slate-650">Select Employee:</label>
-                  <select 
+                  <select
+                    aria-label="Select Employee"
                     value={newAttendanceForm.employeeId}
                     onChange={(e) => setNewAttendanceForm({ ...newAttendanceForm, employeeId: e.target.value })}
                     required
@@ -4156,8 +4586,9 @@ export function WebPortal({
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block font-bold mb-1 text-slate-650">Date:</label>
-                    <input 
+                    <input
                       type="date" required
+                      aria-label="Attendance Date"
                       value={newAttendanceForm.date}
                       onChange={(e) => setNewAttendanceForm({ ...newAttendanceForm, date: e.target.value })}
                       className="w-full p-2 border border-slate-300 rounded focus:ring-1 focus:ring-emerald-500 focus:outline-none"
@@ -4165,7 +4596,8 @@ export function WebPortal({
                   </div>
                   <div>
                     <label className="block font-bold mb-1 text-slate-655">Punch Status:</label>
-                    <select 
+                    <select
+                      aria-label="Punch Status"
                       value={newAttendanceForm.status}
                       onChange={(e) => setNewAttendanceForm({ ...newAttendanceForm, status: e.target.value as any })}
                       className="w-full p-2 bg-white border border-slate-300 rounded focus:ring-1"
@@ -4183,8 +4615,9 @@ export function WebPortal({
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block font-bold mb-1 text-slate-650">Punch In Time (Optional):</label>
-                    <input 
+                    <input
                       type="time"
+                      aria-label="Punch In Time"
                       value={newAttendanceForm.punchIn}
                       onChange={(e) => setNewAttendanceForm({ ...newAttendanceForm, punchIn: e.target.value })}
                       className="w-full p-2 border border-slate-300 rounded focus:ring-1 focus:ring-emerald-500"
@@ -4192,8 +4625,9 @@ export function WebPortal({
                   </div>
                   <div>
                     <label className="block font-bold mb-1 text-slate-650">Punch Out Time (Optional):</label>
-                    <input 
+                    <input
                       type="time"
+                      aria-label="Punch Out Time"
                       value={newAttendanceForm.punchOut}
                       onChange={(e) => setNewAttendanceForm({ ...newAttendanceForm, punchOut: e.target.value })}
                       className="w-full p-2 border border-slate-300 rounded focus:ring-1 focus:ring-emerald-500"
@@ -4203,7 +4637,8 @@ export function WebPortal({
 
                 <div>
                   <label className="block font-bold mb-1 text-slate-655">Attendance Method:</label>
-                  <select 
+                  <select
+                    aria-label="Attendance Method"
                     value={newAttendanceForm.method}
                     onChange={(e) => setNewAttendanceForm({ ...newAttendanceForm, method: e.target.value as any })}
                     className="w-full p-2 bg-white border border-slate-300 rounded focus:ring-1"
@@ -4257,7 +4692,8 @@ export function WebPortal({
               <form onSubmit={handleCreateLeaveSubmit} className="p-6 space-y-4 text-slate-700">
                 <div>
                   <label className="block font-bold mb-1 text-slate-650">Select Employee:</label>
-                  <select 
+                  <select
+                    aria-label="Select Employee for Leave"
                     value={newLeaveForm.employeeId}
                     onChange={(e) => setNewLeaveForm({ ...newLeaveForm, employeeId: e.target.value })}
                     required
@@ -4272,7 +4708,8 @@ export function WebPortal({
 
                 <div>
                   <label className="block font-bold mb-1 text-slate-655">Leave Type:</label>
-                  <select 
+                  <select
+                    aria-label="Leave Type"
                     value={newLeaveForm.leaveType}
                     onChange={(e) => setNewLeaveForm({ ...newLeaveForm, leaveType: e.target.value as any })}
                     className="w-full p-2 bg-white border border-slate-300 rounded focus:ring-1"
@@ -4290,8 +4727,9 @@ export function WebPortal({
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block font-bold mb-1 text-slate-655">Start Date:</label>
-                    <input 
+                    <input
                       type="date" required
+                      aria-label="Leave Start Date"
                       value={newLeaveForm.startDate}
                       onChange={(e) => setNewLeaveForm({ ...newLeaveForm, startDate: e.target.value })}
                       className="w-full p-2 border border-slate-300 rounded focus:ring-1 focus:ring-emerald-500 focus:outline-none"
@@ -4299,8 +4737,9 @@ export function WebPortal({
                   </div>
                   <div>
                     <label className="block font-bold mb-1 text-slate-655">End Date:</label>
-                    <input 
+                    <input
                       type="date" required
+                      aria-label="Leave End Date"
                       value={newLeaveForm.endDate}
                       onChange={(e) => setNewLeaveForm({ ...newLeaveForm, endDate: e.target.value })}
                       className="w-full p-2 border border-slate-300 rounded focus:ring-1 focus:ring-emerald-500 focus:outline-none"
@@ -4311,6 +4750,7 @@ export function WebPortal({
                 <div>
                   <label className="block font-bold mb-1 text-slate-650">Reason / Description:</label>
                   <textarea required
+                    aria-label="Reason / Description"
                     rows={3}
                     placeholder="Provide justification..."
                     value={newLeaveForm.reason}

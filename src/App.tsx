@@ -4,41 +4,42 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { 
-  DEFAULT_EMPLOYEES, DEFAULT_ATTENDANCES, DEFAULT_LEAVE_REQUESTS, 
-  DEFAULT_STATUTORY_CONFIG, DEFAULT_TAX_SLABS, DEFAULT_COMPANIES, 
+import {
+  DEFAULT_EMPLOYEES, DEFAULT_ATTENDANCES, DEFAULT_LEAVE_REQUESTS,
+  DEFAULT_STATUTORY_CONFIG, DEFAULT_TAX_SLABS,
   DEFAULT_BRANCHES, DEFAULT_DEPARTMENTS, DEFAULT_DESIGNATIONS,
-  computePayslipDetails, DEFAULT_ROLES, DEFAULT_USERS
+  computePayslipDetails, DEFAULT_ROLES, DEFAULT_USERS,
+  DEFAULT_HOLIDAYS, DEFAULT_LOAN_ADVANCES, DEFAULT_SALARY_REVISIONS,
+  DEFAULT_PERFORMANCE_REVIEWS, DEFAULT_COMPANY_ASSETS,
+  DEFAULT_JOB_POSTINGS, DEFAULT_JOB_APPLICATIONS,
+  DEFAULT_GRATUITY_SETTLEMENTS, DEFAULT_NOTIFICATIONS
 } from './data/defaults';
-import { 
-  Employee, AttendanceLog, LeaveRequest, StatutoryConfig, TaxSlab, PayrollRun, Payslip,
-  Role, UserAccount, Branch, Department, Designation
+import {
+  Employee, AttendanceLog, LeaveRequest, StatutoryConfig, TaxSlab, PayrollRun,
+  Role, UserAccount, Branch, Department, Designation, Holiday, LoanAdvance, SalaryRevision,
+  PerformanceReview, CompanyAsset, JobPosting, JobApplication, GratuitySettlement, AppNotification
 } from './types';
 import { DeviceEmulator } from './components/DeviceEmulator';
 import { MobileApp } from './components/MobileApp';
 import { db, isFirebaseConfigured } from './firebase';
-import { 
-  collection, getDocs, doc, setDoc, addDoc, updateDoc, query, onSnapshot
+import {
+  collection, doc, setDoc, updateDoc, onSnapshot
 } from 'firebase/firestore';
 
 export default function App() {
-  // Helper to remove undefined fields before writing to Firestore
-  const cleanData = <T,>(obj: T): T => {
-    return JSON.parse(JSON.stringify(obj));
-  };
+  const cleanData = <T,>(obj: T): T => JSON.parse(JSON.stringify(obj));
 
-  // Helper to load initial state from localStorage or fallback to default
   const getInitialValue = <T,>(key: string, fallback: T): T => {
     try {
       const saved = localStorage.getItem(key);
-      if (saved) {
-        return JSON.parse(saved);
-      }
+      if (saved) return JSON.parse(saved);
     } catch (e) {
-      console.warn(`Error loading state from localStorage for key ${key}:`, e);
+      console.warn(`localStorage read error for ${key}:`, e);
     }
     return fallback;
   };
+
+  const todayStr = () => new Date().toISOString().split('T')[0];
 
   // Application Data States
   const [employees, setEmployees] = useState<Employee[]>(() => getInitialValue('hr_employees', DEFAULT_EMPLOYEES));
@@ -49,6 +50,15 @@ export default function App() {
   const [branches, setBranches] = useState<Branch[]>(() => getInitialValue('hr_branches', DEFAULT_BRANCHES));
   const [departments, setDepartments] = useState<Department[]>(() => getInitialValue('hr_departments', DEFAULT_DEPARTMENTS));
   const [designations, setDesignations] = useState<Designation[]>(() => getInitialValue('hr_designations', DEFAULT_DESIGNATIONS));
+  const [holidays, setHolidays] = useState<Holiday[]>(() => getInitialValue('hr_holidays', DEFAULT_HOLIDAYS));
+  const [loanAdvances, setLoanAdvances] = useState<LoanAdvance[]>(() => getInitialValue('hr_loans', DEFAULT_LOAN_ADVANCES));
+  const [salaryRevisions, setSalaryRevisions] = useState<SalaryRevision[]>(() => getInitialValue('hr_salary_revisions', DEFAULT_SALARY_REVISIONS));
+  const [performanceReviews, setPerformanceReviews] = useState<PerformanceReview[]>(() => getInitialValue('hr_perf_reviews', DEFAULT_PERFORMANCE_REVIEWS));
+  const [companyAssets, setCompanyAssets] = useState<CompanyAsset[]>(() => getInitialValue('hr_assets', DEFAULT_COMPANY_ASSETS));
+  const [jobPostings, setJobPostings] = useState<JobPosting[]>(() => getInitialValue('hr_job_postings', DEFAULT_JOB_POSTINGS));
+  const [jobApplications, setJobApplications] = useState<JobApplication[]>(() => getInitialValue('hr_job_apps', DEFAULT_JOB_APPLICATIONS));
+  const [gratuitySettlements, setGratuitySettlements] = useState<GratuitySettlement[]>(() => getInitialValue('hr_gratuity', DEFAULT_GRATUITY_SETTLEMENTS));
+  const [notifications, setNotifications] = useState<AppNotification[]>(() => getInitialValue('hr_notifications', DEFAULT_NOTIFICATIONS));
 
   // User & RBAC States
   const [loggedInUser, setLoggedInUser] = useState<UserAccount | null>(() => getInitialValue('hr_logged_in_user', null));
@@ -68,8 +78,7 @@ export default function App() {
     localStorage.removeItem('hr_logged_in_user');
     localStorage.removeItem('hr_current_user');
   };
-  
-  // Historical Payroll Runs initialized with pre-made seed data
+
   const [payrollRuns, setPayrollRuns] = useState<PayrollRun[]>(() => getInitialValue('hr_payroll_runs', [
     {
       id: 'run-pk-june2026',
@@ -88,13 +97,12 @@ export default function App() {
     }
   ]));
 
-  // Firestore Real-time Sync Effect
+  // Firestore Real-time Sync
   useEffect(() => {
     if (!isFirebaseConfigured()) return;
-    
+
     const unsubscribes: (() => void)[] = [];
 
-    // Helper to register snapshot listener for collections that are arrays
     const registerCollectionListener = <T extends { id: string }>(
       collectionName: string,
       defaultItems: T[],
@@ -108,18 +116,14 @@ export default function App() {
             fetched.push({ id: docSnap.id, ...docSnap.data() } as T);
           });
 
-          // Merge with default seed data to ensure new seeds are preserved
           const merged = [...fetched];
-          let updated = false;
-
           for (const defItem of defaultItems) {
             if (!merged.some(item => item.id === defItem.id)) {
               merged.push(defItem);
-              updated = true;
               try {
                 await setDoc(doc(db, collectionName, defItem.id), defItem);
               } catch (e) {
-                console.warn(`Sync seed item error in ${collectionName}:`, e);
+                console.warn(`Seed sync error in ${collectionName}:`, e);
               }
             }
           }
@@ -127,39 +131,33 @@ export default function App() {
           stateSetter(merged);
           localStorage.setItem(storageKey, JSON.stringify(merged));
         }, (err) => {
-          console.warn(`Firestore collection subscription failed for ${collectionName}:`, err);
+          console.warn(`Firestore listener failed for ${collectionName}:`, err);
         });
         unsubscribes.push(unsub);
       } catch (err) {
-        console.warn(`Firestore initial query subscription deferred for ${collectionName}:`, err);
+        console.warn(`Firestore subscription deferred for ${collectionName}:`, err);
       }
     };
 
-    // 1. Employees Sync
     registerCollectionListener('employees', DEFAULT_EMPLOYEES, setEmployees, 'hr_employees');
-
-    // 2. Attendances Sync
     registerCollectionListener('attendances', DEFAULT_ATTENDANCES, setAttendances, 'hr_attendances');
-
-    // 3. Leaves Sync
     registerCollectionListener('leaves', DEFAULT_LEAVE_REQUESTS, setLeaves, 'hr_leaves');
-
-    // 4. Branches Sync
     registerCollectionListener('branches', DEFAULT_BRANCHES, setBranches, 'hr_branches');
-
-    // 5. Departments Sync
     registerCollectionListener('departments', DEFAULT_DEPARTMENTS, setDepartments, 'hr_departments');
-
-    // 6. Designations Sync
     registerCollectionListener('designations', DEFAULT_DESIGNATIONS, setDesignations, 'hr_designations');
-
-    // 7. Tax Slabs Sync
     registerCollectionListener('taxSlabs', DEFAULT_TAX_SLABS, setTaxSlabs, 'hr_tax_slabs');
-
-    // 8. Roles Sync
     registerCollectionListener('roles', DEFAULT_ROLES, setRoles, 'hr_roles');
+    registerCollectionListener('holidays', DEFAULT_HOLIDAYS, setHolidays, 'hr_holidays');
+    registerCollectionListener('loanAdvances', DEFAULT_LOAN_ADVANCES, setLoanAdvances, 'hr_loans');
+    registerCollectionListener('salaryRevisions', DEFAULT_SALARY_REVISIONS, setSalaryRevisions, 'hr_salary_revisions');
+    registerCollectionListener('performanceReviews', DEFAULT_PERFORMANCE_REVIEWS, setPerformanceReviews, 'hr_perf_reviews');
+    registerCollectionListener('companyAssets', DEFAULT_COMPANY_ASSETS, setCompanyAssets, 'hr_assets');
+    registerCollectionListener('jobPostings', DEFAULT_JOB_POSTINGS, setJobPostings, 'hr_job_postings');
+    registerCollectionListener('jobApplications', DEFAULT_JOB_APPLICATIONS, setJobApplications, 'hr_job_apps');
+    registerCollectionListener('gratuitySettlements', DEFAULT_GRATUITY_SETTLEMENTS, setGratuitySettlements, 'hr_gratuity');
+    registerCollectionListener('notifications', DEFAULT_NOTIFICATIONS, setNotifications, 'hr_notifications');
 
-    // 9. Users Sync (special user tracking for currentUserAccount updates)
+    // Users Sync (special: also updates currentUserAccount)
     try {
       const unsubUsers = onSnapshot(collection(db, 'users'), async (snapshot) => {
         const fetched: UserAccount[] = [];
@@ -174,7 +172,7 @@ export default function App() {
             try {
               await setDoc(doc(db, 'users', defUser.id), defUser);
             } catch (e) {
-              console.warn('Sync seed user error:', e);
+              console.warn('Seed user sync error:', e);
             }
           }
         }
@@ -182,7 +180,6 @@ export default function App() {
         setUsers(merged);
         localStorage.setItem('hr_users', JSON.stringify(merged));
 
-        // Sync active user account profile if in remote updates
         const storedCurrentUser = localStorage.getItem('hr_current_user');
         if (storedCurrentUser) {
           const parsed = JSON.parse(storedCurrentUser) as UserAccount;
@@ -193,14 +190,14 @@ export default function App() {
           }
         }
       }, (err) => {
-        console.warn('Firestore subscription failed for users:', err);
+        console.warn('Firestore users listener failed:', err);
       });
       unsubscribes.push(unsubUsers);
     } catch (err) {
-      console.warn('Firestore user query subscription deferred:', err);
+      console.warn('Firestore users subscription deferred:', err);
     }
 
-    // 10. Payroll Runs Sync
+    // PayrollRuns Sync
     registerCollectionListener('payrollRuns', [
       {
         id: 'run-pk-june2026',
@@ -219,7 +216,7 @@ export default function App() {
       }
     ], setPayrollRuns, 'hr_payroll_runs');
 
-    // 11. Statutory Config Sync (single document config)
+    // StatConfig Sync (single document)
     try {
       const unsubConfig = onSnapshot(collection(db, 'statConfig'), async (snapshot) => {
         let fetchedConfig: StatutoryConfig | null = null;
@@ -231,41 +228,35 @@ export default function App() {
           setStatConfig(fetchedConfig);
           localStorage.setItem('hr_stat_config', JSON.stringify(fetchedConfig));
         } else {
-          // If Firestore is empty, seed it
           const current = getInitialValue('hr_stat_config', DEFAULT_STATUTORY_CONFIG);
           try {
             await setDoc(doc(db, 'statConfig', current.id), current);
           } catch (e) {
-            console.warn('Sync seed statutory config error:', e);
+            console.warn('StatConfig seed error:', e);
           }
         }
       }, (err) => {
-        console.warn('Firestore subscription failed for statConfig:', err);
+        console.warn('Firestore statConfig listener failed:', err);
       });
       unsubscribes.push(unsubConfig);
     } catch (err) {
-      console.warn('Firestore statConfig query subscription deferred:', err);
+      console.warn('Firestore statConfig subscription deferred:', err);
     }
 
-    // Return cleanup to unsubscribe on unmount
-    return () => {
-      unsubscribes.forEach(unsub => unsub());
-    };
+    return () => unsubscribes.forEach(unsub => unsub());
   }, []);
 
-  // Operation Handlers (Synchronized to local state + Firebase)
-
+  // ─── Employee Handlers ────────────────────────────────────────────────────
   const handleAddEmployee = async (newEmp: Employee) => {
     setEmployees(prev => {
       const updated = [...prev, newEmp];
       localStorage.setItem('hr_employees', JSON.stringify(updated));
       return updated;
     });
-    
     try {
       await setDoc(doc(db, 'employees', newEmp.id), cleanData(newEmp));
     } catch (err) {
-      console.warn('Firebase sync delayed: ', err);
+      console.warn('Firebase employee add delayed:', err);
     }
   };
 
@@ -275,191 +266,114 @@ export default function App() {
       localStorage.setItem('hr_employees', JSON.stringify(updated));
       return updated;
     });
-    
     try {
       await setDoc(doc(db, 'employees', updatedEmp.id), cleanData(updatedEmp));
     } catch (err) {
-      console.warn('Firebase update delayed: ', err);
+      console.warn('Firebase employee update delayed:', err);
     }
   };
 
+  // ─── Statutory Config Handlers ────────────────────────────────────────────
   const handleUpdateStatConfig = async (newConfig: StatutoryConfig) => {
     setStatConfig(newConfig);
     localStorage.setItem('hr_stat_config', JSON.stringify(newConfig));
-    
     try {
       await setDoc(doc(db, 'statConfig', newConfig.id), newConfig);
     } catch (err) {
-      console.warn('Firebase config update delayed: ', err);
+      console.warn('Firebase statConfig update delayed:', err);
     }
   };
 
   const handleUpdateTaxSlabs = async (newSlabs: TaxSlab[]) => {
     setTaxSlabs(newSlabs);
     localStorage.setItem('hr_tax_slabs', JSON.stringify(newSlabs));
-    
     try {
       for (const slab of newSlabs) {
         await setDoc(doc(db, 'taxSlabs', slab.id), slab);
       }
     } catch (err) {
-      console.warn('Firebase tax slabs update delayed: ', err);
+      console.warn('Firebase tax slabs update delayed:', err);
     }
   };
 
-  // Leaves Workflow
+  // ─── Leave Handlers ───────────────────────────────────────────────────────
   const handleApproveLeave = async (id: string) => {
-    let updatedLeaves: LeaveRequest[] = [];
+    const today = todayStr();
+    const approverName = loggedInUser?.username || 'HR Manager';
+
     setLeaves(prev => {
-      updatedLeaves = prev.map(l => l.id === id ? { ...l, status: 'Approved' } : l);
-      localStorage.setItem('hr_leaves', JSON.stringify(updatedLeaves));
-      return updatedLeaves;
+      const updated = prev.map(l =>
+        l.id === id ? { ...l, status: 'Approved', approvedBy: approverName, approvedOn: today } as LeaveRequest : l
+      );
+      localStorage.setItem('hr_leaves', JSON.stringify(updated));
+      return updated;
     });
-    
-    // Inject automatically into attendance log to update registers
+
+    // Auto-inject attendance logs for approved leave days
     const targetLeave = leaves.find(l => l.id === id);
     if (targetLeave) {
       const start = new Date(targetLeave.startDate);
       const end = new Date(targetLeave.endDate);
-      let d = new Date(start);
       const autoLogs: AttendanceLog[] = [];
-      
+      let d = new Date(start);
+
       while (d <= end) {
         const dateStr = d.toISOString().split('T')[0];
-        const newLog: AttendanceLog = {
-          id: `att-auto-leave-${targetLeave.id}-${dateStr}`,
-          employeeId: targetLeave.employeeId,
-          date: dateStr,
-          method: 'Manual',
-          status: 'On Leave',
-          overtimeMinutes: 0
-        };
-        autoLogs.push(newLog);
+        // Skip if log already exists
+        const alreadyExists = attendances.some(
+          (a: AttendanceLog) => a.employeeId === targetLeave.employeeId && a.date === dateStr
+        );
+        if (!alreadyExists) {
+          autoLogs.push({
+            id: `att-auto-leave-${targetLeave.id}-${dateStr}`,
+            employeeId: targetLeave.employeeId,
+            date: dateStr,
+            method: 'Manual',
+            status: 'On Leave',
+            overtimeMinutes: 0
+          });
+        }
         d.setDate(d.getDate() + 1);
       }
-      
-      setAttendances(prev => {
-        const updated = [...prev, ...autoLogs];
-        localStorage.setItem('hr_attendances', JSON.stringify(updated));
-        
-        // Sync auto-logs to firestore as well
-        for (const log of autoLogs) {
-          setDoc(doc(db, 'attendances', log.id), log).catch(err => 
-            console.warn('Firebase sync delayed for auto-attendance: ', err)
-          );
-        }
-        return updated;
-      });
+
+      if (autoLogs.length > 0) {
+        setAttendances((prev: AttendanceLog[]) => {
+          const updated = [...prev, ...autoLogs];
+          localStorage.setItem('hr_attendances', JSON.stringify(updated));
+          for (const log of autoLogs) {
+            setDoc(doc(db, 'attendances', log.id), log).catch(err =>
+              console.warn('Firebase auto-attendance sync delayed:', err)
+            );
+          }
+          return updated;
+        });
+      }
     }
 
     try {
-      const leaveRef = doc(db, 'leaves', id);
-      await updateDoc(leaveRef, { status: 'Approved' });
+      await updateDoc(doc(db, 'leaves', id), {
+        status: 'Approved',
+        approvedBy: loggedInUser?.username || 'HR Manager',
+        approvedOn: today
+      });
     } catch (err) {
-      console.warn('Firebase leave update delayed: ', err);
+      console.warn('Firebase leave approval delayed:', err);
     }
   };
 
   const handleRejectLeave = async (id: string) => {
+    const today = todayStr();
     setLeaves(prev => {
-      const updated = prev.map(l => l.id === id ? { ...l, status: 'Rejected' } : l);
+      const updated = prev.map(l =>
+        l.id === id ? { ...l, status: 'Rejected', approvedBy: loggedInUser?.username, approvedOn: today } as LeaveRequest : l
+      );
       localStorage.setItem('hr_leaves', JSON.stringify(updated));
       return updated;
     });
-    
     try {
-      const leaveRef = doc(db, 'leaves', id);
-      await updateDoc(leaveRef, { status: 'Rejected' });
+      await updateDoc(doc(db, 'leaves', id), { status: 'Rejected' });
     } catch (err) {
-      console.warn('Firebase leave rejection delayed: ', err);
-    }
-  };
-
-  // Regularization Workflow
-  const handleApproveRegularization = async (id: string) => {
-    setAttendances(prev => {
-      const updated = prev.map(att => 
-        att.id === id ? { ...att, status: 'Present', regularizationApproved: true } : att
-      );
-      localStorage.setItem('hr_attendances', JSON.stringify(updated));
-      return updated;
-    });
-
-    try {
-      const attRef = doc(db, 'attendances', id);
-      await updateDoc(attRef, { status: 'Present', regularizationApproved: true });
-    } catch (err) {
-      console.warn('Firebase regularization approval delayed: ', err);
-    }
-  };
-
-  const handleRejectRegularization = async (id: string) => {
-    setAttendances(prev => {
-      const updated = prev.map(att => 
-        att.id === id ? { ...att, regularizationApproved: false } : att
-      );
-      localStorage.setItem('hr_attendances', JSON.stringify(updated));
-      return updated;
-    });
-    
-    try {
-      const attRef = doc(db, 'attendances', id);
-      await updateDoc(attRef, { regularizationApproved: false });
-    } catch (err) {
-      console.warn('Firebase regularization rejection delayed: ', err);
-    }
-  };
-
-  // Simulated punch in/out
-  const handleSimulatePunch = async (employeeId: string, punchIn: string, punchOut: string, method: string) => {
-    const todayStr = '2026-06-17';
-    
-    // Check if the log for today exists, if so modify it (simulating checkout)
-    const existingIdx = attendances.findIndex(a => a.employeeId === employeeId && a.date === todayStr);
-    
-    if (existingIdx !== -1) {
-      let updatedLog: AttendanceLog | null = null;
-      setAttendances(prev => {
-        const updated = [...prev];
-        updated[existingIdx] = {
-          ...updated[existingIdx],
-          punchOut,
-          overtimeMinutes: 45 // mock standard OT calculated
-        };
-        updatedLog = updated[existingIdx];
-        localStorage.setItem('hr_attendances', JSON.stringify(updated));
-        return updated;
-      });
-      
-      if (updatedLog) {
-        try {
-          await setDoc(doc(db, 'attendances', (updatedLog as AttendanceLog).id), updatedLog);
-        } catch (err) {
-          console.warn('Firebase checkout delayed:', err);
-        }
-      }
-    } else {
-      const newLog: AttendanceLog = {
-        id: `att-${employeeId}-${Date.now()}`,
-        employeeId,
-        date: todayStr,
-        punchIn,
-        method: method as any,
-        status: 'Present',
-        overtimeMinutes: 0
-      };
-      
-      setAttendances(prev => {
-        const updated = [...prev, newLog];
-        localStorage.setItem('hr_attendances', JSON.stringify(updated));
-        return updated;
-      });
-      
-      try {
-        await setDoc(doc(db, 'attendances', newLog.id), newLog);
-      } catch (err) {
-        console.warn('Firebase clock-in delayed:', err);
-      }
+      console.warn('Firebase leave rejection delayed:', err);
     }
   };
 
@@ -469,11 +383,108 @@ export default function App() {
       localStorage.setItem('hr_leaves', JSON.stringify(updated));
       return updated;
     });
-    
     try {
       await setDoc(doc(db, 'leaves', leave.id), cleanData(leave));
     } catch (err) {
       console.warn('Firebase leave apply delayed:', err);
+    }
+  };
+
+  // ─── Attendance Handlers ──────────────────────────────────────────────────
+  const handleApproveRegularization = async (id: string) => {
+    setAttendances(prev => {
+      const updated = prev.map(att =>
+        att.id === id ? { ...att, status: 'Present', regularizationApproved: true } as AttendanceLog : att
+      );
+      localStorage.setItem('hr_attendances', JSON.stringify(updated));
+      return updated;
+    });
+    try {
+      await updateDoc(doc(db, 'attendances', id), { status: 'Present', regularizationApproved: true });
+    } catch (err) {
+      console.warn('Firebase regularization approval delayed:', err);
+    }
+  };
+
+  const handleRejectRegularization = async (id: string) => {
+    setAttendances(prev => {
+      const updated = prev.map(att =>
+        att.id === id ? { ...att, regularizationApproved: false } : att
+      );
+      localStorage.setItem('hr_attendances', JSON.stringify(updated));
+      return updated;
+    });
+    try {
+      await updateDoc(doc(db, 'attendances', id), { regularizationApproved: false });
+    } catch (err) {
+      console.warn('Firebase regularization rejection delayed:', err);
+    }
+  };
+
+  const handleSimulatePunch = async (employeeId: string, punchIn: string, punchOut: string, method: string, lat?: number, lon?: number) => {
+    const today = todayStr();
+    const existingIdx = attendances.findIndex(a => a.employeeId === employeeId && a.date === today);
+
+    if (existingIdx !== -1) {
+      // Punch out — compute the updated log BEFORE calling setAttendances.
+      // Never set values via updater side-effects: in React 18 concurrent mode the
+      // updater runs during the render phase, so any variable assigned inside it is
+      // still null by the time the next line after setAttendances executes.
+      const existing = attendances[existingIdx];
+      let otMins = 0;
+      if (existing.punchIn && punchOut) {
+        const [ih, im] = existing.punchIn.split(':').map(Number);
+        const [oh, om] = punchOut.split(':').map(Number);
+        const worked = (oh * 60 + om) - (ih * 60 + im);
+        otMins = Math.max(0, worked - 480);
+      }
+      const updatedLog: AttendanceLog = {
+        ...existing,
+        punchOut,
+        overtimeMinutes: otMins,
+        ...(lat !== undefined && { latitude: lat }),
+        ...(lon !== undefined && { longitude: lon })
+      };
+      setAttendances(prev => {
+        const updated = [...prev];
+        const idx = updated.findIndex(a => a.id === updatedLog.id);
+        if (idx !== -1) updated[idx] = updatedLog;
+        localStorage.setItem('hr_attendances', JSON.stringify(updated));
+        return updated;
+      });
+      try {
+        await setDoc(doc(db, 'attendances', updatedLog.id), cleanData(updatedLog));
+      } catch (err) {
+        console.warn('Firebase punch-out sync failed:', err);
+      }
+    } else {
+      // Punch in — create new log
+      let status: AttendanceLog['status'] = 'Present';
+      if (punchIn) {
+        const [h, m] = punchIn.split(':').map(Number);
+        if (h * 60 + m > 9 * 60 + 15) status = 'Late';
+      }
+      const newLog: AttendanceLog = {
+        id: `att-${employeeId}-${Date.now()}`,
+        employeeId,
+        date: today,
+        punchIn,
+        method: method as AttendanceLog['method'],
+        status,
+        overtimeMinutes: 0,
+        ...(lat !== undefined && { latitude: lat }),
+        ...(lon !== undefined && { longitude: lon })
+      };
+      setAttendances(prev => {
+        const updated = [...prev, newLog];
+        localStorage.setItem('hr_attendances', JSON.stringify(updated));
+        return updated;
+      });
+      try {
+        await setDoc(doc(db, 'attendances', newLog.id), cleanData(newLog));
+      } catch (err) {
+        console.warn('Firebase punch-in sync failed:', err);
+      }
     }
   };
 
@@ -483,22 +494,20 @@ export default function App() {
       employeeId,
       date,
       method: 'Manual',
-      status: 'Absent', // remains absent until approved
+      status: 'Absent',
       overtimeMinutes: 0,
       regularizationRequested: true,
       regularizationReason: reason
     };
-
     setAttendances(prev => {
       const updated = [...prev, newRegLog];
       localStorage.setItem('hr_attendances', JSON.stringify(updated));
       return updated;
     });
-    
     try {
       await setDoc(doc(db, 'attendances', newRegLog.id), cleanData(newRegLog));
     } catch (err) {
-      console.warn('Firebase regularization file delayed:', err);
+      console.warn('Firebase regularization delayed:', err);
     }
   };
 
@@ -508,19 +517,19 @@ export default function App() {
       localStorage.setItem('hr_attendances', JSON.stringify(updated));
       return updated;
     });
-    
     try {
       await setDoc(doc(db, 'attendances', newAtt.id), cleanData(newAtt));
     } catch (err) {
-      console.warn('Firebase sync delayed: ', err);
+      console.warn('Firebase attendance add delayed:', err);
     }
   };
 
-  // Create new active payroll run
+  // ─── Payroll Handler ──────────────────────────────────────────────────────
   const handleCreatePayrollRun = async (title: string, month: number, year: number) => {
-    // Generate individual sheets
-    const sheets = employees.map(emp => 
-      computePayslipDetails(emp, month, year, attendances, leaves, statConfig, taxSlabs)
+    const lastDay = new Date(year, month, 0).getDate();
+
+    const sheets = employees.map(emp =>
+      computePayslipDetails(emp, month, year, attendances, leaves, statConfig, taxSlabs, departments, designations, branches, loanAdvances)
     );
 
     const totalGrossPay = sheets.reduce((sum, s) => sum + s.grossSalary, 0);
@@ -535,9 +544,9 @@ export default function App() {
       periodMonth: month,
       periodYear: year,
       startDate: `${year}-${String(month).padStart(2, '0')}-01`,
-      endDate: `${year}-${String(month).padStart(2, '0')}-30`, // approximate
-      status: 'Approved',
-      createdAt: '2026-06-17',
+      endDate: `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`,
+      status: 'Draft',
+      createdAt: todayStr(),
       totalGrossPay,
       totalDeductions,
       totalNetPay,
@@ -550,23 +559,40 @@ export default function App() {
       localStorage.setItem('hr_payroll_runs', JSON.stringify(updated));
       return updated;
     });
-    
+
+    // Process loan installments — reduce remaining installments
+    const updatedLoans = loanAdvances.map((loan: LoanAdvance) => {
+      const hasInstallmentThisMonth = employees.some((e: Employee) => e.id === loan.employeeId) &&
+        loan.status === 'Active' && loan.remainingInstallments > 0;
+      if (!hasInstallmentThisMonth) return loan;
+      const remaining = loan.remainingInstallments - 1;
+      const totalRepaid = loan.totalRepaid + loan.monthlyInstallment;
+      return {
+        ...loan,
+        remainingInstallments: remaining,
+        totalRepaid,
+        status: remaining === 0 ? 'Closed' : 'Active' as LoanAdvance['status']
+      };
+    });
+    setLoanAdvances(updatedLoans);
+    localStorage.setItem('hr_loans', JSON.stringify(updatedLoans));
+
     try {
       await setDoc(doc(db, 'payrollRuns', newRun.id), cleanData(newRun));
     } catch (err) {
       console.warn('Firebase payroll run sync delayed:', err);
     }
 
-    alert(`Success: Payroll processed for ${employees.length} employees!\nTotal gross pay: PKR ${totalGrossPay.toLocaleString()}\nNet take-home dispatches: PKR ${totalNetPay.toLocaleString()}\nEOBI Employer matched reserve: PKR ${totalEobiEmployer.toLocaleString()}`);
+    alert(`Payroll processed for ${employees.length} employees!\nGross Pay: PKR ${totalGrossPay.toLocaleString()}\nNet Pay: PKR ${totalNetPay.toLocaleString()}\nEOBI Employer: PKR ${totalEobiEmployer.toLocaleString()}`);
   };
 
+  // ─── Role & User Handlers ─────────────────────────────────────────────────
   const handleAddRole = async (newRole: Role) => {
     setRoles(prev => {
       const updated = [...prev, newRole];
       localStorage.setItem('hr_roles', JSON.stringify(updated));
       return updated;
     });
-
     try {
       await setDoc(doc(db, 'roles', newRole.id), cleanData(newRole));
     } catch (err) {
@@ -580,7 +606,6 @@ export default function App() {
       localStorage.setItem('hr_users', JSON.stringify(updated));
       return updated;
     });
-
     try {
       await setDoc(doc(db, 'users', newUser.id), cleanData(newUser));
     } catch (err) {
@@ -601,7 +626,7 @@ export default function App() {
       localStorage.setItem('hr_users', JSON.stringify(updated));
       return updated;
     });
-    
+
     if (currentUserAccount.id === userId) {
       setCurrentUserAccount(prev => {
         const updated = { ...prev, roleId };
@@ -612,8 +637,7 @@ export default function App() {
 
     if (updatedUser) {
       try {
-        const userRef = doc(db, 'users', userId);
-        await updateDoc(userRef, { roleId });
+        await updateDoc(doc(db, 'users', userId), { roleId });
       } catch (err) {
         console.warn('Firebase user role update delayed:', err);
       }
@@ -625,6 +649,7 @@ export default function App() {
     localStorage.setItem('hr_current_user', JSON.stringify(user));
   };
 
+  // ─── Org Structure Handlers ───────────────────────────────────────────────
   const handleAddBranch = async (newBranch: Branch) => {
     setBranches(prev => {
       const updated = [...prev, newBranch];
@@ -664,12 +689,301 @@ export default function App() {
     }
   };
 
-  // Check if we are running in Capacitor/Mobile mode
+  // ─── Holiday Handlers ─────────────────────────────────────────────────────
+  const handleAddHoliday = async (holiday: Holiday) => {
+    setHolidays(prev => {
+      const updated = [...prev, holiday];
+      localStorage.setItem('hr_holidays', JSON.stringify(updated));
+      return updated;
+    });
+    try {
+      await setDoc(doc(db, 'holidays', holiday.id), cleanData(holiday));
+    } catch (err) {
+      console.warn('Firebase holiday add delayed:', err);
+    }
+  };
+
+  const handleUpdateHoliday = async (holiday: Holiday) => {
+    setHolidays((prev: Holiday[]) => {
+      const updated = prev.map((h: Holiday) => h.id === holiday.id ? holiday : h);
+      localStorage.setItem('hr_holidays', JSON.stringify(updated));
+      return updated;
+    });
+    try {
+      await setDoc(doc(db, 'holidays', holiday.id), cleanData(holiday));
+    } catch (err) {
+      console.warn('Firebase holiday update delayed:', err);
+    }
+  };
+
+  const handleDeleteHoliday = async (id: string) => {
+    setHolidays((prev: Holiday[]) => {
+      const updated = prev.filter((h: Holiday) => h.id !== id);
+      localStorage.setItem('hr_holidays', JSON.stringify(updated));
+      return updated;
+    });
+    // Soft delete: no Firestore delete to avoid accidental data loss
+  };
+
+  // ─── Loan & Advance Handlers ──────────────────────────────────────────────
+  const handleApplyLoan = async (loan: LoanAdvance) => {
+    setLoanAdvances(prev => {
+      const updated = [...prev, loan];
+      localStorage.setItem('hr_loans', JSON.stringify(updated));
+      return updated;
+    });
+    try {
+      await setDoc(doc(db, 'loanAdvances', loan.id), cleanData(loan));
+    } catch (err) {
+      console.warn('Firebase loan apply delayed:', err);
+    }
+  };
+
+  const handleApproveLoan = async (id: string) => {
+    const today = todayStr();
+    const approverName = loggedInUser?.username || 'HR Manager';
+    setLoanAdvances((prev: LoanAdvance[]) => {
+      const updated = prev.map((l: LoanAdvance) =>
+        l.id === id ? { ...l, status: 'Active' as LoanAdvance['status'], approvedBy: approverName, approvedOn: today, disbursedDate: today } : l
+      );
+      localStorage.setItem('hr_loans', JSON.stringify(updated));
+      return updated;
+    });
+    try {
+      await updateDoc(doc(db, 'loanAdvances', id), { status: 'Active', approvedBy: approverName, approvedOn: today, disbursedDate: today });
+    } catch (err) {
+      console.warn('Firebase loan approval delayed:', err);
+    }
+  };
+
+  const handleRejectLoan = async (id: string) => {
+    setLoanAdvances((prev: LoanAdvance[]) => {
+      const updated = prev.map((l: LoanAdvance) => l.id === id ? { ...l, status: 'Rejected' as LoanAdvance['status'] } : l);
+      localStorage.setItem('hr_loans', JSON.stringify(updated));
+      return updated;
+    });
+    try {
+      await updateDoc(doc(db, 'loanAdvances', id), { status: 'Rejected' });
+    } catch (err) {
+      console.warn('Firebase loan rejection delayed:', err);
+    }
+  };
+
+  // ─── Salary Revision Handlers ─────────────────────────────────────────────
+  const handleAddSalaryRevision = async (revision: SalaryRevision) => {
+    // Apply the new salary to the employee record
+    const employee = employees.find(e => e.id === revision.employeeId);
+    if (employee) {
+      await handleUpdateEmployee({ ...employee, basicSalary: revision.newSalary });
+    }
+
+    setSalaryRevisions(prev => {
+      const updated = [...prev, revision];
+      localStorage.setItem('hr_salary_revisions', JSON.stringify(updated));
+      return updated;
+    });
+    try {
+      await setDoc(doc(db, 'salaryRevisions', revision.id), cleanData(revision));
+    } catch (err) {
+      console.warn('Firebase salary revision delayed:', err);
+    }
+  };
+
+  // ─── Performance Review Handlers ──────────────────────────────────────────
+  const handleAddPerformanceReview = async (review: PerformanceReview) => {
+    setPerformanceReviews((prev: PerformanceReview[]) => {
+      const updated = [...prev, review];
+      localStorage.setItem('hr_perf_reviews', JSON.stringify(updated));
+      return updated;
+    });
+    try {
+      await setDoc(doc(db, 'performanceReviews', review.id), cleanData(review));
+    } catch (err) {
+      console.warn('Firebase performance review add delayed:', err);
+    }
+  };
+
+  const handleUpdatePerformanceReview = async (review: PerformanceReview) => {
+    setPerformanceReviews((prev: PerformanceReview[]) => {
+      const updated = prev.map((r: PerformanceReview) => r.id === review.id ? review : r);
+      localStorage.setItem('hr_perf_reviews', JSON.stringify(updated));
+      return updated;
+    });
+    try {
+      await setDoc(doc(db, 'performanceReviews', review.id), cleanData(review));
+    } catch (err) {
+      console.warn('Firebase performance review update delayed:', err);
+    }
+  };
+
+  // ─── Asset Handlers ───────────────────────────────────────────────────────
+  const handleAddAsset = async (asset: CompanyAsset) => {
+    setCompanyAssets((prev: CompanyAsset[]) => {
+      const updated = [...prev, asset];
+      localStorage.setItem('hr_assets', JSON.stringify(updated));
+      return updated;
+    });
+    try {
+      await setDoc(doc(db, 'companyAssets', asset.id), cleanData(asset));
+    } catch (err) {
+      console.warn('Firebase asset add delayed:', err);
+    }
+  };
+
+  const handleUpdateAsset = async (asset: CompanyAsset) => {
+    setCompanyAssets((prev: CompanyAsset[]) => {
+      const updated = prev.map((a: CompanyAsset) => a.id === asset.id ? asset : a);
+      localStorage.setItem('hr_assets', JSON.stringify(updated));
+      return updated;
+    });
+    try {
+      await setDoc(doc(db, 'companyAssets', asset.id), cleanData(asset));
+    } catch (err) {
+      console.warn('Firebase asset update delayed:', err);
+    }
+  };
+
+  // ─── Recruitment Handlers ─────────────────────────────────────────────────
+  const handleAddJobPosting = async (posting: JobPosting) => {
+    setJobPostings((prev: JobPosting[]) => {
+      const updated = [...prev, posting];
+      localStorage.setItem('hr_job_postings', JSON.stringify(updated));
+      return updated;
+    });
+    try {
+      await setDoc(doc(db, 'jobPostings', posting.id), cleanData(posting));
+    } catch (err) {
+      console.warn('Firebase job posting add delayed:', err);
+    }
+  };
+
+  const handleUpdateJobPosting = async (posting: JobPosting) => {
+    setJobPostings((prev: JobPosting[]) => {
+      const updated = prev.map((p: JobPosting) => p.id === posting.id ? posting : p);
+      localStorage.setItem('hr_job_postings', JSON.stringify(updated));
+      return updated;
+    });
+    try {
+      await setDoc(doc(db, 'jobPostings', posting.id), cleanData(posting));
+    } catch (err) {
+      console.warn('Firebase job posting update delayed:', err);
+    }
+  };
+
+  const handleAddJobApplication = async (app: JobApplication) => {
+    setJobApplications((prev: JobApplication[]) => {
+      const updated = [...prev, app];
+      localStorage.setItem('hr_job_apps', JSON.stringify(updated));
+      return updated;
+    });
+    try {
+      await setDoc(doc(db, 'jobApplications', app.id), cleanData(app));
+    } catch (err) {
+      console.warn('Firebase job application add delayed:', err);
+    }
+  };
+
+  const handleUpdateJobApplication = async (app: JobApplication) => {
+    setJobApplications((prev: JobApplication[]) => {
+      const updated = prev.map((a: JobApplication) => a.id === app.id ? app : a);
+      localStorage.setItem('hr_job_apps', JSON.stringify(updated));
+      return updated;
+    });
+    try {
+      await setDoc(doc(db, 'jobApplications', app.id), cleanData(app));
+    } catch (err) {
+      console.warn('Firebase job application update delayed:', err);
+    }
+  };
+
+  // ─── Gratuity Settlement Handlers ────────────────────────────────────────
+  const handleAddGratuitySettlement = async (settlement: GratuitySettlement) => {
+    setGratuitySettlements((prev: GratuitySettlement[]) => {
+      const updated = [...prev, settlement];
+      localStorage.setItem('hr_gratuity', JSON.stringify(updated));
+      return updated;
+    });
+    try {
+      await setDoc(doc(db, 'gratuitySettlements', settlement.id), cleanData(settlement));
+    } catch (err) {
+      console.warn('Firebase gratuity settlement add delayed:', err);
+    }
+  };
+
+  const handleUpdateGratuitySettlement = async (settlement: GratuitySettlement) => {
+    setGratuitySettlements((prev: GratuitySettlement[]) => {
+      const updated = prev.map((s: GratuitySettlement) => s.id === settlement.id ? settlement : s);
+      localStorage.setItem('hr_gratuity', JSON.stringify(updated));
+      return updated;
+    });
+    try {
+      await setDoc(doc(db, 'gratuitySettlements', settlement.id), cleanData(settlement));
+    } catch (err) {
+      console.warn('Firebase gratuity settlement update delayed:', err);
+    }
+  };
+
+  // ─── Notification Handlers ────────────────────────────────────────────────
+  const handleAddNotification = async (notification: AppNotification) => {
+    setNotifications((prev: AppNotification[]) => {
+      const updated = [...prev, notification];
+      localStorage.setItem('hr_notifications', JSON.stringify(updated));
+      return updated;
+    });
+    try {
+      await setDoc(doc(db, 'notifications', notification.id), cleanData(notification));
+    } catch (err) {
+      console.warn('Firebase notification add delayed:', err);
+    }
+  };
+
+  const handleMarkNotificationRead = async (id: string) => {
+    const empId = loggedInUser?.employeeId || loggedInUser?.username || 'unknown';
+    setNotifications((prev: AppNotification[]) => {
+      const updated = prev.map((n: AppNotification) =>
+        n.id === id && !n.readBy.includes(empId) ? { ...n, readBy: [...n.readBy, empId] } : n
+      );
+      localStorage.setItem('hr_notifications', JSON.stringify(updated));
+      return updated;
+    });
+    try {
+      const notif = notifications.find((n: AppNotification) => n.id === id);
+      if (notif && !notif.readBy.includes(empId)) {
+        await updateDoc(doc(db, 'notifications', id), { readBy: [...notif.readBy, empId] });
+      }
+    } catch (err) {
+      console.warn('Firebase notification mark-read delayed:', err);
+    }
+  };
+
+  const handleMarkAllNotificationsRead = () => {
+    const empId = loggedInUser?.employeeId || loggedInUser?.username || 'unknown';
+    setNotifications((prev: AppNotification[]) => {
+      const updated = prev.map((n: AppNotification) =>
+        n.readBy.includes(empId) ? n : { ...n, readBy: [...n.readBy, empId] }
+      );
+      localStorage.setItem('hr_notifications', JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  const handleDeleteNotification = async (id: string) => {
+    setNotifications((prev: AppNotification[]) => {
+      const updated = prev.filter((n: AppNotification) => n.id !== id);
+      localStorage.setItem('hr_notifications', JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  // ─── Mobile Platform Detection ────────────────────────────────────────────
   const isMobilePlatform = (window as any).Capacitor || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
   if (isMobilePlatform) {
+    if (!loggedInUser) {
+      return <LoginScreen users={users} onLogin={handleLogin} />;
+    }
     return (
-      <MobileApp 
+      <MobileApp
         employees={employees}
         attendances={attendances}
         leaves={leaves}
@@ -677,6 +991,8 @@ export default function App() {
         onSimulatePunch={handleSimulatePunch}
         onAddRegularization={handleAddRegularization}
         hideMockPhoneFrame={true}
+        loggedInUser={loggedInUser}
+        onLogout={handleLogout}
       />
     );
   }
@@ -686,7 +1002,7 @@ export default function App() {
   }
 
   return (
-    <DeviceEmulator 
+    <DeviceEmulator
       employees={employees}
       attendances={attendances}
       leaves={leaves}
@@ -721,44 +1037,65 @@ export default function App() {
       onUpdateUserRole={handleUpdateUserRole}
       loggedInUser={loggedInUser}
       onLogout={handleLogout}
+      holidays={holidays}
+      onAddHoliday={handleAddHoliday}
+      onUpdateHoliday={handleUpdateHoliday}
+      onDeleteHoliday={handleDeleteHoliday}
+      loanAdvances={loanAdvances}
+      onApplyLoan={handleApplyLoan}
+      onApproveLoan={handleApproveLoan}
+      onRejectLoan={handleRejectLoan}
+      salaryRevisions={salaryRevisions}
+      onAddSalaryRevision={handleAddSalaryRevision}
+      performanceReviews={performanceReviews}
+      onAddPerformanceReview={handleAddPerformanceReview}
+      onUpdatePerformanceReview={handleUpdatePerformanceReview}
+      companyAssets={companyAssets}
+      onAddAsset={handleAddAsset}
+      onUpdateAsset={handleUpdateAsset}
+      jobPostings={jobPostings}
+      onAddJobPosting={handleAddJobPosting}
+      onUpdateJobPosting={handleUpdateJobPosting}
+      jobApplications={jobApplications}
+      onAddJobApplication={handleAddJobApplication}
+      onUpdateJobApplication={handleUpdateJobApplication}
+      gratuitySettlements={gratuitySettlements}
+      onAddGratuitySettlement={handleAddGratuitySettlement}
+      onUpdateGratuitySettlement={handleUpdateGratuitySettlement}
+      notifications={notifications}
+      onAddNotification={handleAddNotification}
+      onMarkNotificationRead={handleMarkNotificationRead}
+      onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
+      onDeleteNotification={handleDeleteNotification}
     />
   );
 }
 
-// PREMIUM LOGIN SCREEN COMPONENT
+// ─── Login Screen ─────────────────────────────────────────────────────────────
 function LoginScreen({ users, onLogin }: { users: UserAccount[], onLogin: (user: UserAccount) => void }) {
   const [loginId, setLoginId] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [showHelper, setShowHelper] = useState(true);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = (e: React.SyntheticEvent) => {
     e.preventDefault();
     setError('');
 
     const match = users.find(
-      u => (u.username.toLowerCase() === loginId.toLowerCase() || u.email.toLowerCase() === loginId.toLowerCase())
+      u => u.username.toLowerCase() === loginId.toLowerCase() ||
+           u.email.toLowerCase() === loginId.toLowerCase()
     );
 
     if (!match) {
       setError('Invalid username or email address.');
       return;
     }
-
     if (match.status === 'Inactive') {
-      setError('This account is suspended/inactive. Please contact your Super Admin.');
+      setError('This account is suspended. Contact your Super Admin.');
       return;
     }
-
-    const expectedPassword = match.password || (
-      match.username === 'admin' ? 'admin123' :
-      match.username === 'sara.hr' ? 'sara123' :
-      match.username === 'usman.payroll' ? 'usman123' :
-      match.username === 'ali.raza' ? 'ali123' :
-      match.username === 'kiosk' ? 'kiosk123' : '123456'
-    );
-
-    if (password !== expectedPassword) {
+    if (match.password && password !== match.password) {
       setError('Incorrect password. Please try again.');
       return;
     }
@@ -766,11 +1103,7 @@ function LoginScreen({ users, onLogin }: { users: UserAccount[], onLogin: (user:
     onLogin(match);
   };
 
-  const autofill = (usr: string, pass: string) => {
-    setLoginId(usr);
-    setPassword(pass);
-    setError('');
-  };
+  const autofill = (usr: string, pass: string) => { setLoginId(usr); setPassword(pass); setError(''); };
 
   return (
     <div className="h-screen bg-slate-900 text-slate-100 flex flex-col items-center justify-center p-4 font-sans select-none relative overflow-hidden">
@@ -778,14 +1111,13 @@ function LoginScreen({ users, onLogin }: { users: UserAccount[], onLogin: (user:
       <div className="absolute bottom-1/4 right-1/4 w-96 h-96 rounded-full bg-blue-500/10 blur-3xl pointer-events-none"></div>
 
       <div className="w-full max-w-md bg-slate-950/80 backdrop-blur-md p-8 rounded-3xl border border-slate-800 shadow-2xl relative z-10 space-y-6">
-        
         <div className="text-center space-y-2">
           <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-600 to-green-500 mx-auto flex items-center justify-center shadow-lg text-white font-bold text-xl">
             🇵🇰
           </div>
           <div>
             <h2 className="text-xl font-bold tracking-tight text-white uppercase">Bin Ishaq HR Suite</h2>
-            <p className="text-xs text-slate-400">Payroll Compliance &amp; Attendance Kiosk</p>
+            <p className="text-xs text-slate-400">Payroll Compliance &amp; Attendance Management</p>
           </div>
         </div>
 
@@ -796,96 +1128,58 @@ function LoginScreen({ users, onLogin }: { users: UserAccount[], onLogin: (user:
               <span>{error}</span>
             </div>
           )}
-
           <div className="space-y-1">
             <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">Username or Email</label>
-            <input 
-              type="text" 
-              required
-              value={loginId}
-              onChange={(e) => setLoginId(e.target.value)}
+            <input
+              type="text" required value={loginId} onChange={e => setLoginId(e.target.value)}
               placeholder="admin, sara.hr, kiosk..."
               className="w-full text-sm p-3 bg-slate-900 border border-slate-800 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none text-white placeholder-slate-500"
             />
           </div>
-
           <div className="space-y-1">
             <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">Password</label>
-            <input 
-              type="password" 
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
+            <input
+              type="password" required value={password} onChange={e => setPassword(e.target.value)}
               placeholder="••••••••"
               className="w-full text-sm p-3 bg-slate-900 border border-slate-800 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none text-white placeholder-slate-500 font-mono"
             />
           </div>
-
-          <button 
-            type="submit" 
-            className="w-full bg-gradient-to-r from-emerald-600 to-green-500 hover:from-emerald-500 hover:to-green-400 text-white font-bold py-3.5 rounded-xl shadow-lg transition duration-200 text-sm"
-          >
+          <button type="submit" className="w-full bg-gradient-to-r from-emerald-600 to-green-500 hover:from-emerald-500 hover:to-green-400 text-white font-bold py-3.5 rounded-xl shadow-lg transition duration-200 text-sm">
             Sign In to System
           </button>
         </form>
 
         <div className="border-t border-slate-900 pt-5 space-y-3">
           <div className="flex justify-between items-center">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Credential Help Panel</span>
-            <button 
-              type="button" 
-              onClick={() => setShowHelper(!showHelper)}
-              className="text-[10px] text-emerald-400 font-bold hover:underline"
-            >
-              {showHelper ? 'Hide Panel' : 'Show Panel'}
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Quick Access Panel</span>
+            <button type="button" onClick={() => setShowHelper(!showHelper)} className="text-[10px] text-emerald-400 font-bold hover:underline">
+              {showHelper ? 'Hide' : 'Show'}
             </button>
           </div>
-
           {showHelper && (
             <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-900 text-[10px] space-y-2.5">
-              <p className="text-slate-400">Click any profile below to autofill credentials:</p>
+              <p className="text-slate-400">Click any profile to autofill credentials:</p>
               <div className="grid grid-cols-2 gap-2">
-                <button 
-                  type="button"
-                  onClick={() => autofill('admin', 'admin123')}
-                  className="bg-slate-950 hover:bg-slate-800 p-2 rounded-lg text-left border border-slate-850 hover:border-emerald-500 transition text-[10px]"
-                >
-                  <span className="font-bold block text-white">Super Admin</span>
-                  <span className="text-slate-400 font-mono">admin / admin123</span>
-                </button>
-                <button 
-                  type="button"
-                  onClick={() => autofill('sara.hr', 'sara123')}
-                  className="bg-slate-950 hover:bg-slate-800 p-2 rounded-lg text-left border border-slate-850 hover:border-emerald-500 transition text-[10px]"
-                >
-                  <span className="font-bold block text-white">HR Manager</span>
-                  <span className="text-slate-400 font-mono">sara.hr / sara123</span>
-                </button>
-                <button 
-                  type="button"
-                  onClick={() => autofill('usman.payroll', 'usman123')}
-                  className="bg-slate-950 hover:bg-slate-800 p-2 rounded-lg text-left border border-slate-850 hover:border-emerald-500 transition text-[10px]"
-                >
-                  <span className="font-bold block text-white">Payroll Spec</span>
-                  <span className="text-slate-400 font-mono">usman.payroll / usman123</span>
-                </button>
-                <button 
-                  type="button"
-                  onClick={() => autofill('kiosk', 'kiosk123')}
-                  className="bg-emerald-950/20 hover:bg-emerald-900/30 p-2 rounded-lg text-left border border-emerald-900/30 hover:border-emerald-500 transition text-[10px]"
-                >
-                  <span className="font-bold block text-emerald-300">⏰ Attendance Kiosk</span>
-                  <span className="text-emerald-400/80 font-mono">kiosk / kiosk123</span>
-                </button>
+                {[
+                  { label: 'Super Admin', usr: 'admin', pass: 'admin123', color: 'white' },
+                  { label: 'HR Manager', usr: 'sara.hr', pass: 'sara123', color: 'white' },
+                  { label: 'Payroll Spec', usr: 'usman.payroll', pass: 'usman123', color: 'white' },
+                  { label: '⏰ Kiosk', usr: 'kiosk', pass: 'kiosk123', color: 'emerald' }
+                ].map(({ label, usr, pass, color }) => (
+                  <button key={usr} type="button" onClick={() => autofill(usr, pass)}
+                    className={`bg-slate-950 hover:bg-slate-800 p-2 rounded-lg text-left border border-slate-850 hover:border-emerald-500 transition text-[10px]`}>
+                    <span className={`font-bold block text-${color}-300`}>{label}</span>
+                    <span className="text-slate-400 font-mono">{usr} / {pass}</span>
+                  </button>
+                ))}
               </div>
             </div>
           )}
         </div>
-
       </div>
-      
+
       <div className="text-center text-[10px] text-slate-500 mt-6 font-mono">
-        Bin Ishaq HR Suite • Secured FBR Progressive Payroll Compliance Engine
+        Bin Ishaq HR Suite • FBR Progressive Payroll Compliance Engine
       </div>
     </div>
   );

@@ -3,10 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { 
-  Branch, Company, Department, Designation, Employee, 
+import {
+  Branch, Company, Department, Designation, Employee,
   AttendanceLog, LeaveRequest, StatutoryConfig, TaxSlab, Payslip,
-  Role, UserAccount
+  Role, UserAccount, Holiday, LoanAdvance, SalaryRevision,
+  PerformanceReview, CompanyAsset, JobPosting, JobApplication,
+  GratuitySettlement, AppNotification
 } from '../types';
 
 // Default FBR Income Tax Slabs for Salaried Individuals (Annual)
@@ -393,7 +395,11 @@ export function computePayslipDetails(
   attendances: AttendanceLog[],
   leaves: LeaveRequest[],
   statConfigs: StatutoryConfig = DEFAULT_STATUTORY_CONFIG,
-  taxSlabs: TaxSlab[] = DEFAULT_TAX_SLABS
+  taxSlabs: TaxSlab[] = DEFAULT_TAX_SLABS,
+  departments: Department[] = DEFAULT_DEPARTMENTS,
+  designations: Designation[] = DEFAULT_DESIGNATIONS,
+  branches: Branch[] = DEFAULT_BRANCHES,
+  loanAdvances: LoanAdvance[] = []
 ): Payslip {
   
   // Basic wage context
@@ -527,15 +533,23 @@ export function computePayslipDetails(
     providentFundEmployerContribution = providentFundDeduction; // Employer matches PF
   }
   
-  // Loan / salary advances
-  const loanRepaymentDeduction = 0; // standard mock or can be configured
-  
+  // Loan / salary advance installment deduction
+  const activeLoans = loanAdvances.filter(
+    l => l.employeeId === employee.id && l.status === 'Active' && l.remainingInstallments > 0
+  );
+  const loanRepaymentDeduction = activeLoans.reduce((sum, l) => sum + l.monthlyInstallment, 0);
+
   const totalDeductions = Math.round(
     incomeTaxDeduction + eobiEmployeeDeduction + providentFundDeduction + loanRepaymentDeduction
   );
-  
+
   const netSalary = Math.max(0, grossSalary - totalDeductions);
-  
+
+  // Resolve names via lookup
+  const departmentName = departments.find(d => d.id === employee.departmentId)?.name || 'Unknown Dept';
+  const designationTitle = designations.find(d => d.id === employee.designationId)?.title || 'Unknown Title';
+  const branchName = branches.find(b => b.id === employee.branchId)?.name || 'Unknown Branch';
+
   return {
     id: `pay-${employee.id}-${month}-${year}`,
     payrollRunId: '',
@@ -543,9 +557,9 @@ export function computePayslipDetails(
     employeeName: employee.fullName,
     employeeCode: employee.employeeCode,
     cnic: employee.cnic,
-    departmentName: 'IT & Ops', // mapped in view
-    designationTitle: 'Specialist', // mapped in view
-    branchName: 'Karachi HQ', // mapped in view
+    departmentName,
+    designationTitle,
+    branchName,
     
     totalDaysInMonth,
     daysPresent: presentDays,
@@ -653,5 +667,275 @@ export const DEFAULT_USERS: UserAccount[] = [
     roleId: 'role-kiosk',
     status: 'Active',
     password: 'kiosk123'
+  }
+];
+
+// Pakistan Public Holidays 2026
+export const DEFAULT_HOLIDAYS: Holiday[] = [
+  { id: 'hol-01', name: 'Kashmir Day', date: '2026-02-05', type: 'Public', isRecurring: true, description: 'National day of solidarity with Kashmir' },
+  { id: 'hol-02', name: 'Pakistan Day', date: '2026-03-23', type: 'Public', isRecurring: true, description: 'Lahore Resolution anniversary' },
+  { id: 'hol-03', name: 'Eid ul Fitr (Day 1)', date: '2026-03-31', type: 'Public', isRecurring: false, description: 'End of Ramadan' },
+  { id: 'hol-04', name: 'Eid ul Fitr (Day 2)', date: '2026-04-01', type: 'Public', isRecurring: false, description: 'End of Ramadan (Day 2)' },
+  { id: 'hol-05', name: 'Eid ul Fitr (Day 3)', date: '2026-04-02', type: 'Public', isRecurring: false, description: 'End of Ramadan (Day 3)' },
+  { id: 'hol-06', name: 'Labour Day', date: '2026-05-01', type: 'Public', isRecurring: true, description: 'International Workers Day' },
+  { id: 'hol-07', name: 'Eid ul Adha (Day 1)', date: '2026-06-08', type: 'Public', isRecurring: false, description: 'Festival of Sacrifice' },
+  { id: 'hol-08', name: 'Eid ul Adha (Day 2)', date: '2026-06-09', type: 'Public', isRecurring: false, description: 'Festival of Sacrifice (Day 2)' },
+  { id: 'hol-09', name: 'Eid ul Adha (Day 3)', date: '2026-06-10', type: 'Public', isRecurring: false, description: 'Festival of Sacrifice (Day 3)' },
+  { id: 'hol-10', name: 'Independence Day', date: '2026-08-14', type: 'Public', isRecurring: true, description: 'Pakistan Independence Day' },
+  { id: 'hol-11', name: 'Iqbal Day', date: '2026-11-09', type: 'Public', isRecurring: true, description: 'Allama Iqbal birthday' },
+  { id: 'hol-12', name: 'Quaid-e-Azam Day', date: '2026-12-25', type: 'Public', isRecurring: true, description: 'Birthday of Quaid-e-Azam Muhammad Ali Jinnah' },
+  { id: 'hol-c1', name: 'Company Foundation Day', date: '2026-07-15', type: 'Company', isRecurring: true, description: 'Bin Ishaq Logistics annual foundation celebration' }
+];
+
+// Sample Loan & Advance Records
+export const DEFAULT_LOAN_ADVANCES: LoanAdvance[] = [
+  {
+    id: 'loan-001',
+    employeeId: 'emp1',
+    type: 'Loan',
+    principalAmount: 150000,
+    approvedAmount: 150000,
+    disbursedDate: '2026-04-01',
+    totalInstallments: 6,
+    remainingInstallments: 4,
+    monthlyInstallment: 25000,
+    totalRepaid: 50000,
+    reason: 'Home repair and renovation',
+    status: 'Active',
+    appliedOn: '2026-03-20',
+    approvedBy: 'admin',
+    approvedOn: '2026-03-25'
+  },
+  {
+    id: 'loan-002',
+    employeeId: 'emp3',
+    type: 'Advance',
+    principalAmount: 30000,
+    approvedAmount: 30000,
+    disbursedDate: '2026-05-15',
+    totalInstallments: 2,
+    remainingInstallments: 1,
+    monthlyInstallment: 15000,
+    totalRepaid: 15000,
+    reason: 'Medical emergency',
+    status: 'Active',
+    appliedOn: '2026-05-10',
+    approvedBy: 'admin',
+    approvedOn: '2026-05-12'
+  }
+];
+
+// Sample Salary Revisions
+export const DEFAULT_SALARY_REVISIONS: SalaryRevision[] = [
+  {
+    id: 'rev-001',
+    employeeId: 'emp1',
+    previousSalary: 150000,
+    newSalary: 180000,
+    incrementAmount: 30000,
+    incrementPercentage: 20,
+    effectiveDate: '2026-01-01',
+    reason: 'Annual performance appraisal increment',
+    approvedBy: 'Sara Ahmed',
+    approvedOn: '2025-12-20',
+    type: 'Annual Increment'
+  },
+  {
+    id: 'rev-002',
+    employeeId: 'emp2',
+    previousSalary: 200000,
+    newSalary: 230000,
+    incrementAmount: 30000,
+    incrementPercentage: 15,
+    effectiveDate: '2026-01-01',
+    reason: 'Promotion to Senior HR Manager',
+    approvedBy: 'admin',
+    approvedOn: '2025-12-18',
+    type: 'Promotion'
+  },
+  {
+    id: 'rev-003',
+    employeeId: 'emp4',
+    previousSalary: 60000,
+    newSalary: 65000,
+    incrementAmount: 5000,
+    incrementPercentage: 8.33,
+    effectiveDate: '2026-03-01',
+    reason: 'Mid-year performance bonus conversion',
+    approvedBy: 'Sara Ahmed',
+    approvedOn: '2026-02-28',
+    type: 'Adjustment'
+  }
+];
+
+// ─── Performance Reviews Seed Data ───────────────────────────────────────────
+export const DEFAULT_PERFORMANCE_REVIEWS: PerformanceReview[] = [
+  {
+    id: 'pr-001',
+    employeeId: 'emp1',
+    reviewerId: 'sara.hr',
+    period: 'Annual-2025',
+    reviewDate: '2026-01-15',
+    kpis: [
+      { kpi: 'Technical Delivery', weight: 40, selfScore: 4, managerScore: 4, comment: 'Delivered all sprint tasks on time' },
+      { kpi: 'Code Quality', weight: 30, selfScore: 4, managerScore: 3, comment: 'Needs more unit test coverage' },
+      { kpi: 'Team Collaboration', weight: 20, selfScore: 5, managerScore: 5, comment: 'Excellent team player' },
+      { kpi: 'Attendance & Punctuality', weight: 10, selfScore: 4, managerScore: 4, comment: 'Minor late arrivals' }
+    ],
+    overallSelfRating: 4.2,
+    overallManagerRating: 4.0,
+    strengths: 'Strong technical skills, proactive problem solver, excellent communication with cross-functional teams.',
+    areasOfImprovement: 'Needs to improve documentation habits and unit test coverage for production code.',
+    managerComments: 'Ali has been a strong contributor throughout 2025. Recommended for 20% increment and senior role consideration.',
+    status: 'Acknowledged',
+    incrementRecommended: true,
+    incrementPercent: 20
+  },
+  {
+    id: 'pr-002',
+    employeeId: 'emp2',
+    reviewerId: 'admin',
+    period: 'Annual-2025',
+    reviewDate: '2026-01-18',
+    kpis: [
+      { kpi: 'HR Policy Compliance', weight: 35, selfScore: 5, managerScore: 5 },
+      { kpi: 'Recruitment Efficiency', weight: 25, selfScore: 4, managerScore: 4 },
+      { kpi: 'Employee Relations', weight: 25, selfScore: 5, managerScore: 5 },
+      { kpi: 'Reporting Accuracy', weight: 15, selfScore: 4, managerScore: 4 }
+    ],
+    overallSelfRating: 4.7,
+    overallManagerRating: 4.6,
+    strengths: 'Outstanding leadership in HR transformation, excellent employee advocacy, zero grievances filed in 2025.',
+    areasOfImprovement: 'Digital HR adoption could be accelerated. Training calendar for 2026 needs early planning.',
+    managerComments: 'Sara is a key pillar of our HR function. Promotion to Senior HR Manager with 15% increment approved.',
+    status: 'Acknowledged',
+    incrementRecommended: true,
+    incrementPercent: 15
+  }
+];
+
+// ─── Company Assets Seed Data ─────────────────────────────────────────────────
+export const DEFAULT_COMPANY_ASSETS: CompanyAsset[] = [
+  {
+    id: 'ast-001', assetTag: 'ASSET-LPT-001', name: 'Dell Latitude 5420',
+    category: 'Laptop', serialNumber: 'DL5420-KHI-001', purchaseDate: '2023-03-15',
+    purchaseCost: 185000, condition: 'Good', assignedTo: 'emp1',
+    assignedDate: '2023-03-20', status: 'Assigned', notes: 'Primary development machine'
+  },
+  {
+    id: 'ast-002', assetTag: 'ASSET-MOB-001', name: 'Samsung Galaxy A54',
+    category: 'Mobile', serialNumber: 'SGA54-KHI-002', purchaseDate: '2023-06-01',
+    purchaseCost: 65000, condition: 'Good', assignedTo: 'emp2',
+    assignedDate: '2023-06-05', status: 'Assigned'
+  },
+  {
+    id: 'ast-003', assetTag: 'ASSET-LPT-002', name: 'HP EliteBook 840',
+    category: 'Laptop', serialNumber: 'HPE840-LHR-001', purchaseDate: '2022-11-10',
+    purchaseCost: 195000, condition: 'Fair', assignedTo: 'emp3',
+    assignedDate: '2022-11-15', status: 'Assigned', notes: 'Finance team machine, minor wear'
+  },
+  {
+    id: 'ast-004', assetTag: 'ASSET-VHC-001', name: 'Toyota Hilux Revo (LHR-1234)',
+    category: 'Vehicle', serialNumber: 'THL2024-LHR-001', purchaseDate: '2024-01-10',
+    purchaseCost: 8500000, condition: 'Good', assignedTo: 'emp4',
+    assignedDate: '2024-01-15', status: 'Assigned', notes: 'Logistics Supervisor field vehicle'
+  },
+  {
+    id: 'ast-005', assetTag: 'ASSET-LPT-003', name: 'Lenovo ThinkPad E15',
+    category: 'Laptop', serialNumber: 'LNV-E15-KHI-003', purchaseDate: '2025-02-20',
+    purchaseCost: 160000, condition: 'New', status: 'Available'
+  },
+  {
+    id: 'ast-006', assetTag: 'ASSET-SIM-001', name: 'Jazz Corporate SIM (0302-1234567)',
+    category: 'SIM Card', purchaseDate: '2023-01-01',
+    purchaseCost: 500, condition: 'Good', assignedTo: 'emp1',
+    assignedDate: '2023-01-10', status: 'Assigned'
+  }
+];
+
+// ─── Job Postings Seed Data ───────────────────────────────────────────────────
+export const DEFAULT_JOB_POSTINGS: JobPosting[] = [
+  {
+    id: 'job-001', title: 'Senior React Developer', departmentId: 'd1', branchId: 'b1',
+    vacancies: 2, experienceRequired: '3-5 years', qualificationRequired: 'BS Computer Science or equivalent',
+    salaryRange: 'PKR 150,000 – 200,000', jobType: 'Full Time',
+    postedDate: '2026-06-01', closingDate: '2026-06-30', status: 'Open',
+    description: 'We are looking for experienced React developers to join our growing IT team. Candidates must have hands-on experience with TypeScript, Firebase, and modern CI/CD workflows.'
+  },
+  {
+    id: 'job-002', title: 'Logistics Coordinator', departmentId: 'd3', branchId: 'b2',
+    vacancies: 1, experienceRequired: '1-3 years', qualificationRequired: 'Graduation in Supply Chain or Business',
+    salaryRange: 'PKR 50,000 – 70,000', jobType: 'Full Time',
+    postedDate: '2026-05-15', closingDate: '2026-06-15', status: 'Filled',
+    description: 'Coordinate inbound and outbound logistics, manage dispatch schedules, and maintain warehouse inventory records.'
+  },
+  {
+    id: 'job-003', title: 'HR Executive (Intern)', departmentId: 'd2', branchId: 'b1',
+    vacancies: 1, experienceRequired: 'Fresh / 6 months', qualificationRequired: 'BBA/MBA HR in progress or completed',
+    salaryRange: 'PKR 25,000 – 35,000', jobType: 'Internship',
+    postedDate: '2026-06-10', closingDate: '2026-07-10', status: 'Open',
+    description: 'Support HR team with recruitment coordination, employee onboarding, payroll data entry, and compliance documentation.'
+  }
+];
+
+// ─── Job Applications Seed Data ───────────────────────────────────────────────
+export const DEFAULT_JOB_APPLICATIONS: JobApplication[] = [
+  {
+    id: 'app-001', jobPostingId: 'job-001', applicantName: 'Fahad Iqbal',
+    applicantEmail: 'fahad.iqbal@gmail.com', applicantPhone: '0321-9988776',
+    cnic: '42101-8877665-1', currentSalary: 110000, expectedSalary: 175000,
+    appliedDate: '2026-06-05', stage: 'Interviewed',
+    interviewDate: '2026-06-15', interviewNotes: 'Strong React skills. Needs Firebase deepening. Recommended for round 2.'
+  },
+  {
+    id: 'app-002', jobPostingId: 'job-001', applicantName: 'Zainab Malik',
+    applicantEmail: 'zainab.m.dev@outlook.com', applicantPhone: '0333-5544332',
+    cnic: '42201-7766554-2', currentSalary: 130000, expectedSalary: 185000,
+    appliedDate: '2026-06-08', stage: 'Interview Scheduled',
+    interviewDate: '2026-06-25', interviewNotes: ''
+  },
+  {
+    id: 'app-003', jobPostingId: 'job-001', applicantName: 'Bilal Hashmi',
+    applicantEmail: 'bilal.hashmi.codes@gmail.com', applicantPhone: '0300-4433221',
+    cnic: '35201-6655443-3', currentSalary: 95000, expectedSalary: 160000,
+    appliedDate: '2026-06-12', stage: 'Shortlisted'
+  },
+  {
+    id: 'app-004', jobPostingId: 'job-003', applicantName: 'Sana Baig',
+    applicantEmail: 'sana.baig.hr@yahoo.com', applicantPhone: '0312-3344556',
+    cnic: '42101-3344556-4', currentSalary: 0, expectedSalary: 30000,
+    appliedDate: '2026-06-14', stage: 'Applied'
+  }
+];
+
+// ─── Gratuity Settlements Seed Data ──────────────────────────────────────────
+export const DEFAULT_GRATUITY_SETTLEMENTS: GratuitySettlement[] = [];
+
+// ─── App Notifications Seed Data ─────────────────────────────────────────────
+export const DEFAULT_NOTIFICATIONS: AppNotification[] = [
+  {
+    id: 'notif-001', type: 'payroll_processed', title: 'June 2026 Payroll Processed',
+    message: 'Payroll for June 2026 has been approved. Net disbursement: PKR 614,000 for 6 employees.',
+    createdAt: '2026-06-17T10:30:00Z', readBy: [], priority: 'high'
+  },
+  {
+    id: 'notif-002', type: 'leave_approved', title: 'Annual Leave Approved',
+    message: 'Your annual leave request (Jun 22–30) has been approved by Sara Ahmed.',
+    targetEmployeeId: 'emp6', createdAt: '2026-06-18T09:00:00Z', readBy: [], priority: 'medium'
+  },
+  {
+    id: 'notif-003', type: 'loan_approved', title: 'Salary Advance Approved',
+    message: 'Your salary advance of PKR 30,000 has been approved and disbursed. Installments: PKR 15,000/month x 2.',
+    targetEmployeeId: 'emp3', createdAt: '2026-05-12T11:00:00Z', readBy: ['emp3'], priority: 'medium'
+  },
+  {
+    id: 'notif-004', type: 'holiday_reminder', title: 'Upcoming Holiday: Eid ul Adha',
+    message: 'Office will remain closed June 8–10, 2026 for Eid ul Adha. Please plan your work accordingly.',
+    createdAt: '2026-06-05T08:00:00Z', readBy: [], priority: 'low'
+  },
+  {
+    id: 'notif-005', type: 'review_due', title: 'Performance Reviews Due',
+    message: 'H1-2026 performance reviews are due by July 15. Please submit self-assessments.',
+    createdAt: '2026-06-20T09:00:00Z', readBy: [], priority: 'high'
   }
 ];
