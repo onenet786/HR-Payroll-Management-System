@@ -11,7 +11,6 @@ import {
 } from 'lucide-react';
 import { Employee, AttendanceLog } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
-import './BiometricDeviceModule.css';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -47,8 +46,8 @@ function QualityRing({ quality, size = 88 }: { quality: number; size?: number })
   const color = quality >= 75 ? '#10b981' : quality >= 50 ? '#f59e0b' : '#ef4444';
   const cx = size / 2;
   return (
-    <div className="quality-ring-wrapper" data-size={size}>
-      <svg width={size} height={size} className="quality-ring-svg">
+    <div className="relative" style={{ width: size, height: size }}>
+      <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
         <circle cx={cx} cy={cx} r={r} fill="none" stroke="#1e293b" strokeWidth={7} />
         <circle
           cx={cx} cy={cx} r={r} fill="none"
@@ -56,7 +55,7 @@ function QualityRing({ quality, size = 88 }: { quality: number; size?: number })
           strokeDasharray={circ}
           strokeDashoffset={offset}
           strokeLinecap="round"
-          className="quality-ring-circle"
+          style={{ transition: 'stroke-dashoffset 0.25s ease, stroke 0.3s' }}
         />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
@@ -626,7 +625,7 @@ export function BiometricDeviceModule({
                   {captureState === 'scanning' && (
                     <div className="flex gap-1">
                       {[0, 1, 2].map(i => (
-                        <span key={i} className="scanning-dot" />
+                        <span key={i} className="w-2 h-2 rounded-full bg-emerald-500 animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
                       ))}
                     </div>
                   )}
@@ -660,8 +659,6 @@ export function BiometricDeviceModule({
                       aria-label="Reset"
                     >
                       <RefreshCw className="w-4 h-4" />
-                    </button>
-                  )}
                 </div>
 
                 {/* Template output */}
@@ -827,7 +824,7 @@ export function BiometricDeviceModule({
                     </button>
                   )}
                   {enrollSamples.length > 0 && (
-                    <button type="button" onClick={resetEnrollment} className="px-3 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl transition" aria-label="Reset enrollment">
+                    <button onClick={resetEnrollment} className="px-3 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl transition">
                       <RefreshCw className="w-4 h-4" />
                     </button>
                   )}

@@ -1,0 +1,42 @@
+ls/* Quality Ring — dynamic size via CSS data attribute */
+.quality-ring-wrapper {
+  position: relative;
+  width: var(--qr-size, 88px);
+  height: var(--qr-size, 88px);
+}
+
+/* Size variants */
+.quality-ring-wrapper[data-size="64"] { --qr-size: 64px; }
+.quality-ring-wrapper[data-size="72"] { --qr-size: 72px; }
+.quality-ring-wrapper[data-size="88"] { --qr-size: 88px; }
+.quality-ring-wrapper[data-size="96"] { --qr-size: 96px; }
+
+/* Quality Ring SVG */
+.quality-ring-svg {
+  transform: rotate(-90deg);
+}
+
+/* Animated circle transition */
+.quality-ring-circle {
+  transition: stroke-dashoffset 0.25s ease, stroke 0.3s;
+}
+
+/* Scanning animation dots */
+.scanning-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  background-color: #10b981;
+  animation: pulse-bounce 1.4s ease-in-out var(--dot-delay, 0s) infinite;
+}
+
+@keyframes pulse-bounce {
+  0%, 80%, 100% {
+    transform: scale(0.6);
+    opacity: 0.4;
+  }
+  40% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}

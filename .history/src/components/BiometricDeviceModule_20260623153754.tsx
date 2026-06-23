@@ -626,7 +626,7 @@ export function BiometricDeviceModule({
                   {captureState === 'scanning' && (
                     <div className="flex gap-1">
                       {[0, 1, 2].map(i => (
-                        <span key={i} className="scanning-dot" />
+                        <span key={i} className="scanning-dot" style={{ ['--dot-delay' as string]: `${i * 0.15}s` }} />
                       ))}
                     </div>
                   )}

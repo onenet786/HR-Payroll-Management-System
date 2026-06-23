@@ -47,7 +47,7 @@ function QualityRing({ quality, size = 88 }: { quality: number; size?: number })
   const color = quality >= 75 ? '#10b981' : quality >= 50 ? '#f59e0b' : '#ef4444';
   const cx = size / 2;
   return (
-    <div className="quality-ring-wrapper" data-size={size}>
+    <div className="quality-ring-wrapper" style={{ ['--qr-size' as string]: `${size}px` }}>
       <svg width={size} height={size} className="quality-ring-svg">
         <circle cx={cx} cy={cx} r={r} fill="none" stroke="#1e293b" strokeWidth={7} />
         <circle
@@ -626,7 +626,7 @@ export function BiometricDeviceModule({
                   {captureState === 'scanning' && (
                     <div className="flex gap-1">
                       {[0, 1, 2].map(i => (
-                        <span key={i} className="scanning-dot" />
+                        <span key={i} className="scanning-dot" style={{ ['--dot-delay' as string]: `${i * 0.15}s` }} />
                       ))}
                     </div>
                   )}
