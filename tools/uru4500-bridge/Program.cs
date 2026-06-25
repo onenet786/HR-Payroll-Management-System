@@ -594,7 +594,21 @@ namespace Uru4500Bridge
                 return CaptureSecuGenTemplateNative();
             }
 
-            var asm = LoadSecuGenAssembly();
+            Assembly asm;
+            try
+            {
+                asm = LoadSecuGenAssembly();
+            }
+            catch (Exception ex)
+            {
+                if (FindSecuGenNativePath().Length > 0)
+                {
+                    Log("Managed SecuGen load failed; falling back to native sgfplib.dll. Error=" + ex.Message);
+                    return CaptureSecuGenTemplateNative();
+                }
+                throw;
+            }
+
             var managerType = asm.GetType("SecuGen.FDxSDKPro.Windows.SGFingerPrintManager", true);
             var deviceNameType = asm.GetType("SecuGen.FDxSDKPro.Windows.SGFPMDeviceName", true);
             var portAddrType = asm.GetType("SecuGen.FDxSDKPro.Windows.SGFPMPortAddr", true);
