@@ -7,7 +7,8 @@ import React, { useState } from 'react';
 import {
   Users, Calendar, CreditCard, ShieldCheck, FileText, Download, UserPlus,
   CheckCircle, AlertTriangle, Building, MapPin, Layers, Sliders, Info,
-  CalendarDays, Banknote, TrendingUp, Star, Package, Briefcase, Calculator, Bell, Fingerprint
+  CalendarDays, Banknote, TrendingUp, Star, Package, Briefcase, Calculator, Bell, Fingerprint,
+  Database
 } from 'lucide-react';
 import {
   Employee, AttendanceLog, LeaveRequest, StatutoryConfig, TaxSlab, PayrollRun, Payslip,
@@ -24,6 +25,7 @@ import { RecruitmentModule } from './RecruitmentModule';
 import { GratuityModule } from './GratuityModule';
 import { NotificationCenter } from './NotificationCenter';
 import { BiometricDeviceModule } from './BiometricDeviceModule';
+import { FirestoreMaintenanceModule } from './FirestoreMaintenanceModule';
 import { motion, AnimatePresence } from 'motion/react';
 
 const PAKISTAN_BANKS = [
@@ -188,7 +190,7 @@ export function WebPortal({
   onDeleteNotification,
   onSimulatePunch
 }: WebPortalProps) {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'employees' | 'attendance' | 'leaves' | 'payroll' | 'settings' | 'access' | 'holidays' | 'loans' | 'revisions' | 'performance' | 'assets' | 'recruitment' | 'gratuity' | 'notifications' | 'biometric'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'employees' | 'attendance' | 'leaves' | 'payroll' | 'settings' | 'access' | 'maintenance' | 'holidays' | 'loans' | 'revisions' | 'performance' | 'assets' | 'recruitment' | 'gratuity' | 'notifications' | 'biometric'>('dashboard');
 
   const existingUcs = Array.from(new Set(employees.map(e => e.ucTown).filter(Boolean))) as string[];
   const existingZones = Array.from(new Set(employees.map(e => e.zone).filter(Boolean))) as string[];
@@ -204,6 +206,7 @@ export function WebPortal({
     if (tab === 'payroll') return userPermissions.includes('manage_payroll');
     if (tab === 'settings') return userPermissions.includes('manage_settings');
     if (tab === 'access') return userPermissions.includes('manage_access');
+    if (tab === 'maintenance') return userPermissions.includes('manage_access') || userPermissions.includes('manage_settings');
     if (tab === 'holidays') return userPermissions.includes('manage_attendance') || userPermissions.includes('manage_settings');
     if (tab === 'loans') return userPermissions.includes('manage_payroll') || userPermissions.includes('manage_employees');
     if (tab === 'revisions') return userPermissions.includes('manage_payroll') || userPermissions.includes('manage_employees');
@@ -983,6 +986,16 @@ export function WebPortal({
               </button>
             )}
 
+            {hasPermission('maintenance') && (
+              <button
+                onClick={() => setActiveTab('maintenance')}
+                className={`w-full text-left px-3.5 py-3 rounded-lg text-sm font-medium flex items-center space-x-3 transition ${activeTab === 'maintenance' ? 'bg-emerald-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
+              >
+                <Database className="w-4 h-4" />
+                <span>Data Backup</span>
+              </button>
+            )}
+
             {hasPermission('biometric') && (
               <button
                 onClick={() => setActiveTab('biometric')}
@@ -990,7 +1003,7 @@ export function WebPortal({
               >
                 <Fingerprint className="w-4 h-4" />
                 <span>Fingerprint Device</span>
-                <span className="ml-auto text-[10px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded-md font-bold">URU 4500</span>
+                <span className="ml-auto text-[10px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded-md font-bold">URU 4500 / SecuGen Hamster Pro</span>
               </button>
             )}
 
@@ -2791,6 +2804,13 @@ export function WebPortal({
                 </motion.div>
               )}
 
+              {/* TAB 8: DATA BACKUP & RESTORE */}
+              {activeTab === 'maintenance' && (
+                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="h-full">
+                  <FirestoreMaintenanceModule />
+                </motion.div>
+              )}
+
               {/* TAB 8: HOLIDAY CALENDAR */}
               {activeTab === 'holidays' && (
                 <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
@@ -2888,7 +2908,7 @@ export function WebPortal({
                 </motion.div>
               )}
 
-              {/* TAB 16: FINGERPRINT DEVICE — Digital Persona URU 4500 */}
+              {/* TAB 16: FINGERPRINT DEVICE — DigitalPersona/SecuGen URU 4500 / SecuGen Hamster Pro */}
               {activeTab === 'biometric' && (
                 <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
                   <BiometricDeviceModule
@@ -4783,3 +4803,4 @@ export function WebPortal({
     </div>
   );
 }
+

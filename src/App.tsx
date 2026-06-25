@@ -4,16 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import {
-  DEFAULT_EMPLOYEES, DEFAULT_ATTENDANCES, DEFAULT_LEAVE_REQUESTS,
-  DEFAULT_STATUTORY_CONFIG, DEFAULT_TAX_SLABS,
-  DEFAULT_BRANCHES, DEFAULT_DEPARTMENTS, DEFAULT_DESIGNATIONS,
-  computePayslipDetails, DEFAULT_ROLES, DEFAULT_USERS,
-  DEFAULT_HOLIDAYS, DEFAULT_LOAN_ADVANCES, DEFAULT_SALARY_REVISIONS,
-  DEFAULT_PERFORMANCE_REVIEWS, DEFAULT_COMPANY_ASSETS,
-  DEFAULT_JOB_POSTINGS, DEFAULT_JOB_APPLICATIONS,
-  DEFAULT_GRATUITY_SETTLEMENTS, DEFAULT_NOTIFICATIONS
-} from './data/defaults';
+import { computePayslipDetails } from './data/defaults';
 import {
   Employee, AttendanceLog, LeaveRequest, StatutoryConfig, TaxSlab, PayrollRun,
   Role, UserAccount, Branch, Department, Designation, Holiday, LoanAdvance, SalaryRevision,
@@ -29,6 +20,25 @@ import {
 export default function App() {
   const cleanData = <T,>(obj: T): T => JSON.parse(JSON.stringify(obj));
 
+  const emptyStatConfig: StatutoryConfig = {
+    id: 'stat-config',
+    minimumWage: 0,
+    eobiEmployerRate: 0,
+    eobiEmployeeRate: 0,
+    pessiEmployerRate: 0,
+    gratuityRateDaysPerYear: 0,
+    providentFundMaxEmployeeContribution: 0,
+    updatedAt: ''
+  };
+
+  const emptyUserAccount: UserAccount = {
+    id: '',
+    username: '',
+    email: '',
+    roleId: '',
+    status: 'Inactive'
+  };
+
   const getInitialValue = <T,>(key: string, fallback: T): T => {
     try {
       const saved = localStorage.getItem(key);
@@ -42,29 +52,30 @@ export default function App() {
   const todayStr = () => new Date().toISOString().split('T')[0];
 
   // Application Data States
-  const [employees, setEmployees] = useState<Employee[]>(() => getInitialValue('hr_employees', DEFAULT_EMPLOYEES));
-  const [attendances, setAttendances] = useState<AttendanceLog[]>(() => getInitialValue('hr_attendances', DEFAULT_ATTENDANCES));
-  const [leaves, setLeaves] = useState<LeaveRequest[]>(() => getInitialValue('hr_leaves', DEFAULT_LEAVE_REQUESTS));
-  const [statConfig, setStatConfig] = useState<StatutoryConfig>(() => getInitialValue('hr_stat_config', DEFAULT_STATUTORY_CONFIG));
-  const [taxSlabs, setTaxSlabs] = useState<TaxSlab[]>(() => getInitialValue('hr_tax_slabs', DEFAULT_TAX_SLABS));
-  const [branches, setBranches] = useState<Branch[]>(() => getInitialValue('hr_branches', DEFAULT_BRANCHES));
-  const [departments, setDepartments] = useState<Department[]>(() => getInitialValue('hr_departments', DEFAULT_DEPARTMENTS));
-  const [designations, setDesignations] = useState<Designation[]>(() => getInitialValue('hr_designations', DEFAULT_DESIGNATIONS));
-  const [holidays, setHolidays] = useState<Holiday[]>(() => getInitialValue('hr_holidays', DEFAULT_HOLIDAYS));
-  const [loanAdvances, setLoanAdvances] = useState<LoanAdvance[]>(() => getInitialValue('hr_loans', DEFAULT_LOAN_ADVANCES));
-  const [salaryRevisions, setSalaryRevisions] = useState<SalaryRevision[]>(() => getInitialValue('hr_salary_revisions', DEFAULT_SALARY_REVISIONS));
-  const [performanceReviews, setPerformanceReviews] = useState<PerformanceReview[]>(() => getInitialValue('hr_perf_reviews', DEFAULT_PERFORMANCE_REVIEWS));
-  const [companyAssets, setCompanyAssets] = useState<CompanyAsset[]>(() => getInitialValue('hr_assets', DEFAULT_COMPANY_ASSETS));
-  const [jobPostings, setJobPostings] = useState<JobPosting[]>(() => getInitialValue('hr_job_postings', DEFAULT_JOB_POSTINGS));
-  const [jobApplications, setJobApplications] = useState<JobApplication[]>(() => getInitialValue('hr_job_apps', DEFAULT_JOB_APPLICATIONS));
-  const [gratuitySettlements, setGratuitySettlements] = useState<GratuitySettlement[]>(() => getInitialValue('hr_gratuity', DEFAULT_GRATUITY_SETTLEMENTS));
-  const [notifications, setNotifications] = useState<AppNotification[]>(() => getInitialValue('hr_notifications', DEFAULT_NOTIFICATIONS));
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [attendances, setAttendances] = useState<AttendanceLog[]>([]);
+  const [leaves, setLeaves] = useState<LeaveRequest[]>([]);
+  const [statConfig, setStatConfig] = useState<StatutoryConfig>(emptyStatConfig);
+  const [taxSlabs, setTaxSlabs] = useState<TaxSlab[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [designations, setDesignations] = useState<Designation[]>([]);
+  const [holidays, setHolidays] = useState<Holiday[]>([]);
+  const [loanAdvances, setLoanAdvances] = useState<LoanAdvance[]>([]);
+  const [salaryRevisions, setSalaryRevisions] = useState<SalaryRevision[]>([]);
+  const [performanceReviews, setPerformanceReviews] = useState<PerformanceReview[]>([]);
+  const [companyAssets, setCompanyAssets] = useState<CompanyAsset[]>([]);
+  const [jobPostings, setJobPostings] = useState<JobPosting[]>([]);
+  const [jobApplications, setJobApplications] = useState<JobApplication[]>([]);
+  const [gratuitySettlements, setGratuitySettlements] = useState<GratuitySettlement[]>([]);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
 
   // User & RBAC States
   const [loggedInUser, setLoggedInUser] = useState<UserAccount | null>(() => getInitialValue('hr_logged_in_user', null));
-  const [roles, setRoles] = useState<Role[]>(() => getInitialValue('hr_roles', DEFAULT_ROLES));
-  const [users, setUsers] = useState<UserAccount[]>(() => getInitialValue('hr_users', DEFAULT_USERS));
-  const [currentUserAccount, setCurrentUserAccount] = useState<UserAccount>(() => getInitialValue('hr_current_user', DEFAULT_USERS[0]));
+  const [roles, setRoles] = useState<Role[]>([]);
+  const [users, setUsers] = useState<UserAccount[]>([]);
+  const [usersLoaded, setUsersLoaded] = useState(false);
+  const [currentUserAccount, setCurrentUserAccount] = useState<UserAccount>(emptyUserAccount);
 
   const handleLogin = (user: UserAccount) => {
     setLoggedInUser(user);
@@ -79,23 +90,46 @@ export default function App() {
     localStorage.removeItem('hr_current_user');
   };
 
-  const [payrollRuns, setPayrollRuns] = useState<PayrollRun[]>(() => getInitialValue('hr_payroll_runs', [
-    {
-      id: 'run-pk-june2026',
-      title: 'Payroll - June 2026 (Active)',
-      periodMonth: 6,
-      periodYear: 2026,
-      startDate: '2026-06-01',
-      endDate: '2026-06-30',
-      status: 'Approved',
-      createdAt: '2026-06-17',
-      totalGrossPay: 646600,
-      totalDeductions: 32600,
-      totalNetPay: 614000,
-      totalEobiEmployer: 9250,
-      totalSocialSecurityEmployer: 10400
-    }
-  ]));
+  const handleCreateInitialAdmin = async (payload: { username: string; email: string; password: string }) => {
+    const adminRole: Role = {
+      id: 'role-admin',
+      name: 'Super Admin',
+      description: 'Full administrative control of the system.',
+      permissions: [
+        'view_dashboard',
+        'manage_employees',
+        'manage_attendance',
+        'manage_leaves',
+        'manage_payroll',
+        'manage_settings',
+        'manage_access'
+      ]
+    };
+
+    const adminUser: UserAccount = {
+      id: `usr-admin-${Date.now()}`,
+      username: payload.username,
+      email: payload.email,
+      roleId: adminRole.id,
+      status: 'Active',
+      password: payload.password
+    };
+
+    await setDoc(doc(db, 'roles', adminRole.id), cleanData(adminRole));
+    await setDoc(doc(db, 'users', adminUser.id), cleanData(adminUser));
+
+    setRoles([adminRole]);
+    setUsers([adminUser]);
+    setUsersLoaded(true);
+    setLoggedInUser(adminUser);
+    setCurrentUserAccount(adminUser);
+    localStorage.setItem('hr_roles', JSON.stringify([adminRole]));
+    localStorage.setItem('hr_users', JSON.stringify([adminUser]));
+    localStorage.setItem('hr_logged_in_user', JSON.stringify(adminUser));
+    localStorage.setItem('hr_current_user', JSON.stringify(adminUser));
+  };
+
+  const [payrollRuns, setPayrollRuns] = useState<PayrollRun[]>([]);
 
   // Firestore Real-time Sync
   useEffect(() => {
@@ -105,31 +139,18 @@ export default function App() {
 
     const registerCollectionListener = <T extends { id: string }>(
       collectionName: string,
-      defaultItems: T[],
       stateSetter: React.Dispatch<React.SetStateAction<T[]>>,
       storageKey: string
     ) => {
       try {
-        const unsub = onSnapshot(collection(db, collectionName), async (snapshot) => {
+        const unsub = onSnapshot(collection(db, collectionName), (snapshot) => {
           const fetched: T[] = [];
           snapshot.forEach(docSnap => {
             fetched.push({ id: docSnap.id, ...docSnap.data() } as T);
           });
 
-          const merged = [...fetched];
-          for (const defItem of defaultItems) {
-            if (!merged.some(item => item.id === defItem.id)) {
-              merged.push(defItem);
-              try {
-                await setDoc(doc(db, collectionName, defItem.id), defItem);
-              } catch (e) {
-                console.warn(`Seed sync error in ${collectionName}:`, e);
-              }
-            }
-          }
-
-          stateSetter(merged);
-          localStorage.setItem(storageKey, JSON.stringify(merged));
+          stateSetter(fetched);
+          localStorage.setItem(storageKey, JSON.stringify(fetched));
         }, (err) => {
           console.warn(`Firestore listener failed for ${collectionName}:`, err);
         });
@@ -139,82 +160,65 @@ export default function App() {
       }
     };
 
-    registerCollectionListener('employees', DEFAULT_EMPLOYEES, setEmployees, 'hr_employees');
-    registerCollectionListener('attendances', DEFAULT_ATTENDANCES, setAttendances, 'hr_attendances');
-    registerCollectionListener('leaves', DEFAULT_LEAVE_REQUESTS, setLeaves, 'hr_leaves');
-    registerCollectionListener('branches', DEFAULT_BRANCHES, setBranches, 'hr_branches');
-    registerCollectionListener('departments', DEFAULT_DEPARTMENTS, setDepartments, 'hr_departments');
-    registerCollectionListener('designations', DEFAULT_DESIGNATIONS, setDesignations, 'hr_designations');
-    registerCollectionListener('taxSlabs', DEFAULT_TAX_SLABS, setTaxSlabs, 'hr_tax_slabs');
-    registerCollectionListener('roles', DEFAULT_ROLES, setRoles, 'hr_roles');
-    registerCollectionListener('holidays', DEFAULT_HOLIDAYS, setHolidays, 'hr_holidays');
-    registerCollectionListener('loanAdvances', DEFAULT_LOAN_ADVANCES, setLoanAdvances, 'hr_loans');
-    registerCollectionListener('salaryRevisions', DEFAULT_SALARY_REVISIONS, setSalaryRevisions, 'hr_salary_revisions');
-    registerCollectionListener('performanceReviews', DEFAULT_PERFORMANCE_REVIEWS, setPerformanceReviews, 'hr_perf_reviews');
-    registerCollectionListener('companyAssets', DEFAULT_COMPANY_ASSETS, setCompanyAssets, 'hr_assets');
-    registerCollectionListener('jobPostings', DEFAULT_JOB_POSTINGS, setJobPostings, 'hr_job_postings');
-    registerCollectionListener('jobApplications', DEFAULT_JOB_APPLICATIONS, setJobApplications, 'hr_job_apps');
-    registerCollectionListener('gratuitySettlements', DEFAULT_GRATUITY_SETTLEMENTS, setGratuitySettlements, 'hr_gratuity');
-    registerCollectionListener('notifications', DEFAULT_NOTIFICATIONS, setNotifications, 'hr_notifications');
+    registerCollectionListener('employees', setEmployees, 'hr_employees');
+    registerCollectionListener('attendances', setAttendances, 'hr_attendances');
+    registerCollectionListener('leaves', setLeaves, 'hr_leaves');
+    registerCollectionListener('branches', setBranches, 'hr_branches');
+    registerCollectionListener('departments', setDepartments, 'hr_departments');
+    registerCollectionListener('designations', setDesignations, 'hr_designations');
+    registerCollectionListener('taxSlabs', setTaxSlabs, 'hr_tax_slabs');
+    registerCollectionListener('roles', setRoles, 'hr_roles');
+    registerCollectionListener('holidays', setHolidays, 'hr_holidays');
+    registerCollectionListener('loanAdvances', setLoanAdvances, 'hr_loans');
+    registerCollectionListener('salaryRevisions', setSalaryRevisions, 'hr_salary_revisions');
+    registerCollectionListener('performanceReviews', setPerformanceReviews, 'hr_perf_reviews');
+    registerCollectionListener('companyAssets', setCompanyAssets, 'hr_assets');
+    registerCollectionListener('jobPostings', setJobPostings, 'hr_job_postings');
+    registerCollectionListener('jobApplications', setJobApplications, 'hr_job_apps');
+    registerCollectionListener('gratuitySettlements', setGratuitySettlements, 'hr_gratuity');
+    registerCollectionListener('notifications', setNotifications, 'hr_notifications');
 
     // Users Sync (special: also updates currentUserAccount)
     try {
-      const unsubUsers = onSnapshot(collection(db, 'users'), async (snapshot) => {
+      const unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
         const fetched: UserAccount[] = [];
         snapshot.forEach(docSnap => {
           fetched.push({ id: docSnap.id, ...docSnap.data() } as UserAccount);
         });
 
-        const merged = [...fetched];
-        for (const defUser of DEFAULT_USERS) {
-          if (!merged.some(u => u.id === defUser.id)) {
-            merged.push(defUser);
-            try {
-              await setDoc(doc(db, 'users', defUser.id), defUser);
-            } catch (e) {
-              console.warn('Seed user sync error:', e);
-            }
-          }
-        }
+        setUsersLoaded(true);
+        setUsers(fetched);
+        localStorage.setItem('hr_users', JSON.stringify(fetched));
 
-        setUsers(merged);
-        localStorage.setItem('hr_users', JSON.stringify(merged));
+        if (fetched.length === 0) {
+          setLoggedInUser(null);
+          setCurrentUserAccount(emptyUserAccount);
+          localStorage.removeItem('hr_logged_in_user');
+          localStorage.removeItem('hr_current_user');
+          return;
+        }
 
         const storedCurrentUser = localStorage.getItem('hr_current_user');
         if (storedCurrentUser) {
           const parsed = JSON.parse(storedCurrentUser) as UserAccount;
-          const updatedCurrent = merged.find(u => u.id === parsed.id);
+          const updatedCurrent = fetched.find(u => u.id === parsed.id);
           if (updatedCurrent) {
             setCurrentUserAccount(updatedCurrent);
             localStorage.setItem('hr_current_user', JSON.stringify(updatedCurrent));
           }
         }
       }, (err) => {
+        setUsersLoaded(true);
         console.warn('Firestore users listener failed:', err);
       });
       unsubscribes.push(unsubUsers);
     } catch (err) {
+      setUsersLoaded(true);
       console.warn('Firestore users subscription deferred:', err);
     }
 
     // PayrollRuns Sync
-    registerCollectionListener('payrollRuns', [
-      {
-        id: 'run-pk-june2026',
-        title: 'Payroll - June 2026 (Active)',
-        periodMonth: 6,
-        periodYear: 2026,
-        startDate: '2026-06-01',
-        endDate: '2026-06-30',
-        status: 'Approved',
-        createdAt: '2026-06-17',
-        totalGrossPay: 646600,
-        totalDeductions: 32600,
-        totalNetPay: 614000,
-        totalEobiEmployer: 9250,
-        totalSocialSecurityEmployer: 10400
-      }
-    ], setPayrollRuns, 'hr_payroll_runs');
+    registerCollectionListener('payrollRuns', setPayrollRuns, 'hr_payroll_runs');
 
     // StatConfig Sync (single document)
     try {
@@ -227,13 +231,6 @@ export default function App() {
         if (fetchedConfig) {
           setStatConfig(fetchedConfig);
           localStorage.setItem('hr_stat_config', JSON.stringify(fetchedConfig));
-        } else {
-          const current = getInitialValue('hr_stat_config', DEFAULT_STATUTORY_CONFIG);
-          try {
-            await setDoc(doc(db, 'statConfig', current.id), current);
-          } catch (e) {
-            console.warn('StatConfig seed error:', e);
-          }
         }
       }, (err) => {
         console.warn('Firestore statConfig listener failed:', err);
@@ -980,7 +977,7 @@ export default function App() {
 
   if (isMobilePlatform) {
     if (!loggedInUser) {
-      return <LoginScreen users={users} onLogin={handleLogin} />;
+      return <LoginScreen users={users} usersLoaded={usersLoaded} onLogin={handleLogin} onCreateInitialAdmin={handleCreateInitialAdmin} />;
     }
     return (
       <MobileApp
@@ -998,7 +995,7 @@ export default function App() {
   }
 
   if (!loggedInUser) {
-    return <LoginScreen users={users} onLogin={handleLogin} />;
+    return <LoginScreen users={users} usersLoaded={usersLoaded} onLogin={handleLogin} onCreateInitialAdmin={handleCreateInitialAdmin} />;
   }
 
   return (
@@ -1071,12 +1068,27 @@ export default function App() {
   );
 }
 
-// ─── Login Screen ─────────────────────────────────────────────────────────────
-function LoginScreen({ users, onLogin }: { users: UserAccount[], onLogin: (user: UserAccount) => void }) {
+// Login Screen
+function LoginScreen({
+  users,
+  usersLoaded,
+  onLogin,
+  onCreateInitialAdmin
+}: {
+  users: UserAccount[],
+  usersLoaded: boolean,
+  onLogin: (user: UserAccount) => void,
+  onCreateInitialAdmin: (payload: { username: string; email: string; password: string }) => Promise<void>
+}) {
   const [loginId, setLoginId] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [showHelper, setShowHelper] = useState(true);
+  const [setupUsername, setSetupUsername] = useState('admin');
+  const [setupEmail, setSetupEmail] = useState('admin@company.com');
+  const [setupPassword, setSetupPassword] = useState('');
+  const [setupConfirmPassword, setSetupConfirmPassword] = useState('');
+  const [isCreatingAdmin, setIsCreatingAdmin] = useState(false);
 
   const handleSubmit = (e: React.SyntheticEvent) => {
     e.preventDefault();
@@ -1103,7 +1115,45 @@ function LoginScreen({ users, onLogin }: { users: UserAccount[], onLogin: (user:
     onLogin(match);
   };
 
+  const handleCreateAdminSubmit = async (e: React.SyntheticEvent) => {
+    e.preventDefault();
+    setError('');
+
+    if (!setupUsername.trim() || !setupEmail.trim() || !setupPassword) {
+      setError('Enter username, email, and password for the first Super Admin.');
+      return;
+    }
+    if (setupPassword.length < 6) {
+      setError('Password must be at least 6 characters.');
+      return;
+    }
+    if (setupPassword !== setupConfirmPassword) {
+      setError('Password and confirm password do not match.');
+      return;
+    }
+
+    setIsCreatingAdmin(true);
+    try {
+      await onCreateInitialAdmin({
+        username: setupUsername.trim(),
+        email: setupEmail.trim(),
+        password: setupPassword
+      });
+    } catch (setupError) {
+      setError(`Unable to create Super Admin: ${setupError instanceof Error ? setupError.message : String(setupError)}`);
+    } finally {
+      setIsCreatingAdmin(false);
+    }
+  };
+
   const autofill = (usr: string, pass: string) => { setLoginId(usr); setPassword(pass); setError(''); };
+
+  const renderError = () => error ? (
+    <div className="bg-rose-950/30 border border-rose-900/50 p-3.5 rounded-xl text-rose-400 text-xs flex items-center space-x-2">
+      <span className="font-bold text-base leading-none">!</span>
+      <span>{error}</span>
+    </div>
+  ) : null;
 
   return (
     <div className="h-screen bg-slate-900 text-slate-100 flex flex-col items-center justify-center p-4 font-sans select-none relative overflow-hidden">
@@ -1113,7 +1163,7 @@ function LoginScreen({ users, onLogin }: { users: UserAccount[], onLogin: (user:
       <div className="w-full max-w-md bg-slate-950/80 backdrop-blur-md p-8 rounded-3xl border border-slate-800 shadow-2xl relative z-10 space-y-6">
         <div className="text-center space-y-2">
           <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-600 to-green-500 mx-auto flex items-center justify-center shadow-lg text-white font-bold text-xl">
-            🇵🇰
+            HR
           </div>
           <div>
             <h2 className="text-xl font-bold tracking-tight text-white uppercase">Bin Ishaq HR Suite</h2>
@@ -1121,65 +1171,80 @@ function LoginScreen({ users, onLogin }: { users: UserAccount[], onLogin: (user:
           </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {error && (
-            <div className="bg-rose-950/30 border border-rose-900/50 p-3.5 rounded-xl text-rose-400 text-xs flex items-center space-x-2">
-              <span className="font-bold text-base leading-none">⚠️</span>
-              <span>{error}</span>
+        {!usersLoaded ? (
+          <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-xl text-xs text-slate-300">
+            Loading user accounts from Firestore...
+          </div>
+        ) : users.length === 0 ? (
+          <form onSubmit={handleCreateAdminSubmit} className="space-y-4">
+            {renderError()}
+            <div className="bg-amber-950/30 border border-amber-900/50 p-3.5 rounded-xl text-amber-200 text-xs">
+              No user accounts exist. Create the first Super Admin to unlock the system.
             </div>
-          )}
-          <div className="space-y-1">
-            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">Username or Email</label>
-            <input
-              type="text" required value={loginId} onChange={e => setLoginId(e.target.value)}
-              placeholder="admin, sara.hr, kiosk..."
-              className="w-full text-sm p-3 bg-slate-900 border border-slate-800 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none text-white placeholder-slate-500"
-            />
-          </div>
-          <div className="space-y-1">
-            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">Password</label>
-            <input
-              type="password" required value={password} onChange={e => setPassword(e.target.value)}
-              placeholder="••••••••"
-              className="w-full text-sm p-3 bg-slate-900 border border-slate-800 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none text-white placeholder-slate-500 font-mono"
-            />
-          </div>
-          <button type="submit" className="w-full bg-gradient-to-r from-emerald-600 to-green-500 hover:from-emerald-500 hover:to-green-400 text-white font-bold py-3.5 rounded-xl shadow-lg transition duration-200 text-sm">
-            Sign In to System
-          </button>
-        </form>
-
-        <div className="border-t border-slate-900 pt-5 space-y-3">
-          <div className="flex justify-between items-center">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Quick Access Panel</span>
-            <button type="button" onClick={() => setShowHelper(!showHelper)} className="text-[10px] text-emerald-400 font-bold hover:underline">
-              {showHelper ? 'Hide' : 'Show'}
+            <div className="space-y-1">
+              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">Admin Username</label>
+              <input type="text" required value={setupUsername} onChange={e => setSetupUsername(e.target.value)} className="w-full text-sm p-3 bg-slate-900 border border-slate-800 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none text-white" />
+            </div>
+            <div className="space-y-1">
+              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">Admin Email</label>
+              <input type="email" required value={setupEmail} onChange={e => setSetupEmail(e.target.value)} className="w-full text-sm p-3 bg-slate-900 border border-slate-800 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none text-white" />
+            </div>
+            <div className="space-y-1">
+              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">Password</label>
+              <input type="password" required value={setupPassword} onChange={e => setSetupPassword(e.target.value)} className="w-full text-sm p-3 bg-slate-900 border border-slate-800 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none text-white" />
+            </div>
+            <div className="space-y-1">
+              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">Confirm Password</label>
+              <input type="password" required value={setupConfirmPassword} onChange={e => setSetupConfirmPassword(e.target.value)} className="w-full text-sm p-3 bg-slate-900 border border-slate-800 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none text-white" />
+            </div>
+            <button type="submit" disabled={isCreatingAdmin} className="w-full bg-gradient-to-r from-emerald-600 to-green-500 hover:from-emerald-500 hover:to-green-400 disabled:opacity-50 text-white font-bold py-3.5 rounded-xl shadow-lg transition duration-200 text-sm">
+              {isCreatingAdmin ? 'Creating Super Admin...' : 'Create Super Admin'}
             </button>
-          </div>
-          {showHelper && (
-            <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-900 text-[10px] space-y-2.5">
-              <p className="text-slate-400">Click any profile to autofill credentials:</p>
-              <div className="grid grid-cols-2 gap-2">
-                {[
-                  { label: 'Super Admin', usr: 'admin', pass: 'admin123', color: 'white' },
-                  { label: 'HR Manager', usr: 'sara.hr', pass: 'sara123', color: 'white' },
-                  { label: 'Payroll Spec', usr: 'usman.payroll', pass: 'usman123', color: 'white' },
-                  { label: '⏰ Kiosk', usr: 'kiosk', pass: 'kiosk123', color: 'emerald' }
-                ].map(({ label, usr, pass, color }) => (
-                  <button key={usr} type="button" onClick={() => autofill(usr, pass)}
-                    className={`bg-slate-950 hover:bg-slate-800 p-2 rounded-lg text-left border border-slate-850 hover:border-emerald-500 transition text-[10px]`}>
-                    <span className={`font-bold block text-${color}-300`}>{label}</span>
-                    <span className="text-slate-400 font-mono">{usr} / {pass}</span>
-                  </button>
-                ))}
+          </form>
+        ) : (
+          <>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              {renderError()}
+              <div className="space-y-1">
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">Username or Email</label>
+                <input type="text" required value={loginId} onChange={e => setLoginId(e.target.value)} placeholder="admin" className="w-full text-sm p-3 bg-slate-900 border border-slate-800 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none text-white placeholder-slate-500" />
               </div>
+              <div className="space-y-1">
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">Password</label>
+                <input type="password" required value={password} onChange={e => setPassword(e.target.value)} placeholder="Password" className="w-full text-sm p-3 bg-slate-900 border border-slate-800 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none text-white placeholder-slate-500 font-mono" />
+              </div>
+              <button type="submit" className="w-full bg-gradient-to-r from-emerald-600 to-green-500 hover:from-emerald-500 hover:to-green-400 text-white font-bold py-3.5 rounded-xl shadow-lg transition duration-200 text-sm">
+                Sign In to System
+              </button>
+            </form>
+
+            <div className="border-t border-slate-900 pt-5 space-y-3">
+              <div className="flex justify-between items-center">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Quick Access Panel</span>
+                <button type="button" onClick={() => setShowHelper(!showHelper)} className="text-[10px] text-emerald-400 font-bold hover:underline">
+                  {showHelper ? 'Hide' : 'Show'}
+                </button>
+              </div>
+              {showHelper && (
+                <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-900 text-[10px] space-y-2.5">
+                  <p className="text-slate-400">Click any existing profile to autofill credentials:</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {users.slice(0, 4).map((user) => (
+                      <button key={user.id} type="button" onClick={() => autofill(user.username, user.password || '')} className="bg-slate-950 hover:bg-slate-800 p-2 rounded-lg text-left border border-slate-850 hover:border-emerald-500 transition text-[10px]">
+                        <span className="font-bold block text-white">{user.username}</span>
+                        <span className="text-slate-400 font-mono">{user.email}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          </>
+        )}
       </div>
 
       <div className="text-center text-[10px] text-slate-500 mt-6 font-mono">
-        Bin Ishaq HR Suite • FBR Progressive Payroll Compliance Engine
+        Bin Ishaq HR Suite - Firestore backed access control
       </div>
     </div>
   );

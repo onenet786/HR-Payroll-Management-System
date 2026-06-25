@@ -24,6 +24,36 @@ interface DPDevice {
   type: string;
 }
 
+const DIGITAL_PERSONA_VENDOR_ID = 0x05BA;
+
+const isSupportedFingerprintDevice = (device: any) => {
+  const name = String(device?.productName || '').toLowerCase();
+  return device?.vendorId === DIGITAL_PERSONA_VENDOR_ID ||
+    name.includes('u.are.u') ||
+    name.includes('uru') ||
+    name.includes('digitalpersona') ||
+    name.includes('digital persona') ||
+    name.includes('secugen') ||
+    name.includes('hamster') ||
+    name.includes('hupx');
+};
+
+const formatUsbId = (value?: number) =>
+  `0x${Number(value || 0).toString(16).toUpperCase().padStart(4, '0')}`;
+
+const isDigitalPersonaDevice = (device: any) => {
+  return isSupportedFingerprintDevice(device);
+};
+
+const isLikelyInternalHidDevice = (device: any) => {
+  const name = String(device?.productName || '').toLowerCase();
+  return name.includes('hidi2c') ||
+    name.includes('i2c') ||
+    name.includes('touchpad') ||
+    name.includes('keyboard') ||
+    name.includes('mouse');
+};
+
 export interface BiometricDeviceModuleProps {
   employees: Employee[];
   attendances: AttendanceLog[];
@@ -79,12 +109,14 @@ export function BiometricDeviceModule({
   const wsRef = useRef<WebSocket | null>(null);
   const webHIDRef = useRef<any>(null);
   const hidCaptureActiveRef = useRef(false);
+  const hidReportTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [wsStatus, setWsStatus] = useState<WsStatus>('disconnected');
   const [device, setDevice] = useState<DPDevice | null>(null);
   const [isSimMode, setIsSimMode] = useState(false);
   const [isWebHID, setIsWebHID] = useState(false);
   const [webHIDSupported] = useState(() => typeof navigator !== 'undefined' && 'hid' in navigator);
   const [wsLog, setWsLog] = useState<string[]>([]);
+  const [connectionError, setConnectionError] = useState<{ title: string; steps: string[]; endpoint?: string } | null>(null);
 
   // ── Capture state ────────────────────────────────────────────────────────────
   const [captureState, setCaptureState] = useState<CaptureState>('idle');
@@ -123,10 +155,10 @@ export function BiometricDeviceModule({
       const devList = (msg.devices as any[]) || [];
       if (devList.length > 0) {
         const d = devList[0];
-        setDevice({ sn: d.sn || d.id || 'URU4500-001', type: d.type || d.name || 'U.are.U 4500' });
-        log(`✓ Found: ${d.type || d.name || 'U.are.U 4500'} (SN: ${d.sn || d.id})`);
+        setDevice({ sn: d.sn || d.id || 'BIO-DEVICE-001', type: d.type || d.name || 'Fingerprint Reader' });
+        log(`✓ Found: ${d.type || d.name || 'Fingerprint Reader'} (SN: ${d.sn || d.id})`);
       } else {
-        log('⚠ No devices found — plug in the URU 4500 and retry.');
+        log('⚠ No devices found — plug in the URU 4500 or SecuGen Hamster Pro and retry.');
       }
       return;
     }
@@ -156,23 +188,25 @@ export function BiometricDeviceModule({
   }, [captureState, captureQuality, log]);
 
   // ── Connect to Digital Persona service ───────────────────────────────────────
-  const connectWs = useCallback((url: string, isFallback = false) => {
+  const connectWs = useCallback((url: string, fallbacks: string[] = []) => {
     try {
       const ws = new WebSocket(url);
       ws.onopen = () => {
         setWsStatus('connected');
         setIsSimMode(false);
+        setIsWebHID(false);
         log(`✓ Connected to ${url} — querying device list...`);
         ws.send(JSON.stringify({ action: 'GetDeviceList' }));
       };
       ws.onmessage = e => handleMsg(e.data);
       ws.onerror = () => {
-        if (!isFallback) {
-          log(`✗ ${url} failed — trying ws://localhost:15896...`);
-          connectWs('ws://localhost:15896', true);
+        const nextUrl = fallbacks[0];
+        if (nextUrl) {
+          log(`✗ ${url} failed — trying ${nextUrl}...`);
+          connectWs(nextUrl, fallbacks.slice(1));
         } else {
           setWsStatus('error');
-          log('✗ Both wss:// and ws:// failed. Service not running — see setup guide below.');
+          log('✗ All biometric bridge endpoints failed. Service not running — see setup guide below.');
         }
       };
       ws.onclose = () => {
@@ -190,8 +224,12 @@ export function BiometricDeviceModule({
   const handleConnect = useCallback(() => {
     setWsStatus('connecting');
     setDevice(null);
-    log('Connecting to Digital Persona Web API at wss://localhost:15896...');
-    connectWs('wss://localhost:15896');
+    setIsWebHID(false);
+    webHIDRef.current = null;
+    hidCaptureActiveRef.current = false;
+    setConnectionError(null);
+    log('Connecting to biometric bridge for URU 4500 / SecuGen Hamster Pro USB access...');
+    connectWs('ws://127.0.0.1:15896', ['ws://localhost:15896', 'wss://localhost:15896']);
   }, [connectWs, log]);
 
   const handleDisconnect = useCallback(async () => {
@@ -204,6 +242,7 @@ export function BiometricDeviceModule({
     setIsWebHID(false);
     setWsStatus('disconnected');
     setDevice(null);
+    setConnectionError(null);
   }, []);
 
   // ── WebHID direct USB connection (no external service needed) ─────────────────
@@ -213,6 +252,10 @@ export function BiometricDeviceModule({
     // Any non-zero HID report during capture = finger activity detected
     if (data.some(b => b !== 0)) {
       hidCaptureActiveRef.current = false;
+      if (hidReportTimeoutRef.current) {
+        clearTimeout(hidReportTimeoutRef.current);
+        hidReportTimeoutRef.current = null;
+      }
       // Build a plausible FMR-header template seeded from the HID report bytes
       const bytes = new Uint8Array(498);
       bytes[0] = 0x46; bytes[1] = 0x4D; bytes[2] = 0x52; // 'FMR'
@@ -232,31 +275,102 @@ export function BiometricDeviceModule({
       log('✗ WebHID not supported — use Chrome or Edge 89+.');
       return;
     }
+    const hidApi = (navigator as any).hid;
+    if (!hidApi || typeof hidApi.requestDevice !== 'function') {
+      log('✗ WebHID API unavailable in this browser context.');
+      return;
+    }
     try {
       setWsStatus('connecting');
-      log('Requesting USB access to Digital Persona URU 4500 (vendor 0x05BA)...');
-      const devList: any[] = await (navigator as any).hid.requestDevice({
-        filters: [
-          { vendorId: 0x05BA }, // Digital Persona / HID Global
-        ]
-      });
+      setConnectionError(null);
+      log('Requesting USB HID access (select DigitalPersona U.are.U 4500 or SecuGen Hamster Pro if visible)...');
+      const allDevices: any[] = await hidApi.getDevices();
+      if (allDevices.length > 0) {
+        log(`→ Previously granted HID devices: ${allDevices.map((d: any) => `${d.productName || 'Unknown'} (0x${(d.vendorId as number).toString(16).toUpperCase().padStart(4,'0')}:0x${(d.productId as number).toString(16).toUpperCase().padStart(4,'0')})`).join(', ')}`);
+      }
+      let devList: any[] = allDevices.filter(isSupportedFingerprintDevice);
+      if (devList.length > 0) {
+        log(`→ Reusing granted fingerprint reader: ${devList[0].productName || 'Fingerprint Reader'}`);
+      } else {
+        log('→ No granted supported fingerprint reader found. Opening the full HID device chooser...');
+        devList = await hidApi.requestDevice({
+          filters: [],
+        });
+      }
       if (!devList || devList.length === 0) {
         setWsStatus('disconnected');
-        log('✗ No device selected in the browser prompt.');
+        setConnectionError({
+          title: 'Fingerprint reader is not visible to browser HID',
+          steps: [
+            'Your screenshot shows Chrome can only see mouse/internal HID devices, not the fingerprint reader',
+            'Use Connect Bridge, which talks through the native biometric service instead of Chrome WebHID',
+            'Install or restart the DigitalPersona or SecuGen driver/SDK if Connect Bridge cannot reach the service',
+          ],
+          endpoint: 'Browser WebHID',
+        });
+        log('✗ No supported fingerprint reader was exposed in the browser HID picker. Use Connect Bridge for this reader.');
         return;
       }
-      const hid = devList[0];
-      if (!hid.opened) await hid.open();
+      const hid = devList.find(isSupportedFingerprintDevice) || devList[0];
+      if (!isSupportedFingerprintDevice(hid) && isLikelyInternalHidDevice(hid)) {
+        setWsStatus('error');
+        setConnectionError({
+          title: 'Selected device is not a supported fingerprint reader',
+          steps: [
+            `${hid.productName || 'The selected HID device'} looks like an internal laptop device, not the fingerprint reader`,
+            'Click Connect via USB again and select DigitalPersona / U.are.U 4500 or SecuGen Hamster Pro',
+            'If the fingerprint reader still does not appear, use Connect Bridge with the native SDK service',
+          ],
+          endpoint: `${hid.productName || 'HID device'} (${formatUsbId(hid.vendorId)}:${formatUsbId(hid.productId)})`,
+        });
+        log(`✗ Ignored non-reader HID device: ${hid.productName || 'Unknown'} (${formatUsbId(hid.vendorId)}:${formatUsbId(hid.productId)})`);
+        return;
+      }
+      if (!hid.opened) {
+        try {
+          await hid.open();
+        } catch (e: any) {
+          setWsStatus('error');
+          setConnectionError({
+            title: 'Fingerprint reader USB access was blocked',
+            steps: [
+              'Close DigitalPersona apps or other browser tabs using the fingerprint reader',
+              'Unplug and reconnect the reader, then click Connect via USB again',
+              'If Windows driver ownership still blocks WebHID, use the bridge button with the native SDK service',
+            ],
+            endpoint: 'USB HID / WebHID',
+          });
+          log(`✗ Fingerprint reader was selected but could not be opened: ${e?.message || e}`);
+          return;
+        }
+      }
       webHIDRef.current = hid;
       setIsWebHID(true);
       setIsSimMode(false);
       setWsStatus('connected');
-      setDevice({ sn: hid.serialNumber || 'URU4500-USB', type: hid.productName || 'U.are.U 4500' });
-      log(`✓ WebHID connected: ${hid.productName || 'U.are.U 4500'} (0x${(hid.vendorId as number).toString(16).toUpperCase().padStart(4,'0')}:0x${(hid.productId as number).toString(16).toUpperCase().padStart(4,'0')})`);
-      hid.addEventListener('inputreport', handleHIDInputReport);
+      const productName = hid.productName || 'Fingerprint Reader';
+      const vendorId = formatUsbId(hid.vendorId as number);
+      const productId = formatUsbId(hid.productId as number);
+      setDevice({ sn: hid.serialNumber || `BIO-${vendorId}${productId}`, type: productName });
+      log(`✓ WebHID connected: ${productName} (${vendorId}:${productId})`);
+      log(`→ HID collections: ${JSON.stringify(hid.collections?.map((c: any) => ({ usagePage: c.usagePage, usage: c.usage, reportIds: c.reportIds })) || [])}`);
+      hid.addEventListener('inputreport', (event: any) => {
+        const bytes = new Uint8Array(event.data.buffer || event.data);
+        log(`→ HID inputreport received: reportId=${event.reportId} length=${bytes.length} nonzero=${bytes.some((b: number) => b !== 0)}`);
+        handleHIDInputReport(event);
+      });
       hid.addEventListener('error', (e: any) => log(`✗ HID error: ${e}`));
     } catch (e: any) {
       setWsStatus('error');
+      setConnectionError({
+        title: 'Could not connect to fingerprint reader over USB',
+        steps: [
+          'Use Chrome or Edge on localhost or HTTPS',
+          'Select DigitalPersona / U.are.U 4500 or SecuGen Hamster Pro in the browser USB prompt',
+          'If the device does not appear, use Connect Bridge because the native driver owns this reader',
+        ],
+        endpoint: 'USB HID / WebHID',
+      });
       log(`✗ WebHID error: ${e?.message || e}`);
     }
   }, [webHIDSupported, handleHIDInputReport, log]);
@@ -265,7 +379,7 @@ export function BiometricDeviceModule({
   const enableSimMode = () => {
     setIsSimMode(true);
     setWsStatus('connected');
-    setDevice({ sn: 'SIM-URU4500-001', type: 'U.are.U 4500 (Simulated)' });
+    setDevice({ sn: 'SIM-BIO-001', type: 'Fingerprint Reader (Simulated)' });
     log('[SIM] Simulation mode enabled — no physical device required.');
   };
 
@@ -303,12 +417,31 @@ export function BiometricDeviceModule({
       simulateCapture();
     } else if (isWebHID) {
       hidCaptureActiveRef.current = true;
-      log('→ Place finger firmly on URU 4500 sensor...');
+      if (hidReportTimeoutRef.current) {
+        clearTimeout(hidReportTimeoutRef.current);
+      }
+      log('→ Place finger firmly on fingerprint sensor...');
+      hidReportTimeoutRef.current = setTimeout(() => {
+        if (hidCaptureActiveRef.current) {
+          hidCaptureActiveRef.current = false;
+          setCaptureState('error');
+          log('✗ No HID capture report received. Verify the device is connected, the browser has permission, and the reader is not claimed by another driver.');
+        }
+      }, 7500);
       // Attempt to send a capture trigger via HID output report (optional, device may ignore)
       if (webHIDRef.current?.opened) {
-        try {
-          await webHIDRef.current.sendReport(0, new Uint8Array([0x01]));
-        } catch { /* device doesn't require explicit trigger */ }
+        const outputReports = webHIDRef.current.collections
+          ?.flatMap((collection: any) => collection.outputReports || [])
+          ?.map((report: any) => report.reportId) || [];
+        if (outputReports.length > 0) {
+          try {
+            await webHIDRef.current.sendReport(outputReports[0], new Uint8Array([0x01]));
+          } catch (e: any) {
+            log(`⚠ HID capture trigger was ignored: ${e?.message || e}`);
+          }
+        } else {
+          log('→ No HID output report exposed; waiting for sensor input report.');
+        }
       }
     } else {
       if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
@@ -328,6 +461,7 @@ export function BiometricDeviceModule({
 
   const stopCapture = useCallback(() => {
     if (simTimerRef.current) { clearInterval(simTimerRef.current); simTimerRef.current = null; }
+    if (hidReportTimeoutRef.current) { clearTimeout(hidReportTimeoutRef.current); hidReportTimeoutRef.current = null; }
     hidCaptureActiveRef.current = false;
     if (!isSimMode && !isWebHID && wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ action: 'StopCapture', deviceSN: device?.sn }));
@@ -486,7 +620,7 @@ export function BiometricDeviceModule({
             <Fingerprint className="w-6 h-6 text-emerald-400" />
           </div>
           <div>
-            <h2 className="text-white font-bold text-lg leading-tight">Digital Persona U.are.U 4500</h2>
+            <h2 className="text-white font-bold text-lg leading-tight">Biometric Fingerprint Devices</h2>
             <p className="text-slate-400 text-xs">USB Fingerprint Reader — Attendance Biometric Station</p>
           </div>
         </div>
@@ -513,27 +647,27 @@ export function BiometricDeviceModule({
           {/* Buttons */}
           {wsStatus !== 'connected' ? (
             <>
-              {/* Primary: WebHID — works with the installed device driver, no extra service */}
+              {/* Primary: Native bridge service for DigitalPersona/SecuGen devices */}
+              <button
+                onClick={handleConnect}
+                disabled={wsStatus === 'connecting'}
+                className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition"
+              >
+                <Fingerprint className="w-3.5 h-3.5" />
+                {wsStatus === 'connecting' ? 'Connecting…' : 'Connect Bridge'}
+              </button>
+              {/* Diagnostic: browser WebHID only shows devices Chrome can access directly */}
               {webHIDSupported && (
                 <button
                   type="button"
                   onClick={handleWebHIDConnect}
                   disabled={wsStatus === 'connecting'}
-                  className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition"
+                  className="flex items-center gap-1.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-slate-300 text-xs font-bold px-3 py-1.5 rounded-lg transition"
                 >
-                  <Fingerprint className="w-3.5 h-3.5" />
-                  {wsStatus === 'connecting' ? 'Connecting…' : 'Connect via USB'}
+                  <Wifi className="w-3.5 h-3.5" />
+                  Browser HID
                 </button>
               )}
-              {/* Fallback: WebSocket service (requires DigitalPersona Web API service) */}
-              <button
-                onClick={handleConnect}
-                disabled={wsStatus === 'connecting'}
-                className="flex items-center gap-1.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-slate-300 text-xs font-bold px-3 py-1.5 rounded-lg transition"
-              >
-                <Wifi className="w-3.5 h-3.5" />
-                Web API
-              </button>
               <button
                 onClick={enableSimMode}
                 className="flex items-center gap-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs font-bold px-3 py-1.5 rounded-lg transition"
@@ -566,14 +700,18 @@ export function BiometricDeviceModule({
             <div className="flex items-start gap-3">
               <AlertCircle className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
               <div className="text-xs text-amber-200 space-y-1.5">
-                <p className="font-bold text-amber-300">Digital Persona Web API service not found</p>
+                <p className="font-bold text-amber-300">{connectionError?.title || 'Digital Persona Web API service not found'}</p>
                 <ol className="list-decimal ml-4 space-y-1 text-amber-300/80">
-                  <li>Download and install the <strong>DigitalPersona Web API SDK</strong> (HID Global developer portal)</li>
-                  <li>Run installer — it installs a Windows Service on port 15896</li>
-                  <li>Plug in the URU 4500 via USB; drivers install automatically</li>
-                  <li>Click <strong>Connect</strong> above or use <strong>Simulate</strong> to test without hardware</li>
+                  {(connectionError?.steps || [
+                    'Install the DigitalPersona U.are.U SDK/driver or SecuGen FDx SDK Pro for Windows',
+                    'Run installer — it installs a Windows Service on port 15896',
+                    'Plug in the URU 4500 or SecuGen Hamster Pro via USB; drivers install automatically',
+                    'Click Connect Bridge above or use Simulate to test without hardware',
+                  ]).map(step => (
+                    <li key={step}>{step}</li>
+                  ))}
                 </ol>
-                <p className="text-amber-400/60">Service endpoint: <code className="bg-slate-900/60 px-1 rounded">wss://localhost:15896</code></p>
+                <p className="text-amber-400/60">Endpoint: <code className="bg-slate-900/60 px-1 rounded">{connectionError?.endpoint || 'wss://localhost:15896'}</code></p>
               </div>
             </div>
           </motion.div>
@@ -1065,3 +1203,6 @@ export function BiometricDeviceModule({
     </div>
   );
 }
+
+
+

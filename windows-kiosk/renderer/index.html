@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bin Ishaq Attendance Kiosk</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="bg-layer"></div>
+
+  <div class="shell">
+
+    <!-- ═══ TOP BAR ═══════════════════════════════════════════════════════ -->
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-logo">BIS</div>
+        <div class="brand-text">
+          <div class="brand-name">Bin Ishaq HR Suite</div>
+          <div class="brand-sub" id="terminalLine">Attendance Terminal · Initializing…</div>
+        </div>
+      </div>
+
+      <nav class="mode-nav" id="modeNav">
+        <button class="mode-btn active" data-mode="code">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h.01M12 9h.01M15 9h.01M9 12h.01M12 12h.01M15 12h.01M9 15h.01M12 15h.01M15 15h.01"/></svg>
+          <span>Employee Code</span>
+        </button>
+        <button class="mode-btn" data-mode="fingerprint">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2C8 2 5 5 5 9c0 5.4 6.5 12 7 12s7-6.6 7-12c0-4-3-7-7-7z"/><path d="M12 6c-1.7 0-3 1.3-3 3 0 3.2 2.5 7.2 3 7.2s3-4 3-7.2c0-1.7-1.3-3-3-3z"/><path d="M12 10v2"/></svg>
+          <span>Fingerprint</span>
+        </button>
+        <button class="mode-btn" data-mode="camera">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+          <span>Camera</span>
+        </button>
+      </nav>
+
+      <div class="topbar-right">
+        <div class="status-indicators">
+          <div class="status-pill" id="pillBridge">
+            <span class="dot"></span><span class="label">FP Bridge</span>
+          </div>
+          <div class="status-pill" id="pillOnline">
+            <span class="dot"></span><span class="label">Online</span>
+          </div>
+          <div class="status-pill" id="pillSync">
+            <span class="dot"></span><span class="label">Synced</span>
+          </div>
+        </div>
+        <div class="clock-block">
+          <div class="clock-time" id="clockTime">00:00:00</div>
+          <div class="clock-date" id="clockDate">—</div>
+        </div>
+        <button class="icon-btn" id="settingsBtn" title="Settings">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
+        <button class="exit-btn" id="exitBtn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          Exit
+        </button>
+      </div>
+    </header>
+
+    <!-- ═══ STATS BAR ══════════════════════════════════════════════════════ -->
+    <div class="stats-bar">
+      <div class="stat-chip">
+        <span class="stat-val green" id="statIn">0</span>
+        <span class="stat-label">Punched In</span>
+      </div>
+      <div class="stat-chip">
+        <span class="stat-val blue" id="statOut">0</span>
+        <span class="stat-label">Punched Out</span>
+      </div>
+      <div class="stat-chip">
+        <span class="stat-val" id="statTotal">0</span>
+        <span class="stat-label">Active Employees</span>
+      </div>
+      <div class="stat-chip">
+        <span class="stat-val amber" id="statPending">0</span>
+        <span class="stat-label">Pending Sync</span>
+      </div>
+      <div class="stats-divider"></div>
+      <div class="sync-row">
+        <span class="sync-label" id="syncStatus">Checking connection…</span>
+        <button class="sync-btn" id="syncBtn">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"/><polyline points="23 20 23 14 17 14"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
+          Sync
+        </button>
+      </div>
+    </div>
+
+    <!-- ═══ WORKSPACE ══════════════════════════════════════════════════════ -->
+    <div class="workspace">
+
+      <!-- LEFT: INPUT PANEL -->
+      <aside class="panel input-panel">
+
+        <!-- Employee Preview -->
+        <div class="emp-preview" id="empPreview">
+          <div class="emp-avatar" id="empAvatar">
+            <div class="avatar-initial" id="avatarInitial">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            </div>
+          </div>
+          <div class="emp-info">
+            <div class="emp-name" id="empName">—</div>
+            <div class="emp-meta" id="empMeta">Enter code to identify employee</div>
+            <div class="emp-punch-state" id="empPunchState"></div>
+          </div>
+        </div>
+
+        <!-- Code Input -->
+        <div class="code-input-wrap" id="codeInputWrap">
+          <label class="field-label">EMPLOYEE CODE / ID</label>
+          <div class="code-field">
+            <input id="codeInput" type="text" placeholder="IND-KHI-001 or suffix 001"
+              autocomplete="off" spellcheck="false" autofocus />
+            <button class="code-clear-btn" id="codeClearBtn" type="button" title="Clear">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Fingerprint Orb -->
+        <div class="fp-area hidden" id="fpArea">
+          <div class="fp-orb idle" id="fpOrb">
+            <div class="fp-ring r1"></div>
+            <div class="fp-ring r2"></div>
+            <div class="fp-ring r3"></div>
+            <div class="fp-core">
+              <svg width="36" height="36" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2.5">
+                <path d="M32 8C18.7 8 8 18.7 8 32"/>
+                <path d="M32 8C45.3 8 56 18.7 56 32"/>
+                <path d="M20 32c0-6.6 5.4-12 12-12s12 5.4 12 12"/>
+                <path d="M20 32c0 7.2 4.2 13.8 10 17"/>
+                <path d="M44 32c0 7.2-4.2 13.8-10 17"/>
+                <path d="M26 32c0-3.3 2.7-6 6-6s6 2.7 6 6"/>
+                <path d="M26 32c0 4.5 2.3 8.8 6 11.2"/>
+                <path d="M38 32c0 4.5-2.3 8.8-6 11.2"/>
+                <line x1="32" y1="26" x2="32" y2="32"/>
+              </svg>
+            </div>
+          </div>
+          <div class="fp-instruction" id="fpInstruction">Place finger firmly on the reader</div>
+          <div class="fp-quality-bar" id="fpQualityBar">
+            <div class="fp-quality-fill" id="fpQualityFill"></div>
+          </div>
+        </div>
+
+        <!-- Numeric Keypad -->
+        <div class="keypad" id="keypad">
+          <button class="key" data-val="1">1</button>
+          <button class="key" data-val="2">2</button>
+          <button class="key" data-val="3">3</button>
+          <button class="key" data-val="4">4</button>
+          <button class="key" data-val="5">5</button>
+          <button class="key" data-val="6">6</button>
+          <button class="key" data-val="7">7</button>
+          <button class="key" data-val="8">8</button>
+          <button class="key" data-val="9">9</button>
+          <button class="key key-fn" data-val="CLR">CLR</button>
+          <button class="key" data-val="0">0</button>
+          <button class="key key-fn" data-val="BSP">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"/><line x1="18" y1="9" x2="12" y2="15"/><line x1="12" y1="9" x2="18" y2="15"/></svg>
+          </button>
+        </div>
+
+        <!-- Action Buttons -->
+        <button class="punch-btn" id="punchBtn">
+          <span class="punch-label" id="punchLabel">PUNCH IN / OUT</span>
+          <span class="punch-sub" id="punchSub">Enter employee code above</span>
+        </button>
+
+        <button class="punch-btn fp-action hidden" id="fpScanBtn">
+          <span class="punch-label">SCAN FINGERPRINT</span>
+          <span class="punch-sub">Place finger on fingerprint reader</span>
+        </button>
+
+        <button class="punch-btn cam-action hidden" id="camCaptureBtn">
+          <span class="punch-label">CAPTURE &amp; PUNCH</span>
+          <span class="punch-sub">Snapshot will be saved as evidence</span>
+        </button>
+
+      </aside>
+
+      <!-- CENTER: RESULT / CAMERA -->
+      <section class="center-panel">
+
+        <!-- Camera Feed -->
+        <div class="camera-view hidden" id="cameraView">
+          <video id="webcamEl" autoplay muted playsinline></video>
+          <img id="ipcamEl" alt="IP Camera" />
+          <canvas id="snapCanvas" width="1280" height="720" style="display:none"></canvas>
+          <div class="cam-corners">
+            <span class="cc tl"></span><span class="cc tr"></span>
+            <span class="cc bl"></span><span class="cc br"></span>
+          </div>
+          <div class="cam-hud">
+            <div class="cam-source-badge" id="camSourceBadge">Webcam</div>
+            <div class="cam-face-guide"></div>
+          </div>
+        </div>
+
+        <!-- Result Card -->
+        <div class="result-card idle" id="resultCard">
+          <div class="result-icon-wrap">
+            <div class="result-icon" id="resultIcon">
+              <!-- idle state SVG -->
+              <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.4">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" y1="8" x2="12" y2="12"/>
+                <line x1="12" y1="16" x2="12.01" y2="16"/>
+              </svg>
+            </div>
+          </div>
+          <div class="result-state" id="resultState">TERMINAL READY</div>
+          <div class="result-name" id="resultName">Attendance Kiosk Online</div>
+          <div class="result-detail" id="resultDetail">Select a punch method from the tabs above, then enter your employee code or scan fingerprint.</div>
+          <div class="result-time" id="resultTime"></div>
+          <div class="result-meta" id="resultMeta"></div>
+          <div class="result-countdown hidden" id="resultCountdown">
+            <div class="countdown-bar" id="countdownBar"></div>
+          </div>
+        </div>
+
+        <!-- Today's Quick Stats below result -->
+        <div class="center-bottom">
+          <div class="today-header">
+            <span class="section-title">Today's Activity</span>
+            <span class="today-date" id="todayDateLabel">—</span>
+          </div>
+          <div class="today-feed" id="todayFeed">
+            <div class="feed-empty">No punches recorded today.</div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- RIGHT: ACTIVITY / DIRECTORY -->
+      <aside class="panel activity-panel">
+
+        <div class="panel-section">
+          <div class="panel-title-row">
+            <span class="section-title">Employee Directory</span>
+            <span class="dir-badge" id="dirCount">0</span>
+          </div>
+          <div class="dir-search-wrap">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="dir-search-icon"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input id="dirSearch" class="dir-search" placeholder="Search name or code…" />
+          </div>
+          <div class="dir-list" id="dirList"></div>
+        </div>
+
+        <div class="panel-section event-section">
+          <div class="section-title">Recent Events</div>
+          <div class="event-log" id="eventLog"></div>
+        </div>
+
+      </aside>
+    </div><!-- end workspace -->
+
+  </div><!-- end shell -->
+
+  <!-- ═══ SETTINGS OVERLAY ══════════════════════════════════════════════════ -->
+  <div class="overlay hidden" id="settingsOverlay">
+    <div class="dialog" id="settingsDialog">
+      <div class="dialog-header">
+        <h2 class="dialog-title">Kiosk Settings</h2>
+        <button class="dialog-close" id="settingsClose">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+
+      <div class="dialog-body">
+        <div class="dialog-section">
+          <h3 class="dialog-section-title">Terminal Configuration</h3>
+          <div class="form-grid">
+            <label class="form-field">
+              <span class="form-label">Terminal ID</span>
+              <input id="stTerminalId" class="form-input" placeholder="KIOSK-WIN-01" />
+            </label>
+            <label class="form-field">
+              <span class="form-label">Location / Description</span>
+              <input id="stLocation" class="form-input" placeholder="Main Entrance Gate-1" />
+            </label>
+            <label class="form-field full">
+              <span class="form-label">IP Camera URL <small>(MJPEG stream or snapshot URL)</small></span>
+              <input id="stIpCamUrl" class="form-input" placeholder="http://192.168.1.100/snapshot.jpg" />
+            </label>
+          </div>
+        </div>
+
+        <div class="dialog-section">
+          <h3 class="dialog-section-title">Punch Options</h3>
+          <div class="toggle-list">
+            <label class="toggle-row">
+              <input type="checkbox" id="stReqCodeFp" class="toggle-input" />
+              <div class="toggle-switch"></div>
+              <div class="toggle-text">
+                <span>Require employee code before fingerprint scan</span>
+                <small>Employee must type their code, then scan fingerprint for dual-factor verification</small>
+              </div>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" id="stReqCodeCam" class="toggle-input" />
+              <div class="toggle-switch"></div>
+              <div class="toggle-text">
+                <span>Require employee code for camera punch</span>
+                <small>Camera capture is saved as photo evidence linked to typed employee code</small>
+              </div>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" id="stAutoFullscreen" class="toggle-input" />
+              <div class="toggle-switch"></div>
+              <div class="toggle-text">
+                <span>Enable kiosk fullscreen mode on startup</span>
+                <small>Locks window to full screen on startup for dedicated terminal use</small>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <div class="dialog-section">
+          <h3 class="dialog-section-title">Sync Target</h3>
+          <div class="info-box" id="stSyncInfo">Loading…</div>
+        </div>
+
+        <div class="dialog-section">
+          <h3 class="dialog-section-title">Recent Events Log</h3>
+          <div class="events-table" id="stEventsLog"></div>
+        </div>
+      </div>
+
+      <div class="dialog-footer">
+        <div class="dialog-footer-left">
+          <button class="btn btn-ghost" id="stStartBridge">Start Fingerprint Bridge</button>
+          <button class="btn btn-ghost" id="stOpenStore">Open Local Store</button>
+        </div>
+        <button class="btn btn-primary" id="stSave">Save Settings</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="./app.js"></script>
+</body>
+</html>
+
+

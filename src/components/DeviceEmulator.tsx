@@ -151,9 +151,11 @@ export function DeviceEmulator({
   onDeleteNotification
 }: DeviceEmulatorProps) {
   const isKioskUser = loggedInUser?.username === 'kiosk' || loggedInUser?.roleId === 'role-kiosk';
+  const isWindowsDesktopClient = /Electron/i.test(navigator.userAgent);
 
   const [deviceMode, setDeviceMode] = useState<'web' | 'windows' | 'mobile' | 'kiosk'>(() => {
-    return isKioskUser ? 'kiosk' : 'web';
+    if (isKioskUser) return 'kiosk';
+    return isWindowsDesktopClient ? 'windows' : 'web';
   });
   const [showComplianceOverview, setShowComplianceOverview] = useState(false);
 

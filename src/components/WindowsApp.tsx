@@ -9,6 +9,7 @@ import {
   Layers, UserCheck
 } from 'lucide-react';
 import { Employee, AttendanceLog, LeaveRequest, StatutoryConfig } from '../types';
+import { captureBiometric } from '../utils/uru4500Bridge';
 
 interface WindowsAppProps {
   employees: Employee[];
@@ -27,8 +28,10 @@ export function WindowsApp({
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedEmpId, setSelectedEmpId] = useState(employees[0]?.id || '');
   const [hardwarePort, setHardwarePort] = useState('COM3 (ZK-TeCO SDK v11.4)');
-  const [hardwareStatus, setHardwareStatus] = useState<'IDLE' | 'READING' | 'SUCCESS'>('IDLE');
+  const [hardwareStatus, setHardwareStatus] = useState<'IDLE' | 'READING' | 'SUCCESS' | 'ERROR'>('IDLE');
   const [activePane, setActivePane] = useState<'grid' | 'hardware' | 'logs'>('grid');
+  const [hardwareMessage, setHardwareMessage] = useState('URU 4500 / SecuGen Hamster Pro bridge ready on ws://127.0.0.1:15896');
+  const [hardwareDetails, setHardwareDetails] = useState<string[]>([]);
 
   // Filtered employees
   const filteredEmps = employees.filter(e => 
@@ -37,34 +40,47 @@ export function WindowsApp({
     e.cnic.includes(searchQuery)
   );
 
-  // Trigger simulated biometric punch log
-  const handleBiometricSimulation = () => {
+  // Trigger real URU 4500 / SecuGen Hamster Pro biometric punch log through the local bridge.
+  const handleBiometricCapture = async () => {
     if (!selectedEmpId) return;
     setHardwareStatus('READING');
-    
-    setTimeout(() => {
-      // Calculate realistic random timing
-      const hourIn = String(8 + Math.floor(Math.random() * 2)).padStart(2, '0');
-      const minIn = String(Math.floor(Math.random() * 60)).padStart(2, '0');
-      const secIn = String(Math.floor(Math.random() * 60)).padStart(2, '0');
-      
-      const hourOut = '18';
-      const minOut = String(Math.floor(Math.random() * 30)).padStart(2, '0');
-      const secOut = String(Math.floor(Math.random() * 60)).padStart(2, '0');
+    setHardwareMessage('Place finger flat on the URU 4500 / SecuGen Hamster Pro sensor...');
 
-      onSimulatePunch(
-        selectedEmpId, 
-        `${hourIn}:${minIn}:${secIn}`, 
-        `${hourOut}:${minOut}:${secOut}`,
-        'Biometric'
-      );
+    try {
+      const result = await captureBiometric();
+      const emp = employees.find(e => e.id === selectedEmpId);
+      if (!emp) throw new Error('Selected employee was not found.');
+
+      const now = new Date();
+      const timeStr = [now.getHours(), now.getMinutes(), now.getSeconds()]
+        .map(v => String(v).padStart(2, '0'))
+        .join(':');
+      const today = now.toISOString().split('T')[0];
+      const todayLogs = attendances.filter(a => a.employeeId === emp.id && a.date === today);
+      const isCheckIn = todayLogs.length === 0 || !todayLogs[todayLogs.length - 1].punchOut;
+
+      onSimulatePunch(emp.id, isCheckIn ? timeStr : '', isCheckIn ? '' : timeStr, 'Biometric');
+      setHardwareDetails([
+        `Reader: ${result.device?.type || 'U.are.U 4500 / SecuGen Hamster Pro'}`,
+        `Serial: ${result.device?.sn || 'Unknown'}`,
+        `Quality: ${result.quality}%`,
+        `Template: ${result.template.length} chars`,
+        `Employee: ${emp.fullName} (${emp.employeeCode})`,
+        `Punch: ${isCheckIn ? 'IN' : 'OUT'} ${timeStr}`,
+      ]);
+      setHardwareMessage(`${emp.fullName} biometric ${isCheckIn ? 'check-in' : 'check-out'} committed at ${timeStr}.`);
       setHardwareStatus('SUCCESS');
-      
-      // Quick clean alert notification
       setTimeout(() => {
         setHardwareStatus('IDLE');
-      }, 1500);
-    }, 800);
+        setHardwareMessage('URU 4500 / SecuGen Hamster Pro bridge ready on ws://127.0.0.1:15896');
+      }, 3000);
+    } catch (error) {
+      const text = error instanceof Error ? error.message : String(error);
+      setHardwareStatus('ERROR');
+      setHardwareMessage(text);
+      setHardwareDetails(prev => [`Error: ${text}`, ...prev].slice(0, 6));
+      setTimeout(() => setHardwareStatus('IDLE'), 4000);
+    }
   };
 
   return (
@@ -278,8 +294,8 @@ export function WindowsApp({
                 <div className="flex items-center space-x-3 text-slate-850">
                   <Play className="w-8 h-8 text-emerald-600 flex-shrink-0" />
                   <div>
-                    <h3 className="font-sans font-bold text-sm text-slate-900">Biometric Device Port Emulator (USB)</h3>
-                    <p className="text-[10px] text-slate-400">Mocking SDK triggers to capture real-time fingerprint swipes</p>
+                    <h3 className="font-sans font-bold text-sm text-slate-900">URU 4500 / SecuGen Hamster Pro Biometric Device Bridge</h3>
+                    <p className="text-[10px] text-slate-400">Real fingerprint capture through local Windows bridge</p>
                   </div>
                 </div>
 
@@ -294,9 +310,9 @@ export function WindowsApp({
                       onChange={(e) => setHardwarePort(e.target.value)}
                       className="w-full font-mono p-1.5 border border-slate-300 bg-white text-xs"
                     >
-                      <option value="COM3 (ZK-TeCO SDK v11.4)">COM3 - ZK-Teco Biometric (Connected)</option>
-                      <option value="COM4 (Hanvon FaceId Terminal)">COM4 - face check scanner (Idle)</option>
-                      <option value="IP_PORT: 192.168.1.201">TCPIP Node 192.168.1.201</option>
+                      <option value="Biometric Bridge ws://127.0.0.1:15896">Biometric Bridge - DigitalPersona U.are.U 4500 or SecuGen Hamster Pro</option>
+                      <option value="Browser HID Diagnostic">Browser HID Diagnostic</option>
+                      <option value="Simulation Disabled">Simulation Disabled</option>
                     </select>
                   </div>
 
@@ -318,10 +334,11 @@ export function WindowsApp({
                 <div className="pt-2">
                   <button 
                     disabled={hardwareStatus === 'READING'}
-                    onClick={handleBiometricSimulation}
+                    onClick={handleBiometricCapture}
                     className={`w-full font-sans uppercase font-bold py-3 px-4 rounded shadow-md border text-center transition flex justify-center items-center space-x-2 ${
                       hardwareStatus === 'READING' ? 'bg-amber-100 text-amber-700 border-amber-300' :
                       hardwareStatus === 'SUCCESS' ? 'bg-emerald-600 text-white border-emerald-700' :
+                      hardwareStatus === 'ERROR' ? 'bg-rose-600 text-white border-rose-700' :
                       'bg-emerald-600 text-white hover:bg-emerald-700 border-emerald-700'
                     }`}
                   >
@@ -329,14 +346,32 @@ export function WindowsApp({
                     <span>
                       {hardwareStatus === 'READING' ? 'PROCESSING SCAN...' : 
                        hardwareStatus === 'SUCCESS' ? 'PUNCH COMMITTED!' : 
-                       'SIMULATE FINGERPRINT SWIPE'}
+                       hardwareStatus === 'ERROR' ? 'CAPTURE FAILED' :
+                       'CAPTURE FINGERPRINT'}
                     </span>
                   </button>
                 </div>
 
+                <div className={`font-sans text-xs rounded border p-3 ${
+                  hardwareStatus === 'ERROR'
+                    ? 'bg-rose-50 border-rose-200 text-rose-700'
+                    : hardwareStatus === 'SUCCESS'
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                    : 'bg-slate-100 border-slate-300 text-slate-600'
+                }`}>
+                  <p className="font-bold">{hardwareMessage}</p>
+                  {hardwareDetails.length > 0 && (
+                    <div className="mt-2 grid grid-cols-1 gap-1 font-mono text-[10px]">
+                      {hardwareDetails.map((detail, idx) => (
+                        <span key={`${detail}-${idx}`}>{detail}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
                 {/* Footnote instruction */}
                 <p className="text-[10px] text-slate-400 italic text-center">
-                  * Swiping generates attendance punch records in local list instantly, synchronizing parameters automatically to FBR tax engines in Web Dashboard.
+                  * Requires Biometric Bridge running in the Windows user session or Startup folder.
                 </p>
 
               </div>
@@ -394,3 +429,5 @@ export function WindowsApp({
     </div>
   );
 }
+
+

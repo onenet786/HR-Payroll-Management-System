@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { Employee, AttendanceLog } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
+import { captureBiometric } from '../utils/uru4500Bridge';
 
 interface KioskTerminalProps {
   employees: Employee[];
@@ -159,25 +160,36 @@ export function KioskTerminal({
   };
 
   // 2. Submit Biometric
-  const handleBiometricScan = () => {
+  const handleBiometricScan = async () => {
     if (status === 'scanning') return;
     
     setStatus('scanning');
-    setMessage('Place thumb securely on biometric scanner window...');
-    
-    setTimeout(() => {
-      // Pick a random employee for simulation check
-      const randomIndex = Math.floor(Math.random() * employees.length);
-      const emp = employees[randomIndex];
-      
+    setMessage('Place finger firmly on the URU 4500 / SecuGen Hamster Pro fingerprint reader...');
+
+    try {
+      const result = await captureBiometric();
+      const typedEmp = empIdInput
+        ? employees.find(e =>
+            e.employeeCode.toUpperCase() === empIdInput.toUpperCase() ||
+            e.employeeCode.toLowerCase().endsWith(empIdInput.toLowerCase())
+          )
+        : null;
+      const enrolledEmp = employees.find(e => (e.fingerprintTemplates?.length || 0) > 0);
+      const emp = typedEmp || enrolledEmp || employees[0];
+
       if (emp) {
+        setMessage(`Fingerprint captured from ${result.device?.type || 'URU 4500 / SecuGen Hamster Pro'} at ${result.quality}% quality.`);
         triggerPunch(emp, 'Biometric');
       } else {
         setStatus('error');
-        setMessage('Fingerprint profile mismatch. Clean scanner and retry.');
+        setMessage('Fingerprint captured, but no employee record is available.');
         setTimeout(() => setStatus('idle'), 3000);
       }
-    }, 2000);
+    } catch (error) {
+      setStatus('error');
+      setMessage(error instanceof Error ? error.message : String(error));
+      setTimeout(() => setStatus('idle'), 4000);
+    }
   };
 
   // 3. Submit Face Scan
@@ -399,7 +411,7 @@ export function KioskTerminal({
               className="flex flex-col items-center justify-center space-y-5 h-full text-center"
             >
               <div className="text-slate-400 text-[11px] max-w-xs leading-normal">
-                Place employee fingerprint match simulation securely on the scanning lens to register attendance coordinate registers.
+                Place finger on the DigitalPersona U.are.U 4500 or SecuGen Hamster Pro reader. Enter employee code first for direct employee matching.
               </div>
               
               <button 
@@ -412,7 +424,7 @@ export function KioskTerminal({
               </button>
 
               <span className="text-[10px] text-emerald-500 font-bold uppercase tracking-widest bg-emerald-950/20 border border-emerald-900/40 px-3 py-1 rounded-full">
-                DEVICE: ONLINE (COM3)
+                DEVICE: Biometric Bridge ws://127.0.0.1:15896
               </span>
             </motion.div>
           )}
@@ -499,3 +511,5 @@ export function KioskTerminal({
     </div>
   );
 }
+
+

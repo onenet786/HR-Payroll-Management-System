@@ -3,18 +3,77 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "firestore:maintenance": "tsx scripts/firestore-maintenance.ts",
+    "firestore:backup": "tsx scripts/firestore-maintenance.ts backup",
+    "firestore:cleanup": "tsx scripts/firestore-maintenance.ts cleanup",
+    "firestore:delete": "tsx scripts/firestore-maintenance.ts delete",
+    "firestore:restore": "tsx scripts/firestore-maintenance.ts restore",
+    "windows:run": "npm run build && electron .",
+    "windows:build": "npm run build && electron-builder --win",
+    "kiosk:run": "electron windows-kiosk/main.cjs",
+    "kiosk:build": "electron-builder --config windows-kiosk/electron-builder.json --win"
+  },
+  "build": {
+    "appId": "com.binishaq.hrsuite",
+    "productName": "Bin Ishaq HR Suite",
+    "directories": {
+      "output": "dist-windows"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "tools/uru4500-bridge/bin",
+        "to": "uru4500-bridge",
+        "filter": [
+          "URU4500Bridge.exe",
+          "DPUruNet.dll",
+          "dpfj.dll",
+          "dpfpdd.dll",
+          "dpfpdd_4k.dll",
+          "SecuGen.FDxSDKPro.Windows.dll",
+          "sgfplib.dll"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
   },
   "dependencies": {
     "@capacitor/android": "^8.4.1",
     "@capacitor/cli": "^8.4.1",
     "@capacitor/core": "^8.4.1",
-    "@google/genai": "^2.4.0",
     "@tailwindcss/vite": "^4.1.14",
     "@vitejs/plugin-react": "^5.0.4",
     "dotenv": "^17.2.3",
@@ -28,12 +87,13 @@
     "vite": "^6.2.3"
   },
   "devDependencies": {
-    "@capacitor/assets": "^3.0.5",
     "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "autoprefixer": "^10.4.21",
+    "electron": "^42.4.1",
+    "electron-builder": "^26.15.3",
     "esbuild": "^0.25.0",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
