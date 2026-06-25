@@ -197,6 +197,7 @@ export function WebPortal({
 
   const currentUserRole = roles.find(r => r.id === currentUserAccount.roleId);
   const userPermissions = currentUserRole ? currentUserRole.permissions : [];
+  const isRoleResolving = Boolean(currentUserAccount.roleId && !currentUserRole && roles.length === 0);
 
   const hasPermission = (tab: string) => {
     if (tab === 'dashboard') return userPermissions.includes('view_dashboard');
@@ -870,7 +871,7 @@ export function WebPortal({
                 {currentUserAccount.username}
               </span>
               <span className="text-[9px] text-slate-500 italic">
-                {currentUserRole?.name || 'No Role'}
+                {currentUserRole?.name || (isRoleResolving ? 'Loading role...' : 'No Role')}
               </span>
             </div>
             <button 
@@ -1137,7 +1138,17 @@ export function WebPortal({
         {/* Dynamic Display Area */}
         <main className="flex-1 overflow-y-auto pt-3 px-6 pb-6 bg-slate-50" id="web-main-panel">
           
-          {!hasPermission(activeTab) ? (
+          {isRoleResolving ? (
+            <div className="flex flex-col items-center justify-center p-12 bg-white rounded-2xl border border-slate-200 shadow-md text-center space-y-4 max-w-lg mx-auto mt-12 select-none">
+              <div className="w-16 h-16 rounded-full bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-600">
+                <ShieldCheck className="w-8 h-8 animate-pulse" />
+              </div>
+              <h3 className="font-bold text-lg text-slate-900">Loading Access Profile</h3>
+              <p className="text-slate-500 text-sm max-w-sm">
+                Restoring your account permissions from the server.
+              </p>
+            </div>
+          ) : !hasPermission(activeTab) ? (
             <div className="flex flex-col items-center justify-center p-12 bg-white rounded-2xl border border-slate-200 shadow-md text-center space-y-4 max-w-lg mx-auto mt-12 select-none">
               <div className="w-16 h-16 rounded-full bg-rose-50 border border-rose-200 flex items-center justify-center text-rose-500 animate-bounce">
                 <AlertTriangle className="w-8 h-8" />

@@ -72,10 +72,14 @@ export default function App() {
 
   // User & RBAC States
   const [loggedInUser, setLoggedInUser] = useState<UserAccount | null>(() => getInitialValue('hr_logged_in_user', null));
-  const [roles, setRoles] = useState<Role[]>([]);
-  const [users, setUsers] = useState<UserAccount[]>([]);
-  const [usersLoaded, setUsersLoaded] = useState(false);
-  const [currentUserAccount, setCurrentUserAccount] = useState<UserAccount>(emptyUserAccount);
+  const [roles, setRoles] = useState<Role[]>(() => getInitialValue('hr_roles', []));
+  const [users, setUsers] = useState<UserAccount[]>(() => getInitialValue('hr_users', []));
+  const [usersLoaded, setUsersLoaded] = useState(() => !isFirebaseConfigured() || getInitialValue<UserAccount[]>('hr_users', []).length > 0);
+  const [currentUserAccount, setCurrentUserAccount] = useState<UserAccount>(() => {
+    const storedCurrent = getInitialValue<UserAccount | null>('hr_current_user', null);
+    const storedLoggedIn = getInitialValue<UserAccount | null>('hr_logged_in_user', null);
+    return storedCurrent || storedLoggedIn || emptyUserAccount;
+  });
 
   const handleLogin = (user: UserAccount) => {
     setLoggedInUser(user);
@@ -86,9 +90,20 @@ export default function App() {
 
   const handleLogout = () => {
     setLoggedInUser(null);
+    setCurrentUserAccount(emptyUserAccount);
     localStorage.removeItem('hr_logged_in_user');
     localStorage.removeItem('hr_current_user');
   };
+
+  useEffect(() => {
+    if (!loggedInUser) return;
+    setCurrentUserAccount(prev => {
+      if (prev.id === loggedInUser.id && prev.roleId) return prev;
+      const hydrated = users.find(u => u.id === loggedInUser.id) || loggedInUser;
+      localStorage.setItem('hr_current_user', JSON.stringify(hydrated));
+      return hydrated;
+    });
+  }, [loggedInUser, users]);
 
   const handleCreateInitialAdmin = async (payload: { username: string; email: string; password: string }) => {
     const adminRole: Role = {
