@@ -602,7 +602,7 @@ export function BiometricDeviceModule({
   const statusLabel: Record<WsStatus, string> = {
     disconnected: 'Disconnected',
     connecting: 'Connecting…',
-    connected: isSimMode ? 'Simulation Mode' : isWebHID ? 'USB (WebHID)' : 'Web API',
+    connected: isSimMode ? 'Simulation Mode' : isWebHID ? 'Browser HID Diagnostic' : 'Native Bridge',
     error: 'Service Unreachable',
   };
 
@@ -658,7 +658,7 @@ export function BiometricDeviceModule({
                 <Fingerprint className="w-3.5 h-3.5" />
                 {wsStatus === 'connecting' ? 'Connecting…' : 'Connect Bridge'}
               </button>
-              {/* Diagnostic: browser WebHID only shows devices Chrome can access directly */}
+              {/* Diagnostic only: browser HID is not the SecuGen/URU production capture path. */}
               {webHIDSupported && (
                 <button
                   type="button"
@@ -667,7 +667,7 @@ export function BiometricDeviceModule({
                   className="flex items-center gap-1.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-slate-300 text-xs font-bold px-3 py-1.5 rounded-lg transition"
                 >
                   <Wifi className="w-3.5 h-3.5" />
-                  Browser HID
+                  HID Diagnostic
                 </button>
               )}
               <button
