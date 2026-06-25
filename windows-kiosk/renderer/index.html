@@ -176,6 +176,7 @@
           <span class="punch-label">SCAN FINGERPRINT</span>
           <span class="punch-sub">Place finger on fingerprint reader</span>
         </button>
+        <button class="test-device-btn hidden" id="fpTestBtn">Test Fingerprint Scanner</button>
 
         <button class="punch-btn cam-action hidden" id="camCaptureBtn">
           <span class="punch-label">CAPTURE &amp; PUNCH</span>
@@ -215,6 +216,13 @@
             </div>
           </div>
           <div class="result-state" id="resultState">TERMINAL READY</div>
+          <div class="result-employee hidden" id="resultEmployee">
+            <div class="result-avatar" id="resultAvatar"></div>
+            <div class="result-emp-text">
+              <div class="result-emp-name" id="resultEmpName"></div>
+              <div class="result-emp-meta" id="resultEmpMeta"></div>
+            </div>
+          </div>
           <div class="result-name" id="resultName">Attendance Kiosk Online</div>
           <div class="result-detail" id="resultDetail">Select a punch method from the tabs above, then enter your employee code or scan fingerprint.</div>
           <div class="result-time" id="resultTime"></div>
@@ -227,7 +235,7 @@
         <!-- Today's Quick Stats below result -->
         <div class="center-bottom">
           <div class="today-header">
-            <span class="section-title">Today's Activity</span>
+            <span class="section-title">Recent Transactions</span>
             <span class="today-date" id="todayDateLabel">—</span>
           </div>
           <div class="today-feed" id="todayFeed">
@@ -334,7 +342,8 @@
 
       <div class="dialog-footer">
         <div class="dialog-footer-left">
-          <button class="btn btn-ghost" id="stStartBridge">Start Fingerprint Bridge</button>
+          <button class="btn btn-ghost" id="stStartBridge">Check Biometric Driver Host</button>
+          <button class="btn btn-ghost" id="stTestScanner">Test Scanner</button>
           <button class="btn btn-ghost" id="stOpenStore">Open Local Store</button>
         </div>
         <button class="btn btn-primary" id="stSave">Save Settings</button>

@@ -7,8 +7,9 @@ const https = require('https');
 
 const bridgePort = 15896;
 let mainWindow;
-let bridgeProcess;
+let bridgeProcess = null;
 let autoSyncTimer = null;
+let driverWatchTimer = null;
 
 const firebaseConfig = {
   apiKey: 'AIzaSyAA7uvWdIsP9CqFGJEk5SB0FvLFF97DNk4',
@@ -46,6 +47,10 @@ function defaultStore() {
     },
     employees: seedEmployees,
     attendances: [],
+    branches: [],
+    departments: [],
+    designations: [],
+    biometricTemplates: [],
     evidence: [],
     pendingSync: [],
     events: [],
@@ -99,23 +104,52 @@ function isBridgePortOpen() {
 }
 
 async function startUru4500Bridge() {
-  if (process.platform !== 'win32') return { ok: false, message: 'URU bridge starts only on Windows.' };
-  if (await isBridgePortOpen()) return { ok: true, message: 'URU4500Bridge already running.' };
+  if (process.platform !== 'win32') return { ok: false, message: 'Windows biometric driver host starts only on Windows.' };
+  if (await isBridgePortOpen()) return { ok: true, message: 'Windows biometric driver host already running.' };
 
   const bridgePath = getBridgeExecutablePath();
   if (!fs.existsSync(bridgePath)) {
-    return { ok: false, message: `Fingerprint bridge not found at: ${bridgePath}` };
+    return { ok: false, message: `Windows biometric driver host not found at: ${bridgePath}` };
   }
 
+  const logPath = path.join(app.getPath('userData'), 'biometric-driver-host.log');
+  const logFd = fs.openSync(logPath, 'a');
   bridgeProcess = spawn(bridgePath, [], {
     cwd: path.dirname(bridgePath),
-    detached: false,
-    stdio: 'ignore',
+    detached: true,
+    stdio: ['ignore', logFd, logFd],
     windowsHide: true,
   });
+  bridgeProcess.once('exit', (code, signal) => {
+    addEvent('device', 'Windows biometric driver host exited', { code, signal });
+    try { fs.closeSync(logFd); } catch {}
+    bridgeProcess = null;
+  });
   bridgeProcess.unref();
-  addEvent('device', 'URU4500Bridge started', bridgePath);
-  return { ok: true, message: 'URU4500Bridge started.' };
+  addEvent('device', 'Windows biometric driver host started', { bridgePath, logPath });
+  return { ok: true, message: 'Windows biometric driver host started.' };
+}
+
+async function ensureBiometricDriverHost() {
+  const running = await isBridgePortOpen();
+  if (running) return { ok: true, running: true, message: 'Windows biometric driver host online.' };
+  const started = await startUru4500Bridge();
+  return { ...started, running: await isBridgePortOpen() };
+}
+
+function startDriverWatchdog() {
+  if (driverWatchTimer) clearInterval(driverWatchTimer);
+  driverWatchTimer = setInterval(async () => {
+    try {
+      await ensureBiometricDriverHost();
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        const running = await isBridgePortOpen();
+        mainWindow.webContents.send('kiosk:driver-status', { running });
+      }
+    } catch (error) {
+      addEvent('device', 'Windows biometric driver host watchdog failed', error.message);
+    }
+  }, 15000);
 }
 
 function createWindow() {
@@ -230,16 +264,42 @@ async function putFirestoreDocument(collectionName, docId, data) {
 
 async function performSync() {
   const store = readStore();
-  const report = { employees: 0, attendances: 0, pushed: 0, errors: [] };
+  const report = { employees: 0, attendances: 0, branches: 0, departments: 0, designations: 0, biometricTemplates: 0, pushed: 0, changed: false, errors: [] };
 
   try {
     const employees = await fetchFirestoreCollection('employees');
     if (employees.length) {
+      report.changed = report.changed || JSON.stringify(store.employees || []) !== JSON.stringify(employees);
       store.employees = employees;
       report.employees = employees.length;
     }
   } catch (error) {
     report.errors.push(`employees: ${error.message}`);
+  }
+
+  for (const collectionName of ['branches', 'departments', 'designations']) {
+    try {
+      const records = await fetchFirestoreCollection(collectionName);
+      if (records.length) {
+        report.changed = report.changed || JSON.stringify(store[collectionName] || []) !== JSON.stringify(records);
+        store[collectionName] = records;
+        report[collectionName] = records.length;
+      }
+    } catch (error) {
+      report.errors.push(`${collectionName}: ${error.message}`);
+    }
+  }
+
+  try {
+    const records = await fetchFirestoreCollection('biometricTemplates');
+    if (records.length) {
+      report.changed = report.changed || JSON.stringify(store.biometricTemplates || []) !== JSON.stringify(records);
+      store.biometricTemplates = records;
+      store.employees = mergeEmployeeBiometricTemplates(store.employees || [], records);
+      report.biometricTemplates = records.length;
+    }
+  } catch (error) {
+    report.errors.push(`biometricTemplates: ${error.message}`);
   }
 
   try {
@@ -288,15 +348,87 @@ function todayDate() { return new Date().toISOString().slice(0, 10); }
 function nowTime() { return new Date().toTimeString().slice(0, 8); }
 
 function getDepartmentName(employee) {
-  return seedDepartments[employee.departmentId] || employee.departmentId || '';
+  const store = readStore();
+  const dept = (store.departments || []).find(item => item.id === employee.departmentId);
+  return dept?.name || dept?.departmentName || seedDepartments[employee.departmentId] || employee.departmentId || '';
 }
 
 function getDesignationName(employee) {
-  return seedDesignations[employee.designationId] || employee.designationId || '';
+  const store = readStore();
+  const desig = (store.designations || []).find(item => item.id === employee.designationId);
+  return desig?.name || desig?.designationName || seedDesignations[employee.designationId] || employee.designationId || '';
 }
 
 function getBranchName(employee) {
-  return seedBranches[employee.branchId] || employee.branchId || '';
+  const store = readStore();
+  const branch = (store.branches || []).find(item => item.id === employee.branchId);
+  return branch?.name || branch?.branchName || seedBranches[employee.branchId] || employee.branchId || '';
+}
+
+function kioskEmployee(employee) {
+  if (!employee) return null;
+  return {
+    ...employee,
+    fingerprintTemplates: getFingerprintTemplates(employee),
+    departmentName: getDepartmentName(employee),
+    designationName: getDesignationName(employee),
+    branchName: getBranchName(employee),
+    pictureUrl: employee.pictureUrl || employee.photoUrl || employee.profileImage || employee.imageUrl || '',
+  };
+}
+
+function normalizeFingerprintTemplate(template) {
+  if (!template) return '';
+  if (typeof template === 'string') return template.trim();
+  if (typeof template !== 'object') return '';
+  return String(
+    template.template ||
+    template.sample ||
+    template.data ||
+    template.fmd ||
+    template.value ||
+    template.base64 ||
+    ''
+  ).trim();
+}
+
+function getFingerprintTemplates(employee) {
+  const source =
+    employee?.fingerprintTemplates ||
+    employee?.fingerprints ||
+    employee?.biometricTemplates ||
+    employee?.biometrics?.fingerprintTemplates ||
+    employee?.biometric?.fingerprintTemplates ||
+    [];
+  const list = Array.isArray(source) ? source : [source];
+  return list.map(normalizeFingerprintTemplate).filter(Boolean);
+}
+
+function buildFingerprintGallery(employees) {
+  return (employees || []).flatMap(employee =>
+    getFingerprintTemplates(employee).map(template => ({ employeeId: employee.id, template }))
+  );
+}
+
+function mergeEmployeeBiometricTemplates(employees, biometricRecords) {
+  const byEmployeeId = new Map();
+  const byEmployeeCode = new Map();
+  for (const record of biometricRecords || []) {
+    const templates = getFingerprintTemplates(record);
+    if (!templates.length) continue;
+    const normalized = { ...record, fingerprintTemplates: templates };
+    if (record.employeeId || record.id) byEmployeeId.set(String(record.employeeId || record.id), normalized);
+    if (record.employeeCode) byEmployeeCode.set(String(record.employeeCode).toLowerCase(), normalized);
+  }
+
+  return (employees || []).map(employee => {
+    const existingTemplates = getFingerprintTemplates(employee);
+    if (existingTemplates.length) return { ...employee, fingerprintTemplates: existingTemplates };
+    const match = byEmployeeId.get(String(employee.id)) ||
+      byEmployeeCode.get(String(employee.employeeCode || '').toLowerCase());
+    if (!match) return employee;
+    return { ...employee, fingerprintTemplates: getFingerprintTemplates(match) };
+  });
 }
 
 function computePunch(existingLog, method, terminal, evidenceId) {
@@ -351,20 +483,28 @@ function savePunch(store, employee, method, evidence, meta) {
     }
   }).catch(error => addEvent('sync-error', `Firestore sync pending for ${log.id}`, error.message));
 
-  return { ok: true, employee, log, action: log.punchOut ? 'OUT' : 'IN' };
+  return {
+    ok: true,
+    employee: kioskEmployee(employee),
+    log,
+    action: log.punchOut ? 'OUT' : 'IN',
+    outReason: log.punchOut ? (meta?.outReason || meta?.reason || 'Shift exit') : '',
+  };
 }
 
 // ─── IPC Handlers ───────────────────────────────────────────────────────────
 
 ipcMain.handle('kiosk:get-state', async () => {
   const store = readStore();
+  const employees = mergeEmployeeBiometricTemplates(store.employees || [], store.biometricTemplates || []);
   return {
     ...store,
+    employees,
     syncTarget: {
       portalUrl: firebaseConfig.portalUrl,
       projectId: firebaseConfig.projectId,
       databaseId: firebaseConfig.databaseId,
-      collections: ['employees', 'attendances'],
+      collections: ['employees', 'biometricTemplates', 'branches', 'departments', 'designations', 'attendances'],
     },
     platform: process.platform,
     bridgeRunning: await isBridgePortOpen(),
@@ -374,35 +514,32 @@ ipcMain.handle('kiosk:get-state', async () => {
 
 ipcMain.handle('kiosk:lookup-employee', async (_event, code) => {
   const store = readStore();
-  const employee = findEmployeeByCode(store.employees || [], code);
+  const employees = mergeEmployeeBiometricTemplates(store.employees || [], store.biometricTemplates || []);
+  const employee = findEmployeeByCode(employees, code);
   if (!employee) return { found: false };
   const date = todayDate();
   const todayLog = (store.attendances || []).find(log => log.employeeId === employee.id && log.date === date) || null;
   const action = todayLog?.punchIn && !todayLog?.punchOut ? 'OUT' : 'IN';
   return {
     found: true,
-    employee: {
-      ...employee,
-      departmentName: getDepartmentName(employee),
-      designationName: getDesignationName(employee),
-      branchName: getBranchName(employee),
-    },
+    employee: kioskEmployee(employee),
     todayLog,
     action,
-    fingerprintCount: (employee.fingerprintTemplates || []).length,
+    fingerprintCount: getFingerprintTemplates(employee).length,
   };
 });
 
 ipcMain.handle('kiosk:get-stats', async () => {
   const store = readStore();
+  const employees = mergeEmployeeBiometricTemplates(store.employees || [], store.biometricTemplates || []);
   const date = todayDate();
   const todayLogs = (store.attendances || []).filter(log => log.date === date);
   const punchedIn = todayLogs.filter(log => log.punchIn && !log.punchOut);
   const punchedOut = todayLogs.filter(log => log.punchIn && log.punchOut);
-  const activeEmployees = (store.employees || []).filter(e => e.status === 'Active');
+  const activeEmployees = employees.filter(e => e.status === 'Active');
   return {
     totalActive: activeEmployees.length,
-    totalWithFingerprint: activeEmployees.filter(e => (e.fingerprintTemplates || []).length > 0).length,
+    totalWithFingerprint: activeEmployees.filter(e => getFingerprintTemplates(e).length > 0).length,
     inCount: punchedIn.length,
     outCount: punchedOut.length,
     pendingSync: (store.pendingSync || []).length,
@@ -437,7 +574,19 @@ ipcMain.handle('kiosk:sync', async () => {
     }
     return result;
   } catch (error) {
-    return { report: { errors: [error.message], employees: 0, attendances: 0, pushed: 0 }, store: readStore() };
+    return {
+      report: {
+        errors: [error.message],
+        employees: 0,
+        attendances: 0,
+        branches: 0,
+        departments: 0,
+        designations: 0,
+        pushed: 0,
+        changed: false,
+      },
+      store: readStore(),
+    };
   }
 });
 
@@ -452,19 +601,38 @@ ipcMain.handle('kiosk:punch-by-code', async (_event, payload) => {
 
 ipcMain.handle('kiosk:punch-fingerprint', async (_event, payload) => {
   const store = readStore();
-  const employees = store.employees || [];
+  let employees = mergeEmployeeBiometricTemplates(store.employees || [], store.biometricTemplates || []);
   const typedEmployee = payload.code ? findEmployeeByCode(employees, payload.code) : null;
 
   if (store.terminal.requireCodeWithFingerprint && !typedEmployee) {
     return { ok: false, message: 'Please enter your employee code before fingerprint scan.' };
   }
 
-  const gallery = (typedEmployee ? [typedEmployee] : employees).flatMap(employee =>
-    (employee.fingerprintTemplates || []).map(template => ({ employeeId: employee.id, template }))
-  );
+  let gallery = buildFingerprintGallery(typedEmployee ? [typedEmployee] : employees);
 
   if (!gallery.length) {
-    return { ok: false, message: 'No fingerprint templates enrolled. Please register fingerprints from the HR biometric module first.' };
+    try {
+      const synced = await performSync();
+      const syncedEmployees = mergeEmployeeBiometricTemplates(synced.store.employees || [], synced.store.biometricTemplates || []);
+      const syncedTypedEmployee = payload.code ? findEmployeeByCode(syncedEmployees, payload.code) : null;
+      employees = syncedEmployees;
+      gallery = buildFingerprintGallery(syncedTypedEmployee ? [syncedTypedEmployee] : syncedEmployees);
+    } catch (error) {
+      addEvent('sync-error', 'Fingerprint scan could not refresh employee templates', error.message);
+    }
+  }
+
+  if (!gallery.length) {
+    const checkedCount = typedEmployee ? 1 : employees.length;
+    const latestStore = readStore();
+    const syncErrors = latestStore.lastSyncReport?.errors || [];
+    const syncDetail = syncErrors.length
+      ? ` Kiosk sync is currently failing: ${syncErrors.slice(0, 3).join('; ')}.`
+      : '';
+    return {
+      ok: false,
+      message: `No fingerprint templates were found in the kiosk cache for ${checkedCount} employee record${checkedCount === 1 ? '' : 's'}.${syncDetail} Scanner test can pass while attendance still fails if Firestore rules block kiosk sync.`,
+    };
   }
 
   const match = await identifyFingerprint(gallery);
@@ -472,6 +640,12 @@ ipcMain.handle('kiosk:punch-fingerprint', async (_event, payload) => {
   const employee = employees.find(emp => emp.id === match.employeeId);
   if (!employee) return { ok: false, message: 'Fingerprint matched a missing employee record. Please re-enroll.' };
   return savePunch(store, employee, 'Biometric', null, { quality: match.quality, score: match.score, device: match.device });
+});
+
+ipcMain.handle('kiosk:test-fingerprint-scanner', async () => {
+  const result = await testFingerprintScanner();
+  addEvent(result.ok ? 'device' : 'error', result.ok ? 'Fingerprint scanner test passed' : 'Fingerprint scanner test failed', result);
+  return result;
 });
 
 ipcMain.handle('kiosk:save-evidence', async (_event, payload) => {
@@ -489,11 +663,11 @@ ipcMain.handle('kiosk:save-evidence', async (_event, payload) => {
   return evidence;
 });
 
-ipcMain.handle('kiosk:start-bridge', startUru4500Bridge);
+ipcMain.handle('kiosk:start-bridge', ensureBiometricDriverHost);
 
 ipcMain.handle('kiosk:check-bridge', async () => {
-  const running = await isBridgePortOpen();
-  return { running, message: running ? 'Fingerprint bridge is online.' : 'Fingerprint bridge is offline.' };
+  const status = await ensureBiometricDriverHost();
+  return { running: !!status.running, message: status.running ? 'Windows biometric driver host is online.' : status.message };
 });
 
 ipcMain.handle('kiosk:open-store', async () => {
@@ -541,6 +715,52 @@ function identifyFingerprint(gallery) {
     socket.on('error', error => {
       clearTimeout(timeout);
       resolve({ ok: false, message: `Fingerprint reader not connected: ${error.message}` });
+    });
+  });
+}
+
+function testFingerprintScanner() {
+  return new Promise(async resolve => {
+    const host = await ensureBiometricDriverHost();
+    if (!host.running) {
+      resolve({ ok: false, message: host.message || 'Windows biometric driver host is not running.' });
+      return;
+    }
+
+    const socket = new WebSocketClient(`ws://127.0.0.1:${bridgePort}`);
+    const timeout = setTimeout(() => {
+      socket.close();
+      resolve({ ok: false, message: 'Scanner test timed out. Place a finger flat on the fingerprint reader within 30 seconds.' });
+    }, 30000);
+
+    socket.on('open', () => {
+      socket.send(JSON.stringify({ action: 'StartCapture', format: 'DP_FMD_V20' }));
+    });
+    socket.on('message', raw => {
+      let msg;
+      try { msg = JSON.parse(raw); } catch { return; }
+      if (msg.status === 'CaptureStarted') return;
+      if (msg.status === 'CaptureComplete') {
+        clearTimeout(timeout);
+        socket.close();
+        resolve({
+          ok: true,
+          message: 'Fingerprint scanner captured successfully.',
+          quality: msg.quality,
+          provider: msg.provider,
+          device: msg.device,
+          templateLength: String(msg.template || '').length,
+        });
+      }
+      if (msg.status === 'Error' || msg.error) {
+        clearTimeout(timeout);
+        socket.close();
+        resolve({ ok: false, message: String(msg.error || msg.message || 'Scanner test failed.') });
+      }
+    });
+    socket.on('error', error => {
+      clearTimeout(timeout);
+      resolve({ ok: false, message: `Scanner test could not connect to driver host: ${error.message}` });
     });
   });
 }
@@ -634,7 +854,24 @@ if (!gotLock) {
 
   app.whenReady().then(async () => {
     writeStore(readStore());
-    await startUru4500Bridge();
+    if (process.platform === 'win32') {
+      app.setLoginItemSettings({
+        openAtLogin: true,
+        path: process.execPath,
+        args: app.isPackaged ? [] : [path.join(__dirname, 'main.cjs')],
+      });
+    }
+
+    await ensureBiometricDriverHost();
+    startDriverWatchdog();
+
+    try {
+      const result = await performSync();
+      addEvent('sync', result.report.changed ? 'Startup sync updated local kiosk data' : 'Startup sync checked local kiosk data', result.report);
+    } catch (err) {
+      addEvent('sync', 'Startup sync failed; kiosk will use local cache', err.message);
+    }
+
     createWindow();
 
     // Auto-sync every 5 minutes after window is ready
@@ -658,6 +895,7 @@ if (!gotLock) {
 
 app.on('before-quit', () => {
   if (autoSyncTimer) clearInterval(autoSyncTimer);
+  if (driverWatchTimer) clearInterval(driverWatchTimer);
   if (bridgeProcess && !bridgeProcess.killed) bridgeProcess.kill();
 });
 

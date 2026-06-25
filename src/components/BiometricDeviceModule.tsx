@@ -57,7 +57,7 @@ const isLikelyInternalHidDevice = (device: any) => {
 export interface BiometricDeviceModuleProps {
   employees: Employee[];
   attendances: AttendanceLog[];
-  onUpdateEmployee: (emp: Employee) => void;
+  onUpdateEmployee: (emp: Employee) => void | Promise<void>;
   onSimulatePunch: (employeeId: string, punchIn: string, punchOut: string, method: string, lat?: number, lon?: number) => void;
 }
 
@@ -554,14 +554,20 @@ export function BiometricDeviceModule({
     startCapture();
   };
 
-  const handleSaveEnrollment = () => {
+  const handleSaveEnrollment = async () => {
     const emp = employees.find(e => e.id === enrollEmpId);
     if (!emp || enrollSamples.length === 0) return;
     const updated: Employee = { ...emp, fingerprintTemplates: enrollSamples };
-    onUpdateEmployee(updated);
-    setEnrollMsg({ type: 'ok', text: `✓ ${enrollSamples.length} fingerprint samples enrolled for ${emp.fullName} and saved to Firestore.` });
-    log(`✓ Enrollment saved: ${emp.fullName} (${enrollSamples.length} templates)`);
-    setTimeout(() => setEnrollMsg(null), 4000);
+    try {
+      await onUpdateEmployee(updated);
+      setEnrollMsg({ type: 'ok', text: `✓ ${enrollSamples.length} fingerprint samples enrolled for ${emp.fullName} and saved to Firestore.` });
+      log(`✓ Enrollment saved: ${emp.fullName} (${enrollSamples.length} templates)`);
+      setTimeout(() => setEnrollMsg(null), 4000);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown Firestore error';
+      setEnrollMsg({ type: 'err', text: `Enrollment captured, but Firestore rejected the save: ${message}` });
+      log(`✗ Enrollment save failed: ${message}`);
+    }
   };
 
   const resetEnrollment = () => {

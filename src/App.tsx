@@ -283,8 +283,19 @@ export default function App() {
     });
     try {
       await setDoc(doc(db, 'employees', updatedEmp.id), cleanData(updatedEmp));
+      if ((updatedEmp.fingerprintTemplates?.length || 0) > 0) {
+        await setDoc(doc(db, 'biometricTemplates', updatedEmp.id), cleanData({
+          id: updatedEmp.id,
+          employeeId: updatedEmp.id,
+          employeeCode: updatedEmp.employeeCode,
+          fullName: updatedEmp.fullName,
+          fingerprintTemplates: updatedEmp.fingerprintTemplates,
+          updatedAt: new Date().toISOString(),
+        }));
+      }
     } catch (err) {
       console.warn('Firebase employee update delayed:', err);
+      throw err;
     }
   };
 

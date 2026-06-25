@@ -63,6 +63,7 @@ const el = {
   fpInstruction:  id('fpInstruction'),
   fpQualityFill:  id('fpQualityFill'),
   fpScanBtn:      id('fpScanBtn'),
+  fpTestBtn:      id('fpTestBtn'),
   camCaptureBtn:  id('camCaptureBtn'),
   // center
   cameraView:     id('cameraView'),
@@ -73,6 +74,10 @@ const el = {
   resultCard:     id('resultCard'),
   resultIcon:     id('resultIcon'),
   resultState:    id('resultState'),
+  resultEmployee: id('resultEmployee'),
+  resultAvatar:   id('resultAvatar'),
+  resultEmpName:  id('resultEmpName'),
+  resultEmpMeta:  id('resultEmpMeta'),
   resultName:     id('resultName'),
   resultDetail:   id('resultDetail'),
   resultTime:     id('resultTime'),
@@ -98,6 +103,7 @@ const el = {
   stSyncInfo:     id('stSyncInfo'),
   stEventsLog:    id('stEventsLog'),
   stStartBridge:  id('stStartBridge'),
+  stTestScanner:  id('stTestScanner'),
   stOpenStore:    id('stOpenStore'),
   stSave:         id('stSave'),
 };
@@ -136,6 +142,7 @@ function setMode(mode) {
   el.punchBtn.classList.toggle('hidden', isFp || isCam);
   el.fpArea.classList.toggle('hidden', !isFp);
   el.fpScanBtn.classList.toggle('hidden', !isFp);
+  el.fpTestBtn.classList.toggle('hidden', !isFp);
   el.camCaptureBtn.classList.toggle('hidden', !isCam);
   el.cameraView.classList.toggle('hidden', !isCam);
 
@@ -393,27 +400,67 @@ async function punchFingerprint() {
   handlePunchResult(result);
 }
 
+async function testFingerprintScanner() {
+  if (fpBusy) return;
+  fpBusy = true;
+  setFpOrb('scanning', 'Testing scanner... place any finger on the reader');
+  showResult('busy', 'Scanner Test', 'Place any finger on the fingerprint reader. This will not mark attendance.');
+
+  const result = await api.testFingerprintScanner();
+  fpBusy = false;
+
+  if (result.ok) {
+    const deviceName = result.device?.name || result.device?.type || result.provider || 'Fingerprint reader';
+    const quality = Number(result.quality || 0);
+    setFpOrb('success', `Scanner OK (${quality}% quality)`);
+    el.fpQualityFill.style.width = `${Math.max(5, Math.min(100, quality || 80))}%`;
+    showResult('ok', 'Scanner Working', deviceName, `${quality || '--'}%`, [
+      result.provider || '',
+      result.templateLength ? `${result.templateLength} chars captured` : '',
+    ].filter(Boolean));
+  } else {
+    setFpOrb('error', result.message || 'Scanner test failed.');
+    showResult('err', 'Scanner Test Failed', result.message || 'Could not capture from fingerprint reader.');
+  }
+  scheduleReset();
+}
+
 function handlePunchResult(result) {
   if (result.ok) {
     const { employee, log, action } = result;
     const timeStr = action === 'OUT' ? (log.punchOut || '').slice(0, 5) : (log.punchIn || '').slice(0, 5);
-    const isLate = log.status === 'Late';
+    const orgLine = [
+      employee.departmentName,
+      employee.designationName,
+      employee.branchName,
+    ].filter(Boolean).join(' · ');
+    const reasonLine = action === 'OUT'
+      ? `Out reason: ${result.outReason || 'Shift exit'}`
+      : 'Entry recorded';
 
     showResult('ok',
       `${action === 'OUT' ? 'Punch Out' : 'Punch In'} Recorded`,
       employee.fullName,
       timeStr,
       [
+        employee.employeeCode,
+        employee.designationName,
+        employee.departmentName,
+        action === 'OUT' ? (result.outReason || 'Shift exit') : log.status,
         `${log.method}`,
-        log.status,
         log.terminalLocation || kioskState?.terminal?.location || '',
       ].filter(Boolean)
     );
+    renderResultEmployee(employee, orgLine || reasonLine);
 
     el.codeInput.value = '';
     preview = null;
     clearPreview();
-    refreshTodayFeed();
+    api.getState().then(state => {
+      kioskState = state;
+      refreshTodayFeed();
+      renderDirectory(el.dirSearch.value);
+    }).catch(() => refreshTodayFeed());
     refreshStats();
     scheduleReset();
   } else {
@@ -429,6 +476,7 @@ function showResult(state, status, name, timeStr, metaItems) {
   cancelAnimationFrame(countdownRaf);
   el.resultCountdown.classList.add('hidden');
   el.countdownBar.style.transform = '';
+  clearResultEmployee();
 
   el.resultCard.className = `result-card ${state}`;
   el.resultState.textContent = state === 'ok' ? 'ACCEPTED' : state === 'err' ? 'REJECTED' : 'PROCESSING';
@@ -476,8 +524,30 @@ function showResult(state, status, name, timeStr, metaItems) {
   }
 }
 
+function renderResultEmployee(employee, metaLine) {
+  if (!employee) return;
+  const name = employee.fullName || 'Employee';
+  const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+  el.resultEmpName.textContent = name;
+  el.resultEmpMeta.textContent = metaLine || [employee.departmentName, employee.designationName].filter(Boolean).join(' · ');
+  if (employee.pictureUrl) {
+    el.resultAvatar.innerHTML = `<img src="${esc(employee.pictureUrl)}" alt="" />`;
+  } else {
+    el.resultAvatar.textContent = initials || '?';
+  }
+  el.resultEmployee.classList.remove('hidden');
+}
+
+function clearResultEmployee() {
+  el.resultEmployee.classList.add('hidden');
+  el.resultAvatar.innerHTML = '';
+  el.resultEmpName.textContent = '';
+  el.resultEmpMeta.textContent = '';
+}
+
 function resetResultToIdle() {
   el.resultCard.className = 'result-card idle';
+  clearResultEmployee();
   el.resultState.textContent = 'TERMINAL READY';
   el.resultName.textContent = 'Attendance Kiosk Online';
   el.resultDetail.textContent = 'Select a punch method, then enter employee code or scan fingerprint.';
@@ -534,7 +604,7 @@ async function refreshStats() {
   } catch {}
 }
 
-function refreshTodayFeed() {
+function refreshTodayOnlyFeedLegacy() {
   if (!kioskState) return;
   const today = todayStr();
   el.todayDateLabel.textContent = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
@@ -578,6 +648,53 @@ function refreshTodayFeed() {
   }).join('');
 }
 
+function refreshTodayFeed() {
+  if (!kioskState) return;
+  el.todayDateLabel.textContent = 'Last 10 across all employees';
+
+  const employees = kioskState.employees || [];
+  const transactions = (kioskState.attendances || []).flatMap(log => {
+    const items = [];
+    if (log.punchIn) items.push({ log, action: 'IN', at: `${log.date || ''}T${log.punchIn}` });
+    if (log.punchOut) items.push({ log, action: 'OUT', at: `${log.date || ''}T${log.punchOut}` });
+    return items;
+  }).sort((a, b) => String(b.at).localeCompare(String(a.at))).slice(0, 10);
+
+  if (!transactions.length) {
+    el.todayFeed.innerHTML = '<div class="feed-empty">No punches recorded yet.</div>';
+    return;
+  }
+
+  el.todayFeed.innerHTML = transactions.map(item => {
+    const { log, action } = item;
+    const emp = employees.find(e => e.id === log.employeeId);
+    const name = emp?.fullName || log.employeeId;
+    const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+    const pictureUrl = emp?.pictureUrl || emp?.photoUrl || emp?.profileImage || emp?.imageUrl || '';
+    const isOut = action === 'OUT';
+    const isLate = action === 'IN' && log.status === 'Late';
+    const rowClass = isOut ? 'row-out' : isLate ? 'row-late' : 'row-ok';
+    const badge = isOut ? `<span class="feed-badge badge-out">OUT</span>`
+      : isLate ? `<span class="feed-badge badge-late">LATE</span>`
+      : `<span class="feed-badge badge-in">IN</span>`;
+    const time = action === 'OUT' ? log.punchOut : log.punchIn;
+    const dateLabel = log.date ? new Date(`${log.date}T00:00:00`).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : '';
+    const avatar = pictureUrl ? `<img src="${esc(pictureUrl)}" alt="" />` : esc(initials);
+
+    return `<div class="feed-row ${rowClass}">
+      <div class="feed-avatar-sm">${avatar}</div>
+      <div class="feed-info">
+        <div class="feed-name">${esc(name)}</div>
+        <div class="feed-sub">${esc(dateLabel)} · ${esc(log.method || 'Code')} · ${esc(log.status || '')}</div>
+      </div>
+      <div class="feed-times">
+        <div class="${isOut ? 'feed-out' : 'feed-in'}">${esc(time?.slice(0,5) || '--')}</div>
+      </div>
+      ${badge}
+    </div>`;
+  }).join('');
+}
+
 function renderDirectory(filter) {
   if (!kioskState) return;
   const q = (filter || '').toLowerCase();
@@ -597,7 +714,8 @@ function renderDirectory(filter) {
   }
 
   el.dirList.innerHTML = list.map(emp => {
-    const hasFp = (emp.fingerprintTemplates || []).length > 0;
+    const templates = getFingerprintTemplates(emp);
+    const hasFp = templates.length > 0;
     const log = todayLogs.find(l => l.employeeId === emp.id);
     const punchedIn = log?.punchIn && !log?.punchOut;
     const classes = [hasFp ? 'has-fp' : '', punchedIn ? 'punched-in' : ''].filter(Boolean).join(' ');
@@ -605,7 +723,7 @@ function renderDirectory(filter) {
       ? `In since ${log.punchIn?.slice(0,5)}`
       : log?.punchOut
         ? `Out ${log.punchOut?.slice(0,5)}`
-        : hasFp ? `${(emp.fingerprintTemplates||[]).length} FP template${(emp.fingerprintTemplates||[]).length > 1 ? 's' : ''}` : 'No fingerprint';
+        : hasFp ? `${templates.length} FP template${templates.length > 1 ? 's' : ''}` : 'No fingerprint';
     return `<div class="dir-row ${classes}" data-code="${esc(emp.employeeCode)}">
       <div class="dir-dot"></div>
       <div class="dir-info">
@@ -624,6 +742,25 @@ function renderDirectory(filter) {
       el.codeInput.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     });
   });
+}
+
+function normalizeFingerprintTemplate(template) {
+  if (!template) return '';
+  if (typeof template === 'string') return template.trim();
+  if (typeof template !== 'object') return '';
+  return String(template.template || template.sample || template.data || template.fmd || template.value || template.base64 || '').trim();
+}
+
+function getFingerprintTemplates(employee) {
+  const source =
+    employee?.fingerprintTemplates ||
+    employee?.fingerprints ||
+    employee?.biometricTemplates ||
+    employee?.biometrics?.fingerprintTemplates ||
+    employee?.biometric?.fingerprintTemplates ||
+    [];
+  const list = Array.isArray(source) ? source : [source];
+  return list.map(normalizeFingerprintTemplate).filter(Boolean);
 }
 
 async function renderEventLog() {
@@ -651,7 +788,7 @@ async function performSync() {
     const errs = report.errors?.length || 0;
     el.syncStatus.textContent = errs
       ? `${errs} sync warning(s)`
-      : `Synced: ${report.employees} emp, ${report.pushed} records pushed`;
+      : `Synced: ${report.employees} emp, ${report.biometricTemplates || 0} bio, ${report.departments || 0} dept, ${report.pushed} pushed`;
     setPill(el.pillOnline, 'online');
     renderDirectory(el.dirSearch.value);
     refreshTodayFeed();
@@ -782,6 +919,7 @@ function bindEvents() {
   // Action buttons
   el.punchBtn.addEventListener('click', punchByCode);
   el.fpScanBtn.addEventListener('click', punchFingerprint);
+  el.fpTestBtn.addEventListener('click', testFingerprintScanner);
   el.camCaptureBtn.addEventListener('click', punchCamera);
 
   // Sync
@@ -796,8 +934,24 @@ function bindEvents() {
     await refreshStats();
     renderSettingsEvents();
     // Brief feedback
-    el.stStartBridge.textContent = result.ok ? '✓ Bridge Started' : '✗ ' + result.message.slice(0, 40);
-    setTimeout(() => { el.stStartBridge.textContent = 'Start Fingerprint Bridge'; }, 3000);
+    el.stStartBridge.textContent = result.ok ? 'Driver Host Ready' : `Driver Host Error: ${result.message.slice(0, 32)}`;
+    setTimeout(() => { el.stStartBridge.textContent = 'Check Biometric Driver Host'; }, 3000);
+  });
+  el.stTestScanner.addEventListener('click', async () => {
+    el.stTestScanner.textContent = 'Place Finger...';
+    const result = await api.testFingerprintScanner();
+    await refreshStats();
+    renderSettingsEvents();
+    el.stTestScanner.textContent = result.ok ? 'Scanner OK' : 'Scanner Failed';
+    showResult(
+      result.ok ? 'ok' : 'err',
+      result.ok ? 'Scanner Working' : 'Scanner Test Failed',
+      result.ok ? (result.device?.name || result.device?.type || 'Fingerprint reader captured successfully.') : result.message,
+      result.ok ? `${result.quality || '--'}%` : '',
+      result.ok ? [result.provider || '', result.templateLength ? `${result.templateLength} chars captured` : ''].filter(Boolean) : []
+    );
+    scheduleReset();
+    setTimeout(() => { el.stTestScanner.textContent = 'Test Scanner'; }, 3000);
   });
   el.stOpenStore.addEventListener('click', () => api.openStore());
 
@@ -842,7 +996,11 @@ function bindEvents() {
     }).catch(() => {});
   });
 
-  // Bridge check every minute
+  api.onDriverStatus(data => {
+    setPill(el.pillBridge, data?.running ? 'online' : 'offline');
+  });
+
+  // Driver host check every minute
   setInterval(async () => {
     const { running } = await api.checkBridge().catch(() => ({ running: false }));
     setPill(el.pillBridge, running ? 'online' : 'offline');

@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('kioskApi', {
   sync: () => ipcRenderer.invoke('kiosk:sync'),
   punchByCode: payload => ipcRenderer.invoke('kiosk:punch-by-code', payload),
   punchFingerprint: payload => ipcRenderer.invoke('kiosk:punch-fingerprint', payload),
+  testFingerprintScanner: () => ipcRenderer.invoke('kiosk:test-fingerprint-scanner'),
   saveEvidence: payload => ipcRenderer.invoke('kiosk:save-evidence', payload),
   startBridge: () => ipcRenderer.invoke('kiosk:start-bridge'),
   checkBridge: () => ipcRenderer.invoke('kiosk:check-bridge'),
@@ -16,6 +17,9 @@ contextBridge.exposeInMainWorld('kioskApi', {
   exit: () => ipcRenderer.invoke('kiosk:exit'),
   onSyncComplete: (callback) => {
     ipcRenderer.on('kiosk:sync-complete', (_event, data) => callback(data));
+  },
+  onDriverStatus: (callback) => {
+    ipcRenderer.on('kiosk:driver-status', (_event, data) => callback(data));
   },
   onPunchSynced: (callback) => {
     ipcRenderer.on('kiosk:punch-synced', (_event, data) => callback(data));
