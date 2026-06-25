@@ -141,10 +141,9 @@ namespace Uru4500Bridge
         {
             var current = AppDomain.CurrentDomain.BaseDirectory;
             var sdkX64 = @"C:\Program Files\DigitalPersona\U.are.U SDK\Windows\Lib\x64";
-            var secuGenBin = @"C:\Program Files\SecuGen\FDx SDK Pro for Windows\bin";
-            var secuGenX64 = @"C:\Program Files\SecuGen\FDx SDK Pro for Windows\bin\x64";
             var path = Environment.GetEnvironmentVariable("PATH") ?? "";
-            Environment.SetEnvironmentVariable("PATH", current + ";" + sdkX64 + ";" + secuGenBin + ";" + secuGenX64 + ";" + path);
+            var secuGenPaths = string.Join(";", GetSecuGenSearchDirectories().ToArray());
+            Environment.SetEnvironmentVariable("PATH", current + ";" + sdkX64 + ";" + secuGenPaths + ";" + path);
         }
 
         private static void HandleClient(TcpClient client)
@@ -479,19 +478,62 @@ namespace Uru4500Bridge
 
         private static string FindSecuGenAssemblyPath()
         {
-            var candidates = new[]
+            foreach (var dir in GetSecuGenSearchDirectories())
             {
-                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "SecuGen.FDxSDKPro.Windows.dll"),
-                @"C:\Program Files\SecuGen\FDx SDK Pro for Windows\bin\SecuGen.FDxSDKPro.Windows.dll",
-                @"C:\Program Files\SecuGen\FDx SDK Pro for Windows\bin\x64\SecuGen.FDxSDKPro.Windows.dll",
-                @"C:\Program Files (x86)\SecuGen\FDx SDK Pro for Windows\bin\SecuGen.FDxSDKPro.Windows.dll"
-            };
-
-            foreach (var candidate in candidates)
-            {
+                var candidate = Path.Combine(dir, "SecuGen.FDxSDKPro.Windows.dll");
                 if (File.Exists(candidate)) return candidate;
             }
             return "";
+        }
+
+        private static List<string> GetSecuGenSearchDirectories()
+        {
+            var dirs = new List<string>();
+            AddDirectory(dirs, AppDomain.CurrentDomain.BaseDirectory);
+            AddDirectory(dirs, Environment.GetEnvironmentVariable("SECUGEN_FDX_SDK"));
+            AddDirectory(dirs, @"C:\Program Files\SecuGen\FDx SDK Pro for Windows\bin");
+            AddDirectory(dirs, @"C:\Program Files\SecuGen\FDx SDK Pro for Windows\bin\x64");
+            AddDirectory(dirs, @"C:\Program Files (x86)\SecuGen\FDx SDK Pro for Windows\bin");
+            AddDirectory(dirs, @"C:\Program Files (x86)\SecuGen\FDx SDK Pro for Windows\bin\x64");
+
+            AddSecuGenSubDirectories(dirs, Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles));
+            AddSecuGenSubDirectories(dirs, Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86));
+            return dirs;
+        }
+
+        private static void AddSecuGenSubDirectories(List<string> dirs, string programFilesRoot)
+        {
+            if (string.IsNullOrWhiteSpace(programFilesRoot)) return;
+            var secuGenRoot = Path.Combine(programFilesRoot, "SecuGen");
+            if (!Directory.Exists(secuGenRoot)) return;
+
+            try
+            {
+                foreach (var dll in Directory.GetFiles(secuGenRoot, "SecuGen.FDxSDKPro.Windows.dll", SearchOption.AllDirectories))
+                {
+                    AddDirectory(dirs, Path.GetDirectoryName(dll));
+                }
+                foreach (var dll in Directory.GetFiles(secuGenRoot, "sgfplib.dll", SearchOption.AllDirectories))
+                {
+                    AddDirectory(dirs, Path.GetDirectoryName(dll));
+                }
+            }
+            catch (Exception ex)
+            {
+                Log("SecuGen SDK directory scan skipped: " + ex.Message);
+            }
+        }
+
+        private static void AddDirectory(List<string> dirs, string path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return;
+            var fullPath = Path.GetFullPath(path);
+            if (!Directory.Exists(fullPath)) return;
+            foreach (var existing in dirs)
+            {
+                if (string.Equals(existing, fullPath, StringComparison.OrdinalIgnoreCase)) return;
+            }
+            dirs.Add(fullPath);
         }
 
         private static Assembly LoadSecuGenAssembly()
@@ -499,7 +541,7 @@ namespace Uru4500Bridge
             var path = FindSecuGenAssemblyPath();
             if (path.Length == 0)
             {
-                throw new Exception("SecuGen Hamster Pro (HUPx) support requires the SecuGen FDx SDK Pro for Windows. Install it or copy SecuGen.FDxSDKPro.Windows.dll beside URU4500Bridge.exe.");
+                throw new Exception("SecuGen Hamster Pro (HUPx) support requires SecuGen FDx SDK Pro for Windows runtime files. Install the SecuGen driver/SDK, or copy SecuGen.FDxSDKPro.Windows.dll and sgfplib.dll beside URU4500Bridge.exe. You may also set SECUGEN_FDX_SDK to the SDK bin folder.");
             }
             return Assembly.LoadFrom(path);
         }

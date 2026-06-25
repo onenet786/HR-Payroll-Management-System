@@ -30,6 +30,8 @@ dist-kiosk
 ## Fingerprint Requirements
 
 1. Install the DigitalPersona U.are.U SDK/driver or SecuGen FDx SDK Pro for Windows on the kiosk machine.
+   - For SecuGen Hamster Pro (HUPx), the bridge must be able to load `SecuGen.FDxSDKPro.Windows.dll` and `sgfplib.dll`.
+   - Install the SecuGen FDx SDK/driver, copy both DLLs beside `URU4500Bridge.exe`, or set `SECUGEN_FDX_SDK` to the SDK `bin` folder before building/running the bridge.
 2. Enroll employee fingerprints from the HR biometric module so `fingerprintTemplates` are saved on employee records.
 3. Start the kiosk. It automatically starts `URU4500Bridge.exe`.
 4. Use Fingerprint mode. The kiosk sends enrolled templates to the bridge, captures a live finger, and the native SDK returns the matched employee.

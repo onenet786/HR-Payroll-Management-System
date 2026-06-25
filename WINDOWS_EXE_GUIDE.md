@@ -59,6 +59,7 @@ npx electron-builder --prepackaged dist-windows\win-unpacked --win portable
 
 - Windows 10/11 64-bit
 - DigitalPersona U.are.U SDK/driver or SecuGen FDx SDK Pro for Windows installed
+  - SecuGen Hamster Pro (HUPx) requires `SecuGen.FDxSDKPro.Windows.dll` and `sgfplib.dll` beside `URU4500Bridge.exe`, available through the SecuGen FDx SDK/driver install. You can also point the bridge at the SDK `bin` folder with `SECUGEN_FDX_SDK`.
 - URU 4500 / SecuGen Hamster Pro reader connected by USB
 - Firewall must allow local loopback access to `127.0.0.1:15896`
 
