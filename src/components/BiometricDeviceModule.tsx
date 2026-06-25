@@ -110,6 +110,8 @@ export function BiometricDeviceModule({
   const webHIDRef = useRef<any>(null);
   const hidCaptureActiveRef = useRef(false);
   const hidReportTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoConnectStartedRef = useRef(false);
+  const manualDisconnectRef = useRef(false);
   const [wsStatus, setWsStatus] = useState<WsStatus>('disconnected');
   const [device, setDevice] = useState<DPDevice | null>(null);
   const [isSimMode, setIsSimMode] = useState(false);
@@ -228,6 +230,7 @@ export function BiometricDeviceModule({
   }, [handleMsg, log]);
 
   const handleConnect = useCallback(() => {
+    manualDisconnectRef.current = false;
     setWsStatus('connecting');
     setDevice(null);
     setDeviceDiagnostics([]);
@@ -240,6 +243,7 @@ export function BiometricDeviceModule({
   }, [connectWs, log]);
 
   const handleDisconnect = useCallback(async () => {
+    manualDisconnectRef.current = true;
     wsRef.current?.close();
     if (webHIDRef.current?.opened) {
       try { await webHIDRef.current.close(); } catch {}
@@ -252,6 +256,44 @@ export function BiometricDeviceModule({
     setDeviceDiagnostics([]);
     setConnectionError(null);
   }, []);
+
+  useEffect(() => {
+    if (autoConnectStartedRef.current) return;
+    autoConnectStartedRef.current = true;
+    const timer = setTimeout(() => {
+      if (wsRef.current?.readyState !== WebSocket.OPEN) {
+        handleConnect();
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [handleConnect]);
+
+  useEffect(() => {
+    if (wsStatus !== 'connected' || isSimMode || isWebHID) return;
+
+    const queryDevices = () => {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ action: 'GetDeviceList' }));
+      }
+    };
+
+    queryDevices();
+    const interval = setInterval(queryDevices, 5000);
+    return () => clearInterval(interval);
+  }, [wsStatus, isSimMode, isWebHID]);
+
+  useEffect(() => {
+    if (manualDisconnectRef.current || isSimMode || isWebHID) return;
+    if (wsStatus !== 'disconnected' && wsStatus !== 'error') return;
+
+    const timer = setTimeout(() => {
+      if (!manualDisconnectRef.current && wsRef.current?.readyState !== WebSocket.OPEN) {
+        handleConnect();
+      }
+    }, wsStatus === 'error' ? 10000 : 5000);
+
+    return () => clearTimeout(timer);
+  }, [wsStatus, isSimMode, isWebHID, handleConnect]);
 
   // ── WebHID direct USB connection (no external service needed) ─────────────────
   const handleHIDInputReport = useCallback((event: any) => {
