@@ -43,6 +43,7 @@ interface DeviceEmulatorProps {
   roles: Role[];
   users: UserAccount[];
   currentUserAccount: UserAccount;
+  accessControlLoaded: boolean;
   onSetCurrentUserAccount: (user: UserAccount) => void;
   onAddRole: (role: Role) => void;
   onAddUser: (user: UserAccount) => void;
@@ -110,6 +111,7 @@ export function DeviceEmulator({
   roles,
   users,
   currentUserAccount,
+  accessControlLoaded,
   onSetCurrentUserAccount,
   onAddRole,
   onAddUser,
@@ -320,6 +322,7 @@ export function DeviceEmulator({
                     roles={roles}
                     users={users}
                     currentUserAccount={currentUserAccount}
+                    accessControlLoaded={accessControlLoaded}
                     onSetCurrentUserAccount={onSetCurrentUserAccount}
                     onAddRole={onAddRole}
                     onAddUser={onAddUser}

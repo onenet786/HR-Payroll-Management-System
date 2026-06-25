@@ -83,6 +83,7 @@ interface WebPortalProps {
   roles: Role[];
   users: UserAccount[];
   currentUserAccount: UserAccount;
+  accessControlLoaded: boolean;
   onSetCurrentUserAccount: (user: UserAccount) => void;
   onAddRole: (role: Role) => void;
   onAddUser: (user: UserAccount) => void;
@@ -149,6 +150,7 @@ export function WebPortal({
   roles,
   users,
   currentUserAccount,
+  accessControlLoaded,
   onSetCurrentUserAccount: _onSetCurrentUserAccount,
   onAddRole,
   onAddUser,
@@ -197,9 +199,10 @@ export function WebPortal({
 
   const currentUserRole = roles.find(r => r.id === currentUserAccount.roleId);
   const userPermissions = currentUserRole ? currentUserRole.permissions : [];
-  const isRoleResolving = Boolean(currentUserAccount.roleId && !currentUserRole && roles.length === 0);
+  const isRoleResolving = !accessControlLoaded || Boolean(currentUserAccount.roleId && !currentUserRole && roles.length === 0);
 
   const hasPermission = (tab: string) => {
+    if (!accessControlLoaded) return false;
     if (tab === 'dashboard') return userPermissions.includes('view_dashboard');
     if (tab === 'employees') return userPermissions.includes('manage_employees');
     if (tab === 'attendance') return userPermissions.includes('manage_attendance');

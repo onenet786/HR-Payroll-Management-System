@@ -74,7 +74,8 @@ export default function App() {
   const [loggedInUser, setLoggedInUser] = useState<UserAccount | null>(() => getInitialValue('hr_logged_in_user', null));
   const [roles, setRoles] = useState<Role[]>(() => getInitialValue('hr_roles', []));
   const [users, setUsers] = useState<UserAccount[]>(() => getInitialValue('hr_users', []));
-  const [usersLoaded, setUsersLoaded] = useState(() => !isFirebaseConfigured() || getInitialValue<UserAccount[]>('hr_users', []).length > 0);
+  const [rolesLoaded, setRolesLoaded] = useState(() => !isFirebaseConfigured());
+  const [usersLoaded, setUsersLoaded] = useState(() => !isFirebaseConfigured());
   const [currentUserAccount, setCurrentUserAccount] = useState<UserAccount>(() => {
     const storedCurrent = getInitialValue<UserAccount | null>('hr_current_user', null);
     const storedLoggedIn = getInitialValue<UserAccount | null>('hr_logged_in_user', null);
@@ -154,8 +155,9 @@ export default function App() {
 
     const registerCollectionListener = <T extends { id: string }>(
       collectionName: string,
-      stateSetter: React.Dispatch<React.SetStateAction<T[]>>,
-      storageKey: string
+      stateSetter: (items: T[]) => void,
+      storageKey: string,
+      onLoaded?: () => void
     ) => {
       try {
         const unsub = onSnapshot(collection(db, collectionName), (snapshot) => {
@@ -166,6 +168,7 @@ export default function App() {
 
           stateSetter(fetched);
           localStorage.setItem(storageKey, JSON.stringify(fetched));
+          onLoaded?.();
         }, (err) => {
           console.warn(`Firestore listener failed for ${collectionName}:`, err);
         });
@@ -182,7 +185,7 @@ export default function App() {
     registerCollectionListener('departments', setDepartments, 'hr_departments');
     registerCollectionListener('designations', setDesignations, 'hr_designations');
     registerCollectionListener('taxSlabs', setTaxSlabs, 'hr_tax_slabs');
-    registerCollectionListener('roles', setRoles, 'hr_roles');
+    registerCollectionListener('roles', setRoles, 'hr_roles', () => setRolesLoaded(true));
     registerCollectionListener('holidays', setHolidays, 'hr_holidays');
     registerCollectionListener('loanAdvances', setLoanAdvances, 'hr_loans');
     registerCollectionListener('salaryRevisions', setSalaryRevisions, 'hr_salary_revisions');
@@ -989,6 +992,7 @@ export default function App() {
 
   // ─── Mobile Platform Detection ────────────────────────────────────────────
   const isMobilePlatform = (window as any).Capacitor || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  const accessControlLoaded = !isFirebaseConfigured() || (rolesLoaded && usersLoaded);
 
   if (isMobilePlatform) {
     if (!loggedInUser) {
@@ -1043,6 +1047,7 @@ export default function App() {
       roles={roles}
       users={users}
       currentUserAccount={currentUserAccount}
+      accessControlLoaded={accessControlLoaded}
       onSetCurrentUserAccount={handleSetCurrentUserAccount}
       onAddRole={handleAddRole}
       onAddUser={handleAddUser}
