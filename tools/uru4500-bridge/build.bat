@@ -35,7 +35,7 @@ if not exist "%OUT%\sgfplib.dll" if exist "%ProgramFiles%\SecuGen" for /r "%Prog
 if not exist "%OUT%\SecuGen.FDxSDKPro.Windows.dll" if exist "%ProgramFiles(x86)%\SecuGen" for /r "%ProgramFiles(x86)%\SecuGen" %%F in (SecuGen.FDxSDKPro.Windows.dll) do if not exist "%OUT%\SecuGen.FDxSDKPro.Windows.dll" copy /Y "%%F" "%OUT%\" >nul
 if not exist "%OUT%\sgfplib.dll" if exist "%ProgramFiles(x86)%\SecuGen" for /r "%ProgramFiles(x86)%\SecuGen" %%F in (sgfplib.dll) do if not exist "%OUT%\sgfplib.dll" copy /Y "%%F" "%OUT%\" >nul
 
-if not exist "%OUT%\SecuGen.FDxSDKPro.Windows.dll" echo Warning: SecuGen.FDxSDKPro.Windows.dll not found. Install SecuGen FDx SDK Pro or set SECUGEN_FDX_SDK before building.
-if not exist "%OUT%\sgfplib.dll" echo Warning: sgfplib.dll not found. Install SecuGen FDx SDK Pro or set SECUGEN_FDX_SDK before building.
+if not exist "%OUT%\sgfplib.dll" echo Warning: sgfplib.dll not found. Install the SecuGen driver/runtime or set SECUGEN_FDX_SDK before building.
+if not exist "%OUT%\SecuGen.FDxSDKPro.Windows.dll" if exist "%OUT%\sgfplib.dll" echo SecuGen native runtime found. Managed FDx wrapper not found; native sgfplib fallback will be used.
 
 echo Built %OUT%\URU4500Bridge.exe

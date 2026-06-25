@@ -4,6 +4,7 @@ using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.ServiceProcess;
 using System.Text;
@@ -222,7 +223,7 @@ namespace Uru4500Bridge
 
             var secuGenAssembly = FindSecuGenAssemblyPath();
             var secuGenNative = FindSecuGenNativePath();
-            if (secuGenAssembly.Length > 0 && secuGenNative.Length > 0)
+            if (secuGenAssembly.Length > 0 || secuGenNative.Length > 0)
             {
                 parts.Add("{\"sn\":\"SECUGEN-HUPX\",\"id\":\"SECUGEN-HUPX\",\"provider\":\"secugen\",\"type\":\"SecuGen Hamster Pro (HUPx)\",\"name\":\"SecuGen Corporation Hamster Pro (HUPx)\"}");
             }
@@ -236,7 +237,7 @@ namespace Uru4500Bridge
                 {
                     diagnostics.Add("SecuGen native runtime is not detected: missing sgfplib.dll.");
                 }
-                diagnostics.Add("Install SecuGen FDx SDK Pro for Windows, copy both SecuGen DLLs beside URU4500Bridge.exe, or set SECUGEN_FDX_SDK to the SDK bin folder.");
+                diagnostics.Add("Install the SecuGen driver/runtime, copy sgfplib.dll beside URU4500Bridge.exe, or set SECUGEN_FDX_SDK to the SDK/service folder.");
             }
 
             return "{\"status\":\"DeviceList\",\"devices\":[" + string.Join(",", parts.ToArray()) +
@@ -588,6 +589,11 @@ namespace Uru4500Bridge
 
         private static CapturedFmd CaptureSecuGenTemplate()
         {
+            if (FindSecuGenAssemblyPath().Length == 0 && FindSecuGenNativePath().Length > 0)
+            {
+                return CaptureSecuGenTemplateNative();
+            }
+
             var asm = LoadSecuGenAssembly();
             var managerType = asm.GetType("SecuGen.FDxSDKPro.Windows.SGFingerPrintManager", true);
             var deviceNameType = asm.GetType("SecuGen.FDxSDKPro.Windows.SGFPMDeviceName", true);
@@ -641,6 +647,11 @@ namespace Uru4500Bridge
 
         private static int SecuGenMatchScore(object manager, string capturedTemplate, string enrolledTemplate)
         {
+            if (manager is IntPtr)
+            {
+                return SecuGenNativeMatchScore((IntPtr)manager, capturedTemplate, enrolledTemplate);
+            }
+
             var captured = DecodeSecuGenTemplate(capturedTemplate);
             var enrolled = DecodeSecuGenTemplate(enrolledTemplate);
             var asm = manager.GetType().Assembly;
@@ -653,6 +664,95 @@ namespace Uru4500Bridge
 
             matched = Convert.ToBoolean(args[3]);
             return matched ? 0 : int.MaxValue;
+        }
+
+        private static CapturedFmd CaptureSecuGenTemplateNative()
+        {
+            IntPtr manager;
+            CheckSecuGenCode(NativeSecuGen.CreateSGFPMObject(out manager), "CreateSGFPMObject");
+            if (manager == IntPtr.Zero) throw new Exception("CreateSGFPMObject returned an empty SecuGen manager.");
+
+            CheckSecuGenCode(NativeSecuGen.SGFPM_Init(manager, NativeSecuGen.SG_DEV_AUTO), "SGFPM_Init");
+            CheckSecuGenCode(NativeSecuGen.SGFPM_OpenDevice(manager, NativeSecuGen.USB_AUTO_DETECT), "SGFPM_OpenDevice");
+
+            var width = 260;
+            var height = 300;
+            var serial = "SECUGEN-HUPX";
+            try
+            {
+                var info = new NativeSecuGen.SGDeviceInfoParam();
+                if (NativeSecuGen.SGFPM_GetDeviceInfo(manager, ref info) == 0)
+                {
+                    width = info.ImageWidth > 0 ? info.ImageWidth : width;
+                    height = info.ImageHeight > 0 ? info.ImageHeight : height;
+                    if (!string.IsNullOrWhiteSpace(info.DeviceSN)) serial = info.DeviceSN.Trim();
+                }
+            }
+            catch (Exception ex)
+            {
+                Log("SecuGen native GetDeviceInfo skipped: " + ex.Message);
+            }
+
+            var image = new byte[Math.Max(1, width * height)];
+            var imageCode = NativeSecuGen.SGFPM_GetImageEx(manager, image, 10000, 50);
+            if (imageCode != 0)
+            {
+                imageCode = NativeSecuGen.SGFPM_GetImage(manager, image);
+            }
+            CheckSecuGenCode(imageCode, "SGFPM_GetImage");
+
+            var quality = 80;
+            try
+            {
+                NativeSecuGen.SGFPM_GetImageQuality(manager, width, height, image, ref quality);
+            }
+            catch (Exception ex)
+            {
+                Log("SecuGen native GetImageQuality skipped: " + ex.Message);
+            }
+
+            var maxTemplateSize = 400;
+            try
+            {
+                NativeSecuGen.SGFPM_GetMaxTemplateSize(manager, ref maxTemplateSize);
+            }
+            catch (Exception ex)
+            {
+                Log("SecuGen native GetMaxTemplateSize skipped: " + ex.Message);
+            }
+            maxTemplateSize = Math.Max(128, maxTemplateSize);
+
+            var template = new byte[maxTemplateSize];
+            CheckSecuGenCode(NativeSecuGen.SGFPM_CreateTemplate(manager, IntPtr.Zero, image, template), "SGFPM_CreateTemplate");
+
+            return new CapturedFmd
+            {
+                Fmd = null,
+                Provider = "secugen",
+                SecuGenManager = manager,
+                Template = "SGFDX:" + Convert.ToBase64String(template),
+                Quality = Math.Max(0, Math.Min(100, quality)),
+                DeviceJson = "{\"sn\":\"" + Json(serial) + "\",\"provider\":\"secugen\",\"type\":\"SecuGen Hamster Pro (HUPx)\",\"name\":\"SecuGen Corporation Hamster Pro (HUPx)\"}"
+            };
+        }
+
+        private static int SecuGenNativeMatchScore(IntPtr manager, string capturedTemplate, string enrolledTemplate)
+        {
+            var captured = DecodeSecuGenTemplate(capturedTemplate);
+            var enrolled = DecodeSecuGenTemplate(enrolledTemplate);
+            var matched = false;
+            var code = NativeSecuGen.SGFPM_MatchTemplate(manager, captured, enrolled, NativeSecuGen.SECURITY_NORMAL, ref matched);
+            if (code != 0)
+            {
+                Log("SecuGen native MatchTemplate failed with code " + code);
+                return -1;
+            }
+            return matched ? 0 : int.MaxValue;
+        }
+
+        private static void CheckSecuGenCode(int code, string operation)
+        {
+            if (code != 0) throw new Exception(operation + " failed with SecuGen code " + code);
         }
 
         private static byte[] DecodeSecuGenTemplate(string template)
@@ -918,6 +1018,66 @@ namespace Uru4500Bridge
                 quoted.Add("\"" + Json(value) + "\"");
             }
             return string.Join(",", quoted.ToArray());
+        }
+
+        private static class NativeSecuGen
+        {
+            public const int SG_DEV_AUTO = 255;
+            public const int USB_AUTO_DETECT = 255;
+            public const int SECURITY_NORMAL = 3;
+
+            [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
+            public struct SGDeviceInfoParam
+            {
+                public int DeviceID;
+                [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 16)]
+                public string DeviceSN;
+                public int ComPort;
+                public int ComSpeed;
+                public int ImageWidth;
+                public int ImageHeight;
+                public int Contrast;
+                public int Brightness;
+                public int Gain;
+                public int ImageDPI;
+                public int FWVersion;
+            }
+
+            [DllImport("sgfplib.dll")]
+            public static extern int CreateSGFPMObject(out IntPtr phFPM);
+
+            [DllImport("sgfplib.dll")]
+            public static extern int DestroySGFPMObject(IntPtr hFPM);
+
+            [DllImport("sgfplib.dll")]
+            public static extern int SGFPM_Init(IntPtr hFPM, int deviceName);
+
+            [DllImport("sgfplib.dll")]
+            public static extern int SGFPM_OpenDevice(IntPtr hFPM, int deviceId);
+
+            [DllImport("sgfplib.dll")]
+            public static extern int SGFPM_CloseDevice(IntPtr hFPM);
+
+            [DllImport("sgfplib.dll")]
+            public static extern int SGFPM_GetDeviceInfo(IntPtr hFPM, ref SGDeviceInfoParam deviceInfo);
+
+            [DllImport("sgfplib.dll")]
+            public static extern int SGFPM_GetImage(IntPtr hFPM, byte[] imageBuffer);
+
+            [DllImport("sgfplib.dll")]
+            public static extern int SGFPM_GetImageEx(IntPtr hFPM, byte[] imageBuffer, int timeout, int quality);
+
+            [DllImport("sgfplib.dll")]
+            public static extern int SGFPM_GetImageQuality(IntPtr hFPM, int width, int height, byte[] imageBuffer, ref int quality);
+
+            [DllImport("sgfplib.dll")]
+            public static extern int SGFPM_GetMaxTemplateSize(IntPtr hFPM, ref int size);
+
+            [DllImport("sgfplib.dll")]
+            public static extern int SGFPM_CreateTemplate(IntPtr hFPM, IntPtr fingerInfo, byte[] imageBuffer, byte[] minTemplate);
+
+            [DllImport("sgfplib.dll")]
+            public static extern int SGFPM_MatchTemplate(IntPtr hFPM, byte[] template1, byte[] template2, int securityLevel, [MarshalAs(UnmanagedType.Bool)] ref bool matched);
         }
 
         private static string Unjson(string value)
