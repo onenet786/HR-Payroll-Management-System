@@ -153,12 +153,14 @@ export function BiometricDeviceModule({
     // Device list
     if (msg.status === 'DeviceList' || Array.isArray(msg.devices)) {
       const devList = (msg.devices as any[]) || [];
+      const diagnostics = Array.isArray(msg.diagnostics) ? msg.diagnostics as string[] : [];
       if (devList.length > 0) {
         const d = devList[0];
         setDevice({ sn: d.sn || d.id || 'BIO-DEVICE-001', type: d.type || d.name || 'Fingerprint Reader' });
         log(`✓ Found: ${d.type || d.name || 'Fingerprint Reader'} (SN: ${d.sn || d.id})`);
       } else {
         log('⚠ No devices found — plug in the URU 4500 or SecuGen Hamster Pro and retry.');
+        diagnostics.forEach(item => log(`• ${item}`));
       }
       return;
     }

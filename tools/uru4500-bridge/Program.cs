@@ -197,20 +197,50 @@ namespace Uru4500Bridge
 
         private static string BuildDeviceListJson()
         {
-            var readers = ReaderCollection.GetReaders();
             var parts = new List<string>();
-            foreach (Reader reader in readers)
+            var diagnostics = new List<string>();
+
+            try
             {
-                var sn = reader.Description.SerialNumber ?? "URU4500";
-                var name = reader.Description.Name ?? "U.are.U 4500";
-                parts.Add("{\"sn\":\"" + Json(sn) + "\",\"id\":\"" + Json(sn) + "\",\"provider\":\"digitalpersona\",\"type\":\"" + Json(name) + "\",\"name\":\"" + Json(name) + "\"}");
+                var readers = ReaderCollection.GetReaders();
+                if (readers.Count == 0)
+                {
+                    diagnostics.Add("DigitalPersona runtime is available, but no U.are.U reader is currently detected.");
+                }
+
+                foreach (Reader reader in readers)
+                {
+                    var sn = reader.Description.SerialNumber ?? "URU4500";
+                    var name = reader.Description.Name ?? "U.are.U 4500";
+                    parts.Add("{\"sn\":\"" + Json(sn) + "\",\"id\":\"" + Json(sn) + "\",\"provider\":\"digitalpersona\",\"type\":\"" + Json(name) + "\",\"name\":\"" + Json(name) + "\"}");
+                }
+            }
+            catch (Exception ex)
+            {
+                diagnostics.Add("DigitalPersona reader scan failed: " + ex.Message);
             }
 
-            if (IsSecuGenSdkAvailable())
+            var secuGenAssembly = FindSecuGenAssemblyPath();
+            var secuGenNative = FindSecuGenNativePath();
+            if (secuGenAssembly.Length > 0 && secuGenNative.Length > 0)
             {
                 parts.Add("{\"sn\":\"SECUGEN-HUPX\",\"id\":\"SECUGEN-HUPX\",\"provider\":\"secugen\",\"type\":\"SecuGen Hamster Pro (HUPx)\",\"name\":\"SecuGen Corporation Hamster Pro (HUPx)\"}");
             }
-            return "{\"status\":\"DeviceList\",\"devices\":[" + string.Join(",", parts.ToArray()) + "]}";
+            else
+            {
+                if (secuGenAssembly.Length == 0)
+                {
+                    diagnostics.Add("SecuGen FDx SDK Pro is not detected: missing SecuGen.FDxSDKPro.Windows.dll.");
+                }
+                if (secuGenNative.Length == 0)
+                {
+                    diagnostics.Add("SecuGen native runtime is not detected: missing sgfplib.dll.");
+                }
+                diagnostics.Add("Install SecuGen FDx SDK Pro for Windows, copy both SecuGen DLLs beside URU4500Bridge.exe, or set SECUGEN_FDX_SDK to the SDK bin folder.");
+            }
+
+            return "{\"status\":\"DeviceList\",\"devices\":[" + string.Join(",", parts.ToArray()) +
+                "],\"diagnostics\":[" + QuoteList(diagnostics) + "]}";
         }
 
         private static string CaptureJson()
@@ -481,6 +511,16 @@ namespace Uru4500Bridge
             foreach (var dir in GetSecuGenSearchDirectories())
             {
                 var candidate = Path.Combine(dir, "SecuGen.FDxSDKPro.Windows.dll");
+                if (File.Exists(candidate)) return candidate;
+            }
+            return "";
+        }
+
+        private static string FindSecuGenNativePath()
+        {
+            foreach (var dir in GetSecuGenSearchDirectories())
+            {
+                var candidate = Path.Combine(dir, "sgfplib.dll");
                 if (File.Exists(candidate)) return candidate;
             }
             return "";
@@ -868,6 +908,16 @@ namespace Uru4500Bridge
         private static string Json(string value)
         {
             return (value ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", "\\r").Replace("\n", "\\n");
+        }
+
+        private static string QuoteList(List<string> values)
+        {
+            var quoted = new List<string>();
+            foreach (var value in values)
+            {
+                quoted.Add("\"" + Json(value) + "\"");
+            }
+            return string.Join(",", quoted.ToArray());
         }
 
         private static string Unjson(string value)
