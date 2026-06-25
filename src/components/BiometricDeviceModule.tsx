@@ -117,6 +117,7 @@ export function BiometricDeviceModule({
   const [webHIDSupported] = useState(() => typeof navigator !== 'undefined' && 'hid' in navigator);
   const [wsLog, setWsLog] = useState<string[]>([]);
   const [connectionError, setConnectionError] = useState<{ title: string; steps: string[]; endpoint?: string } | null>(null);
+  const [deviceDiagnostics, setDeviceDiagnostics] = useState<string[]>([]);
 
   // ── Capture state ────────────────────────────────────────────────────────────
   const [captureState, setCaptureState] = useState<CaptureState>('idle');
@@ -156,9 +157,12 @@ export function BiometricDeviceModule({
       const diagnostics = Array.isArray(msg.diagnostics) ? msg.diagnostics as string[] : [];
       if (devList.length > 0) {
         const d = devList[0];
+        setDeviceDiagnostics([]);
         setDevice({ sn: d.sn || d.id || 'BIO-DEVICE-001', type: d.type || d.name || 'Fingerprint Reader' });
         log(`✓ Found: ${d.type || d.name || 'Fingerprint Reader'} (SN: ${d.sn || d.id})`);
       } else {
+        setDevice(null);
+        setDeviceDiagnostics(diagnostics);
         log('⚠ No devices found — plug in the URU 4500 or SecuGen Hamster Pro and retry.');
         diagnostics.forEach(item => log(`• ${item}`));
       }
@@ -226,6 +230,7 @@ export function BiometricDeviceModule({
   const handleConnect = useCallback(() => {
     setWsStatus('connecting');
     setDevice(null);
+    setDeviceDiagnostics([]);
     setIsWebHID(false);
     webHIDRef.current = null;
     hidCaptureActiveRef.current = false;
@@ -244,6 +249,7 @@ export function BiometricDeviceModule({
     setIsWebHID(false);
     setWsStatus('disconnected');
     setDevice(null);
+    setDeviceDiagnostics([]);
     setConnectionError(null);
   }, []);
 
@@ -634,6 +640,9 @@ export function BiometricDeviceModule({
             <span className={`w-2 h-2 rounded-full ${statusColor[wsStatus]}`} />
             <span className="text-xs text-slate-300 font-medium">{statusLabel[wsStatus]}</span>
             {device && <span className="text-[10px] text-slate-500 ml-1">· {device.type}</span>}
+            {wsStatus === 'connected' && !device && !isSimMode && !isWebHID && (
+              <span className="text-[10px] text-amber-300 ml-1">· No reader detected</span>
+            )}
           </div>
 
           {/* Stats */}
@@ -689,6 +698,26 @@ export function BiometricDeviceModule({
           )}
         </div>
       </div>
+
+      {wsStatus === 'connected' && !device && !isSimMode && !isWebHID && (
+        <div className="bg-amber-950/40 border border-amber-700/50 rounded-xl p-4">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
+            <div className="text-xs text-amber-200 space-y-1.5">
+              <p className="font-bold text-amber-300">Bridge connected, but no fingerprint reader was detected</p>
+              <ol className="list-decimal ml-4 space-y-1 text-amber-300/80">
+                {(deviceDiagnostics.length > 0 ? deviceDiagnostics : [
+                  'Unplug and reconnect the URU 4500 or SecuGen Hamster Pro',
+                  'Confirm the correct vendor driver/SDK is installed',
+                  'Restart URU4500Bridge.exe after installing drivers',
+                ]).map(step => (
+                  <li key={step}>{step}</li>
+                ))}
+              </ol>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Setup guide (shown when service unreachable) ── */}
       <AnimatePresence>
