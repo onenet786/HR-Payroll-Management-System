@@ -10,6 +10,7 @@ import { WebPortal } from './WebPortal';
 import { WindowsApp } from './WindowsApp';
 import { MobileApp } from './MobileApp';
 import { KioskTerminal } from './KioskTerminal';
+import type { FirestoreSyncStatus } from '../App';
 import {
   Employee, AttendanceLog, LeaveRequest, StatutoryConfig, TaxSlab, PayrollRun, Designation, Branch, Department,
   Role, UserAccount, Holiday, LoanAdvance, SalaryRevision,
@@ -83,6 +84,7 @@ interface DeviceEmulatorProps {
   onMarkNotificationRead: (id: string) => void;
   onMarkAllNotificationsRead: () => void;
   onDeleteNotification: (id: string) => void;
+  firestoreSyncStatus: FirestoreSyncStatus;
 }
 
 export function DeviceEmulator({
@@ -150,7 +152,8 @@ export function DeviceEmulator({
   onAddNotification,
   onMarkNotificationRead,
   onMarkAllNotificationsRead,
-  onDeleteNotification
+  onDeleteNotification,
+  firestoreSyncStatus
 }: DeviceEmulatorProps) {
   const isKioskUser = loggedInUser?.username === 'kiosk' || loggedInUser?.roleId === 'role-kiosk';
   const isWindowsDesktopClient = /Electron/i.test(navigator.userAgent);
@@ -363,6 +366,7 @@ export function DeviceEmulator({
                     onMarkAllNotificationsRead={onMarkAllNotificationsRead}
                     onDeleteNotification={onDeleteNotification}
                     onSimulatePunch={onSimulatePunch}
+                    firestoreSyncStatus={firestoreSyncStatus}
                   />
                 </motion.div>
               )}

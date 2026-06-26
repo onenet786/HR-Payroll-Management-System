@@ -12,6 +12,20 @@ const RESULT_AUTO_RESET_MS = 7000;
 const LOOKUP_DEBOUNCE_MS = 280;
 const DIR_RENDER_LIMIT = 80;
 const IP_CAM_REFRESH_MS = 2000;
+const CHECKOUT_REASONS = [
+  'End of Shift',
+  'Lunch Break',
+  'Tea Break',
+  'Official Duty',
+  'Client Meeting',
+  'Site Visit',
+  'Personal Work',
+  'Medical Appointment',
+  'Emergency Leave',
+  'Half-Day Leave',
+  'Sick Leave',
+  'Prayer',
+];
 
 // ─── Application State ──────────────────────────────────────────────────────
 let kioskState = null;
@@ -62,10 +76,15 @@ const el = {
   fpOrb:          id('fpOrb'),
   fpInstruction:  id('fpInstruction'),
   fpQualityFill:  id('fpQualityFill'),
+  fpPreviewCard:  id('fpPreviewCard'),
+  fpPreviewCanvas:id('fpPreviewCanvas'),
+  fpPreviewStatus:id('fpPreviewStatus'),
+  fpPreviewMeta:  id('fpPreviewMeta'),
   fpScanBtn:      id('fpScanBtn'),
   fpTestBtn:      id('fpTestBtn'),
   camCaptureBtn:  id('camCaptureBtn'),
   // center
+  centerPanel:    id('centerPanel'),
   cameraView:     id('cameraView'),
   webcamEl:       id('webcamEl'),
   ipcamEl:        id('ipcamEl'),
@@ -145,6 +164,7 @@ function setMode(mode) {
   el.fpTestBtn.classList.toggle('hidden', !isFp);
   el.camCaptureBtn.classList.toggle('hidden', !isCam);
   el.cameraView.classList.toggle('hidden', !isCam);
+  el.centerPanel?.classList.toggle('camera-active', isCam);
 
   if (isCam) {
     startCamera();
@@ -170,7 +190,9 @@ function setMode(mode) {
     setFpOrb('idle');
   }
   if (isCam) {
-    // camera mode hint shown on button
+    resetResultToIdle();
+  } else if (el.resultCard.classList.contains('idle')) {
+    resetResultToIdle();
   }
 }
 
@@ -290,6 +312,111 @@ function setFpOrb(state, instruction) {
   }
 }
 
+function resetFingerprintPreview(message = 'Run Test Fingerprint Scanner.') {
+  const canvas = el.fpPreviewCanvas;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+  gradient.addColorStop(0, '#020617');
+  gradient.addColorStop(1, '#0f172a');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.strokeStyle = 'rgba(148, 163, 184, 0.22)';
+  ctx.lineWidth = 1;
+  for (let x = 12; x < canvas.width; x += 18) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x - 18, canvas.height);
+    ctx.stroke();
+  }
+  el.fpPreviewCard.className = 'fp-preview-card';
+  el.fpPreviewStatus.textContent = 'No scan yet';
+  el.fpPreviewMeta.textContent = message;
+}
+
+function renderFingerprintPreview(result, statusText = 'Captured') {
+  const canvas = el.fpPreviewCanvas;
+  const ctx = canvas.getContext('2d');
+  const quality = Number(result?.quality || 0);
+  const provider = result?.provider || result?.device?.provider || 'reader';
+
+  if (result?.imageBase64 && result?.imageWidth > 0 && result?.imageHeight > 0) {
+    drawRawFingerprintImage(ctx, canvas, result.imageBase64, result.imageWidth, result.imageHeight);
+    el.fpPreviewMeta.textContent = `${provider} image ${result.imageWidth}x${result.imageHeight} · ${quality || '--'}% quality`;
+  } else {
+    drawTemplateFingerprintPreview(ctx, canvas, result?.templateSeed || '', quality);
+    el.fpPreviewMeta.textContent = `${provider} template captured · ${result?.templateLength || 0} chars · ${quality || '--'}% quality`;
+  }
+
+  el.fpPreviewCard.className = 'fp-preview-card ok';
+  el.fpPreviewStatus.textContent = statusText;
+}
+
+function hasFingerprintPreview(result) {
+  return !!(
+    result?.imageBase64 ||
+    result?.templateSeed ||
+    result?.templateLength ||
+    result?.quality
+  );
+}
+
+function renderFingerprintPreviewError(message) {
+  resetFingerprintPreview(message || 'Capture failed.');
+  el.fpPreviewCard.className = 'fp-preview-card err';
+  el.fpPreviewStatus.textContent = 'Failed';
+}
+
+function drawRawFingerprintImage(ctx, canvas, imageBase64, width, height) {
+  const raw = atob(imageBase64);
+  const source = ctx.createImageData(width, height);
+  for (let i = 0; i < width * height; i++) {
+    const value = raw.charCodeAt(i) || 0;
+    source.data[i * 4] = value;
+    source.data[i * 4 + 1] = value;
+    source.data[i * 4 + 2] = value;
+    source.data[i * 4 + 3] = 255;
+  }
+
+  const offscreen = document.createElement('canvas');
+  offscreen.width = width;
+  offscreen.height = height;
+  offscreen.getContext('2d').putImageData(source, 0, 0);
+  ctx.imageSmoothingEnabled = true;
+  ctx.fillStyle = '#020617';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const scale = Math.min(canvas.width / width, canvas.height / height);
+  const drawW = Math.max(1, Math.round(width * scale));
+  const drawH = Math.max(1, Math.round(height * scale));
+  const dx = Math.round((canvas.width - drawW) / 2);
+  const dy = Math.round((canvas.height - drawH) / 2);
+  ctx.drawImage(offscreen, dx, dy, drawW, drawH);
+}
+
+function drawTemplateFingerprintPreview(ctx, canvas, templateSeed, quality) {
+  ctx.fillStyle = '#020617';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const bytes = templateSeed
+    ? Array.from(templateSeed).map(ch => ch.charCodeAt(0))
+    : Array.from({ length: 96 }, (_, i) => (i * 37 + 91) % 255);
+
+  ctx.lineWidth = 1.5;
+  for (let i = 0; i < 18; i++) {
+    const seed = bytes[i % bytes.length] || 1;
+    const cx = canvas.width / 2 + ((bytes[(i + 7) % bytes.length] || 0) % 15) - 7;
+    const cy = canvas.height / 2 + ((bytes[(i + 13) % bytes.length] || 0) % 11) - 5;
+    const rx = 12 + ((seed + i * 3) % 36);
+    const ry = 8 + ((seed + i * 5) % 27);
+    ctx.strokeStyle = `rgba(${90 + (seed % 80)}, ${145 + (seed % 80)}, ${130 + (seed % 70)}, ${0.18 + Math.min(quality || 60, 100) / 180})`;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, rx, ry, (seed % 90) * Math.PI / 180, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  ctx.fillStyle = quality >= 60 ? 'rgba(52, 211, 153, 0.9)' : 'rgba(245, 158, 11, 0.9)';
+  ctx.fillRect(8, canvas.height - 10, Math.max(8, Math.min(canvas.width - 16, (quality || 50) / 100 * (canvas.width - 16))), 3);
+}
+
 // ─── Camera ──────────────────────────────────────────────────────────────────
 async function startCamera() {
   const ipUrl = kioskState?.terminal?.ipCameraUrl?.trim();
@@ -337,6 +464,8 @@ async function captureEvidence() {
   const canvas = el.snapCanvas;
   const ctx = canvas.getContext('2d');
   const source = kioskState?.terminal?.ipCameraUrl ? el.ipcamEl : el.webcamEl;
+  const readiness = getCameraSourceReadiness(source);
+  if (!readiness.ok) throw new Error(readiness.message);
   ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
   const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
   return api.saveEvidence({
@@ -346,7 +475,308 @@ async function captureEvidence() {
   });
 }
 
+function getCameraSourceReadiness(source) {
+  if (!source) return { ok: false, message: 'Camera source is not ready. Start camera mode and try again.' };
+  if (source instanceof HTMLVideoElement) {
+    if (!source.srcObject || source.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || source.videoWidth <= 0 || source.videoHeight <= 0) {
+      return { ok: false, message: 'Camera is not showing a live frame yet. Wait for the preview, then try again.' };
+    }
+  } else if (source instanceof HTMLImageElement) {
+    if (!source.complete || source.naturalWidth <= 0 || source.naturalHeight <= 0) {
+      return { ok: false, message: 'IP camera image is not loaded yet. Wait for the preview, then try again.' };
+    }
+  }
+  return { ok: true, message: '' };
+}
+
+function captureCameraDescriptor() {
+  const width = 16;
+  const height = 20;
+  const source = kioskState?.terminal?.ipCameraUrl ? el.ipcamEl : el.webcamEl;
+  const readiness = getCameraSourceReadiness(source);
+  if (!readiness.ok) throw new Error(readiness.message);
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(source, 0, 0, width, height);
+  const data = ctx.getImageData(0, 0, width, height).data;
+  const luma = [];
+  for (let i = 0; i < data.length; i += 4) {
+    luma.push((0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]) / 255);
+  }
+  const mean = luma.reduce((sum, value) => sum + value, 0) / luma.length;
+  const vector = [];
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = y * width + x;
+      const base = idx * 4;
+      const r = data[base] / 255;
+      const g = data[base + 1] / 255;
+      const b = data[base + 2] / 255;
+      const gx = x > 0 && x < width - 1 ? luma[idx + 1] - luma[idx - 1] : 0;
+      const gy = y > 0 && y < height - 1 ? luma[idx + width] - luma[idx - width] : 0;
+      vector.push(
+        Number((luma[idx] - mean).toFixed(4)),
+        Number((r - g).toFixed(4)),
+        Number((b - (r + g) / 2).toFixed(4)),
+        Number(Math.sqrt(gx * gx + gy * gy).toFixed(4))
+      );
+    }
+  }
+  return {
+    version: 2,
+    vector,
+    capturedAt: new Date().toISOString(),
+    source: kioskState?.terminal?.ipCameraUrl ? 'ip-camera' : 'webcam',
+  };
+}
+
+async function detectFaceInsideGuide(source) {
+  const Detector = window.FaceDetector;
+  if (!Detector) return null;
+
+  const width = source instanceof HTMLVideoElement ? source.videoWidth : source.naturalWidth;
+  const height = source instanceof HTMLVideoElement ? source.videoHeight : source.naturalHeight;
+  if (!width || !height) return { ok: false, message: 'Camera is not showing a live frame yet. Wait for the preview, then try again.' };
+
+  try {
+    const detector = new Detector({ fastMode: true, maxDetectedFaces: 2 });
+    const faces = await detector.detect(source);
+    if (!Array.isArray(faces) || faces.length === 0) {
+      return { ok: false, message: 'No face detected. Put your full face inside the oval marker.' };
+    }
+    if (faces.length > 1) {
+      return { ok: false, message: 'More than one face detected. Only one employee should be inside the camera frame.' };
+    }
+
+    const box = faces[0].boundingBox;
+    const faceCenterX = (box.x + box.width / 2) / width;
+    const faceCenterY = (box.y + box.height / 2) / height;
+    const faceWidth = box.width / width;
+    const faceHeight = box.height / height;
+
+    const centerIsInGuide =
+      faceCenterX >= 0.39 &&
+      faceCenterX <= 0.61 &&
+      faceCenterY >= 0.34 &&
+      faceCenterY <= 0.64;
+    const sizeIsValid =
+      faceWidth >= 0.22 &&
+      faceWidth <= 0.58 &&
+      faceHeight >= 0.28 &&
+      faceHeight <= 0.74;
+
+    if (!centerIsInGuide) {
+      return { ok: false, message: 'Face is not inside the oval marker. Center your full face, then try again.' };
+    }
+    if (!sizeIsValid) {
+      return { ok: false, message: 'Face is not fully visible. Move closer and keep the full face inside the oval.' };
+    }
+
+    return { ok: true, message: 'Face is centered inside the oval.' };
+  } catch (error) {
+    if (String(error?.message || '').toLowerCase().includes('not implemented')) return null;
+    return { ok: false, message: `Camera face detection failed. ${error?.message || ''}`.trim() };
+  }
+}
+
+async function assessCameraFrame() {
+  const brightnessCanvas = document.createElement('canvas');
+  brightnessCanvas.width = 48;
+  brightnessCanvas.height = 60;
+  const source = kioskState?.terminal?.ipCameraUrl ? el.ipcamEl : el.webcamEl;
+  const readiness = getCameraSourceReadiness(source);
+  if (!readiness.ok) return { ok: false, descriptor: null, message: readiness.message };
+  const guideFace = await detectFaceInsideGuide(source);
+  if (guideFace && !guideFace.ok) return { ok: false, descriptor: null, message: guideFace.message };
+  const descriptor = captureCameraDescriptor();
+  const ctx = brightnessCanvas.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(source, 0, 0, 48, 60);
+  const data = ctx.getImageData(0, 0, 48, 60).data;
+  const values = [];
+  let skinPixels = 0;
+  let ovalPixels = 0;
+  let leftEyeDarkPixels = 0;
+  let rightEyeDarkPixels = 0;
+  let mouthDarkPixels = 0;
+  let leftEyeCoreDarkPixels = 0;
+  let rightEyeCoreDarkPixels = 0;
+  let mouthCoreDarkPixels = 0;
+  let centerSkinPixels = 0;
+  let leftCoreSkinPixels = 0;
+  let rightCoreSkinPixels = 0;
+  let noseMouthCoreSkinPixels = 0;
+  let leftSkinPixels = 0;
+  let rightSkinPixels = 0;
+  let skinMinX = 48;
+  let skinMaxX = -1;
+  let skinMinY = 60;
+  let skinMaxY = -1;
+  let skinSumX = 0;
+  let skinSumY = 0;
+  let totalSkinPixels = 0;
+  let totalSkinMinX = 48;
+  let totalSkinMaxX = -1;
+  let totalSkinSumX = 0;
+  let totalSkinSumY = 0;
+  let outsideSkinPixels = 0;
+  let outsideSideSkinPixels = 0;
+  let outsideLeftSkinPixels = 0;
+  let outsideRightSkinPixels = 0;
+  let symmetryDiff = 0;
+  let symmetryPairs = 0;
+  const lumaAt = (x, y) => {
+    const i = (y * 48 + x) * 4;
+    return (0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]) / 255;
+  };
+
+  for (let y = 0; y < 60; y++) {
+    for (let x = 0; x < 48; x++) {
+      const i = (y * 48 + x) * 4;
+      const r = data[i] / 255;
+      const g = data[i + 1] / 255;
+      const b = data[i + 2] / 255;
+      const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+      values.push(lum);
+
+      const nx = (x - 24) / (48 * 0.34);
+      const ny = (y - 30) / (60 * 0.43);
+      const max = Math.max(r, g, b);
+      const min = Math.min(r, g, b);
+      const skinLike = r > 0.22 && g > 0.16 && b > 0.10 && r > b * 1.06 && max - min > 0.045;
+      const inOval = nx * nx + ny * ny <= 1;
+
+      if (skinLike && y >= 10 && y <= 52) {
+        totalSkinPixels += 1;
+        totalSkinMinX = Math.min(totalSkinMinX, x);
+        totalSkinMaxX = Math.max(totalSkinMaxX, x);
+        totalSkinSumX += x;
+        totalSkinSumY += y;
+      }
+
+      if (!inOval) {
+        if (skinLike && y >= 10 && y <= 52) {
+          outsideSkinPixels += 1;
+          if (x < 18) {
+            outsideSideSkinPixels += 1;
+            outsideLeftSkinPixels += 1;
+          } else if (x > 30) {
+            outsideSideSkinPixels += 1;
+            outsideRightSkinPixels += 1;
+          }
+        }
+        continue;
+      }
+
+      ovalPixels += 1;
+      if (skinLike) {
+        skinPixels += 1;
+        skinMinX = Math.min(skinMinX, x);
+        skinMaxX = Math.max(skinMaxX, x);
+        skinMinY = Math.min(skinMinY, y);
+        skinMaxY = Math.max(skinMaxY, y);
+        skinSumX += x;
+        skinSumY += y;
+        if (x >= 17 && x <= 31 && y >= 18 && y <= 42) centerSkinPixels += 1;
+        if (x >= 13 && x <= 22 && y >= 17 && y <= 44) leftCoreSkinPixels += 1;
+        if (x >= 26 && x <= 35 && y >= 17 && y <= 44) rightCoreSkinPixels += 1;
+        if (x >= 19 && x <= 29 && y >= 22 && y <= 48) noseMouthCoreSkinPixels += 1;
+        if (x < 24) leftSkinPixels += 1;
+        else rightSkinPixels += 1;
+      }
+      const yNorm = y / 60;
+      if (yNorm > 0.33 && yNorm < 0.49 && lum < 0.34) {
+        if (x < 24) leftEyeDarkPixels += 1;
+        else rightEyeDarkPixels += 1;
+      }
+      if (yNorm > 0.62 && yNorm < 0.80 && lum < 0.38) mouthDarkPixels += 1;
+      if (x >= 14 && x <= 23 && y >= 20 && y <= 32 && lum < 0.42) leftEyeCoreDarkPixels += 1;
+      if (x >= 25 && x <= 34 && y >= 20 && y <= 32 && lum < 0.42) rightEyeCoreDarkPixels += 1;
+      if (x >= 19 && x <= 29 && y >= 36 && y <= 48 && lum < 0.42) mouthCoreDarkPixels += 1;
+    }
+  }
+
+  for (let y = 8; y < 52; y += 2) {
+    for (let x = 8; x < 22; x += 2) {
+      symmetryDiff += Math.abs(lumaAt(x, y) - lumaAt(47 - x, y));
+      symmetryPairs += 1;
+    }
+  }
+  const brightness = values.reduce((sum, value) => sum + value, 0) / values.length;
+  const contrast = Math.sqrt(values.reduce((sum, value) => sum + Math.pow(value - brightness, 2), 0) / values.length);
+  const skinRatio = ovalPixels ? skinPixels / ovalPixels : 0;
+  const leftEyeRatio = ovalPixels ? leftEyeDarkPixels / ovalPixels : 0;
+  const rightEyeRatio = ovalPixels ? rightEyeDarkPixels / ovalPixels : 0;
+  const mouthRatio = ovalPixels ? mouthDarkPixels / ovalPixels : 0;
+  const symmetry = symmetryPairs ? symmetryDiff / symmetryPairs : 1;
+  const skinCenterX = skinPixels ? (skinSumX / skinPixels) / 48 : 0;
+  const skinCenterY = skinPixels ? (skinSumY / skinPixels) / 60 : 0;
+  const skinWidthRatio = skinPixels ? (skinMaxX - skinMinX + 1) / 48 : 0;
+  const skinHeightRatio = skinPixels ? (skinMaxY - skinMinY + 1) / 60 : 0;
+  const centerSkinRatio = centerSkinPixels / (15 * 25);
+  const coreSkinPixels = leftCoreSkinPixels + rightCoreSkinPixels;
+  const coreSkinBalance = Math.min(leftCoreSkinPixels, rightCoreSkinPixels) / Math.max(1, Math.max(leftCoreSkinPixels, rightCoreSkinPixels));
+  const skinBalance = Math.min(leftSkinPixels, rightSkinPixels) / Math.max(1, Math.max(leftSkinPixels, rightSkinPixels));
+  const strongestOutsideSide = Math.max(outsideLeftSkinPixels, outsideRightSkinPixels);
+  const outsideSideRatio = strongestOutsideSide / Math.max(1, skinPixels);
+  const outsideSideDominance = strongestOutsideSide / Math.max(1, outsideSideSkinPixels);
+  const faceTouchesOvalSide = skinMinX <= 8 || skinMaxX >= 39;
+  const totalSkinCenterX = totalSkinPixels ? (totalSkinSumX / totalSkinPixels) / 48 : 0;
+  const totalSkinCenterY = totalSkinPixels ? (totalSkinSumY / totalSkinPixels) / 60 : 0;
+  const faceInsideShare = skinPixels / Math.max(1, totalSkinPixels);
+  const outsideSkinShare = outsideSkinPixels / Math.max(1, totalSkinPixels);
+  const faceTouchesFrameSide = totalSkinMinX <= 2 || totalSkinMaxX >= 45;
+  const wholeFaceOffCenter = totalSkinCenterX < 0.38 || totalSkinCenterX > 0.62 || totalSkinCenterY < 0.28 || totalSkinCenterY > 0.72;
+  const faceIsOneSided = skinBalance < 0.42 || skinCenterX < 0.38 || skinCenterX > 0.62;
+
+  if (brightness < 0.18) return { ok: false, descriptor, message: 'Face area is too dark. Add light and try again.' };
+  if (brightness > 0.88) return { ok: false, descriptor, message: 'Face area is overexposed. Reduce glare and try again.' };
+  if (
+    coreSkinPixels < 26 ||
+    leftCoreSkinPixels < 9 ||
+    rightCoreSkinPixels < 9 ||
+    noseMouthCoreSkinPixels < 12 ||
+    coreSkinBalance < 0.46 ||
+    leftEyeCoreDarkPixels < 3 ||
+    rightEyeCoreDarkPixels < 3 ||
+    mouthCoreDarkPixels < 3
+  ) {
+    return { ok: false, descriptor, message: 'Bring your full face inside the oval before punching.' };
+  }
+  if (contrast < 0.03) return { ok: false, descriptor, message: 'No face detected in camera. Move closer and keep your face inside the oval.' };
+  if (skinRatio < 0.14 || skinRatio > 0.76) return { ok: false, descriptor, message: 'No face detected in camera. Put a full face inside the oval marker.' };
+  if (skinCenterX < 0.40 || skinCenterX > 0.60 || skinCenterY < 0.34 || skinCenterY > 0.66) return { ok: false, descriptor, message: 'Face is not inside the oval marker. Center your full face, then try again.' };
+  if (skinWidthRatio < 0.16 || skinWidthRatio > 0.88 || skinHeightRatio < 0.22 || skinHeightRatio > 0.92) return { ok: false, descriptor, message: 'Face is not fully visible. Move closer and keep the full face inside the oval.' };
+  if (centerSkinRatio < 0.18 || skinBalance < 0.35) return { ok: false, descriptor, message: 'No centered full face detected. Keep your face straight inside the oval.' };
+  if (leftEyeRatio < 0.003 || rightEyeRatio < 0.003 || mouthRatio < 0.004) return { ok: false, descriptor, message: 'No full face detected. Keep both eyes and mouth inside the oval.' };
+  if (symmetry > 0.32) return { ok: false, descriptor, message: 'Face is not centered. Look straight at the camera inside the oval.' };
+  return { ok: true, descriptor, message: 'Face frame looks ready.' };
+}
+
 // ─── Punch Handlers ──────────────────────────────────────────────────────────
+function askCheckoutReason(employeeName) {
+  const text = [
+    `Select checkout reason${employeeName ? ` for ${employeeName}` : ''}:`,
+    'Use number hotkey 1-12, then press Enter.',
+    '',
+    ...CHECKOUT_REASONS.map((reason, index) => `${index + 1}. ${reason}`),
+  ].join('\n');
+  const answer = window.prompt(text, '1');
+  if (answer === null) return '';
+  const trimmed = answer.trim();
+  const selectedByNumber = CHECKOUT_REASONS[Number(trimmed) - 1];
+  if (selectedByNumber) return selectedByNumber;
+  return CHECKOUT_REASONS.find(reason => reason.toLowerCase() === trimmed.toLowerCase()) || '';
+}
+
+async function resolveCheckoutReasonAndRetry(result, retry) {
+  if (!result?.needsOutReason) return result;
+  const reason = askCheckoutReason(result.employee?.fullName || preview?.employee?.fullName || '');
+  if (!reason) return { ok: false, message: 'Checkout reason is required before punching out.' };
+  return retry(reason);
+}
+
 async function punchByCode() {
   const code = el.codeInput.value.trim();
   if (!code) {
@@ -354,29 +784,45 @@ async function punchByCode() {
     return;
   }
   showResult('busy', 'Processing…', 'Verifying employee record and saving attendance…');
-  const result = await api.punchByCode({ code, method: 'RFID' });
+  const result = await resolveCheckoutReasonAndRetry(
+    await api.punchByCode({ code, method: 'RFID' }),
+    outReason => api.punchByCode({ code, method: 'RFID', meta: { outReason } })
+  );
   handlePunchResult(result);
 }
 
 async function punchCamera() {
   const code = el.codeInput.value.trim();
-  if (kioskState?.terminal?.requireCodeWithCamera && !code) {
-    showResult('err', 'Employee Code Required', 'Enter your employee code before camera punch.');
-    return;
-  }
-  if (!code) {
-    showResult('err', 'No Code Entered', 'Enter employee code before camera proof punch.');
-    return;
-  }
   showResult('busy', 'Capturing Evidence…', 'Saving camera snapshot as attendance proof…');
   let evidence = null;
+  let descriptor = null;
   try {
+    let lastReadyFrame = null;
+    for (let i = 0; i < 3; i += 1) {
+      const frame = await assessCameraFrame();
+      if (!frame.ok) {
+        showResult('err', 'Face Not Ready', frame.message);
+        return;
+      }
+      lastReadyFrame = frame;
+      if (i < 2) await new Promise(resolve => setTimeout(resolve, 140));
+    }
+    descriptor = lastReadyFrame.descriptor;
     evidence = await captureEvidence();
   } catch (err) {
     showResult('err', 'Capture Failed', err.message || 'Could not save camera image.');
     return;
   }
-  const result = await api.punchByCode({ code, method: 'Camera', evidence, meta: { camera: kioskState?.terminal?.ipCameraUrl ? 'ip-camera' : 'webcam' } });
+  const cameraPayload = {
+    code,
+    descriptor,
+    evidence,
+    meta: { camera: kioskState?.terminal?.ipCameraUrl ? 'ip-camera' : 'webcam' },
+  };
+  const result = await resolveCheckoutReasonAndRetry(
+    await api.punchCamera(cameraPayload),
+    outReason => api.punchCamera({ ...cameraPayload, meta: { ...cameraPayload.meta, outReason } })
+  );
   handlePunchResult(result);
 }
 
@@ -386,16 +832,28 @@ async function punchFingerprint() {
   const code = el.codeInput.value.trim();
 
   setFpOrb('scanning', 'Scanning… keep finger flat on reader');
+  resetFingerprintPreview('Attendance scan started. If this fails before capture, run Test Fingerprint Scanner.');
   showResult('busy', 'Fingerprint Scan', 'Place your finger flat on the fingerprint reader and hold still.');
 
-  const result = await api.punchFingerprint({ code });
+  const fpPayload = { code };
+  const result = await resolveCheckoutReasonAndRetry(
+    await api.punchFingerprint(fpPayload),
+    outReason => api.punchFingerprint({ ...fpPayload, meta: { outReason } })
+  );
   fpBusy = false;
 
   if (result.ok) {
     setFpOrb('success', 'Fingerprint matched!');
-    el.fpQualityFill.style.width = `${Math.min(100, Math.round((result.log?.method ? 95 : 80)))}%`;
+    el.fpQualityFill.style.width = `${Math.max(5, Math.min(100, Number(result.quality || 95)))}%`;
+    renderFingerprintPreview(result, 'Matched');
   } else {
     setFpOrb('error', result.message || 'Scan failed. Please try again.');
+    if (hasFingerprintPreview(result)) {
+      el.fpQualityFill.style.width = `${Math.max(5, Math.min(100, Number(result.quality || 60)))}%`;
+      renderFingerprintPreview(result, 'Not matched');
+    } else {
+      renderFingerprintPreviewError(result.message || 'Attendance scan did not reach scanner capture.');
+    }
   }
   handlePunchResult(result);
 }
@@ -404,6 +862,7 @@ async function testFingerprintScanner() {
   if (fpBusy) return;
   fpBusy = true;
   setFpOrb('scanning', 'Testing scanner... place any finger on the reader');
+  resetFingerprintPreview('Waiting for scanner capture...');
   showResult('busy', 'Scanner Test', 'Place any finger on the fingerprint reader. This will not mark attendance.');
 
   const result = await api.testFingerprintScanner();
@@ -414,12 +873,14 @@ async function testFingerprintScanner() {
     const quality = Number(result.quality || 0);
     setFpOrb('success', `Scanner OK (${quality}% quality)`);
     el.fpQualityFill.style.width = `${Math.max(5, Math.min(100, quality || 80))}%`;
+    renderFingerprintPreview(result);
     showResult('ok', 'Scanner Working', deviceName, `${quality || '--'}%`, [
       result.provider || '',
       result.templateLength ? `${result.templateLength} chars captured` : '',
     ].filter(Boolean));
   } else {
     setFpOrb('error', result.message || 'Scanner test failed.');
+    renderFingerprintPreviewError(result.message || 'Could not capture from fingerprint reader.');
     showResult('err', 'Scanner Test Failed', result.message || 'Could not capture from fingerprint reader.');
   }
   scheduleReset();
@@ -550,7 +1011,15 @@ function resetResultToIdle() {
   clearResultEmployee();
   el.resultState.textContent = 'TERMINAL READY';
   el.resultName.textContent = 'Attendance Kiosk Online';
-  el.resultDetail.textContent = 'Select a punch method, then enter employee code or scan fingerprint.';
+  if (activeMode === MODE.CAM) {
+    el.resultDetail.innerHTML = [
+      '<span class="guide-line"><b>1.</b> Keep face inside the oval marker.</span>',
+      '<span class="guide-line"><b>2.</b> Look straight and hold still.</span>',
+      '<span class="guide-line"><b>3.</b> Tap Capture & Punch.</span>',
+    ].join('');
+  } else {
+    el.resultDetail.textContent = 'Select a punch method, then enter employee code or scan fingerprint.';
+  }
   el.resultTime.textContent = '';
   el.resultMeta.innerHTML = '';
   el.resultCountdown.classList.add('hidden');
@@ -939,10 +1408,13 @@ function bindEvents() {
   });
   el.stTestScanner.addEventListener('click', async () => {
     el.stTestScanner.textContent = 'Place Finger...';
+    resetFingerprintPreview('Waiting for scanner capture...');
     const result = await api.testFingerprintScanner();
     await refreshStats();
     renderSettingsEvents();
     el.stTestScanner.textContent = result.ok ? 'Scanner OK' : 'Scanner Failed';
+    if (result.ok) renderFingerprintPreview(result);
+    else renderFingerprintPreviewError(result.message || 'Could not capture from fingerprint reader.');
     showResult(
       result.ok ? 'ok' : 'err',
       result.ok ? 'Scanner Working' : 'Scanner Test Failed',
@@ -1042,6 +1514,7 @@ async function boot() {
     refreshTodayFeed();
     renderDirectory('');
     renderEventLog();
+    resetFingerprintPreview();
     setMode(MODE.CODE);
 
     // Kick off initial sync

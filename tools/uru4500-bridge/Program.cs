@@ -255,7 +255,8 @@ namespace Uru4500Bridge
                         "\",\"quality\":" + captured.Quality +
                         ",\"device\":" + captured.DeviceJson +
                         ",\"template\":\"" + Json(captured.Template) +
-                        "\",\"sample\":\"" + Json(captured.Template) + "\"}";
+                        "\",\"sample\":\"" + Json(captured.Template) + "\"" +
+                        PreviewJson(captured) + "}";
                 }
                 catch (Exception ex)
                 {
@@ -323,6 +324,9 @@ namespace Uru4500Bridge
             public string DeviceJson;
             public string Provider;
             public object SecuGenManager;
+            public string ImageBase64;
+            public int ImageWidth;
+            public int ImageHeight;
         }
 
         private static string IdentifyJson(string requestJson)
@@ -403,7 +407,8 @@ namespace Uru4500Bridge
                         ",\"threshold\":" + threshold +
                         ",\"quality\":" + captured.Quality +
                         ",\"device\":" + captured.DeviceJson +
-                        ",\"template\":\"" + Json(captured.Template) + "\"}";
+                        ",\"template\":\"" + Json(captured.Template) + "\"" +
+                        PreviewJson(captured) + "}";
                 }
                 catch (Exception ex)
                 {
@@ -655,6 +660,9 @@ namespace Uru4500Bridge
                 SecuGenManager = manager,
                 Template = templateText,
                 Quality = Math.Max(0, Math.Min(100, quality)),
+                ImageBase64 = Convert.ToBase64String(image),
+                ImageWidth = width,
+                ImageHeight = height,
                 DeviceJson = "{\"sn\":\"" + Json(serial) + "\",\"provider\":\"secugen\",\"type\":\"SecuGen Hamster Pro (HUPx)\",\"name\":\"SecuGen Corporation Hamster Pro (HUPx)\"}"
             };
         }
@@ -746,8 +754,22 @@ namespace Uru4500Bridge
                 SecuGenManager = manager,
                 Template = "SGFDX:" + Convert.ToBase64String(template),
                 Quality = Math.Max(0, Math.Min(100, quality)),
+                ImageBase64 = Convert.ToBase64String(image),
+                ImageWidth = width,
+                ImageHeight = height,
                 DeviceJson = "{\"sn\":\"" + Json(serial) + "\",\"provider\":\"secugen\",\"type\":\"SecuGen Hamster Pro (HUPx)\",\"name\":\"SecuGen Corporation Hamster Pro (HUPx)\"}"
             };
+        }
+
+        private static string PreviewJson(CapturedFmd captured)
+        {
+            if (captured == null || string.IsNullOrEmpty(captured.ImageBase64) || captured.ImageWidth <= 0 || captured.ImageHeight <= 0)
+            {
+                return "";
+            }
+            return ",\"imageBase64\":\"" + Json(captured.ImageBase64) +
+                "\",\"imageWidth\":" + captured.ImageWidth +
+                ",\"imageHeight\":" + captured.ImageHeight;
         }
 
         private static int SecuGenNativeMatchScore(IntPtr manager, string capturedTemplate, string enrolledTemplate)

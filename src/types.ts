@@ -98,6 +98,12 @@ export interface Employee {
   fbrEnabled?: boolean;
   maritalStatus?: 'Single' | 'Married' | 'Divorced' | 'Widowed';
   fingerprintTemplates?: string[]; // base64 FMD templates from Digital Persona URU 4500
+  faceDescriptors?: {
+    version: 1 | 2;
+    vector: number[];
+    capturedAt: string;
+    source?: string;
+  }[]; // compact camera descriptors for kiosk face recognition
 }
 
 // Attendance Logs
@@ -107,6 +113,7 @@ export interface AttendanceLog {
   date: string; // YYYY-MM-DD
   punchIn?: string; // HH:MM:SS
   punchOut?: string; // HH:MM:SS
+  outReason?: string;
   method: 'Biometric' | 'Camera' | 'Mobile GPS' | 'RFID' | 'Manual' | 'Web Punch';
   status: 'Present' | 'Late' | 'Half Day' | 'Absent' | 'On Leave' | 'Holiday';
   overtimeMinutes: number;

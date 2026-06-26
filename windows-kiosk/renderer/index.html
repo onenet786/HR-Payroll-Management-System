@@ -146,6 +146,14 @@
           <div class="fp-quality-bar" id="fpQualityBar">
             <div class="fp-quality-fill" id="fpQualityFill"></div>
           </div>
+          <div class="fp-preview-card" id="fpPreviewCard">
+            <div class="fp-preview-head">
+              <span>Scanner Preview</span>
+              <span id="fpPreviewStatus">No scan yet</span>
+            </div>
+            <canvas id="fpPreviewCanvas" width="132" height="96"></canvas>
+            <div class="fp-preview-meta" id="fpPreviewMeta">Run Test Fingerprint Scanner.</div>
+          </div>
         </div>
 
         <!-- Numeric Keypad -->
@@ -161,7 +169,7 @@
           <button class="key" data-val="9">9</button>
           <button class="key key-fn" data-val="CLR">CLR</button>
           <button class="key" data-val="0">0</button>
-          <button class="key key-fn" data-val="BSP">
+          <button class="key key-fn" data-val="BSP" aria-label="Backspace" title="Backspace">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"/><line x1="18" y1="9" x2="12" y2="15"/><line x1="12" y1="9" x2="18" y2="15"/></svg>
           </button>
         </div>
@@ -186,17 +194,13 @@
       </aside>
 
       <!-- CENTER: RESULT / CAMERA -->
-      <section class="center-panel">
+      <section class="center-panel" id="centerPanel">
 
         <!-- Camera Feed -->
         <div class="camera-view hidden" id="cameraView">
-          <video id="webcamEl" autoplay muted playsinline></video>
+          <video id="webcamEl" autoplay muted></video>
           <img id="ipcamEl" alt="IP Camera" />
-          <canvas id="snapCanvas" width="1280" height="720" style="display:none"></canvas>
-          <div class="cam-corners">
-            <span class="cc tl"></span><span class="cc tr"></span>
-            <span class="cc bl"></span><span class="cc br"></span>
-          </div>
+          <canvas id="snapCanvas" class="snap-canvas" width="1280" height="720"></canvas>
           <div class="cam-hud">
             <div class="cam-source-badge" id="camSourceBadge">Webcam</div>
             <div class="cam-face-guide"></div>
@@ -224,7 +228,7 @@
             </div>
           </div>
           <div class="result-name" id="resultName">Attendance Kiosk Online</div>
-          <div class="result-detail" id="resultDetail">Select a punch method from the tabs above, then enter your employee code or scan fingerprint.</div>
+          <div class="result-detail" id="resultDetail">Select a punch method, then follow the on-screen verification steps.</div>
           <div class="result-time" id="resultTime"></div>
           <div class="result-meta" id="resultMeta"></div>
           <div class="result-countdown hidden" id="resultCountdown">
@@ -275,7 +279,7 @@
     <div class="dialog" id="settingsDialog">
       <div class="dialog-header">
         <h2 class="dialog-title">Kiosk Settings</h2>
-        <button class="dialog-close" id="settingsClose">
+        <button class="dialog-close" id="settingsClose" aria-label="Close settings" title="Close settings">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>

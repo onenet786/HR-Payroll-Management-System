@@ -14,11 +14,83 @@ import { DeviceEmulator } from './components/DeviceEmulator';
 import { MobileApp } from './components/MobileApp';
 import { db, isFirebaseConfigured } from './firebase';
 import {
-  collection, doc, setDoc, updateDoc, onSnapshot
+  collection, deleteDoc, doc, setDoc, updateDoc, onSnapshot
 } from 'firebase/firestore';
+
+type BiometricTemplateRecord = {
+  id: string;
+  employeeId?: string;
+  employeeCode?: string;
+  fullName?: string;
+  fingerprintTemplates?: string[];
+};
+
+export type FirestoreSyncStatus = {
+  state: 'local' | 'syncing' | 'synced' | 'warning';
+  message: string;
+};
 
 export default function App() {
   const cleanData = <T,>(obj: T): T => JSON.parse(JSON.stringify(obj));
+
+  const normalizeFingerprintTemplate = (template: unknown): string => {
+    if (!template) return '';
+    if (typeof template === 'string') return template.trim();
+    if (typeof template !== 'object') return '';
+    const record = template as Record<string, unknown>;
+    return String(
+      record.template ||
+      record.sample ||
+      record.data ||
+      record.fmd ||
+      record.value ||
+      record.base64 ||
+      ''
+    ).trim();
+  };
+
+  const getFingerprintTemplates = (record: unknown): string[] => {
+    const source =
+      (record as any)?.fingerprintTemplates ||
+      (record as any)?.fingerprints ||
+      (record as any)?.biometricTemplates ||
+      (record as any)?.biometrics?.fingerprintTemplates ||
+      (record as any)?.biometric?.fingerprintTemplates ||
+      [];
+    const list = Array.isArray(source) ? source : [source];
+    return list.map(normalizeFingerprintTemplate).filter(Boolean);
+  };
+
+  const mergeEmployeeFingerprintTemplates = (
+    employeeList: Employee[],
+    templateRecords: BiometricTemplateRecord[]
+  ): Employee[] => {
+    if (!templateRecords.length) {
+      return employeeList.map(emp => ({
+        ...emp,
+        fingerprintTemplates: getFingerprintTemplates(emp),
+      }));
+    }
+
+    const byEmployeeId = new Map<string, BiometricTemplateRecord>();
+    const byEmployeeCode = new Map<string, BiometricTemplateRecord>();
+    for (const record of templateRecords) {
+      const templates = getFingerprintTemplates(record);
+      if (!templates.length) continue;
+      const normalized = { ...record, fingerprintTemplates: templates };
+      if (record.employeeId || record.id) byEmployeeId.set(String(record.employeeId || record.id), normalized);
+      if (record.employeeCode) byEmployeeCode.set(String(record.employeeCode).toLowerCase(), normalized);
+    }
+
+    return employeeList.map(emp => {
+      const existingTemplates = getFingerprintTemplates(emp);
+      if (existingTemplates.length) return { ...emp, fingerprintTemplates: existingTemplates };
+      const match =
+        byEmployeeId.get(String(emp.id)) ||
+        byEmployeeCode.get(String(emp.employeeCode || '').toLowerCase());
+      return match ? { ...emp, fingerprintTemplates: getFingerprintTemplates(match) } : emp;
+    });
+  };
 
   const emptyStatConfig: StatutoryConfig = {
     id: 'stat-config',
@@ -53,6 +125,7 @@ export default function App() {
 
   // Application Data States
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [biometricTemplates, setBiometricTemplates] = useState<BiometricTemplateRecord[]>(() => getInitialValue('hr_biometric_templates', []));
   const [attendances, setAttendances] = useState<AttendanceLog[]>([]);
   const [leaves, setLeaves] = useState<LeaveRequest[]>([]);
   const [statConfig, setStatConfig] = useState<StatutoryConfig>(emptyStatConfig);
@@ -76,6 +149,11 @@ export default function App() {
   const [users, setUsers] = useState<UserAccount[]>(() => getInitialValue('hr_users', []));
   const [rolesLoaded, setRolesLoaded] = useState(() => !isFirebaseConfigured());
   const [usersLoaded, setUsersLoaded] = useState(() => !isFirebaseConfigured());
+  const [firestoreSyncStatus, setFirestoreSyncStatus] = useState<FirestoreSyncStatus>(() =>
+    isFirebaseConfigured()
+      ? { state: 'syncing', message: 'Loading server data...' }
+      : { state: 'local', message: 'Firebase is not configured.' }
+  );
   const [currentUserAccount, setCurrentUserAccount] = useState<UserAccount>(() => {
     const storedCurrent = getInitialValue<UserAccount | null>('hr_current_user', null);
     const storedLoggedIn = getInitialValue<UserAccount | null>('hr_logged_in_user', null);
@@ -152,6 +230,47 @@ export default function App() {
     if (!isFirebaseConfigured()) return;
 
     const unsubscribes: (() => void)[] = [];
+    const requiredSnapshots = new Set([
+      'employees',
+      'biometricTemplates',
+      'attendances',
+      'leaves',
+      'branches',
+      'departments',
+      'designations',
+      'taxSlabs',
+      'roles',
+      'holidays',
+      'loanAdvances',
+      'salaryRevisions',
+      'performanceReviews',
+      'companyAssets',
+      'jobPostings',
+      'jobApplications',
+      'gratuitySettlements',
+      'notifications',
+      'users',
+      'payrollRuns',
+      'statConfig',
+    ]);
+    const loadedSnapshots = new Set<string>();
+
+    const markSnapshotLoaded = (collectionName: string) => {
+      loadedSnapshots.add(collectionName);
+      if (loadedSnapshots.size >= requiredSnapshots.size) {
+        setFirestoreSyncStatus({ state: 'synced', message: 'Firestore synced.' });
+      } else {
+        setFirestoreSyncStatus({
+          state: 'syncing',
+          message: `Loading server data (${loadedSnapshots.size}/${requiredSnapshots.size})...`,
+        });
+      }
+    };
+
+    const markSnapshotWarning = (collectionName: string, err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
+      setFirestoreSyncStatus({ state: 'warning', message: `${collectionName} sync failed: ${message}` });
+    };
 
     const registerCollectionListener = <T extends { id: string }>(
       collectionName: string,
@@ -169,16 +288,20 @@ export default function App() {
           stateSetter(fetched);
           localStorage.setItem(storageKey, JSON.stringify(fetched));
           onLoaded?.();
+          markSnapshotLoaded(collectionName);
         }, (err) => {
+          markSnapshotWarning(collectionName, err);
           console.warn(`Firestore listener failed for ${collectionName}:`, err);
         });
         unsubscribes.push(unsub);
       } catch (err) {
+        markSnapshotWarning(collectionName, err);
         console.warn(`Firestore subscription deferred for ${collectionName}:`, err);
       }
     };
 
     registerCollectionListener('employees', setEmployees, 'hr_employees');
+    registerCollectionListener('biometricTemplates', setBiometricTemplates, 'hr_biometric_templates');
     registerCollectionListener('attendances', setAttendances, 'hr_attendances');
     registerCollectionListener('leaves', setLeaves, 'hr_leaves');
     registerCollectionListener('branches', setBranches, 'hr_branches');
@@ -208,13 +331,14 @@ export default function App() {
         setUsers(fetched);
         localStorage.setItem('hr_users', JSON.stringify(fetched));
 
-        if (fetched.length === 0) {
-          setLoggedInUser(null);
-          setCurrentUserAccount(emptyUserAccount);
-          localStorage.removeItem('hr_logged_in_user');
-          localStorage.removeItem('hr_current_user');
-          return;
-        }
+          if (fetched.length === 0) {
+            setLoggedInUser(null);
+            setCurrentUserAccount(emptyUserAccount);
+            localStorage.removeItem('hr_logged_in_user');
+            localStorage.removeItem('hr_current_user');
+            markSnapshotLoaded('users');
+            return;
+          }
 
         const storedCurrentUser = localStorage.getItem('hr_current_user');
         if (storedCurrentUser) {
@@ -225,13 +349,16 @@ export default function App() {
             localStorage.setItem('hr_current_user', JSON.stringify(updatedCurrent));
           }
         }
+        markSnapshotLoaded('users');
       }, (err) => {
         setUsersLoaded(true);
+        markSnapshotWarning('users', err);
         console.warn('Firestore users listener failed:', err);
       });
       unsubscribes.push(unsubUsers);
     } catch (err) {
       setUsersLoaded(true);
+      markSnapshotWarning('users', err);
       console.warn('Firestore users subscription deferred:', err);
     }
 
@@ -250,11 +377,14 @@ export default function App() {
           setStatConfig(fetchedConfig);
           localStorage.setItem('hr_stat_config', JSON.stringify(fetchedConfig));
         }
+        markSnapshotLoaded('statConfig');
       }, (err) => {
+        markSnapshotWarning('statConfig', err);
         console.warn('Firestore statConfig listener failed:', err);
       });
       unsubscribes.push(unsubConfig);
     } catch (err) {
+      markSnapshotWarning('statConfig', err);
       console.warn('Firestore statConfig subscription deferred:', err);
     }
 
@@ -276,23 +406,46 @@ export default function App() {
   };
 
   const handleUpdateEmployee = async (updatedEmp: Employee) => {
+    const hasExplicitFingerprintTemplates = Object.prototype.hasOwnProperty.call(updatedEmp, 'fingerprintTemplates');
+    const employeeWithKnownTemplates = hasExplicitFingerprintTemplates
+      ? updatedEmp
+      : mergeEmployeeFingerprintTemplates([updatedEmp], biometricTemplates)[0];
+    const fingerprintTemplates = getFingerprintTemplates(employeeWithKnownTemplates);
+    const employeeForSave: Employee = { ...updatedEmp, fingerprintTemplates };
+
     setEmployees(prev => {
-      const updated = prev.map(e => e.id === updatedEmp.id ? updatedEmp : e);
+      const updated = prev.map(e => e.id === updatedEmp.id ? employeeForSave : e);
       localStorage.setItem('hr_employees', JSON.stringify(updated));
       return updated;
     });
     try {
-      await setDoc(doc(db, 'employees', updatedEmp.id), cleanData(updatedEmp));
-      if ((updatedEmp.fingerprintTemplates?.length || 0) > 0) {
-        await setDoc(doc(db, 'biometricTemplates', updatedEmp.id), cleanData({
-          id: updatedEmp.id,
-          employeeId: updatedEmp.id,
-          employeeCode: updatedEmp.employeeCode,
-          fullName: updatedEmp.fullName,
-          fingerprintTemplates: updatedEmp.fingerprintTemplates,
+      if (fingerprintTemplates.length > 0) {
+        const biometricRecord = cleanData({
+          id: employeeForSave.id,
+          employeeId: employeeForSave.id,
+          employeeCode: employeeForSave.employeeCode,
+          fullName: employeeForSave.fullName,
+          fingerprintTemplates,
           updatedAt: new Date().toISOString(),
-        }));
+        });
+        await setDoc(doc(db, 'biometricTemplates', employeeForSave.id), biometricRecord, { merge: true });
+        setBiometricTemplates(prev => {
+          const updated = [
+            biometricRecord,
+            ...prev.filter(item => item.id !== employeeForSave.id && item.employeeId !== employeeForSave.id),
+          ];
+          localStorage.setItem('hr_biometric_templates', JSON.stringify(updated));
+          return updated;
+        });
+      } else if (hasExplicitFingerprintTemplates) {
+        await deleteDoc(doc(db, 'biometricTemplates', employeeForSave.id));
+        setBiometricTemplates(prev => {
+          const updated = prev.filter(item => item.id !== employeeForSave.id && item.employeeId !== employeeForSave.id);
+          localStorage.setItem('hr_biometric_templates', JSON.stringify(updated));
+          return updated;
+        });
       }
+      await setDoc(doc(db, 'employees', employeeForSave.id), cleanData(employeeForSave), { merge: true });
     } catch (err) {
       console.warn('Firebase employee update delayed:', err);
       throw err;
@@ -1004,6 +1157,7 @@ export default function App() {
   // ─── Mobile Platform Detection ────────────────────────────────────────────
   const isMobilePlatform = (window as any).Capacitor || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
   const accessControlLoaded = !isFirebaseConfigured() || (rolesLoaded && usersLoaded);
+  const employeesWithFingerprints = mergeEmployeeFingerprintTemplates(employees, biometricTemplates);
 
   if (isMobilePlatform) {
     if (!loggedInUser) {
@@ -1011,7 +1165,7 @@ export default function App() {
     }
     return (
       <MobileApp
-        employees={employees}
+        employees={employeesWithFingerprints}
         attendances={attendances}
         leaves={leaves}
         onApplyLeave={handleApplyLeave}
@@ -1030,7 +1184,7 @@ export default function App() {
 
   return (
     <DeviceEmulator
-      employees={employees}
+      employees={employeesWithFingerprints}
       attendances={attendances}
       leaves={leaves}
       statConfig={statConfig}
@@ -1095,6 +1249,7 @@ export default function App() {
       onMarkNotificationRead={handleMarkNotificationRead}
       onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
       onDeleteNotification={handleDeleteNotification}
+      firestoreSyncStatus={firestoreSyncStatus}
     />
   );
 }

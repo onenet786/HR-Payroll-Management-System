@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('kioskApi', {
   saveSettings: settings => ipcRenderer.invoke('kiosk:save-settings', settings),
   sync: () => ipcRenderer.invoke('kiosk:sync'),
   punchByCode: payload => ipcRenderer.invoke('kiosk:punch-by-code', payload),
+  punchCamera: payload => ipcRenderer.invoke('kiosk:punch-camera', payload),
   punchFingerprint: payload => ipcRenderer.invoke('kiosk:punch-fingerprint', payload),
   testFingerprintScanner: () => ipcRenderer.invoke('kiosk:test-fingerprint-scanner'),
   saveEvidence: payload => ipcRenderer.invoke('kiosk:save-evidence', payload),

@@ -18,11 +18,12 @@
     "windows:run": "npm run build && electron .",
     "windows:build": "npm run build && electron-builder --win",
     "kiosk:run": "electron windows-kiosk/main.cjs",
-    "kiosk:build": "electron-builder --config windows-kiosk/electron-builder.json --win"
+    "kiosk:build": "node scripts/electron-builder-retry.cjs --config windows-kiosk/electron-builder.json --win"
   },
   "build": {
     "appId": "com.binishaq.hrsuite",
     "productName": "Bin Ishaq HR Suite",
+    "icon": "assets/icon.png",
     "directories": {
       "output": "dist-windows"
     },
@@ -32,6 +33,10 @@
       "package.json"
     ],
     "extraResources": [
+      {
+        "from": "assets/icon.png",
+        "to": "icon.png"
+      },
       {
         "from": "tools/uru4500-bridge/bin",
         "to": "uru4500-bridge",
@@ -47,6 +52,7 @@
       }
     ],
     "win": {
+      "icon": "assets/icon.png",
       "target": [
         {
           "target": "nsis",

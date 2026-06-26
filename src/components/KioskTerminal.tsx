@@ -10,6 +10,7 @@ import {
 import { Employee, AttendanceLog } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 import { captureBiometric } from '../utils/uru4500Bridge';
+import { assessFaceFrame, createFaceDescriptorFromVideo, findBestFaceMatch, hasFaceEnrollment } from '../utils/faceRecognition';
 
 interface KioskTerminalProps {
   employees: Employee[];
@@ -193,25 +194,35 @@ export function KioskTerminal({
   };
 
   // 3. Submit Face Scan
-  const handleFaceScan = () => {
+  const handleFaceScan = async () => {
     if (status === 'scanning') return;
 
     setStatus('scanning');
-    setMessage('Align your face inside the framing box. Scanning...');
+    setMessage('Align your face inside the framing box. Comparing enrolled camera profile...');
 
-    setTimeout(() => {
-      // Pick a random employee
-      const randomIndex = Math.floor(Math.random() * employees.length);
-      const emp = employees[randomIndex];
-
-      if (emp) {
-        triggerPunch(emp, 'Biometric'); // facial recognition biometric register
-      } else {
-        setStatus('error');
-        setMessage('Facial match profile not identified. Retry under better lighting.');
-        setTimeout(() => setStatus('idle'), 3000);
+    try {
+      if (!videoRef.current || !streamActive) {
+        throw new Error('Camera is not ready. Allow webcam access and try again.');
       }
-    }, 2200);
+      const enrolledEmployees = employees.filter(hasFaceEnrollment);
+      if (enrolledEmployees.length === 0) {
+        throw new Error('No camera face profiles are enrolled yet. Enroll employees from HR biometric setup first.');
+      }
+      await new Promise(resolve => setTimeout(resolve, 650));
+      const frameQuality = assessFaceFrame(videoRef.current);
+      if (!frameQuality.ok) throw new Error(frameQuality.message);
+      const probe = createFaceDescriptorFromVideo(videoRef.current, 'kiosk-webcam');
+      const match = findBestFaceMatch(enrolledEmployees, probe);
+      if (!match) {
+        throw new Error('Face not recognized. Step closer, improve lighting, or re-enroll the camera profile.');
+      }
+      setMessage(`Face match confidence ${(100 - match.score * 100).toFixed(1)}%.`);
+      triggerPunch(match.employee, 'Camera');
+    } catch (error) {
+      setStatus('error');
+      setMessage(error instanceof Error ? error.message : String(error));
+      setTimeout(() => setStatus('idle'), 3500);
+    }
   };
 
   return (
@@ -435,10 +446,11 @@ export function KioskTerminal({
               initial={{ opacity: 0 }} 
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="w-full flex flex-col items-center justify-center h-full relative"
+              className="w-full flex flex-col lg:flex-row items-center justify-center gap-5 h-full relative"
             >
               {/* Webcam Frame Container */}
-              <div className="relative w-72 h-52 bg-slate-950 border-2 border-slate-800 rounded-xl overflow-hidden flex items-center justify-center shadow-lg">
+              <div className="flex w-full lg:flex-1 items-center justify-center">
+              <div className="relative w-64 h-64 bg-slate-950 border-2 border-slate-800 rounded-xl overflow-hidden flex items-center justify-center shadow-lg">
                 
                 {hasWebcam === true && streamActive ? (
                   <video 
@@ -451,7 +463,7 @@ export function KioskTerminal({
                   <div className="flex flex-col items-center text-center p-4 text-slate-500 space-y-2">
                     <VideoOff className="w-10 h-10 text-slate-700 animate-pulse" />
                     <span className="text-[11px] leading-relaxed">
-                      Webcam access denied or not found.<br/>Simulating smart computer vision scan.
+                      Webcam access denied or not found.<br/>Camera verification unavailable.
                     </span>
                   </div>
                 ) : (
@@ -461,32 +473,39 @@ export function KioskTerminal({
                   </div>
                 )}
 
-                {/* Laser scan line overlay when active/scanning */}
-                <div className="absolute inset-x-0 h-0.5 bg-emerald-500 shadow-md shadow-emerald-400/50 animate-bounce top-0 pointer-events-none z-10"></div>
-                
-                {/* Face bounds target frame */}
-                <div className="absolute w-40 h-40 border border-dashed border-emerald-500/40 rounded-3xl top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 flex items-center justify-center">
-                  <div className="w-4 h-4 border-t-2 border-l-2 border-emerald-400 absolute top-0 left-0 rounded-tl-lg"></div>
-                  <div className="w-4 h-4 border-t-2 border-r-2 border-emerald-400 absolute top-0 right-0 rounded-tr-lg"></div>
-                  <div className="w-4 h-4 border-b-2 border-l-2 border-emerald-400 absolute bottom-0 left-0 rounded-bl-lg"></div>
-                  <div className="w-4 h-4 border-b-2 border-r-2 border-emerald-400 absolute bottom-0 right-0 rounded-br-lg"></div>
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <div className="relative w-40 h-52 rounded-[50%] border-2 border-emerald-400 shadow-[0_0_0_999px_rgba(2,6,23,0.38)]">
+                    <div className="absolute -top-1 left-1/2 h-2 w-10 -translate-x-1/2 rounded-full bg-emerald-300"></div>
+                    <div className="absolute top-16 left-1/2 h-px w-24 -translate-x-1/2 bg-emerald-300/80"></div>
+                    <div className="absolute bottom-10 left-1/2 h-px w-14 -translate-x-1/2 bg-emerald-300/70"></div>
+                  </div>
                 </div>
 
                 <div className="absolute bottom-2 left-2 bg-slate-900/80 px-2 py-0.5 text-[8px] font-mono text-emerald-400 rounded border border-emerald-900/50">
                   CV_MODEL: v4.1 (FACE_DETECT)
                 </div>
               </div>
+              </div>
 
-              <div className="mt-4 flex flex-col items-center space-y-2 w-full max-w-xs">
+              <div className="flex flex-col justify-center space-y-3 w-full lg:w-72 text-left">
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4 space-y-3">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-400">TERMINAL READY</p>
+                  <h4 className="text-sm font-black text-white">Attendance Kiosk Online</h4>
+                  <div className="space-y-1.5 text-[11px] leading-relaxed text-slate-400">
+                    <p><span className="text-emerald-400 font-bold">1.</span> Keep face inside the oval marker.</p>
+                    <p><span className="text-emerald-400 font-bold">2.</span> Look straight, hold still, avoid glare.</p>
+                    <p><span className="text-emerald-400 font-bold">3.</span> Press face match to mark attendance.</p>
+                  </div>
+                </div>
                 <button 
                   onClick={handleFaceScan}
                   className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs uppercase px-6 py-2.5 rounded-lg w-full flex items-center justify-center space-x-1.5 shadow"
                 >
                   <Scan className="w-4 h-4" />
-                  <span>SIMULATE FACE MATCH</span>
+                  <span>FACE MATCH &amp; PUNCH</span>
                 </button>
                 <p className="text-[10px] text-slate-500 italic text-center">
-                  * Captures face vectors, matches records instantly and registers punch.
+                  * Matches enrolled camera profiles and registers attendance instantly.
                 </p>
               </div>
             </motion.div>

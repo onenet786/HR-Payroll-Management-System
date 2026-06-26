@@ -27,6 +27,7 @@ import { NotificationCenter } from './NotificationCenter';
 import { BiometricDeviceModule } from './BiometricDeviceModule';
 import { FirestoreMaintenanceModule } from './FirestoreMaintenanceModule';
 import { motion, AnimatePresence } from 'motion/react';
+import type { FirestoreSyncStatus } from '../App';
 
 const PAKISTAN_BANKS = [
   { name: 'Habib Bank Limited (HBL)', code: 'HABB' },
@@ -124,6 +125,7 @@ interface WebPortalProps {
   onMarkAllNotificationsRead: () => void;
   onDeleteNotification: (id: string) => void;
   onSimulatePunch: (employeeId: string, punchIn: string, punchOut: string, method: string, lat?: number, lon?: number) => void;
+  firestoreSyncStatus: FirestoreSyncStatus;
 }
 
 export function WebPortal({
@@ -190,7 +192,8 @@ export function WebPortal({
   onMarkNotificationRead,
   onMarkAllNotificationsRead,
   onDeleteNotification,
-  onSimulatePunch
+  onSimulatePunch,
+  firestoreSyncStatus
 }: WebPortalProps) {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'employees' | 'attendance' | 'leaves' | 'payroll' | 'settings' | 'access' | 'maintenance' | 'holidays' | 'loans' | 'revisions' | 'performance' | 'assets' | 'recruitment' | 'gratuity' | 'notifications' | 'biometric'>('dashboard');
 
@@ -200,6 +203,22 @@ export function WebPortal({
   const currentUserRole = roles.find(r => r.id === currentUserAccount.roleId);
   const userPermissions = currentUserRole ? currentUserRole.permissions : [];
   const isRoleResolving = !accessControlLoaded || Boolean(currentUserAccount.roleId && !currentUserRole && roles.length === 0);
+  const syncBadgeClass =
+    firestoreSyncStatus.state === 'synced'
+      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+      : firestoreSyncStatus.state === 'warning'
+        ? 'bg-amber-50 text-amber-700 border-amber-200'
+        : firestoreSyncStatus.state === 'syncing'
+          ? 'bg-blue-50 text-blue-700 border-blue-200'
+          : 'bg-slate-100 text-slate-600 border-slate-200';
+  const syncLabel =
+    firestoreSyncStatus.state === 'synced'
+      ? 'Server Synced'
+      : firestoreSyncStatus.state === 'warning'
+        ? 'Sync Warning'
+        : firestoreSyncStatus.state === 'syncing'
+          ? 'Syncing Server'
+          : 'Local Mode';
 
   const hasPermission = (tab: string) => {
     if (!accessControlLoaded) return false;
@@ -886,10 +905,10 @@ export function WebPortal({
           </div>
 
           <div className="text-right">
-            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-              ● Server Connected
+            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border ${syncBadgeClass}`}>
+              ● {syncLabel}
             </span>
-            <div className="text-[10px] text-slate-400 font-mono mt-0.5">DB: Firestore • synced</div>
+            <div className="text-[10px] text-slate-400 font-mono mt-0.5">{firestoreSyncStatus.message}</div>
           </div>
           
           {userPermissions.includes('manage_employees') && (
@@ -1006,8 +1025,8 @@ export function WebPortal({
                 className={`w-full text-left px-3.5 py-3 rounded-lg text-sm font-medium flex items-center space-x-3 transition ${activeTab === 'biometric' ? 'bg-emerald-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
               >
                 <Fingerprint className="w-4 h-4" />
-                <span>Fingerprint Device</span>
-                <span className="ml-auto text-[10px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded-md font-bold">URU 4500 / SecuGen Hamster Pro</span>
+                <span>Biometric Enrollment</span>
+                <span className="ml-auto text-[10px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded-md font-bold">Face + Fingerprint</span>
               </button>
             )}
 

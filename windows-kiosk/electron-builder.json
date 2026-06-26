@@ -1,6 +1,7 @@
 {
   "appId": "com.binishaq.hrsuite.kiosk",
   "productName": "Bin Ishaq Attendance Kiosk",
+  "icon": "assets/icon.png",
   "extraMetadata": {
     "main": "windows-kiosk/main.cjs"
   },
@@ -12,6 +13,10 @@
     "package.json"
   ],
   "extraResources": [
+    {
+      "from": "assets/icon.png",
+      "to": "icon.png"
+    },
     {
       "from": "windows-kiosk/bridge-bin",
       "to": "uru4500-bridge",
@@ -27,6 +32,7 @@
     }
   ],
   "win": {
+    "icon": "assets/icon.png",
     "target": [
       {
         "target": "nsis",

@@ -4,19 +4,156 @@ const fs = require('fs');
 const net = require('net');
 const path = require('path');
 const https = require('https');
+const { pathToFileURL } = require('url');
 
 const bridgePort = 15896;
 let mainWindow;
+let splashWindow;
 let bridgeProcess = null;
 let autoSyncTimer = null;
 let driverWatchTimer = null;
 
+app.commandLine.appendSwitch('enable-experimental-web-platform-features');
+app.commandLine.appendSwitch('enable-features', 'FaceDetection');
+
+function getAppIconPath() {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, 'icon.png');
+  }
+  return path.join(__dirname, '..', 'assets', 'icon.png');
+}
+
+function splashHtml(title, subtitle) {
+  const iconUrl = pathToFileURL(getAppIconPath()).toString();
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      height: 100vh;
+      display: grid;
+      place-items: center;
+      font-family: "Segoe UI", Arial, sans-serif;
+      background: radial-gradient(circle at 20% 15%, #064e3b 0, #051525 44%, #020617 100%);
+      color: #ecfdf5;
+      overflow: hidden;
+    }
+    .card {
+      width: 440px;
+      min-height: 260px;
+      padding: 34px 38px;
+      border: 1px solid rgba(45, 212, 191, 0.24);
+      border-radius: 22px;
+      background: rgba(5, 21, 37, 0.86);
+      box-shadow: 0 28px 70px rgba(0, 0, 0, 0.46);
+      text-align: center;
+    }
+    img {
+      width: 82px;
+      height: 82px;
+      object-fit: contain;
+      margin-bottom: 18px;
+      filter: drop-shadow(0 14px 24px rgba(52, 211, 153, 0.22));
+    }
+    h1 {
+      margin: 0;
+      font-size: 22px;
+      letter-spacing: 0.02em;
+      font-weight: 800;
+    }
+    p {
+      margin: 8px 0 28px;
+      color: #9caec4;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .bar {
+      width: 100%;
+      height: 5px;
+      border-radius: 999px;
+      background: rgba(148, 163, 184, 0.18);
+      overflow: hidden;
+    }
+    .bar span {
+      display: block;
+      width: 42%;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, #34d399, #22d3ee);
+      animation: load 1.35s ease-in-out infinite;
+    }
+    .foot {
+      margin-top: 16px;
+      color: #64748b;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+    }
+    @keyframes load {
+      0% { transform: translateX(-110%); }
+      100% { transform: translateX(250%); }
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <img src="${iconUrl}" alt="">
+    <h1>${title}</h1>
+    <p>${subtitle}</p>
+    <div class="bar"><span></span></div>
+    <div class="foot">Please wait</div>
+  </div>
+</body>
+</html>`;
+}
+
+function createSplashWindow() {
+  if (splashWindow && !splashWindow.isDestroyed()) return;
+  splashWindow = new BrowserWindow({
+    width: 500,
+    height: 340,
+    resizable: false,
+    movable: true,
+    frame: false,
+    alwaysOnTop: true,
+    show: false,
+    icon: getAppIconPath(),
+    backgroundColor: '#051525',
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  splashWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(splashHtml('Attendance Kiosk', 'Starting terminal, devices, and sync...'))}`);
+  splashWindow.once('ready-to-show', () => {
+    if (splashWindow && !splashWindow.isDestroyed()) splashWindow.show();
+  });
+}
+
+function closeSplashWindow() {
+  if (splashWindow && !splashWindow.isDestroyed()) {
+    splashWindow.close();
+  }
+  splashWindow = null;
+}
+
 const firebaseConfig = {
   apiKey: 'AIzaSyAA7uvWdIsP9CqFGJEk5SB0FvLFF97DNk4',
+  authDomain: 'gen-lang-client-0314098400.firebaseapp.com',
   projectId: 'gen-lang-client-0314098400',
   databaseId: 'ai-studio-0ab7c3a1-e4ca-49b5-86f4-6883897b9163',
+  storageBucket: 'gen-lang-client-0314098400.firebasestorage.app',
+  messagingSenderId: '279125201448',
+  appId: '1:279125201448:web:60c148c137e9fd60a2db1d',
   portalUrl: 'https://attendance.binishaqsoft.com',
 };
+
+let firebaseSdkPromise = null;
 
 const seedEmployees = [
   { id: 'emp1', employeeCode: 'IND-KHI-001', fullName: 'Ali Raza Khan', departmentId: 'd1', designationId: 'ds1', branchId: 'b1', status: 'Active', fingerprintTemplates: [] },
@@ -30,6 +167,30 @@ const seedEmployees = [
 const seedBranches = { b1: 'Karachi HQ Office', b2: 'Lahore Distribution Hub' };
 const seedDepartments = { d1: 'Information Technology', d2: 'Human Resources', d3: 'Warehouse & Logistics', d4: 'Finance & Accounts' };
 const seedDesignations = { ds1: 'Senior Developer', ds2: 'HR Manager', ds3: 'Logistics Coordinator', ds4: 'Warehouse Supervisor', ds5: 'Warehouse Staff' };
+const checkoutReasons = [
+  'End of Shift',
+  'Lunch Break',
+  'Tea Break',
+  'Official Duty',
+  'Client Meeting',
+  'Site Visit',
+  'Personal Work',
+  'Medical Appointment',
+  'Emergency Leave',
+  'Half-Day Leave',
+  'Sick Leave',
+  'Prayer',
+];
+
+function normalizeCheckoutReason(value) {
+  const text = String(value || '').trim();
+  return checkoutReasons.find(reason => reason.toLowerCase() === text.toLowerCase()) || '';
+}
+
+function timeToSeconds(value) {
+  const [h, m, s] = String(value || '00:00:00').split(':').map(Number);
+  return (Number(h) || 0) * 3600 + (Number(m) || 0) * 60 + (Number(s) || 0);
+}
 
 function kioskStorePath() {
   return path.join(app.getPath('userData'), 'attendance-kiosk-store.json');
@@ -45,7 +206,7 @@ function defaultStore() {
       requireCodeWithCamera: true,
       autoFullscreen: true,
     },
-    employees: seedEmployees,
+    employees: [],
     attendances: [],
     branches: [],
     departments: [],
@@ -59,12 +220,26 @@ function defaultStore() {
   };
 }
 
+function isDefaultSeedEmployeeList(employees) {
+  if (!Array.isArray(employees) || employees.length === 0) return false;
+  return employees.every(employee =>
+    seedEmployees.some(seed =>
+      seed.id === employee.id &&
+      seed.employeeCode === employee.employeeCode &&
+      seed.fullName === employee.fullName
+    )
+  );
+}
+
 function readStore() {
   try {
     const file = kioskStorePath();
     if (fs.existsSync(file)) {
       const loaded = JSON.parse(fs.readFileSync(file, 'utf8'));
-      return { ...defaultStore(), ...loaded, terminal: { ...defaultStore().terminal, ...(loaded.terminal || {}) } };
+      const defaults = defaultStore();
+      const store = { ...defaults, ...loaded, terminal: { ...defaults.terminal, ...(loaded.terminal || {}) } };
+      if (isDefaultSeedEmployeeList(store.employees)) store.employees = [];
+      return store;
     }
   } catch (error) {
     console.warn('Could not read kiosk store:', error);
@@ -163,6 +338,7 @@ function createWindow() {
     fullscreen: !!store.terminal.autoFullscreen,
     autoHideMenuBar: true,
     title: 'Bin Ishaq Attendance Kiosk',
+    icon: getAppIconPath(),
     backgroundColor: '#020c17',
     show: false,
     webPreferences: {
@@ -170,10 +346,14 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      enableBlinkFeatures: 'FaceDetector',
     },
   });
 
-  mainWindow.once('ready-to-show', () => mainWindow.show());
+  mainWindow.once('ready-to-show', () => {
+    mainWindow.show();
+    closeSplashWindow();
+  });
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 }
 
@@ -239,7 +419,12 @@ function requestJson(method, url, body) {
       res.on('end', () => {
         const parsed = data ? JSON.parse(data) : null;
         if (res.statusCode >= 200 && res.statusCode < 300) resolve(parsed);
-        else reject(new Error(parsed?.error?.message || `HTTP ${res.statusCode}`));
+        else {
+          const error = new Error(parsed?.error?.message || `HTTP ${res.statusCode}`);
+          error.statusCode = res.statusCode;
+          error.url = url.replace(/([?&]key=)[^&]+/, '$1***');
+          reject(error);
+        }
       });
     });
     req.on('error', reject);
@@ -248,16 +433,85 @@ function requestJson(method, url, body) {
   });
 }
 
+async function getFirebaseSdkDb() {
+  if (!firebaseSdkPromise) {
+    firebaseSdkPromise = Promise.all([
+      import('firebase/app'),
+      import('firebase/firestore'),
+    ]).then(([appMod, firestoreMod]) => {
+      const appConfig = {
+        apiKey: firebaseConfig.apiKey,
+        authDomain: firebaseConfig.authDomain,
+        projectId: firebaseConfig.projectId,
+        storageBucket: firebaseConfig.storageBucket,
+        messagingSenderId: firebaseConfig.messagingSenderId,
+        appId: firebaseConfig.appId,
+      };
+      const firebaseApp = appMod.getApps().length ? appMod.getApp() : appMod.initializeApp(appConfig);
+      return {
+        db: firestoreMod.getFirestore(firebaseApp, firebaseConfig.databaseId),
+        firestoreMod,
+      };
+    });
+  }
+  return firebaseSdkPromise;
+}
+
+async function fetchFirestoreCollectionViaSdk(collectionName) {
+  const { db, firestoreMod } = await getFirebaseSdkDb();
+  const snapshot = await firestoreMod.getDocs(firestoreMod.collection(db, collectionName));
+  return snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() }));
+}
+
+async function putFirestoreDocumentViaSdk(collectionName, docId, data) {
+  const { db, firestoreMod } = await getFirebaseSdkDb();
+  await firestoreMod.setDoc(firestoreMod.doc(db, collectionName, docId), data, { merge: true });
+}
+
 async function fetchFirestoreCollection(collectionName) {
-  const result = await requestJson('GET', firestoreUrl(collectionName), null);
-  return (result.documents || []).map(doc => {
-    const id = String(doc.name || '').split('/').pop();
-    return { id, ...fromFirestoreFields(doc.fields || {}) };
-  });
+  try {
+    const result = await requestJson('GET', firestoreUrl(collectionName), null);
+    return (result.documents || []).map(doc => {
+      const id = String(doc.name || '').split('/').pop();
+      return { id, ...fromFirestoreFields(doc.fields || {}) };
+    });
+  } catch (restError) {
+    try {
+      const records = await fetchFirestoreCollectionViaSdk(collectionName);
+      addEvent('sync', `Firestore REST failed for ${collectionName}; Firebase SDK fallback succeeded`, {
+        restError: restError.message,
+        statusCode: restError.statusCode || null,
+        url: restError.url || null,
+        count: records.length,
+      });
+      return records;
+    } catch (sdkError) {
+      const error = new Error(`${restError.message}; SDK fallback: ${sdkError.message}`);
+      error.statusCode = restError.statusCode || null;
+      error.url = restError.url || null;
+      throw error;
+    }
+  }
 }
 
 async function putFirestoreDocument(collectionName, docId, data) {
-  return requestJson('PATCH', firestoreUrl(collectionName, docId), toFirestoreDocument(data));
+  try {
+    return await requestJson('PATCH', firestoreUrl(collectionName, docId), toFirestoreDocument(data));
+  } catch (restError) {
+    try {
+      await putFirestoreDocumentViaSdk(collectionName, docId, data);
+      addEvent('sync', `Firestore REST write failed for ${collectionName}/${docId}; Firebase SDK fallback succeeded`, {
+        restError: restError.message,
+        statusCode: restError.statusCode || null,
+        url: restError.url || null,
+      });
+    } catch (sdkError) {
+      const error = new Error(`${restError.message}; SDK fallback: ${sdkError.message}`);
+      error.statusCode = restError.statusCode || null;
+      error.url = restError.url || null;
+      throw error;
+    }
+  }
 }
 
 // ─── Core Sync Logic ────────────────────────────────────────────────────────
@@ -268,11 +522,9 @@ async function performSync() {
 
   try {
     const employees = await fetchFirestoreCollection('employees');
-    if (employees.length) {
-      report.changed = report.changed || JSON.stringify(store.employees || []) !== JSON.stringify(employees);
-      store.employees = employees;
-      report.employees = employees.length;
-    }
+    report.changed = report.changed || JSON.stringify(store.employees || []) !== JSON.stringify(employees);
+    store.employees = employees;
+    report.employees = employees.length;
   } catch (error) {
     report.errors.push(`employees: ${error.message}`);
   }
@@ -280,11 +532,9 @@ async function performSync() {
   for (const collectionName of ['branches', 'departments', 'designations']) {
     try {
       const records = await fetchFirestoreCollection(collectionName);
-      if (records.length) {
-        report.changed = report.changed || JSON.stringify(store[collectionName] || []) !== JSON.stringify(records);
-        store[collectionName] = records;
-        report[collectionName] = records.length;
-      }
+      report.changed = report.changed || JSON.stringify(store[collectionName] || []) !== JSON.stringify(records);
+      store[collectionName] = records;
+      report[collectionName] = records.length;
     } catch (error) {
       report.errors.push(`${collectionName}: ${error.message}`);
     }
@@ -292,12 +542,9 @@ async function performSync() {
 
   try {
     const records = await fetchFirestoreCollection('biometricTemplates');
-    if (records.length) {
-      report.changed = report.changed || JSON.stringify(store.biometricTemplates || []) !== JSON.stringify(records);
-      store.biometricTemplates = records;
-      store.employees = mergeEmployeeBiometricTemplates(store.employees || [], records);
-      report.biometricTemplates = records.length;
-    }
+    report.changed = report.changed || JSON.stringify(store.biometricTemplates || []) !== JSON.stringify(records);
+    store.biometricTemplates = records;
+    report.biometricTemplates = (store.biometricTemplates || []).length;
   } catch (error) {
     report.errors.push(`biometricTemplates: ${error.message}`);
   }
@@ -325,6 +572,7 @@ async function performSync() {
     }
   }
   store.pendingSync = remaining;
+  store.employees = mergeEmployeeBiometricTemplates(store.employees || [], store.biometricTemplates || []);
   store.lastSync = new Date().toISOString();
   store.lastSyncReport = report;
   writeStore(store);
@@ -404,6 +652,75 @@ function getFingerprintTemplates(employee) {
   return list.map(normalizeFingerprintTemplate).filter(Boolean);
 }
 
+function normalizeFaceDescriptor(value) {
+  if (!value || typeof value !== 'object') return null;
+  const vector = Array.isArray(value.vector) ? value.vector.map(Number).filter(Number.isFinite) : [];
+  if (value.version !== 2 || vector.length !== 1280) return null;
+  return {
+    version: 2,
+    vector,
+    capturedAt: value.capturedAt || '',
+    source: value.source || '',
+  };
+}
+
+function getFaceDescriptors(employee) {
+  const source =
+    employee?.faceDescriptors ||
+    employee?.faces ||
+    employee?.biometrics?.faceDescriptors ||
+    employee?.biometric?.faceDescriptors ||
+    [];
+  const list = Array.isArray(source) ? source : [source];
+  return list.map(normalizeFaceDescriptor).filter(Boolean);
+}
+
+function compareFaceDescriptors(a, b) {
+  const length = a?.vector?.length || 0;
+  if (!length || length !== (b?.vector?.length || 0)) return Number.POSITIVE_INFINITY;
+  let sum = 0;
+  for (let i = 0; i < length; i++) {
+    const delta = Number(a.vector[i]) - Number(b.vector[i]);
+    sum += delta * delta;
+  }
+  return Math.sqrt(sum / length);
+}
+
+function identifyFaceDescriptor(employees, probe, threshold = 0.20) {
+  const normalizedProbe = normalizeFaceDescriptor(probe);
+  if (!normalizedProbe) return { ok: false, message: 'Camera face descriptor was invalid. Try another capture.' };
+
+  let best = null;
+  let secondScore = Number.POSITIVE_INFINITY;
+  let secondEmployeeId = '';
+  for (const employee of employees || []) {
+    for (const descriptor of getFaceDescriptors(employee)) {
+      const score = compareFaceDescriptors(normalizedProbe, descriptor);
+      if (!Number.isFinite(score)) continue;
+      if (!best || score < best.score) {
+        if (best && best.employee.id !== employee.id) {
+          secondScore = best.score;
+          secondEmployeeId = best.employee.id;
+        }
+        best = { employee, score };
+      } else if (employee.id !== best.employee.id && score < secondScore) {
+        secondScore = score;
+        secondEmployeeId = employee.id;
+      }
+    }
+  }
+
+  if (!best) return { ok: false, message: 'No v2 camera face profiles found. Re-enroll employee faces from HR biometric setup.' };
+  if (best.score > threshold) {
+    return { ok: false, message: 'Face not recognized. Improve lighting or re-enroll the employee camera profile.', score: best.score };
+  }
+  const margin = secondScore - best.score;
+  if (secondEmployeeId && Number.isFinite(secondScore) && margin < 0.012) {
+    return { ok: false, message: 'Face match is not unique enough. Use full face, better light, or enter employee code with camera.', score: best.score, margin };
+  }
+  return { ok: true, employee: best.employee, score: best.score, margin };
+}
+
 function buildFingerprintGallery(employees) {
   return (employees || []).flatMap(employee =>
     getFingerprintTemplates(employee).map(template => ({ employeeId: employee.id, template }))
@@ -431,8 +748,7 @@ function mergeEmployeeBiometricTemplates(employees, biometricRecords) {
   });
 }
 
-function computePunch(existingLog, method, terminal, evidenceId) {
-  const at = nowTime();
+function computePunch(existingLog, method, terminal, evidenceId, outReason, at) {
   if (!existingLog) {
     return {
       id: `att-kiosk-${Date.now()}`,
@@ -448,7 +764,15 @@ function computePunch(existingLog, method, terminal, evidenceId) {
     };
   }
 
-  const updated = { ...existingLog, punchOut: at, method, terminalId: terminal.id, terminalLocation: terminal.location, evidenceId: evidenceId || existingLog.evidenceId || '' };
+  const updated = {
+    ...existingLog,
+    punchOut: at,
+    outReason,
+    method,
+    terminalId: terminal.id,
+    terminalLocation: terminal.location,
+    evidenceId: evidenceId || existingLog.evidenceId || '',
+  };
   if (updated.punchIn && at > '18:00:00') {
     const [h, m] = at.split(':').map(Number);
     updated.overtimeMinutes = Math.max(0, (h * 60 + m) - 18 * 60);
@@ -459,7 +783,33 @@ function computePunch(existingLog, method, terminal, evidenceId) {
 function savePunch(store, employee, method, evidence, meta) {
   const date = todayDate();
   const existing = (store.attendances || []).find(log => log.employeeId === employee.id && log.date === date);
-  const log = { ...computePunch(existing, method, store.terminal, evidence?.id), employeeId: employee.id };
+  const at = nowTime();
+  const lastPunchTime = existing?.punchOut || existing?.punchIn || '';
+  if (lastPunchTime) {
+    const secondsSinceLastPunch = timeToSeconds(at) - timeToSeconds(lastPunchTime);
+    if (secondsSinceLastPunch >= 0 && secondsSinceLastPunch < 60) {
+      const remaining = 60 - secondsSinceLastPunch;
+      return {
+        ok: false,
+        message: `Please wait ${remaining} second${remaining === 1 ? '' : 's'} before punching again. Minimum delay is 1 minute between punches.`,
+        cooldownSeconds: remaining,
+        employee: kioskEmployee(employee),
+      };
+    }
+  }
+  const isPunchOut = existing?.punchIn && !existing?.punchOut;
+  const outReason = isPunchOut ? normalizeCheckoutReason(meta?.outReason || meta?.reason) : '';
+  if (isPunchOut && !outReason) {
+    return {
+      ok: false,
+      needsOutReason: true,
+      message: 'Select checkout reason before punching out.',
+      employee: kioskEmployee(employee),
+      action: 'OUT',
+      reasons: checkoutReasons,
+    };
+  }
+  const log = { ...computePunch(existing, method, store.terminal, evidence?.id, outReason, at), employeeId: employee.id };
   const next = existing
     ? store.attendances.map(item => item.id === existing.id ? log : item)
     : [log, ...(store.attendances || [])];
@@ -488,7 +838,7 @@ function savePunch(store, employee, method, evidence, meta) {
     employee: kioskEmployee(employee),
     log,
     action: log.punchOut ? 'OUT' : 'IN',
-    outReason: log.punchOut ? (meta?.outReason || meta?.reason || 'Shift exit') : '',
+    outReason: log.punchOut ? (log.outReason || outReason) : '',
   };
 }
 
@@ -599,6 +949,34 @@ ipcMain.handle('kiosk:punch-by-code', async (_event, payload) => {
   return savePunch(store, employee, payload.method || 'RFID', payload.evidence || null, payload.meta || {});
 });
 
+ipcMain.handle('kiosk:punch-camera', async (_event, payload) => {
+  const store = readStore();
+  const employees = mergeEmployeeBiometricTemplates(store.employees || [], store.biometricTemplates || []);
+  const typedEmployee = payload.code ? findEmployeeByCode(employees, payload.code) : null;
+  if (store.terminal.requireCodeWithCamera && !typedEmployee) {
+    return { ok: false, message: 'Please enter your employee code before camera punch.' };
+  }
+  if (payload.code && !typedEmployee) return { ok: false, message: 'Employee code not found in terminal database.' };
+
+  const candidates = typedEmployee ? [typedEmployee] : employees;
+  if (typedEmployee && !getFaceDescriptors(typedEmployee).length) {
+    return { ok: false, message: 'No camera face profile is enrolled for this employee. Enroll face from HR biometric setup first.' };
+  }
+  const match = identifyFaceDescriptor(candidates, payload.descriptor);
+  if (!match.ok) return match;
+
+  const employee = match.employee;
+  if (employee.status === 'Terminated') return { ok: false, message: 'This employee account is terminated.' };
+  if (employee.status === 'Suspended') return { ok: false, message: 'This employee account is suspended.' };
+
+  return savePunch(store, employee, 'Camera', payload.evidence || null, {
+    ...(payload.meta || {}),
+    camera: payload.meta?.camera || 'webcam',
+    score: match.score,
+    recognizedBy: typedEmployee ? 'camera-code-confirmed' : 'camera-face',
+  });
+});
+
 ipcMain.handle('kiosk:punch-fingerprint', async (_event, payload) => {
   const store = readStore();
   let employees = mergeEmployeeBiometricTemplates(store.employees || [], store.biometricTemplates || []);
@@ -627,11 +1005,11 @@ ipcMain.handle('kiosk:punch-fingerprint', async (_event, payload) => {
     const latestStore = readStore();
     const syncErrors = latestStore.lastSyncReport?.errors || [];
     const syncDetail = syncErrors.length
-      ? ` Kiosk sync is currently failing: ${syncErrors.slice(0, 3).join('; ')}.`
+      ? ` Kiosk sync is currently failing: ${syncErrors.join('; ')}.`
       : '';
     return {
       ok: false,
-      message: `No fingerprint templates were found in the kiosk cache for ${checkedCount} employee record${checkedCount === 1 ? '' : 's'}.${syncDetail} Scanner test can pass while attendance still fails if Firestore rules block kiosk sync.`,
+      message: `No fingerprint templates were found in the kiosk cache for ${checkedCount} employee record${checkedCount === 1 ? '' : 's'}.${syncDetail} Use Test Fingerprint Scanner to confirm the reader captures. Attendance still needs Firestore read permission for employees and biometricTemplates.`,
     };
   }
 
@@ -639,7 +1017,12 @@ ipcMain.handle('kiosk:punch-fingerprint', async (_event, payload) => {
   if (!match.ok) return match;
   const employee = employees.find(emp => emp.id === match.employeeId);
   if (!employee) return { ok: false, message: 'Fingerprint matched a missing employee record. Please re-enroll.' };
-  return savePunch(store, employee, 'Biometric', null, { quality: match.quality, score: match.score, device: match.device });
+  return savePunch(store, employee, 'Biometric', null, {
+    ...(payload.meta || {}),
+    quality: match.quality,
+    score: match.score,
+    device: match.device,
+  });
 });
 
 ipcMain.handle('kiosk:test-fingerprint-scanner', async () => {
@@ -704,7 +1087,20 @@ function identifyFingerprint(gallery) {
       if (msg.status === 'IdentifyComplete') {
         clearTimeout(timeout);
         socket.close();
-        resolve({ ok: !!msg.matched, employeeId: msg.employeeId, quality: msg.quality, score: msg.score, device: msg.device, message: msg.matched ? 'Fingerprint matched.' : 'Fingerprint not recognized. Please try again.' });
+        resolve({
+          ok: !!msg.matched,
+          employeeId: msg.employeeId,
+          quality: msg.quality,
+          score: msg.score,
+          device: msg.device,
+          provider: msg.provider || msg.device?.provider || '',
+          message: msg.matched ? 'Fingerprint matched.' : 'Fingerprint not recognized. Please try again.',
+          templateLength: String(msg.template || '').length,
+          templateSeed: String(msg.template || '').slice(0, 2048),
+          imageBase64: msg.imageBase64 || '',
+          imageWidth: Number(msg.imageWidth || 0),
+          imageHeight: Number(msg.imageHeight || 0),
+        });
       }
       if (msg.status === 'Error' || msg.error) {
         clearTimeout(timeout);
@@ -750,6 +1146,10 @@ function testFingerprintScanner() {
           provider: msg.provider,
           device: msg.device,
           templateLength: String(msg.template || '').length,
+          templateSeed: String(msg.template || '').slice(0, 2048),
+          imageBase64: msg.imageBase64 || '',
+          imageWidth: Number(msg.imageWidth || 0),
+          imageHeight: Number(msg.imageHeight || 0),
         });
       }
       if (msg.status === 'Error' || msg.error) {
@@ -831,6 +1231,12 @@ class WebSocketClient {
         if (this.buffer.length < 4) return;
         length = this.buffer.readUInt16BE(2);
         offset = 4;
+      } else if (lengthByte === 127) {
+        if (this.buffer.length < 10) return;
+        const high = this.buffer.readUInt32BE(2);
+        const low = this.buffer.readUInt32BE(6);
+        length = high * 0x100000000 + low;
+        offset = 10;
       }
       if (this.buffer.length < offset + length) return;
       const payload = this.buffer.slice(offset, offset + length);
@@ -853,6 +1259,7 @@ if (!gotLock) {
   });
 
   app.whenReady().then(async () => {
+    createSplashWindow();
     writeStore(readStore());
     if (process.platform === 'win32') {
       app.setLoginItemSettings({
