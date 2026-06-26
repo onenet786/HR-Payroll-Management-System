@@ -110,6 +110,10 @@ const el = {
   dirSearch:      id('dirSearch'),
   dirList:        id('dirList'),
   eventLog:       id('eventLog'),
+  checkoutReasonOverlay:id('checkoutReasonOverlay'),
+  checkoutReasonCancel: id('checkoutReasonCancel'),
+  checkoutReasonEmployee:id('checkoutReasonEmployee'),
+  checkoutReasonList:   id('checkoutReasonList'),
   // settings
   settingsOverlay:id('settingsOverlay'),
   settingsClose:  id('settingsClose'),
@@ -755,26 +759,101 @@ async function assessCameraFrame() {
 }
 
 // ─── Punch Handlers ──────────────────────────────────────────────────────────
+function closeCheckoutReasonDialog() {
+  el.checkoutReasonOverlay.classList.add('hidden');
+  el.checkoutReasonList.innerHTML = '';
+}
+
 function askCheckoutReason(employeeName) {
-  const text = [
-    `Select checkout reason${employeeName ? ` for ${employeeName}` : ''}:`,
-    'Use number hotkey 1-12, then press Enter.',
-    '',
-    ...CHECKOUT_REASONS.map((reason, index) => `${index + 1}. ${reason}`),
-  ].join('\n');
-  const answer = window.prompt(text, '1');
-  if (answer === null) return '';
-  const trimmed = answer.trim();
-  const selectedByNumber = CHECKOUT_REASONS[Number(trimmed) - 1];
-  if (selectedByNumber) return selectedByNumber;
-  return CHECKOUT_REASONS.find(reason => reason.toLowerCase() === trimmed.toLowerCase()) || '';
+  return new Promise(resolve => {
+    let settled = false;
+    let keyBuffer = '';
+    let keyBufferTimer = null;
+
+    const settle = reason => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(keyBufferTimer);
+      cleanup();
+      closeCheckoutReasonDialog();
+      resolve(reason || '');
+    };
+
+    const onKeyDown = event => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        settle('');
+        return;
+      }
+
+      if (!/^[0-9]$/.test(event.key)) return;
+      event.preventDefault();
+      event.stopPropagation();
+
+      keyBuffer += event.key;
+      clearTimeout(keyBufferTimer);
+
+      const selectedIndex = Number(keyBuffer) - 1;
+      if (selectedIndex >= 0 && selectedIndex < CHECKOUT_REASONS.length) {
+        if (keyBuffer === '1' && CHECKOUT_REASONS.length > 9) {
+          keyBufferTimer = setTimeout(() => settle(CHECKOUT_REASONS[0]), 500);
+          return;
+        }
+        settle(CHECKOUT_REASONS[selectedIndex]);
+        return;
+      }
+
+      keyBuffer = event.key === '1' ? '1' : '';
+      if (keyBuffer) keyBufferTimer = setTimeout(() => settle(CHECKOUT_REASONS[0]), 500);
+    };
+
+    const onCancel = () => settle('');
+    const onOverlayClick = event => {
+      if (event.target === el.checkoutReasonOverlay) settle('');
+    };
+    const cleanup = () => {
+      document.removeEventListener('keydown', onKeyDown, true);
+      el.checkoutReasonCancel.removeEventListener('click', onCancel);
+      el.checkoutReasonOverlay.removeEventListener('click', onOverlayClick);
+    };
+
+    el.checkoutReasonEmployee.textContent = employeeName
+      ? `Punch out for ${employeeName}`
+      : 'Punch out requires a reason';
+    el.checkoutReasonList.innerHTML = CHECKOUT_REASONS.map((reason, index) => `
+      <button type="button" class="reason-option" data-reason="${esc(reason)}">
+        <span class="reason-hotkey">${index + 1}</span>
+        <span>${esc(reason)}</span>
+      </button>
+    `).join('');
+    el.checkoutReasonList.querySelectorAll('.reason-option').forEach(button => {
+      button.addEventListener('click', () => settle(button.dataset.reason || ''));
+    });
+
+    document.addEventListener('keydown', onKeyDown, true);
+    el.checkoutReasonCancel.addEventListener('click', onCancel);
+    el.checkoutReasonOverlay.addEventListener('click', onOverlayClick);
+    el.checkoutReasonOverlay.classList.remove('hidden');
+    el.checkoutReasonList.querySelector('.reason-option')?.focus();
+  });
 }
 
 async function resolveCheckoutReasonAndRetry(result, retry) {
   if (!result?.needsOutReason) return result;
-  const reason = askCheckoutReason(result.employee?.fullName || preview?.employee?.fullName || '');
+  const reason = await askCheckoutReason(result.employee?.fullName || preview?.employee?.fullName || '');
   if (!reason) return { ok: false, message: 'Checkout reason is required before punching out.' };
   return retry(reason);
+}
+
+async function runPunchAction(action) {
+  try {
+    const result = await action();
+    handlePunchResult(result);
+  } catch (err) {
+    showResult('err', 'Attendance Failed', err.message || 'Could not mark attendance. Please try again or contact HR.');
+    scheduleReset();
+  }
 }
 
 async function punchByCode() {
@@ -784,11 +863,10 @@ async function punchByCode() {
     return;
   }
   showResult('busy', 'Processing…', 'Verifying employee record and saving attendance…');
-  const result = await resolveCheckoutReasonAndRetry(
+  await runPunchAction(async () => resolveCheckoutReasonAndRetry(
     await api.punchByCode({ code, method: 'RFID' }),
     outReason => api.punchByCode({ code, method: 'RFID', meta: { outReason } })
-  );
-  handlePunchResult(result);
+  ));
 }
 
 async function punchCamera() {
@@ -819,11 +897,10 @@ async function punchCamera() {
     evidence,
     meta: { camera: kioskState?.terminal?.ipCameraUrl ? 'ip-camera' : 'webcam' },
   };
-  const result = await resolveCheckoutReasonAndRetry(
+  await runPunchAction(async () => resolveCheckoutReasonAndRetry(
     await api.punchCamera(cameraPayload),
     outReason => api.punchCamera({ ...cameraPayload, meta: { ...cameraPayload.meta, outReason } })
-  );
-  handlePunchResult(result);
+  ));
 }
 
 async function punchFingerprint() {
@@ -836,11 +913,18 @@ async function punchFingerprint() {
   showResult('busy', 'Fingerprint Scan', 'Place your finger flat on the fingerprint reader and hold still.');
 
   const fpPayload = { code };
-  const result = await resolveCheckoutReasonAndRetry(
-    await api.punchFingerprint(fpPayload),
-    outReason => api.punchFingerprint({ ...fpPayload, meta: { outReason } })
-  );
-  fpBusy = false;
+  const result = await (async () => {
+    try {
+      return await resolveCheckoutReasonAndRetry(
+        await api.punchFingerprint(fpPayload),
+        outReason => api.punchFingerprint({ ...fpPayload, meta: { outReason } })
+      );
+    } catch (err) {
+      return { ok: false, message: err.message || 'Could not mark attendance. Please try again or contact HR.' };
+    } finally {
+      fpBusy = false;
+    }
+  })();
 
   if (result.ok) {
     setFpOrb('success', 'Fingerprint matched!');
