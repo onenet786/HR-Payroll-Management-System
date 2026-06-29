@@ -24,7 +24,11 @@ function getAppIconPath() {
 }
 
 function splashHtml(title, subtitle) {
-  const iconUrl = pathToFileURL(getAppIconPath()).toString();
+  let iconSrc = '';
+  try {
+    const iconData = fs.readFileSync(getAppIconPath());
+    iconSrc = `data:image/png;base64,${iconData.toString('base64')}`;
+  } catch { /* icon missing, skip */ }
   return `<!doctype html>
 <html>
 <head>
@@ -101,7 +105,7 @@ function splashHtml(title, subtitle) {
 </head>
 <body>
   <div class="card">
-    <img src="${iconUrl}" alt="">
+    ${iconSrc ? `<img src="${iconSrc}" alt="">` : ''}
     <h1>${title}</h1>
     <p>${subtitle}</p>
     <div class="bar"><span></span></div>
