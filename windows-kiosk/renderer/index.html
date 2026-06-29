@@ -204,6 +204,10 @@
           <div class="cam-hud">
             <div class="cam-source-badge" id="camSourceBadge">Webcam</div>
             <div class="cam-face-guide"></div>
+            <div class="cam-auto-status hidden" id="camAutoStatus">
+              <span class="auto-scan-dot"></span>
+              <span id="camAutoLabel">Scanning for face…</span>
+            </div>
           </div>
         </div>
 
@@ -335,6 +339,14 @@
               <div class="toggle-text">
                 <span>Require employee code for camera punch</span>
                 <small>Camera capture is saved as photo evidence linked to typed employee code</small>
+              </div>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" id="stAutoCaptureCamera" class="toggle-input" />
+              <div class="toggle-switch"></div>
+              <div class="toggle-text">
+                <span>Auto-capture face check</span>
+                <small>Camera continuously scans and punches automatically — no button tap needed. Employee ID not required.</small>
               </div>
             </label>
             <label class="toggle-row">

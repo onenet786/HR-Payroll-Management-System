@@ -630,6 +630,59 @@ body {
   width: 34%;
 }
 
+.cam-auto-status {
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  background: rgba(2, 6, 23, 0.82);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(52, 211, 153, 0.28);
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--t2);
+  white-space: nowrap;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+  z-index: 20;
+  transition: border-color 0.25s, color 0.25s;
+}
+.cam-auto-status[data-state="detected"] {
+  border-color: rgba(245, 158, 11, 0.5);
+  color: #fbbf24;
+}
+.cam-auto-status[data-state="punching"] {
+  border-color: rgba(59, 130, 246, 0.55);
+  color: #93c5fd;
+}
+.cam-auto-status[data-state="hold"] {
+  border-color: rgba(100, 116, 139, 0.35);
+  color: var(--t3);
+}
+
+.auto-scan-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--em);
+  flex-shrink: 0;
+  animation: auto-dot-pulse 1.4s ease-in-out infinite;
+}
+[data-state="detected"] .auto-scan-dot { background: #f59e0b; animation: none; transform: scale(1.15); }
+[data-state="punching"] .auto-scan-dot { background: var(--blue); animation: auto-dot-pulse 0.5s ease-in-out infinite; }
+[data-state="hold"]     .auto-scan-dot { background: var(--t4); animation: none; }
+
+@keyframes auto-dot-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.45; transform: scale(0.78); }
+}
+
 /* Result Card */
 .result-card {
   flex: 1; min-height: 0;
@@ -644,6 +697,7 @@ body {
   padding: 28px;
   text-align: center;
   transition: all 0.3s ease;
+  -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
 }
 .center-panel.camera-active .result-card {
@@ -840,6 +894,7 @@ body {
   max-height: 200px;
   display: flex;
   flex-direction: column;
+  -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
 }
 
@@ -1032,6 +1087,7 @@ body {
 .overlay {
   position: fixed; inset: 0; z-index: 100;
   background: rgba(2,12,23,0.8);
+  -webkit-backdrop-filter: blur(8px);
   backdrop-filter: blur(8px);
   display: flex; align-items: center; justify-content: center;
   padding: 20px;
@@ -1045,6 +1101,7 @@ body {
   border-radius: var(--r-xl);
   display: flex; flex-direction: column;
   overflow: hidden;
+  -webkit-backdrop-filter: blur(20px);
   backdrop-filter: blur(20px);
   box-shadow: 0 40px 100px rgba(0,0,0,0.5);
 }

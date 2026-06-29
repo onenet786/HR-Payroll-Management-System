@@ -12,6 +12,9 @@ const RESULT_AUTO_RESET_MS = 7000;
 const LOOKUP_DEBOUNCE_MS = 280;
 const DIR_RENDER_LIMIT = 80;
 const IP_CAM_REFRESH_MS = 2000;
+const AUTO_GOOD_FRAMES_NEEDED = 3;
+const AUTO_LOOP_MS = 700;
+const AUTO_PUNCH_COOLDOWN_MS = 8000;
 const CHECKOUT_REASONS = [
   'End of Shift',
   'Lunch Break',
@@ -38,6 +41,10 @@ let resetTimer = null;
 let countdownRaf = null;
 let countdownStart = null;
 let fpBusy = false;
+let autoCaptureTimer = null;
+let autoCaptureGoodFrames = 0;
+let autoCaptureIsPunching = false;
+let autoCaptureHoldUntil = 0;
 
 // ─── DOM Cache ───────────────────────────────────────────────────────────────
 const el = {
@@ -90,6 +97,8 @@ const el = {
   ipcamEl:        id('ipcamEl'),
   snapCanvas:     id('snapCanvas'),
   camSourceBadge: id('camSourceBadge'),
+  camAutoStatus:  id('camAutoStatus'),
+  camAutoLabel:   id('camAutoLabel'),
   resultCard:     id('resultCard'),
   resultIcon:     id('resultIcon'),
   resultState:    id('resultState'),
@@ -122,6 +131,7 @@ const el = {
   stIpCamUrl:     id('stIpCamUrl'),
   stReqCodeFp:    id('stReqCodeFp'),
   stReqCodeCam:   id('stReqCodeCam'),
+  stAutoCaptureCamera: id('stAutoCaptureCamera'),
   stAutoFullscreen:id('stAutoFullscreen'),
   stSyncInfo:     id('stSyncInfo'),
   stEventsLog:    id('stEventsLog'),
@@ -160,20 +170,24 @@ function setMode(mode) {
   const isFp   = mode === MODE.FP;
   const isCam  = mode === MODE.CAM;
 
+  const autoCapture = isCam && isAutoCaptureEnabled();
   el.codeInputWrap.classList.toggle('hidden', false); // always show code field
   el.keypad.classList.toggle('hidden', isFp);
   el.punchBtn.classList.toggle('hidden', isFp || isCam);
   el.fpArea.classList.toggle('hidden', !isFp);
   el.fpScanBtn.classList.toggle('hidden', !isFp);
   el.fpTestBtn.classList.toggle('hidden', !isFp);
-  el.camCaptureBtn.classList.toggle('hidden', !isCam);
+  el.camCaptureBtn.classList.toggle('hidden', !isCam || autoCapture);
   el.cameraView.classList.toggle('hidden', !isCam);
   el.centerPanel?.classList.toggle('camera-active', isCam);
 
   if (isCam) {
     startCamera();
+    if (autoCapture) startAutoCapture();
+    else stopAutoCapture();
   } else {
     stopCamera();
+    stopAutoCapture();
   }
 
   if (!isFp) {
@@ -758,6 +772,78 @@ async function assessCameraFrame() {
   return { ok: true, descriptor, message: 'Face frame looks ready.' };
 }
 
+// ─── Auto-Capture (Face Recognition without Employee Code) ───────────────────
+function isAutoCaptureEnabled() {
+  return !!(kioskState?.terminal?.autoCaptureCamera);
+}
+
+function setAutoCaptureStatus(state, text) {
+  if (!el.camAutoStatus) return;
+  el.camAutoStatus.classList.remove('hidden');
+  el.camAutoStatus.dataset.state = state;
+  if (el.camAutoLabel) el.camAutoLabel.textContent = text;
+}
+
+function startAutoCapture() {
+  stopAutoCapture();
+  autoCaptureGoodFrames = 0;
+  autoCaptureIsPunching = false;
+  autoCaptureHoldUntil = 0;
+  setAutoCaptureStatus('scanning', 'Scanning for face…');
+  autoCaptureTimer = setInterval(runAutoCaptureStep, AUTO_LOOP_MS);
+}
+
+function stopAutoCapture() {
+  clearInterval(autoCaptureTimer);
+  autoCaptureTimer = null;
+  autoCaptureGoodFrames = 0;
+  autoCaptureIsPunching = false;
+  if (el.camAutoStatus) el.camAutoStatus.classList.add('hidden');
+}
+
+async function runAutoCaptureStep() {
+  if (activeMode !== MODE.CAM || autoCaptureIsPunching) return;
+
+  const now = Date.now();
+  if (now < autoCaptureHoldUntil) {
+    const secs = Math.ceil((autoCaptureHoldUntil - now) / 1000);
+    setAutoCaptureStatus('hold', `Next scan in ${secs}s…`);
+    return;
+  }
+
+  let frame;
+  try {
+    frame = await assessCameraFrame();
+  } catch {
+    autoCaptureGoodFrames = 0;
+    setAutoCaptureStatus('scanning', 'Camera not ready…');
+    return;
+  }
+
+  if (!frame.ok) {
+    autoCaptureGoodFrames = 0;
+    setAutoCaptureStatus('scanning', frame.message);
+    return;
+  }
+
+  autoCaptureGoodFrames++;
+  if (autoCaptureGoodFrames < AUTO_GOOD_FRAMES_NEEDED) {
+    setAutoCaptureStatus('detected', `Face locked ${autoCaptureGoodFrames}/${AUTO_GOOD_FRAMES_NEEDED}…`);
+    return;
+  }
+
+  autoCaptureGoodFrames = 0;
+  autoCaptureIsPunching = true;
+  setAutoCaptureStatus('punching', 'Identifying…');
+  try {
+    await punchCamera();
+  } finally {
+    autoCaptureIsPunching = false;
+    autoCaptureHoldUntil = Date.now() + AUTO_PUNCH_COOLDOWN_MS;
+    setAutoCaptureStatus('hold', 'Hold on…');
+  }
+}
+
 // ─── Punch Handlers ──────────────────────────────────────────────────────────
 function closeCheckoutReasonDialog() {
   el.checkoutReasonOverlay.classList.add('hidden');
@@ -1096,10 +1182,13 @@ function resetResultToIdle() {
   el.resultState.textContent = 'TERMINAL READY';
   el.resultName.textContent = 'Attendance Kiosk Online';
   if (activeMode === MODE.CAM) {
+    const auto = isAutoCaptureEnabled();
     el.resultDetail.innerHTML = [
       '<span class="guide-line"><b>1.</b> Keep face inside the oval marker.</span>',
       '<span class="guide-line"><b>2.</b> Look straight and hold still.</span>',
-      '<span class="guide-line"><b>3.</b> Tap Capture & Punch.</span>',
+      auto
+        ? '<span class="guide-line"><b>3.</b> Auto-capture will punch automatically.</span>'
+        : '<span class="guide-line"><b>3.</b> Tap Capture &amp; Punch.</span>',
     ].join('');
   } else {
     el.resultDetail.textContent = 'Select a punch method, then enter employee code or scan fingerprint.';
@@ -1369,6 +1458,7 @@ function openSettings() {
   el.stIpCamUrl.value       = t.ipCameraUrl || '';
   el.stReqCodeFp.checked    = !!t.requireCodeWithFingerprint;
   el.stReqCodeCam.checked   = !!t.requireCodeWithCamera;
+  el.stAutoCaptureCamera.checked = !!t.autoCaptureCamera;
   el.stAutoFullscreen.checked = !!t.autoFullscreen;
 
   const st = kioskState.syncTarget;
@@ -1412,11 +1502,19 @@ async function saveSettings() {
     ipCameraUrl: el.stIpCamUrl.value.trim(),
     requireCodeWithFingerprint: el.stReqCodeFp.checked,
     requireCodeWithCamera: el.stReqCodeCam.checked,
+    autoCaptureCamera: el.stAutoCaptureCamera.checked,
     autoFullscreen: el.stAutoFullscreen.checked,
   });
   if (kioskState) kioskState.terminal = terminal;
   closeSettings();
   el.terminalLine.textContent = `${terminal.location} · ${terminal.id}`;
+  if (activeMode === MODE.CAM) {
+    const autoCapture = !!terminal.autoCaptureCamera;
+    el.camCaptureBtn.classList.toggle('hidden', autoCapture);
+    if (autoCapture) startAutoCapture();
+    else stopAutoCapture();
+    resetResultToIdle();
+  }
   showResult('ok', 'SETTINGS SAVED', 'Kiosk configuration updated successfully.');
   scheduleReset();
 }
