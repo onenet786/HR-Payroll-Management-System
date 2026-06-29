@@ -683,10 +683,10 @@ function compareFaceDescriptors(a, b) {
     const delta = Number(a.vector[i]) - Number(b.vector[i]);
     sum += delta * delta;
   }
-  return Math.sqrt(sum / length);
+  return Math.sqrt(sum);
 }
 
-function identifyFaceDescriptor(employees, probe, threshold = 0.20) {
+function identifyFaceDescriptor(employees, probe, threshold = 0.50) {
   const normalizedProbe = normalizeFaceDescriptor(probe);
   if (!normalizedProbe) return { ok: false, message: 'Camera face descriptor was invalid. Try another capture.' };
 
@@ -715,7 +715,7 @@ function identifyFaceDescriptor(employees, probe, threshold = 0.20) {
     return { ok: false, message: 'Face not recognized. Improve lighting or re-enroll the employee camera profile.', score: best.score };
   }
   const margin = secondScore - best.score;
-  if (secondEmployeeId && Number.isFinite(secondScore) && margin < 0.012) {
+  if (secondEmployeeId && Number.isFinite(secondScore) && secondScore < threshold && margin < 0.10) {
     return { ok: false, message: 'Face match is not unique enough. Use full face, better light, or enter employee code with camera.', score: best.score, margin };
   }
   return { ok: true, employee: best.employee, score: best.score, margin };
@@ -953,7 +953,7 @@ ipcMain.handle('kiosk:punch-camera', async (_event, payload) => {
   const store = readStore();
   const employees = mergeEmployeeBiometricTemplates(store.employees || [], store.biometricTemplates || []);
   const typedEmployee = payload.code ? findEmployeeByCode(employees, payload.code) : null;
-  if (store.terminal.requireCodeWithCamera && !typedEmployee) {
+  if (store.terminal.requireCodeWithCamera && !store.terminal.autoCaptureCamera && !typedEmployee) {
     return { ok: false, message: 'Please enter your employee code before camera punch.' };
   }
   if (payload.code && !typedEmployee) return { ok: false, message: 'Employee code not found in terminal database.' };

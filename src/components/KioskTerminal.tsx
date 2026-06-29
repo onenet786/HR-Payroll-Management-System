@@ -10,7 +10,7 @@ import {
 import { Employee, AttendanceLog } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 import { captureBiometric } from '../utils/uru4500Bridge';
-import { assessFaceFrame, createFaceDescriptorFromVideo, findBestFaceMatch, hasFaceEnrollment } from '../utils/faceRecognition';
+import { assessFaceFrame, createFaceDescriptorFromVideo, findBestFaceMatch, hasFaceEnrollment, FACE_MATCH_THRESHOLD } from '../utils/faceRecognition';
 
 interface KioskTerminalProps {
   employees: Employee[];
@@ -216,7 +216,7 @@ export function KioskTerminal({
       if (!match) {
         throw new Error('Face not recognized. Step closer, improve lighting, or re-enroll the camera profile.');
       }
-      setMessage(`Face match confidence ${(100 - match.score * 100).toFixed(1)}%.`);
+      setMessage(`Face match confidence ${(Math.max(0, 1 - match.score / FACE_MATCH_THRESHOLD) * 100).toFixed(1)}%.`);
       triggerPunch(match.employee, 'Camera');
     } catch (error) {
       setStatus('error');

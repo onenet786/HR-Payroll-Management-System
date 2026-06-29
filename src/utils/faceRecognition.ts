@@ -23,8 +23,8 @@ export interface FaceFrameQuality {
 const GRID_W = 16;
 const GRID_H = 20;
 const V2_LENGTH = GRID_W * GRID_H * 4;
-export const FACE_MATCH_THRESHOLD = 0.20;
-export const FACE_MATCH_MARGIN = 0.012;
+export const FACE_MATCH_THRESHOLD = 0.50;
+export const FACE_MATCH_MARGIN = 0.10;
 
 export function getFaceDescriptors(employee: Employee): FaceDescriptor[] {
   const values = employee.faceDescriptors || [];
@@ -267,7 +267,7 @@ export function compareFaceDescriptors(a: FaceDescriptor, b: FaceDescriptor): nu
     const delta = a.vector[i] - b.vector[i];
     sum += delta * delta;
   }
-  return Math.sqrt(sum / a.vector.length);
+  return Math.sqrt(sum);
 }
 
 export function findBestFaceMatch(
