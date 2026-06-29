@@ -687,10 +687,10 @@ function compareFaceDescriptors(a, b) {
     const delta = Number(a.vector[i]) - Number(b.vector[i]);
     sum += delta * delta;
   }
-  return Math.sqrt(sum);
+  return Math.sqrt(sum / length);
 }
 
-function identifyFaceDescriptor(employees, probe, threshold = 0.50) {
+function identifyFaceDescriptor(employees, probe, threshold = 0.18) {
   const normalizedProbe = normalizeFaceDescriptor(probe);
   if (!normalizedProbe) return { ok: false, message: 'Camera face descriptor was invalid. Try another capture.' };
 
@@ -719,7 +719,7 @@ function identifyFaceDescriptor(employees, probe, threshold = 0.50) {
     return { ok: false, message: 'Face not recognized. Improve lighting or re-enroll the employee camera profile.', score: best.score };
   }
   const margin = secondScore - best.score;
-  if (secondEmployeeId && Number.isFinite(secondScore) && secondScore < threshold && margin < 0.10) {
+  if (secondEmployeeId && Number.isFinite(secondScore) && secondScore < threshold && margin < 0.04) {
     return { ok: false, message: 'Face match is not unique enough. Use full face, better light, or enter employee code with camera.', score: best.score, margin };
   }
   return { ok: true, employee: best.employee, score: best.score, margin };
