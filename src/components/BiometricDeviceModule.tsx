@@ -706,15 +706,17 @@ export function BiometricDeviceModule({
 
       for (let i = 0; i < 3; i += 1) {
         const browserFace = await assessBrowserFaceDetection(faceVideoRef.current);
-        if (browserFace && !browserFace.ok) {
-          setFaceMsg({ type: 'err', text: `Sample ${i + 1} failed: ${browserFace.message}` });
-          return;
-        }
-
-        const frameQuality = assessFaceFrame(faceVideoRef.current);
-        if (!frameQuality.ok) {
-          setFaceMsg({ type: 'err', text: `Sample ${i + 1} failed: ${frameQuality.message}` });
-          return;
+        if (browserFace !== null) {
+          if (!browserFace.ok) {
+            setFaceMsg({ type: 'err', text: `Sample ${i + 1} failed: ${browserFace.message}` });
+            return;
+          }
+        } else {
+          const frameQuality = assessFaceFrame(faceVideoRef.current);
+          if (!frameQuality.ok) {
+            setFaceMsg({ type: 'err', text: `Sample ${i + 1} failed: ${frameQuality.message}` });
+            return;
+          }
         }
 
         samples.push(createFaceDescriptorFromVideo(faceVideoRef.current, `admin-webcam-${i + 1}`));
@@ -751,15 +753,17 @@ export function BiometricDeviceModule({
 
     try {
       const browserFace = await assessBrowserFaceDetection(faceVideoRef.current);
-      if (browserFace && !browserFace.ok) {
-        setFaceMsg({ type: 'err', text: browserFace.message });
-        return;
-      }
-
-      const frameQuality = assessFaceFrame(faceVideoRef.current);
-      if (!frameQuality.ok) {
-        setFaceMsg({ type: 'err', text: frameQuality.message });
-        return;
+      if (browserFace !== null) {
+        if (!browserFace.ok) {
+          setFaceMsg({ type: 'err', text: browserFace.message });
+          return;
+        }
+      } else {
+        const frameQuality = assessFaceFrame(faceVideoRef.current);
+        if (!frameQuality.ok) {
+          setFaceMsg({ type: 'err', text: frameQuality.message });
+          return;
+        }
       }
 
       const probe = createFaceDescriptorFromVideo(faceVideoRef.current, 'admin-verify');

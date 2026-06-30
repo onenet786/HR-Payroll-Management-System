@@ -246,13 +246,17 @@ export function assessFaceFrame(video: HTMLVideoElement): FaceFrameQuality {
   if (skinWidthRatio < 0.16 || skinWidthRatio > 0.88 || skinHeightRatio < 0.22 || skinHeightRatio > 0.92) {
     return { ok: false, brightness, contrast, message: 'Face is not fully visible. Move closer and keep the full face inside the oval.' };
   }
-  if (centerSkinRatio < 0.18 || skinBalance < 0.35) {
+  if (centerSkinRatio < 0.18 || skinBalance < 0.50) {
     return { ok: false, brightness, contrast, message: 'No centered full face detected. Keep your face straight inside the oval.' };
   }
-  if (leftEyeRatio < 0.003 || rightEyeRatio < 0.003 || mouthRatio < 0.004) {
+  if (leftEyeRatio < 0.020 || rightEyeRatio < 0.020 || mouthRatio < 0.016) {
     return { ok: false, brightness, contrast, message: 'No full face detected. Keep both eyes and mouth inside the oval.' };
   }
-  if (symmetry > 0.32) return { ok: false, brightness, contrast, message: 'Face is not centered. Look straight at the camera inside the oval.' };
+  const eyeBalance = Math.min(leftEyeRatio, rightEyeRatio) / Math.max(leftEyeRatio, rightEyeRatio);
+  if (eyeBalance < 0.30) {
+    return { ok: false, brightness, contrast, message: 'Face is not straight. Look directly at the camera.' };
+  }
+  if (symmetry > 0.28) return { ok: false, brightness, contrast, message: 'Face is not centered. Look straight at the camera inside the oval.' };
 
   return { ok: true, brightness, contrast, message: 'Face frame looks ready.' };
 }
