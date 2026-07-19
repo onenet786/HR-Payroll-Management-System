@@ -17,7 +17,7 @@ import {
   PerformanceReview, CompanyAsset, JobPosting, JobApplication, GratuitySettlement, AppNotification, Company, CompanySetupPayload, Zone, UcTown, WageType
 } from '../types';
 import { computePayslipDetails } from '../data/defaults';
-import { resolveRecordId, resolveUcTownName, resolveWageBasis, resolveWageTypeName, resolveZoneName, validateEmployeeMasterSelection } from '../data/masterData';
+import { deriveEmployeeCompanyId, getEmployeeEditDepartmentOptions, getEmployeeEditOptions, resolveEmployeeCompanyId, resolveRecordId, resolveUcTownName, resolveWageBasis, resolveWageTypeName, resolveZoneName, synchronizeDepartmentSelection, validateEmployeeMasterSelection } from '../data/masterData';
 import { HolidayModule } from './HolidayModule';
 import { LoansModule } from './LoansModule';
 import { SalaryRevisionModule } from './SalaryRevisionModule';
@@ -62,6 +62,29 @@ const formatCNIC = (val: string): string => {
     return `${digits.slice(0, 5)}-${digits.slice(5)}`;
   }
   return `${digits.slice(0, 5)}-${digits.slice(5, 12)}-${digits.slice(12, 13)}`;
+};
+
+type LegacyEmployeeAssignment = Employee & {
+  branch?: string;
+  branchName?: string;
+  branchCode?: string;
+};
+
+const getLegacyBranchValue = (employee: Employee) => {
+  const legacyEmployee = employee as LegacyEmployeeAssignment;
+  return legacyEmployee.branchName || legacyEmployee.branch || legacyEmployee.branchCode || employee.branchId || '';
+};
+
+const getExceptionalCurrentSuffix = (
+  record: { id: string; companyId?: string; status?: 'Active' | 'Inactive' },
+  currentId: string,
+  companyId: string
+) => {
+  if (record.id !== currentId) return '';
+  if (record.status === 'Inactive') return ' (Inactive — current)';
+  if (!record.companyId) return ' (Legacy metadata — current)';
+  if (companyId && record.companyId !== companyId) return ' (Outside company — current)';
+  return '';
 };
 
 interface WebPortalProps {
@@ -289,6 +312,7 @@ export function WebPortal({
   const [showAddEmpModal, setShowAddEmpModal] = useState(false);
   const [showEditEmpModal, setShowEditEmpModal] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
+  const [editDepartmentMoveNotice, setEditDepartmentMoveNotice] = useState('');
   const [showBankFileModal, setShowBankFileModal] = useState<PayrollRun | null>(null);
   const [showPayslipModal, setShowPayslipModal] = useState<Payslip | null>(null);
   const [showOffboardModal, setShowOffboardModal] = useState<Employee | null>(null);
@@ -388,10 +412,113 @@ export function WebPortal({
   const companyBranches = localBranches.filter(branch => !primaryCompany || branch.companyId === primaryCompany.id);
   const activeZones = zones.filter(zone => (!primaryCompany || zone.companyId === primaryCompany.id) && zone.status === 'Active');
   const activeWageTypes = wageTypes.filter(wage => (!primaryCompany || wage.companyId === primaryCompany.id) && wage.status === 'Active');
+  const editingCompanyId = editingEmployee
+    ? resolveEmployeeCompanyId(editingEmployee, localBranches, companies.map(company => company.id), primaryCompany?.id)
+    : '';
+  const editBranchOptions = getEmployeeEditOptions(localBranches, editingCompanyId, editEmpForm.branchId);
+  const editCompanyBranchIds = new Set(localBranches
+    .filter(branch => !editingCompanyId || branch.companyId === editingCompanyId)
+    .map(branch => branch.id));
+  const editCompanyDepartmentsForResolution = localDepartments.filter(department => editCompanyBranchIds.has(department.branchId));
+  const resolvedEditingDepartmentId = editingEmployee
+    ? resolveRecordId(editCompanyDepartmentsForResolution, editingEmployee.departmentId, editingEmployee.departmentId)
+    : '';
+  const editDepartmentOptions = getEmployeeEditDepartmentOptions(
+    localDepartments,
+    localBranches,
+    editingCompanyId,
+    editEmpForm.branchId,
+    resolvedEditingDepartmentId
+  );
+  const savedEditingDepartment = localDepartments.find(department => department.id === resolvedEditingDepartmentId);
+  const savedEditingDepartmentBranch = localBranches.find(branch => branch.id === savedEditingDepartment?.branchId);
+  const savedDepartmentLabel = savedEditingDepartment?.name || editingEmployee?.departmentId || '';
+  const resolvedEditingDesignationId = editingEmployee
+    ? resolveRecordId(
+      localDesignations
+        .filter(designation => designation.departmentId === (editEmpForm.departmentId || resolvedEditingDepartmentId))
+        .map(designation => ({ ...designation, name: designation.title, code: designation.grade })),
+      editingEmployee.designationId,
+      editingEmployee.designationId
+    )
+    : '';
+  const editDesignationOptions = localDesignations.filter(designation =>
+    designation.departmentId === editEmpForm.departmentId
+    && ((designation as Designation & { status?: 'Active' | 'Inactive' }).status !== 'Inactive' || designation.id === resolvedEditingDesignationId)
+  );
+  const savedEditingDesignation = localDesignations.find(designation => designation.id === resolvedEditingDesignationId);
+  const savedDesignationLabel = savedEditingDesignation?.title || editingEmployee?.designationId || '';
+  const editZoneOptions = getEmployeeEditOptions(zones, editingCompanyId, editEmpForm.zoneId);
+  const editWageTypeOptions = getEmployeeEditOptions(wageTypes, editingCompanyId, editEmpForm.wageTypeId);
+  const editUcTownOptions = ucTowns.filter(item =>
+    item.zoneId === editEmpForm.zoneId
+    && (item.status === 'Active' || item.id === editEmpForm.ucTownId)
+  );
 
   React.useEffect(() => { setLocalBranches(branches); }, [branches]);
   React.useEffect(() => { setLocalDepartments(departments); }, [departments]);
   React.useEffect(() => { setLocalDesignations(designations); }, [designations]);
+
+  React.useEffect(() => {
+    if (!showEditEmpModal || !editingEmployee) return;
+
+    const employeeCompanyId = resolveEmployeeCompanyId(
+      editingEmployee,
+      localBranches,
+      companies.map(company => company.id),
+      primaryCompany?.id
+    );
+    const companyBranchesForResolution = localBranches.filter(branch =>
+      !employeeCompanyId || !branch.companyId || branch.companyId === employeeCompanyId || branch.id === editingEmployee.branchId
+    );
+    const companyZonesForResolution = zones.filter(zone =>
+      !employeeCompanyId || !zone.companyId || zone.companyId === employeeCompanyId || zone.id === editingEmployee.zoneId
+    );
+    const companyWagesForResolution = wageTypes.filter(wage =>
+      !employeeCompanyId || !wage.companyId || wage.companyId === employeeCompanyId || wage.id === editingEmployee.wageTypeId
+    );
+    const companyBranchIds = new Set(localBranches
+      .filter(branch => !employeeCompanyId || branch.companyId === employeeCompanyId)
+      .map(branch => branch.id));
+    const companyDepartmentsForResolution = localDepartments.filter(department => companyBranchIds.has(department.branchId));
+
+    setEditEmpForm(previous => {
+      const branchId = resolveRecordId(companyBranchesForResolution, previous.branchId, getLegacyBranchValue(editingEmployee));
+      const validPreviousDepartment = companyDepartmentsForResolution.find(department => department.id === previous.departmentId);
+      const savedDepartmentId = resolveRecordId(
+        companyDepartmentsForResolution,
+        editingEmployee.departmentId,
+        editingEmployee.departmentId
+      );
+      const savedDepartment = companyDepartmentsForResolution.find(department => department.id === savedDepartmentId);
+      const departmentId = validPreviousDepartment?.branchId === branchId
+        ? validPreviousDepartment.id
+        : savedDepartment?.branchId === branchId ? savedDepartment.id : '';
+      const designationCandidates = localDesignations.filter(designation => designation.departmentId === departmentId);
+      const designationId = resolveRecordId(
+        designationCandidates.map(designation => ({ ...designation, name: designation.title, code: designation.grade })),
+        previous.designationId,
+        editingEmployee.designationId
+      );
+      const zoneId = resolveRecordId(companyZonesForResolution, previous.zoneId, editingEmployee.zone);
+      const ucTownId = resolveRecordId(
+        ucTowns.filter(item => item.zoneId === zoneId),
+        previous.ucTownId,
+        editingEmployee.ucTown
+      );
+      const wageTypeId = resolveRecordId(companyWagesForResolution, previous.wageTypeId, editingEmployee.wageType);
+
+      if (
+        branchId === previous.branchId
+        && departmentId === previous.departmentId
+        && designationId === previous.designationId
+        && zoneId === previous.zoneId
+        && ucTownId === previous.ucTownId
+        && wageTypeId === previous.wageTypeId
+      ) return previous;
+      return { ...previous, branchId, departmentId, designationId, zoneId, ucTownId, wageTypeId };
+    });
+  }, [showEditEmpModal, editingEmployee, localBranches, localDepartments, localDesignations, zones, ucTowns, wageTypes, companies, primaryCompany?.id]);
 
   // For Auto Code Generation
   const [autoGenNewCode, setAutoGenNewCode] = useState(false);
@@ -626,7 +753,7 @@ export function WebPortal({
     const selectedWageType = wageTypes.find(item => item.id === newEmpForm.wageTypeId);
     const newEmp: Employee = {
       id: 'emp-' + Date.now(),
-      companyId: 'c1',
+      companyId: deriveEmployeeCompanyId(newEmpForm.branchId, localBranches, primaryCompany?.id),
       branchId: newEmpForm.branchId,
       departmentId: newEmpForm.departmentId,
       designationId: newEmpForm.designationId,
@@ -723,16 +850,25 @@ export function WebPortal({
       alert('CNIC format must be valid (e.g. 42101-1234567-3)');
       return;
     }
-    const masterErrors = validateEmployeeMasterSelection(editEmpForm, { branches: companyBranches, departments: localDepartments, designations: localDesignations, zones, ucTowns, wageTypes });
+    const masterErrors = validateEmployeeMasterSelection(editEmpForm, {
+      branches: editBranchOptions,
+      departments: editDepartmentOptions,
+      designations: editDesignationOptions,
+      zones: editZoneOptions,
+      ucTowns: editUcTownOptions,
+      wageTypes: editWageTypeOptions,
+    });
     if (masterErrors.length) { alert(`Please correct the employee assignment:\n• ${masterErrors.join('\n• ')}`); return; }
 
     if (!editingEmployee) return;
 
+    const selectedBranch = localBranches.find(item => item.id === editEmpForm.branchId);
     const selectedZone = zones.find(item => item.id === editEmpForm.zoneId);
     const selectedUcTown = ucTowns.find(item => item.id === editEmpForm.ucTownId);
     const selectedWageType = wageTypes.find(item => item.id === editEmpForm.wageTypeId);
     const updatedEmp: Employee = {
       ...editingEmployee,
+      companyId: selectedBranch?.companyId || editingEmployee.companyId,
       branchId: editEmpForm.branchId,
       departmentId: editEmpForm.departmentId,
       designationId: editEmpForm.designationId,
@@ -777,9 +913,31 @@ export function WebPortal({
   };
 
   const openEditEmployee = (emp: Employee) => {
-    const resolvedZoneId = resolveRecordId(zones, emp.zoneId, emp.zone);
+    const employeeCompanyId = resolveEmployeeCompanyId(emp, localBranches, companies.map(company => company.id), primaryCompany?.id);
+    const branchCandidates = localBranches.filter(branch =>
+      !employeeCompanyId || !branch.companyId || branch.companyId === employeeCompanyId || branch.id === emp.branchId
+    );
+    const zoneCandidates = zones.filter(zone =>
+      !employeeCompanyId || !zone.companyId || zone.companyId === employeeCompanyId || zone.id === emp.zoneId
+    );
+    const wageCandidates = wageTypes.filter(wage =>
+      !employeeCompanyId || !wage.companyId || wage.companyId === employeeCompanyId || wage.id === emp.wageTypeId
+    );
+    const resolvedBranchId = resolveRecordId(branchCandidates, emp.branchId, getLegacyBranchValue(emp));
+    const companyBranchIds = new Set(localBranches
+      .filter(branch => !employeeCompanyId || branch.companyId === employeeCompanyId)
+      .map(branch => branch.id));
+    const companyDepartmentCandidates = localDepartments.filter(department => companyBranchIds.has(department.branchId));
+    const savedDepartmentId = resolveRecordId(companyDepartmentCandidates, emp.departmentId, emp.departmentId);
+    const savedDepartment = companyDepartmentCandidates.find(department => department.id === savedDepartmentId);
+    const resolvedDepartmentId = savedDepartment?.branchId === resolvedBranchId ? savedDepartmentId : '';
+    const designationCandidates = localDesignations
+      .filter(designation => designation.departmentId === resolvedDepartmentId)
+      .map(designation => ({ ...designation, name: designation.title, code: designation.grade }));
+    const resolvedDesignationId = resolveRecordId(designationCandidates, emp.designationId, emp.designationId);
+    const resolvedZoneId = resolveRecordId(zoneCandidates, emp.zoneId, emp.zone);
     const resolvedUcTownId = resolveRecordId(ucTowns.filter(item => item.zoneId === resolvedZoneId), emp.ucTownId, emp.ucTown);
-    const resolvedWageTypeId = resolveRecordId(wageTypes, emp.wageTypeId, emp.wageType);
+    const resolvedWageTypeId = resolveRecordId(wageCandidates, emp.wageTypeId, emp.wageType);
     setEditingEmployee(emp);
     setEditEmpForm({
       fullName: emp.fullName,
@@ -788,9 +946,9 @@ export function WebPortal({
       cnic: emp.cnic,
       gender: emp.gender,
       dateOfBirth: emp.dateOfBirth,
-      branchId: emp.branchId,
-      departmentId: emp.departmentId,
-      designationId: emp.designationId,
+      branchId: resolvedBranchId,
+      departmentId: resolvedDepartmentId,
+      designationId: resolvedDesignationId,
       zoneId: resolvedZoneId,
       ucTownId: resolvedUcTownId,
       wageTypeId: resolvedWageTypeId,
@@ -807,8 +965,8 @@ export function WebPortal({
       pictureUrl: emp.pictureUrl || '',
       isZoneInCharge: emp.isZoneInCharge || false,
       zoneInChargeName: emp.zoneInChargeName || '',
-      zone: emp.zone || 'East Zone',
-      ucTown: emp.ucTown || 'UC-2 Clifton Town',
+      zone: emp.zone || '',
+      ucTown: emp.ucTown || '',
       houseRentAllowance: emp.houseRentAllowance || 0,
       conveyanceAllowance: emp.conveyanceAllowance || 0,
       medicalAllowance: emp.medicalAllowance || 0,
@@ -818,6 +976,7 @@ export function WebPortal({
       employeeCode: emp.employeeCode,
       maritalStatus: emp.maritalStatus || 'Single'
     });
+    setEditDepartmentMoveNotice('');
     setShowEditEmpModal(true);
   };
 
@@ -898,6 +1057,7 @@ export function WebPortal({
   };
 
   const handleEditBranchChange = (branchId: string) => {
+    setEditDepartmentMoveNotice('');
     setEditEmpForm(prev => ({
       ...prev,
       branchId,
@@ -907,11 +1067,15 @@ export function WebPortal({
   };
 
   const handleEditDeptChange = (departmentId: string) => {
-    setEditEmpForm(prev => ({
-      ...prev,
-      departmentId,
-      designationId: ''
-    }));
+    const update = synchronizeDepartmentSelection(departmentId, editEmpForm.branchId, editDepartmentOptions);
+    if (update.branchChanged) {
+      const oldBranch = localBranches.find(branch => branch.id === editEmpForm.branchId)?.name || 'the previous branch';
+      const newBranch = localBranches.find(branch => branch.id === update.branchId)?.name || 'the department branch';
+      setEditDepartmentMoveNotice(`Branch changed from ${oldBranch} to ${newBranch}; choose a Designation for the new Department.`);
+    } else {
+      setEditDepartmentMoveNotice(departmentId ? 'Department confirmed; choose a Designation.' : '');
+    }
+    setEditEmpForm(previous => ({ ...previous, branchId: update.branchId, departmentId: update.departmentId, designationId: update.designationId }));
   };
 
   const executeOffboarding = () => {
@@ -1904,22 +2068,40 @@ export function WebPortal({
                                       <td className="px-4 py-3 font-mono text-emerald-700">{punch?.punchIn || '--:--'}</td>
                                       <td className="px-4 py-3 font-mono text-indigo-700">{punch?.punchOut || '--:--'}</td>
                                       <td className="px-4 py-3">
-                                        {punch?.punchOut ? (
-                                          punch.outReason?.trim() ? (
-                                            <span
-                                              title={punch.outReason.trim()}
-                                              className="inline-flex max-w-48 truncate rounded border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-800"
-                                            >
-                                              {punch.outReason.trim()}
-                                            </span>
-                                          ) : (
+                                        {(() => {
+                                          const completedBreaks = Array.isArray(punch?.breaks) ? punch.breaks : [];
+                                          const finalReason = punch?.punchOut && punch.outReason?.trim()
+                                            ? [{ reason: punch.outReason.trim(), outAt: punch.punchOut, returnAt: '' }]
+                                            : [];
+                                          const reasons = [...completedBreaks, ...finalReason];
+                                          if (reasons.length) {
+                                            return (
+                                              <div className="flex max-w-64 flex-wrap gap-1.5">
+                                                {reasons.map((entry, index) => {
+                                                  const timeRange = entry.returnAt
+                                                    ? `${entry.outAt.slice(0, 5)}–${entry.returnAt.slice(0, 5)}`
+                                                    : entry.outAt.slice(0, 5);
+                                                  return (
+                                                    <span
+                                                      key={`${entry.reason}-${entry.outAt}-${index}`}
+                                                      title={`${entry.reason} · ${timeRange}`}
+                                                      className={`inline-flex max-w-60 truncate rounded border px-2 py-0.5 text-[10px] font-semibold ${entry.returnAt ? 'border-sky-200 bg-sky-50 text-sky-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}
+                                                    >
+                                                      {entry.reason} · {timeRange}
+                                                    </span>
+                                                  );
+                                                })}
+                                              </div>
+                                            );
+                                          }
+                                          return punch?.punchOut ? (
                                             <span className="inline-flex rounded border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
                                               Not recorded
                                             </span>
-                                          )
-                                        ) : (
-                                          <span className="text-slate-400" aria-label="No punch-out">&mdash;</span>
-                                        )}
+                                          ) : (
+                                            <span className="text-slate-400" aria-label="No punch-out">&mdash;</span>
+                                          );
+                                        })()}
                                       </td>
                                       <td className="px-4 py-3 text-slate-500">{punch?.method || 'N/A'}</td>
                                       <td className="px-4 py-3 font-mono">{punch?.overtimeMinutes ? `${punch.overtimeMinutes}m` : 'None'}</td>
@@ -3634,7 +3816,7 @@ export function WebPortal({
                 <div className="border-b border-slate-100 pb-3">
                   <h3 className="font-bold text-slate-800 text-[10px] uppercase tracking-wider mb-2.5 text-indigo-600">Personal &amp; Core Details</h3>
                   
-                  <div className="grid grid-cols-4 gap-3 mb-2.5">
+                  <div className="grid grid-cols-1 gap-3 mb-2.5 sm:grid-cols-2 lg:grid-cols-4">
                     <div>
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Full Name <span className="text-slate-400 font-normal">(e.g. Ali Ahmed)</span>:</label>
                       <input
@@ -3694,7 +3876,7 @@ export function WebPortal({
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-4 gap-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
                     <div>
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Mobile Contact <span className="text-slate-400 font-normal">(e.g. 0300-1234567)</span>:</label>
                       <input
@@ -3743,7 +3925,7 @@ export function WebPortal({
                         className="w-full p-1.5 border border-slate-300 rounded focus:ring-1 focus:outline-none"
                       />
                     </div>
-                    <div className="col-span-2">
+                    <div className="sm:col-span-2">
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Picture URL / Upload:</label>
                       <div className="flex space-x-1 items-center">
                         <input
@@ -3777,88 +3959,99 @@ export function WebPortal({
                 <div className="border-b border-slate-100 pb-3">
                   <h3 className="font-bold text-slate-800 text-[10px] uppercase tracking-wider mb-2.5 text-indigo-600">Organization &amp; Regional Assignment</h3>
                   
-                  <div className="grid grid-cols-4 gap-3 mb-2.5">
-                    <div>
+                  <div className="grid grid-cols-1 gap-3 mb-2.5 sm:grid-cols-2 lg:grid-cols-3">
+                    <div className="min-w-0">
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Assigned Branch:</label>
-                      <div className="flex space-x-1 items-center">
+                      <div className="flex min-w-0 items-center space-x-1">
                         <select
                           aria-label="Assigned Branch"
                           value={editEmpForm.branchId}
                           onChange={(e) => handleEditBranchChange(e.target.value)}
-                          className="flex-1 p-1.5 bg-white border border-slate-300 rounded focus:ring-1"
+                          className="min-w-0 w-full p-1.5 bg-white border border-slate-300 rounded focus:ring-1"
                         >
-                          <option value="">{companyBranches.length ? 'Select Branch' : 'No branches configured in Master Data'}</option>
-                          {companyBranches.map(b => (
-                            <option key={b.id} value={b.id}>{b.name}</option>
+                          <option value="">{editBranchOptions.length ? 'Select Branch' : 'No branches configured for this company'}</option>
+                          {editBranchOptions.map(b => (
+                            <option key={b.id} value={b.id}>{b.name}{getExceptionalCurrentSuffix(b, editEmpForm.branchId, editingCompanyId)}</option>
                           ))}
                         </select>
                       </div>
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Department:</label>
-                      <div className="flex space-x-1 items-center">
+                      <div className="flex min-w-0 items-center space-x-1">
                         <select
                           aria-label="Department"
                           value={editEmpForm.departmentId}
                           onChange={(e) => handleEditDeptChange(e.target.value)}
-                          className="flex-1 p-1.5 bg-white border border-slate-300 rounded focus:ring-1"
+                          className="min-w-0 w-full p-1.5 bg-white border border-slate-300 rounded focus:ring-1"
                         >
-                          <option value="">{!editEmpForm.branchId ? 'Select a branch first' : localDepartments.some(d => d.branchId === editEmpForm.branchId) ? 'Select Department' : 'No departments configured in Master Data'}</option>
-                          {localDepartments.filter(d => d.branchId === editEmpForm.branchId).map(d => (
-                            <option key={d.id} value={d.id}>{d.name}</option>
+                          <option value="">{savedDepartmentLabel && !editEmpForm.departmentId ? `Choose department (saved: ${savedDepartmentLabel})` : editDepartmentOptions.length ? 'Choose Department' : 'No departments configured for this company'}</option>
+                          {editDepartmentOptions.map(d => (
+                            <option key={d.id} value={d.id}>{d.name} — {localBranches.find(branch => branch.id === d.branchId)?.name || 'Unknown Branch'}{(d as Department & { status?: 'Active' | 'Inactive' }).status === 'Inactive' ? ' (Inactive — current)' : ''}</option>
                           ))}
                         </select>
                       </div>
+                      {!editEmpForm.departmentId && savedDepartmentLabel && (
+                        <p className="mt-1 text-[10px] leading-tight text-amber-700">
+                          Saved: {savedDepartmentLabel}{savedEditingDepartmentBranch ? ` — ${savedEditingDepartmentBranch.name}` : ''}. Choose a Department to confirm; its Branch will be applied automatically.
+                        </p>
+                      )}
+                      {editDepartmentMoveNotice && <p className="mt-1 text-[10px] leading-tight text-amber-700">{editDepartmentMoveNotice}</p>}
                     </div>
-                    <div className="col-span-2">
+                    <div className="min-w-0 sm:col-span-2 lg:col-span-1">
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Designation:</label>
-                      <div className="flex space-x-1 items-center">
+                      <div className="flex min-w-0 items-center space-x-1">
                         <select
                           aria-label="Designation"
                           value={editEmpForm.designationId}
                           onChange={(e) => setEditEmpForm({ ...editEmpForm, designationId: e.target.value })}
-                          className="flex-1 p-1.5 bg-white border border-slate-300 rounded focus:ring-1"
+                          className="min-w-0 w-full p-1.5 bg-white border border-slate-300 rounded focus:ring-1"
                         >
-                          <option value="">{!editEmpForm.departmentId ? 'Select a department first' : localDesignations.some(ds => ds.departmentId === editEmpForm.departmentId) ? 'Select Designation' : 'No designations configured in Master Data'}</option>
-                          {localDesignations.filter(ds => ds.departmentId === editEmpForm.departmentId).map(ds => (
-                            <option key={ds.id} value={ds.id}>{ds.title} (Grade {ds.grade})</option>
+                          <option value="">{!editEmpForm.departmentId ? 'Choose a Department first' : savedDesignationLabel && !editEmpForm.designationId ? `Choose designation (saved: ${savedDesignationLabel})` : editDesignationOptions.length ? 'Choose Designation' : 'No designations configured for this Department'}</option>
+                          {editDesignationOptions.map(ds => (
+                            <option key={ds.id} value={ds.id}>{ds.title} (Grade {ds.grade}){(ds as Designation & { status?: 'Active' | 'Inactive' }).status === 'Inactive' ? ' (Inactive — current)' : ''}</option>
                           ))}
                         </select>
                       </div>
+                      {editEmpForm.departmentId && !editEmpForm.designationId && savedDesignationLabel && <p className="mt-1 text-[10px] leading-tight text-amber-700">Saved designation: {savedDesignationLabel}. Choose a valid Designation for this Department.</p>}
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-4 gap-3">
-                    <div>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    <div className="min-w-0">
+                      <label className="block font-bold mb-1 text-slate-600 font-sans">Zone:</label>
+                      <div className="flex min-w-0 items-center space-x-1">
+                        <select
+                          aria-label="Zone"
+                          value={editEmpForm.zoneId}
+                          onChange={(e) => setEditEmpForm({ ...editEmpForm, zoneId: e.target.value, ucTownId: '' })}
+                          className="min-w-0 w-full p-1.5 bg-white border border-slate-300 rounded focus:ring-1 focus:outline-none"
+                        >
+                          <option value="">{!editEmpForm.zoneId && editEmpForm.zone ? `Choose master zone (saved: ${editEmpForm.zone})` : editZoneOptions.length ? 'Choose master Zone' : 'No zones configured for this company'}</option>
+                          {editZoneOptions.map(item => <option key={item.id} value={item.id}>{item.name}{getExceptionalCurrentSuffix(item, editEmpForm.zoneId, editingCompanyId)}</option>)}
+                        </select>
+                      </div>
+                      {!editEmpForm.zoneId && editEmpForm.zone && <p className="mt-1 text-[10px] leading-tight text-amber-700">Saved zone “{editEmpForm.zone}” is not linked to current Master Data. Choose its replacement.</p>}
+                    </div>
+                    <div className="min-w-0">
                       <label className="block font-bold mb-1 text-slate-600 font-sans">UC / Town Information:</label>
-                      <div className="flex space-x-1 items-center">
+                      <div className="flex min-w-0 items-center space-x-1">
                         <select
                           aria-label="UC / Town"
                           value={editEmpForm.ucTownId}
                           onChange={(e) => setEditEmpForm({ ...editEmpForm, ucTownId: e.target.value })}
                           disabled={!editEmpForm.zoneId}
-                          className="flex-1 p-1.5 bg-white border border-slate-300 rounded focus:ring-1 focus:outline-none"
+                          className="min-w-0 w-full p-1.5 bg-white border border-slate-300 rounded focus:ring-1 focus:outline-none disabled:bg-slate-100 disabled:text-slate-500"
                         >
-                          <option value="">{!editEmpForm.zoneId && editEmpForm.ucTown ? `Legacy: ${editEmpForm.ucTown}` : !editEmpForm.zoneId ? 'Select a zone first' : ucTowns.filter(item => item.zoneId === editEmpForm.zoneId && (item.status === 'Active' || item.id === editEmpForm.ucTownId)).length ? 'Select UC / Town' : 'No UC/Towns configured in Master Data'}</option>
-                          {ucTowns.filter(item => item.zoneId === editEmpForm.zoneId && (item.status === 'Active' || item.id === editEmpForm.ucTownId)).map(item => <option key={item.id} value={item.id}>{item.name}{item.status === 'Inactive' ? ' (Inactive)' : ''}</option>)}
+                          <option value="">{!editEmpForm.zoneId ? 'Choose a master Zone first' : !editEmpForm.ucTownId && editEmpForm.ucTown ? `Choose UC / Town (saved: ${editEmpForm.ucTown})` : editUcTownOptions.length ? 'Choose UC / Town' : 'No UC/Towns configured for this Zone'}</option>
+                          {editUcTownOptions.map(item => <option key={item.id} value={item.id}>{item.name}{item.status === 'Inactive' ? ' (Inactive — current)' : ''}</option>)}
                         </select>
                       </div>
+                      {!editEmpForm.zoneId && <p className="mt-1 text-[10px] leading-tight text-amber-700">Select a Zone to enable UC / Town.</p>}
+                      {editEmpForm.zoneId && !editEmpForm.ucTownId && editEmpForm.ucTown && <p className="mt-1 text-[10px] leading-tight text-amber-700">Saved UC / Town “{editEmpForm.ucTown}” is not linked to this Zone. Choose its replacement.</p>}
+                      {editEmpForm.zoneId && editUcTownOptions.length === 0 && <p className="mt-1 text-[10px] leading-tight text-amber-700">No UC / Town records are configured for this Zone.</p>}
                     </div>
-                    <div>
-                      <label className="block font-bold mb-1 text-slate-600 font-sans">Zone:</label>
-                      <div className="flex space-x-1 items-center">
-                        <select
-                          aria-label="Zone"
-                          value={editEmpForm.zoneId}
-                          onChange={(e) => setEditEmpForm({ ...editEmpForm, zoneId: e.target.value, ucTownId: '' })}
-                          className="flex-1 p-1.5 bg-white border border-slate-300 rounded focus:ring-1 focus:outline-none"
-                        >
-                          <option value="">{!editEmpForm.zoneId && editEmpForm.zone ? `Legacy: ${editEmpForm.zone}` : zones.filter(item => (!primaryCompany || item.companyId === primaryCompany.id) && (item.status === 'Active' || item.id === editEmpForm.zoneId)).length ? 'Select Zone' : 'No zones configured in Master Data'}</option>
-                          {zones.filter(item => (!primaryCompany || item.companyId === primaryCompany.id) && (item.status === 'Active' || item.id === editEmpForm.zoneId)).map(item => <option key={item.id} value={item.id}>{item.name}{item.status === 'Inactive' ? ' (Inactive)' : ''}</option>)}
-                        </select>
-                      </div>
-                    </div>
-                    <div className="col-span-2 flex items-center space-x-3 pt-3">
+                    <div className="flex items-center space-x-3 pt-3 sm:col-span-2">
                       <label className="flex items-center space-x-1.5 font-medium select-none">
                         <input
                           type="checkbox"
@@ -3889,20 +4082,21 @@ export function WebPortal({
                 <div className="border-b border-slate-100 pb-3">
                   <h3 className="font-bold text-slate-800 text-[10px] uppercase tracking-wider mb-2.5 text-indigo-600">Wage &amp; Custom Allowance configuration</h3>
                   
-                  <div className="grid grid-cols-4 gap-3 mb-2.5">
-                    <div>
+                  <div className="grid grid-cols-1 gap-3 mb-2.5 sm:grid-cols-2 lg:grid-cols-4">
+                    <div className="min-w-0">
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Wage Type:</label>
-                      <div className="flex space-x-1 items-center">
+                      <div className="flex min-w-0 items-center space-x-1">
                         <select
                           aria-label="Wage Type"
                           value={editEmpForm.wageTypeId}
                           onChange={(e) => setEditEmpForm({ ...editEmpForm, wageTypeId: e.target.value })}
-                          className="flex-1 p-1.5 bg-white border border-slate-300 rounded focus:ring-1"
+                          className="min-w-0 w-full p-1.5 bg-white border border-slate-300 rounded focus:ring-1"
                         >
-                          <option value="">{!editEmpForm.wageTypeId && editEmpForm.wageType ? `Legacy: ${editEmpForm.wageType}` : wageTypes.filter(item => (!primaryCompany || item.companyId === primaryCompany.id) && (item.status === 'Active' || item.id === editEmpForm.wageTypeId)).length ? 'Select Wage Type' : 'No wage types configured in Master Data'}</option>
-                          {wageTypes.filter(item => (!primaryCompany || item.companyId === primaryCompany.id) && (item.status === 'Active' || item.id === editEmpForm.wageTypeId)).map(item => <option key={item.id} value={item.id}>{item.name} ({item.calculationBasis}){item.status === 'Inactive' ? ' — Inactive' : ''}</option>)}
+                          <option value="">{!editEmpForm.wageTypeId && editEmpForm.wageType ? `Choose wage type (saved: ${editEmpForm.wageType})` : editWageTypeOptions.length ? 'Choose Wage Type' : 'No wage types configured for this company'}</option>
+                          {editWageTypeOptions.map(item => <option key={item.id} value={item.id}>{item.name} ({item.calculationBasis}){getExceptionalCurrentSuffix(item, editEmpForm.wageTypeId, editingCompanyId)}</option>)}
                         </select>
                       </div>
+                      {!editEmpForm.wageTypeId && editEmpForm.wageType && <p className="mt-1 text-[10px] leading-tight text-amber-700">Saved wage type “{editEmpForm.wageType}” is not linked to current Master Data. Choose its replacement.</p>}
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-600 font-sans">Basic Monthly Wage / Daily Rate (PKR) <span className="text-slate-400 font-normal">(e.g. 85000)</span>:</label>
@@ -3961,8 +4155,8 @@ export function WebPortal({
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-4 gap-3 mb-2.5">
-                    <div className="col-span-2">
+                  <div className="grid grid-cols-1 gap-3 mb-2.5 sm:grid-cols-2 lg:grid-cols-4">
+                    <div className="sm:col-span-2">
                       <label className="block font-bold mb-1 text-slate-600 font-sans">PKR IBAN Number <span className="text-slate-400 font-normal">(e.g. PK42HABB0012345678901234)</span>:</label>
                       <input
                         type="text" required
@@ -3973,11 +4167,11 @@ export function WebPortal({
                         className="w-full p-1.5 border border-slate-300 rounded font-mono focus:ring-1"
                       />
                     </div>
-                    <div className="col-span-2">
+                    <div className="sm:col-span-2">
                       {(wageTypes.find(item => item.id === editEmpForm.wageTypeId)?.calculationBasis ?? (editEmpForm.wageType === 'Daily Wager' ? 'Daily' : 'Monthly')) === 'Monthly' && (
                         <div className="bg-slate-50 p-2 rounded-lg border border-slate-200">
                           <h4 className="font-bold text-slate-700 text-[9px] uppercase tracking-wider mb-1">Allowance Overrides (0 to default split)</h4>
-                          <div className="grid grid-cols-4 gap-1.5">
+                          <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
                             <div>
                               <label className="block text-[8px] font-semibold text-slate-500 font-sans">Rent:</label>
                               <input
@@ -4033,7 +4227,7 @@ export function WebPortal({
                 <div className="space-y-2 pb-2">
                   <h3 className="font-bold text-slate-800 text-[10px] uppercase tracking-wider text-indigo-600">Statutory &amp; Trust Compliance</h3>
                   
-                  <div className="grid grid-cols-4 gap-3 bg-slate-50 p-2.5 rounded-lg border border-slate-200 items-start">
+                  <div className="grid grid-cols-1 gap-3 bg-slate-50 p-2.5 rounded-lg border border-slate-200 items-start sm:grid-cols-2 lg:grid-cols-4">
                     <div className="flex flex-col space-y-1">
                       <label className="flex items-center space-x-1.5 font-medium select-none">
                         <input

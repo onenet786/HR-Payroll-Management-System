@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { AlertTriangle, Building2, Check, ChevronLeft, ChevronRight, CircleCheck, Landmark, Loader2, Plus, Trash2 } from 'lucide-react';
 import type { Branch, Company, CompanySetupPayload, Department, Designation, Province, StatutoryConfig, TaxSlab } from '../types';
+import { generateMasterCode } from '../data/masterCodes';
 
 interface Props {
   companies: Company[];
@@ -145,8 +146,18 @@ export function CompanySetupModule({ companies, branches, departments, designati
     const now = new Date().toISOString();
     const savedCompany: Company = { ...company, name: company.name.trim(), legalName: company.legalName?.trim(), code: upper(company.code || ''), ntn: company.ntn?.trim(), taxRegistrationNumber: company.ntn?.trim() || '', eobiRegistrationNumber: registrationStatus.eobi === 'Registered' ? company.eobiRegistration?.trim() || '' : '', socialSecurityRegistration: registrationStatus.social === 'Registered' ? company.socialSecurityRegistration?.trim() : undefined, socialSecurityRegion: company.province || '', updatedAt: now, createdAt: company.createdAt || now, setupCompletedAt: now };
     const savedBranch = { ...branch, companyId: savedCompany.id, address: sameAddress ? company.registeredAddress || '' : branch.address.trim(), city: sameAddress ? company.city || '' : branch.city.trim(), province: sameAddress ? company.province || 'Punjab' : branch.province };
+    const savedDepartments = deptRows.map(d => ({ ...d, branchId: savedBranch.id, name: d.name.trim(), code: upper(d.code) }));
+    const savedDesignations = desgRows.reduce<Designation[]>((result, designation) => {
+      const department = savedDepartments.find(item => item.id === designation.departmentId);
+      const departmentDesignations = [...designations, ...result].filter(item => item.departmentId === designation.departmentId);
+      const code = designation.code || generateMasterCode('designation', {
+        name: '', title: designation.title, company: savedCompany, branch: savedBranch, department,
+      }, departmentDesignations, designation.id);
+      result.push({ ...designation, code, title: designation.title.trim(), grade: upper(designation.grade) });
+      return result;
+    }, []);
     try {
-      await onSave({ company: savedCompany, branch: savedBranch, departments: deptRows.map(d => ({ ...d, branchId: savedBranch.id, name: d.name.trim(), code: upper(d.code) })), designations: desgRows.map(d => ({ ...d, title: d.title.trim(), grade: upper(d.grade) })), statutoryConfig: { ...config, updatedAt: now } });
+      await onSave({ company: savedCompany, branch: savedBranch, departments: savedDepartments, designations: savedDesignations, statutoryConfig: { ...config, updatedAt: now } });
       setSavedAction(loadedExisting ? 'updated' : 'created'); setLoadedExisting(true); hydratedCompanyId.current=savedCompany.id; setDirty(false); setSaved(true);
     } catch { setError('Company setup could not be saved. Please try again.'); }
     finally { setSaving(false); }

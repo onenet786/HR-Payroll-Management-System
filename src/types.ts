@@ -66,6 +66,7 @@ export interface Department {
 export interface Designation {
   id: string;
   departmentId: string;
+  code?: string;
   title: string;
   grade: string;
 }
@@ -170,6 +171,16 @@ export interface Employee {
 }
 
 // Attendance Logs
+export interface AttendanceBreak {
+  reason: string;
+  outAt: string; // HH:MM:SS
+  returnAt: string; // HH:MM:SS
+  outMethod?: string;
+  returnMethod?: string;
+  terminalId?: string;
+  terminalLocation?: string;
+}
+
 export interface AttendanceLog {
   id: string;
   employeeId: string;
@@ -177,6 +188,8 @@ export interface AttendanceLog {
   punchIn?: string; // HH:MM:SS
   punchOut?: string; // HH:MM:SS
   outReason?: string;
+  breaks?: AttendanceBreak[];
+  lastPunchAt?: string;
   employeeBranchId?: string;
   terminalBranchId?: string;
   crossBranch?: boolean;

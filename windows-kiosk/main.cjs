@@ -5,7 +5,34 @@ const net = require('net');
 const path = require('path');
 const https = require('https');
 const { pathToFileURL } = require('url');
-require('dotenv').config({ quiet: true });
+const dotenv = require('dotenv');
+const {
+  canReturnFromTemporaryExit,
+  resumeFromTemporaryExit,
+} = require('./attendance-state.cjs');
+
+dotenv.config({ quiet: true });
+
+// Vite reads .env.local automatically, but Electron does not. During local
+// development, load the same file and map its browser-safe Firebase settings
+// to the unprefixed names used by the kiosk main process. Packaged builds stay
+// strict and continue to require their deployment environment configuration.
+if (!app.isPackaged) {
+  dotenv.config({ path: path.join(__dirname, '..', '.env.local'), quiet: true, override: false });
+  const localFirebaseKeys = [
+    'FIREBASE_API_KEY',
+    'FIREBASE_AUTH_DOMAIN',
+    'FIREBASE_PROJECT_ID',
+    'FIREBASE_STORAGE_BUCKET',
+    'FIREBASE_MESSAGING_SENDER_ID',
+    'FIREBASE_APP_ID',
+    'FIRESTORE_DATABASE_ID',
+  ];
+  for (const key of localFirebaseKeys) {
+    if (!process.env[key] && process.env[`VITE_${key}`]) process.env[key] = process.env[`VITE_${key}`];
+  }
+  if (!process.env.PORTAL_URL) process.env.PORTAL_URL = 'http://localhost:3000';
+}
 
 const bridgePort = 15896;
 let mainWindow;
@@ -852,6 +879,7 @@ function computePunch(existingLog, method, terminal, evidenceId, outReason, at) 
       terminalId: terminal.id,
       terminalLocation: terminal.location,
       evidenceId: evidenceId || '',
+      lastPunchAt: at,
       createdAt: new Date().toISOString(),
     };
   }
@@ -864,6 +892,7 @@ function computePunch(existingLog, method, terminal, evidenceId, outReason, at) 
     terminalId: terminal.id,
     terminalLocation: terminal.location,
     evidenceId: evidenceId || existingLog.evidenceId || '',
+    lastPunchAt: at,
   };
   if (updated.punchIn && at > '18:00:00') {
     const [h, m] = at.split(':').map(Number);
@@ -876,7 +905,8 @@ function savePunch(store, employee, method, evidence, meta) {
   const date = todayDate();
   const existing = (store.attendances || []).find(log => log.employeeId === employee.id && log.date === date);
   const at = nowTime();
-  if (existing?.punchIn && existing?.punchOut) {
+  const isReturningFromBreak = canReturnFromTemporaryExit(existing);
+  if (existing?.punchIn && existing?.punchOut && !isReturningFromBreak) {
     return {
       ok: false,
       message: `Attendance is already completed today (${existing.punchIn} to ${existing.punchOut}). Contact HR if it needs correction.`,
@@ -891,7 +921,7 @@ function savePunch(store, employee, method, evidence, meta) {
       action: 'OUT',
     };
   }
-  const lastPunchTime = existing?.punchOut || existing?.punchIn || '';
+  const lastPunchTime = existing?.lastPunchAt || existing?.punchOut || existing?.punchIn || '';
   if (lastPunchTime) {
     const secondsSinceLastPunch = timeToSeconds(at) - timeToSeconds(lastPunchTime);
     if (secondsSinceLastPunch >= 0 && secondsSinceLastPunch < 60) {
@@ -916,8 +946,16 @@ function savePunch(store, employee, method, evidence, meta) {
       reasons: checkoutReasons,
     };
   }
+  const resumed = isReturningFromBreak
+    ? resumeFromTemporaryExit(existing, {
+        at,
+        method,
+        terminal: store.terminal,
+        evidenceId: evidence?.id,
+      })
+    : null;
   const log = {
-    ...computePunch(existing, method, store.terminal, evidence?.id, outReason, at),
+    ...(resumed?.log || computePunch(existing, method, store.terminal, evidence?.id, outReason, at)),
     employeeId: employee.id,
     employeeBranchId: employee.branchId || '',
     terminalBranchId: store.terminal.branchId || '',
@@ -949,8 +987,18 @@ function savePunch(store, employee, method, evidence, meta) {
   return {
     ok: true,
     employee: kioskEmployee(employee),
-    attendance: { date: log.date, punchIn: log.punchIn, punchOut: log.punchOut, method: log.method, status: log.status },
-    action: log.punchOut ? 'OUT' : 'IN',
+    attendance: {
+      date: log.date,
+      punchIn: log.punchIn,
+      punchOut: log.punchOut,
+      method: log.method,
+      status: log.status,
+      terminalLocation: log.terminalLocation,
+    },
+    action: isReturningFromBreak ? 'IN' : (log.punchOut ? 'OUT' : 'IN'),
+    eventTime: at,
+    returnedFromBreak: isReturningFromBreak,
+    breakReason: resumed?.breakReason || '',
     outReason: log.punchOut ? (log.outReason || outReason) : '',
   };
 }
@@ -969,6 +1017,18 @@ ipcMain.handle('kiosk:get-state', async () => {
     terminal: store.terminal,
     lastSync: store.lastSync || null,
     employees: (store.employees || []).map(kioskEmployee),
+    attendances: (store.attendances || []).map(log => ({
+      id: log.id,
+      employeeId: log.employeeId,
+      date: log.date,
+      punchIn: log.punchIn || '',
+      punchOut: log.punchOut || '',
+      outReason: log.outReason || '',
+      breaks: Array.isArray(log.breaks) ? log.breaks : [],
+      lastPunchAt: log.lastPunchAt || '',
+      method: log.method,
+      status: log.status,
+    })),
     branches,
     assignedBranch: branches.find(branch => branch.id === store.terminal.branchId) || null,
     syncTarget: {
@@ -993,7 +1053,15 @@ ipcMain.handle('kiosk:lookup-employee', async (_event, code) => {
   return {
     found: true,
     employee: kioskEmployee(employee),
-    todayLog: todayLog ? { punchIn: todayLog.punchIn, punchOut: todayLog.punchOut, status: todayLog.status } : null,
+    todayLog: todayLog ? {
+      punchIn: todayLog.punchIn,
+      punchOut: todayLog.punchOut,
+      outReason: todayLog.outReason || '',
+      breaks: Array.isArray(todayLog.breaks) ? todayLog.breaks : [],
+      lastPunchAt: todayLog.lastPunchAt || '',
+      canReturn: canReturnFromTemporaryExit(todayLog),
+      status: todayLog.status,
+    } : null,
     action,
     fingerprintCount: getFingerprintTemplates(employee).length,
   };

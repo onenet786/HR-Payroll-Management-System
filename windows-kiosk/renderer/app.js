@@ -306,8 +306,12 @@ function renderPreview(result) {
   // Punch state badge
   el.empPunchState.className = '';
   if (todayLog?.punchIn && !todayLog?.punchOut) {
+    const lastReturnAt = Array.isArray(todayLog.breaks) ? todayLog.breaks.at(-1)?.returnAt : '';
     el.empPunchState.className = 'emp-punch-state in-state';
-    el.empPunchState.textContent = `● IN since ${todayLog.punchIn?.slice(0,5)}`;
+    el.empPunchState.textContent = `● IN since ${(lastReturnAt || todayLog.punchIn)?.slice(0,5)}`;
+  } else if (todayLog?.punchOut && todayLog?.canReturn) {
+    el.empPunchState.className = 'emp-punch-state out-state';
+    el.empPunchState.textContent = `● ${todayLog.outReason?.toUpperCase()} since ${todayLog.punchOut?.slice(0,5)} — verify to return`;
   } else if (todayLog?.punchOut) {
     el.empPunchState.className = 'emp-punch-state out-state';
     el.empPunchState.textContent = `● OUT at ${todayLog.punchOut?.slice(0,5)}`;
@@ -1188,27 +1192,29 @@ function handlePunchResult(result) {
   if (result.ok) {
     const { employee, action } = result;
     const attendance = result.attendance || result.log || {};
-    const timeStr = action === 'OUT'
-      ? (attendance.punchOut || '').slice(0, 5)
-      : (attendance.punchIn || '').slice(0, 5);
+    const timeStr = (result.eventTime || (action === 'OUT' ? attendance.punchOut : attendance.punchIn) || '').slice(0, 5);
     const orgLine = [
       employee.departmentName,
       employee.designationName,
       employee.branchName,
     ].filter(Boolean).join(' · ');
-    const reasonLine = action === 'OUT'
-      ? `Out reason: ${result.outReason || 'Shift exit'}`
-      : 'Entry recorded';
+    const reasonLine = result.returnedFromBreak
+      ? `Returned from ${result.breakReason || 'break'}`
+      : action === 'OUT'
+        ? `Out reason: ${result.outReason || 'Shift exit'}`
+        : 'Entry recorded';
 
     showResult('ok',
-      `${action === 'OUT' ? 'Punch Out' : 'Punch In'} Recorded`,
+      result.returnedFromBreak ? 'Return from Break Recorded' : `${action === 'OUT' ? 'Punch Out' : 'Punch In'} Recorded`,
       employee.fullName,
       timeStr,
       [
         employee.employeeCode,
         employee.designationName,
         employee.departmentName,
-        action === 'OUT' ? (result.outReason || 'Shift exit') : attendance.status,
+        result.returnedFromBreak
+          ? `Returned from ${result.breakReason || 'break'}`
+          : action === 'OUT' ? (result.outReason || 'Shift exit') : attendance.status,
         attendance.method,
         attendance.terminalLocation || kioskState?.terminal?.location || '',
       ].filter(Boolean)
@@ -1434,6 +1440,26 @@ function refreshTodayFeed() {
   const transactions = (kioskState.attendances || []).flatMap(log => {
     const items = [];
     if (log.punchIn) items.push({ log, action: 'IN', at: `${log.date || ''}T${log.punchIn}` });
+    for (const attendanceBreak of Array.isArray(log.breaks) ? log.breaks : []) {
+      if (attendanceBreak.outAt) {
+        items.push({
+          log,
+          action: 'OUT',
+          at: `${log.date || ''}T${attendanceBreak.outAt}`,
+          eventTime: attendanceBreak.outAt,
+          reason: attendanceBreak.reason,
+        });
+      }
+      if (attendanceBreak.returnAt) {
+        items.push({
+          log,
+          action: 'IN',
+          at: `${log.date || ''}T${attendanceBreak.returnAt}`,
+          eventTime: attendanceBreak.returnAt,
+          reason: `Returned from ${attendanceBreak.reason || 'break'}`,
+        });
+      }
+    }
     if (log.punchOut) items.push({ log, action: 'OUT', at: `${log.date || ''}T${log.punchOut}` });
     return items;
   }).sort((a, b) => String(b.at).localeCompare(String(a.at))).slice(0, 10);
@@ -1455,7 +1481,7 @@ function refreshTodayFeed() {
     const badge = isOut ? `<span class="feed-badge badge-out">OUT</span>`
       : isLate ? `<span class="feed-badge badge-late">LATE</span>`
       : `<span class="feed-badge badge-in">IN</span>`;
-    const time = action === 'OUT' ? log.punchOut : log.punchIn;
+    const time = item.eventTime || (action === 'OUT' ? log.punchOut : log.punchIn);
     const dateLabel = log.date ? new Date(`${log.date}T00:00:00`).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : '';
     const avatar = pictureUrl ? `<img src="${esc(pictureUrl)}" alt="" />` : esc(initials);
 
@@ -1463,7 +1489,7 @@ function refreshTodayFeed() {
       <div class="feed-avatar-sm">${avatar}</div>
       <div class="feed-info">
         <div class="feed-name">${esc(name)}</div>
-        <div class="feed-sub">${esc(dateLabel)} · ${esc(log.method || 'Code')} · ${esc(log.status || '')}</div>
+        <div class="feed-sub">${esc([dateLabel, item.reason || log.method || 'Code', log.status || ''].filter(Boolean).join(' · '))}</div>
       </div>
       <div class="feed-times">
         <div class="${isOut ? 'feed-out' : 'feed-in'}">${esc(time?.slice(0,5) || '--')}</div>
@@ -1497,10 +1523,11 @@ function renderDirectory(filter) {
     const log = todayLogs.find(l => l.employeeId === emp.id);
     const punchedIn = log?.punchIn && !log?.punchOut;
     const classes = [hasFp ? 'has-fp' : '', punchedIn ? 'punched-in' : ''].filter(Boolean).join(' ');
+    const lastReturnAt = Array.isArray(log?.breaks) ? log.breaks.at(-1)?.returnAt : '';
     const status = punchedIn
-      ? `In since ${log.punchIn?.slice(0,5)}`
+      ? `In since ${(lastReturnAt || log.punchIn)?.slice(0,5)}`
       : log?.punchOut
-        ? `Out ${log.punchOut?.slice(0,5)}`
+        ? `${log.outReason || 'Out'} ${log.punchOut?.slice(0,5)}`
         : hasFp ? `${templates.length} FP template${templates.length > 1 ? 's' : ''}` : 'No fingerprint';
     return `<div class="dir-row ${classes}" data-code="${esc(emp.employeeCode)}">
       <div class="dir-dot"></div>
