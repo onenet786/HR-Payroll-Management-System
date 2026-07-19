@@ -4,19 +4,17 @@
  */
 
 import { useState } from 'react';
-import { Monitor, Cpu, Smartphone, Layers, ShieldCheck, Briefcase, Info, Scan } from 'lucide-react';
+import { Layers, ShieldCheck, Briefcase, Info } from 'lucide-react';
 import './DeviceEmulator.css';
 import { WebPortal } from './WebPortal';
-import { WindowsApp } from './WindowsApp';
-import { MobileApp } from './MobileApp';
 import { KioskTerminal } from './KioskTerminal';
 import type { FirestoreSyncStatus } from '../App';
 import {
-  Employee, AttendanceLog, LeaveRequest, StatutoryConfig, TaxSlab, PayrollRun, Designation, Branch, Department,
-  Role, UserAccount, Holiday, LoanAdvance, SalaryRevision,
-  PerformanceReview, CompanyAsset, JobPosting, JobApplication, GratuitySettlement, AppNotification
+  Employee, AttendanceLog, LeaveRequest, StatutoryConfig, TaxSlab, PayrollRun, Payslip, Designation, Branch, Department,
+  Role, UserAccount, NewUserAccount, Holiday, LoanAdvance, SalaryRevision,
+  PerformanceReview, CompanyAsset, JobPosting, JobApplication, GratuitySettlement, AppNotification, Company, CompanySetupPayload, Zone, UcTown, WageType
 } from '../types';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion } from 'motion/react';
 
 interface DeviceEmulatorProps {
   employees: Employee[];
@@ -25,6 +23,7 @@ interface DeviceEmulatorProps {
   statConfig: StatutoryConfig;
   taxSlabs: TaxSlab[];
   payrollRuns: PayrollRun[];
+  payrollPayslips: Payslip[];
   onAddEmployee: (emp: Employee) => void;
   onUpdateEmployee: (emp: Employee) => void;
   onUpdateStatConfig: (config: StatutoryConfig) => void;
@@ -34,20 +33,28 @@ interface DeviceEmulatorProps {
   onApproveRegularization: (id: string) => void;
   onRejectRegularization: (id: string) => void;
   onCreatePayrollRun: (title: string, month: number, year: number) => void;
+  onUpdatePayrollStatus: (runId: string, status: 'Approved' | 'Disbursed') => void;
   onSimulatePunch: (employeeId: string, punchIn: string, punchOut: string, method: string) => void;
   onApplyLeave: (leave: LeaveRequest) => void;
   onAddRegularization: (employeeId: string, date: string, reason: string) => void;
   onAddAttendance: (log: AttendanceLog) => void;
   branches: Branch[];
+  companies: Company[];
+  onSaveCompanySetup: (payload: CompanySetupPayload) => Promise<void>;
   departments: Department[];
   designations: Designation[];
+  zones: Zone[];
+  ucTowns: UcTown[];
+  wageTypes: WageType[];
+  onSaveMasterData: (kind: 'branch' | 'department' | 'designation' | 'zone' | 'ucTown' | 'wageType', record: Branch | Department | Designation | Zone | UcTown | WageType) => Promise<void>;
   roles: Role[];
   users: UserAccount[];
   currentUserAccount: UserAccount;
   accessControlLoaded: boolean;
   onSetCurrentUserAccount: (user: UserAccount) => void;
   onAddRole: (role: Role) => void;
-  onAddUser: (user: UserAccount) => void;
+  onAddUser: (user: NewUserAccount) => Promise<void>;
+  onDeleteUser: (userId: string) => Promise<void>;
   onUpdateUserRole: (userId: string, roleId: string) => void;
   loggedInUser: UserAccount;
   onLogout: () => void;
@@ -94,6 +101,7 @@ export function DeviceEmulator({
   statConfig,
   taxSlabs,
   payrollRuns,
+  payrollPayslips,
   onAddEmployee,
   onUpdateEmployee,
   onUpdateStatConfig,
@@ -103,13 +111,20 @@ export function DeviceEmulator({
   onApproveRegularization,
   onRejectRegularization,
   onCreatePayrollRun,
+  onUpdatePayrollStatus,
   onSimulatePunch,
   onApplyLeave,
   onAddRegularization,
   onAddAttendance,
   branches,
+  companies,
+  onSaveCompanySetup,
   departments,
   designations,
+  zones,
+  ucTowns,
+  wageTypes,
+  onSaveMasterData,
   roles,
   users,
   currentUserAccount,
@@ -117,6 +132,7 @@ export function DeviceEmulator({
   onSetCurrentUserAccount,
   onAddRole,
   onAddUser,
+  onDeleteUser,
   onUpdateUserRole,
   loggedInUser,
   onLogout,
@@ -156,34 +172,28 @@ export function DeviceEmulator({
   firestoreSyncStatus
 }: DeviceEmulatorProps) {
   const isKioskUser = loggedInUser?.username === 'kiosk' || loggedInUser?.roleId === 'role-kiosk';
-  const isWindowsDesktopClient = /Electron/i.test(navigator.userAgent);
-
-  const [deviceMode, setDeviceMode] = useState<'web' | 'windows' | 'mobile' | 'kiosk'>(() => {
-    if (isKioskUser) return 'kiosk';
-    return isWindowsDesktopClient ? 'windows' : 'web';
-  });
   const [showComplianceOverview, setShowComplianceOverview] = useState(false);
 
+  /* ── Kiosk locked mode ─────────────────────────────────────────── */
   if (isKioskUser) {
     return (
-      <div className="h-screen overflow-hidden bg-slate-900 text-slate-100 flex flex-col font-sans select-none" id="kiosk-locked-container">
-        {/* Sleek top status bar for Kiosk */}
+      <div className="h-screen overflow-hidden bg-slate-900 text-slate-100 flex flex-col font-sans select-none">
         <div className="bg-slate-950 px-6 py-4 flex items-center justify-between border-b border-slate-800">
           <div className="flex items-center space-x-3">
-            <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></div>
-            <span className="text-xs font-mono font-bold uppercase tracking-wider text-slate-350">
-              Bin Ishaq Attendance Terminal Locked Mode
+            <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="text-xs font-mono font-bold uppercase tracking-wider text-slate-300">
+              Bin Ishaq Attendance Terminal — Locked Mode
             </span>
           </div>
-          <button 
+          <button
             onClick={onLogout}
-            className="text-xs bg-rose-650 hover:bg-rose-700 text-white font-bold px-3 py-1.5 rounded-lg flex items-center space-x-1.5 transition"
+            className="text-xs bg-rose-700 hover:bg-rose-600 text-white font-bold px-3 py-1.5 rounded-lg transition"
           >
-            <span>Exit Kiosk Terminal</span>
+            Exit Kiosk Terminal
           </button>
         </div>
-        <div className="flex-1 flex items-center justify-center p-2 h-full overflow-hidden">
-          <KioskTerminal 
+        <div className="flex-1 flex items-center justify-center p-2 overflow-hidden">
+          <KioskTerminal
             employees={employees}
             attendances={attendances}
             onSimulatePunch={onSimulatePunch}
@@ -193,261 +203,152 @@ export function DeviceEmulator({
     );
   }
 
+  /* ── Normal HR portal ──────────────────────────────────────────── */
   return (
-    <div className="h-screen overflow-hidden bg-slate-900 text-slate-100 flex flex-col font-sans" id="emulator-container">
-      
-      {/* 1. Global Emulator Device Selector Bar (Only visible to Super Admin for simulation) */}
-      {loggedInUser?.roleId === 'role-admin' ? (
-        <div className="bg-slate-950 border-b border-slate-800 px-6 py-4 flex flex-col md:flex-row items-center justify-between space-y-4 md:space-y-0" id="emulator-selector-bar">
-          
-          <div className="flex items-center space-x-3.5">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-emerald-600 to-green-500 flex items-center justify-center shadow-lg text-white">
-              <Layers className="w-5 h-5" />
-            </div>
-            <div>
-              <h1 className="font-bold text-xs md:text-sm text-white tracking-wider uppercase flex flex-wrap items-center gap-2">
-                <span>Bin Ishaq HR &amp; Payroll Management System</span>
-                <span className="font-mono text-[9px] px-1.5 py-0.5 bg-emerald-950 text-emerald-400 rounded-full border border-emerald-900 leading-none">v1.2</span>
-              </h1>
-              <p className="text-xs text-slate-400 font-sans mt-0.5">FBR High-Compliance Multi-Tenant Engine</p>
-            </div>
+    <div className="h-screen overflow-hidden bg-slate-900 text-slate-100 flex flex-col font-sans">
+
+      {/* Top header bar — branding + stats only, no device switcher */}
+      <header className="hidden sm:flex bg-slate-950 border-b border-slate-800 px-4 sm:px-6 py-3 items-center justify-between gap-4 flex-shrink-0">
+
+        <div className="flex items-center space-x-3">
+          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-tr from-emerald-600 to-green-500 flex items-center justify-center shadow-lg text-white flex-shrink-0">
+            <Layers className="w-4 h-4 sm:w-5 sm:h-5" />
           </div>
-
-          {/* Quadruple Switch Controller */}
-          <div className="bg-slate-900 p-1 rounded-2xl flex border border-slate-850 shadow-inner" id="emulator-buttons">
-            <button 
-              onClick={() => setDeviceMode('web')}
-              className={`px-3 py-2 rounded-xl text-xs font-bold leading-none flex items-center space-x-1.5 transition ${deviceMode === 'web' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}
-            >
-              <Monitor className="w-3.5 h-3.5" />
-              <span>🖥️ Web Admin</span>
-            </button>
-
-            <button 
-              onClick={() => setDeviceMode('windows')}
-              className={`px-3 py-2 rounded-xl text-xs font-bold leading-none flex items-center space-x-1.5 transition ${deviceMode === 'windows' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}
-            >
-              <Cpu className="w-3.5 h-3.5" />
-              <span>💻 Windows Client</span>
-            </button>
-
-            <button 
-              onClick={() => setDeviceMode('mobile')}
-              className={`px-3 py-2 rounded-xl text-xs font-bold leading-none flex items-center space-x-1.5 transition ${deviceMode === 'mobile' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}
-            >
-              <Smartphone className="w-3.5 h-3.5" />
-              <span>📱 Mobile ESS</span>
-            </button>
-
-            <button 
-              onClick={() => setDeviceMode('kiosk')}
-              className={`px-3 py-2 rounded-xl text-xs font-bold leading-none flex items-center space-x-1.5 transition ${deviceMode === 'kiosk' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}
-            >
-              <Scan className="w-3.5 h-3.5" />
-              <span>⏰ Kiosk Terminal</span>
-            </button>
-          </div>
-
-          {/* Quick diagnostic view */}
-          <div className="hidden lg:flex items-center space-x-4 font-mono text-xs">
-            <div className="text-right">
-              <span className="text-slate-400">Total Staff:</span> <span className="text-white font-bold">{employees.length}</span>
-            </div>
-            <div className="h-4 border-r border-slate-800"></div>
-            <div className="text-right">
-              <span className="text-slate-400">Active Logs:</span> <span className="text-emerald-400 font-bold">{attendances.length} Synced</span>
-            </div>
-          </div>
-
-        </div>
-      ) : (
-        <div className="bg-slate-950 border-b border-slate-800 px-6 py-4 flex items-center justify-between" id="locked-client-header">
-          <div className="flex items-center space-x-3.5">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-emerald-600 to-green-500 flex items-center justify-center shadow-lg text-white">
-              <Layers className="w-5 h-5" />
-            </div>
-            <div>
-              <h1 className="font-bold text-xs md:text-sm text-white tracking-wider uppercase flex flex-wrap items-center gap-2">
-                <span>Bin Ishaq HR Suite</span>
-              </h1>
-              <p className="text-xs text-slate-450 font-sans mt-0.5">
-                Logged in: <span className="text-emerald-400 font-bold">{loggedInUser?.username}</span> ({roles.find(r => r.id === loggedInUser?.roleId)?.name})
-              </p>
-            </div>
-          </div>
-          {deviceMode !== 'web' && (
-            <button 
-              onClick={onLogout}
-              className="text-xs bg-slate-900 border border-slate-800 hover:bg-rose-700 text-slate-350 hover:text-white font-bold px-3 py-1.5 rounded-lg transition cursor-pointer"
-            >
-              Log Out
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* 2. Interactive Main Workspace Area */}
-      <div className="flex-1 flex flex-col lg:flex-row overflow-hidden" id="emulator-main">
-        
-        {/* Main Content Area */}
-        <div className="flex-1 p-2 flex items-center justify-center overflow-auto" id="emulator-canvas">
-          <div className="w-full h-full max-w-7xl">
-            <AnimatePresence mode="wait">
-              {deviceMode === 'web' && (
-                <motion.div 
-                  key="web-view"
-                  initial={{ opacity: 0, scale: 0.99 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.99 }}
-                  className="w-full h-full rounded-3xl overflow-hidden shadow-2xl border border-slate-800"
-                >
-                  <WebPortal 
-                    employees={employees}
-                    attendances={attendances}
-                    leaves={leaves}
-                    statConfig={statConfig}
-                    taxSlabs={taxSlabs}
-                    payrollRuns={payrollRuns}
-                    onAddEmployee={onAddEmployee}
-                    onUpdateEmployee={onUpdateEmployee}
-                    onUpdateStatConfig={onUpdateStatConfig}
-                    onUpdateTaxSlabs={onUpdateTaxSlabs}
-                    onApproveLeave={onApproveLeave}
-                    onRejectLeave={onRejectLeave}
-                    onApproveRegularization={onApproveRegularization}
-                    onRejectRegularization={onRejectRegularization}
-                    onCreatePayrollRun={onCreatePayrollRun}
-                    onApplyLeave={onApplyLeave}
-                    onAddAttendance={onAddAttendance}
-                    branches={branches}
-                    departments={departments}
-                    designations={designations}
-                    roles={roles}
-                    users={users}
-                    currentUserAccount={currentUserAccount}
-                    accessControlLoaded={accessControlLoaded}
-                    onSetCurrentUserAccount={onSetCurrentUserAccount}
-                    onAddRole={onAddRole}
-                    onAddUser={onAddUser}
-                    onUpdateUserRole={onUpdateUserRole}
-                    onLogout={onLogout}
-                    onAddBranch={onAddBranch}
-                    onAddDepartment={onAddDepartment}
-                    onAddDesignation={onAddDesignation}
-                    holidays={holidays}
-                    onAddHoliday={onAddHoliday}
-                    onUpdateHoliday={onUpdateHoliday}
-                    onDeleteHoliday={onDeleteHoliday}
-                    loanAdvances={loanAdvances}
-                    onApplyLoan={onApplyLoan}
-                    onApproveLoan={onApproveLoan}
-                    onRejectLoan={onRejectLoan}
-                    salaryRevisions={salaryRevisions}
-                    onAddSalaryRevision={onAddSalaryRevision}
-                    loggedInUser={loggedInUser}
-                    performanceReviews={performanceReviews}
-                    onAddPerformanceReview={onAddPerformanceReview}
-                    onUpdatePerformanceReview={onUpdatePerformanceReview}
-                    companyAssets={companyAssets}
-                    onAddAsset={onAddAsset}
-                    onUpdateAsset={onUpdateAsset}
-                    jobPostings={jobPostings}
-                    onAddJobPosting={onAddJobPosting}
-                    onUpdateJobPosting={onUpdateJobPosting}
-                    jobApplications={jobApplications}
-                    onAddJobApplication={onAddJobApplication}
-                    onUpdateJobApplication={onUpdateJobApplication}
-                    gratuitySettlements={gratuitySettlements}
-                    onAddGratuitySettlement={onAddGratuitySettlement}
-                    onUpdateGratuitySettlement={onUpdateGratuitySettlement}
-                    notifications={notifications}
-                    onAddNotification={onAddNotification}
-                    onMarkNotificationRead={onMarkNotificationRead}
-                    onMarkAllNotificationsRead={onMarkAllNotificationsRead}
-                    onDeleteNotification={onDeleteNotification}
-                    onSimulatePunch={onSimulatePunch}
-                    firestoreSyncStatus={firestoreSyncStatus}
-                  />
-                </motion.div>
-              )}
-
-              {deviceMode === 'windows' && (
-                <motion.div 
-                  key="win-view"
-                  initial={{ opacity: 0, scale: 0.99 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.99 }}
-                  className="w-full h-full rounded-2xl overflow-hidden shadow-2xl"
-                >
-                  <WindowsApp 
-                    employees={employees}
-                    attendances={attendances}
-                    leaves={leaves}
-                    statConfig={statConfig}
-                    onSimulatePunch={onSimulatePunch}
-                    onApproveLeave={onApproveLeave}
-                  />
-                </motion.div>
-              )}
-
-              {deviceMode === 'mobile' && (
-                <motion.div 
-                  key="mob-view"
-                  initial={{ opacity: 0, scale: 0.98 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.98 }}
-                  className="w-full h-full flex items-center justify-center p-2 overflow-hidden"
-                >
-                  <MobileApp
-                    employees={employees}
-                    attendances={attendances}
-                    leaves={leaves}
-                    onApplyLeave={onApplyLeave}
-                    onSimulatePunch={onSimulatePunch}
-                    onAddRegularization={onAddRegularization}
-                    loggedInUser={loggedInUser}
-                    onLogout={onLogout}
-                  />
-                </motion.div>
-              )}
-
-              {deviceMode === 'kiosk' && (
-                <motion.div 
-                  key="kiosk-view"
-                  initial={{ opacity: 0, scale: 0.98 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.98 }}
-                  className="w-full h-full flex items-center justify-center p-2 overflow-hidden"
-                >
-                  <KioskTerminal 
-                    employees={employees}
-                    attendances={attendances}
-                    onSimulatePunch={onSimulatePunch}
-                  />
-                </motion.div>
-              )}
-            </AnimatePresence>
+          <div>
+            <h1 className="font-bold text-xs sm:text-sm text-white tracking-wider uppercase flex flex-wrap items-center gap-2">
+              <span>Bin Ishaq HR &amp; Payroll</span>
+              <span className="font-mono text-[9px] px-1.5 py-0.5 bg-emerald-950 text-emerald-400 rounded-full border border-emerald-900 leading-none">
+                v1.2
+              </span>
+            </h1>
+            <p className="text-[11px] text-slate-400 mt-0.5 hidden sm:block">
+              FBR High-Compliance Multi-Tenant Engine
+            </p>
           </div>
         </div>
 
-        {/* Floating toggle button for the compliance overview rail */}
+        <div className="flex items-center gap-4 font-mono text-xs">
+          <span className="hidden md:block text-slate-400">
+            Total Staff: <span className="text-white font-bold">{employees.length}</span>
+          </span>
+          <span className="hidden md:block h-4 border-r border-slate-700" />
+          <span className="hidden md:block text-slate-400">
+            Active Logs: <span className="text-emerald-400 font-bold">{attendances.length} Synced</span>
+          </span>
+          <span className="hidden md:block h-4 border-r border-slate-700" />
+          <span className="text-slate-400 text-[11px]">
+            <span className="text-slate-300 font-semibold">{loggedInUser?.username}</span>
+            {' · '}
+            <span className="text-emerald-400">{roles.find(r => r.id === loggedInUser?.roleId)?.name ?? 'User'}</span>
+          </span>
+        </div>
+
+      </header>
+
+      {/* Main workspace */}
+      <div className="flex-1 flex overflow-hidden">
+
+        {/* Portal canvas — fills all remaining space */}
+        <div className="flex-1 overflow-hidden flex flex-col">
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="w-full h-full"
+          >
+            <WebPortal
+              employees={employees}
+              attendances={attendances}
+              leaves={leaves}
+              statConfig={statConfig}
+              taxSlabs={taxSlabs}
+              payrollRuns={payrollRuns}
+              payrollPayslips={payrollPayslips}
+              onAddEmployee={onAddEmployee}
+              onUpdateEmployee={onUpdateEmployee}
+              onUpdateStatConfig={onUpdateStatConfig}
+              onUpdateTaxSlabs={onUpdateTaxSlabs}
+              onApproveLeave={onApproveLeave}
+              onRejectLeave={onRejectLeave}
+              onApproveRegularization={onApproveRegularization}
+              onRejectRegularization={onRejectRegularization}
+              onCreatePayrollRun={onCreatePayrollRun}
+              onUpdatePayrollStatus={onUpdatePayrollStatus}
+              onApplyLeave={onApplyLeave}
+              onAddAttendance={onAddAttendance}
+              branches={branches}
+              companies={companies}
+              onSaveCompanySetup={onSaveCompanySetup}
+              departments={departments}
+              designations={designations}
+              zones={zones}
+              ucTowns={ucTowns}
+              wageTypes={wageTypes}
+              onSaveMasterData={onSaveMasterData}
+              roles={roles}
+              users={users}
+              currentUserAccount={currentUserAccount}
+              accessControlLoaded={accessControlLoaded}
+              onSetCurrentUserAccount={onSetCurrentUserAccount}
+              onAddRole={onAddRole}
+              onAddUser={onAddUser}
+              onDeleteUser={onDeleteUser}
+              onUpdateUserRole={onUpdateUserRole}
+              onLogout={onLogout}
+              onAddBranch={onAddBranch}
+              onAddDepartment={onAddDepartment}
+              onAddDesignation={onAddDesignation}
+              holidays={holidays}
+              onAddHoliday={onAddHoliday}
+              onUpdateHoliday={onUpdateHoliday}
+              onDeleteHoliday={onDeleteHoliday}
+              loanAdvances={loanAdvances}
+              onApplyLoan={onApplyLoan}
+              onApproveLoan={onApproveLoan}
+              onRejectLoan={onRejectLoan}
+              salaryRevisions={salaryRevisions}
+              onAddSalaryRevision={onAddSalaryRevision}
+              loggedInUser={loggedInUser}
+              performanceReviews={performanceReviews}
+              onAddPerformanceReview={onAddPerformanceReview}
+              onUpdatePerformanceReview={onUpdatePerformanceReview}
+              companyAssets={companyAssets}
+              onAddAsset={onAddAsset}
+              onUpdateAsset={onUpdateAsset}
+              jobPostings={jobPostings}
+              onAddJobPosting={onAddJobPosting}
+              onUpdateJobPosting={onUpdateJobPosting}
+              jobApplications={jobApplications}
+              onAddJobApplication={onAddJobApplication}
+              onUpdateJobApplication={onUpdateJobApplication}
+              gratuitySettlements={gratuitySettlements}
+              onAddGratuitySettlement={onAddGratuitySettlement}
+              onUpdateGratuitySettlement={onUpdateGratuitySettlement}
+              notifications={notifications}
+              onAddNotification={onAddNotification}
+              onMarkNotificationRead={onMarkNotificationRead}
+              onMarkAllNotificationsRead={onMarkAllNotificationsRead}
+              onDeleteNotification={onDeleteNotification}
+              onSimulatePunch={onSimulatePunch}
+              firestoreSyncStatus={firestoreSyncStatus}
+            />
+          </motion.div>
+        </div>
+
+        {/* Floating compliance toggle */}
         {!showComplianceOverview && (
           <button
             type="button"
             onClick={() => setShowComplianceOverview(true)}
-            className="fixed right-0 top-1/2 transform -translate-y-1/2 bg-emerald-600 hover:bg-emerald-700 text-white px-2 py-4 rounded-l-xl shadow-xl flex flex-col items-center justify-center space-y-2 cursor-pointer z-40 transition border border-emerald-500 border-r-0"
-            id="compliance-toggle-btn"
+            className="fixed right-0 top-1/2 -translate-y-1/2 bg-emerald-600 hover:bg-emerald-700 text-white px-2 py-4 rounded-l-xl shadow-xl flex flex-col items-center justify-center space-y-2 z-40 transition border border-emerald-500 border-r-0"
           >
             <ShieldCheck className="w-4 h-4" />
-            <span className="text-[9px] font-bold tracking-widest uppercase vertical-text">
-              Compliance
-            </span>
+            <span className="text-[9px] font-bold tracking-widest uppercase vertical-text">Compliance</span>
           </button>
         )}
 
-        {/* Absolute High-Compliance Explanatory Guide Rail */}
+        {/* Compliance reference rail */}
         {showComplianceOverview && (
-          <aside className="w-full lg:w-80 bg-slate-950 border-t lg:border-t-0 lg:border-l border-slate-800 p-5 overflow-y-auto space-y-5 flex-shrink-0" id="emulator-guide">
+          <aside className="w-72 xl:w-80 bg-slate-950 border-l border-slate-800 p-5 overflow-y-auto space-y-5 flex-shrink-0">
             <div className="flex justify-between items-center border-b border-slate-800 pb-3">
               <h3 className="font-bold text-xs uppercase tracking-widest text-emerald-400 flex items-center">
                 <Briefcase className="w-4 h-4 mr-1.5" />
@@ -466,43 +367,68 @@ export function DeviceEmulator({
               <div className="space-y-1">
                 <h4 className="font-bold text-white text-xs">⭐ 100% Shared State Coordination</h4>
                 <p>
-                  Any action on the <strong>Mobile ESS App</strong> (such as marking geofenced attendance or applying sick leave) immediately propagates to Firestore and refreshes the live dashboards on the <strong>Web Admin Portal</strong> and the <strong>Windows Client terminal</strong>!
+                  Any action on the <strong>Mobile ESS App</strong> (marking geofenced attendance or applying sick leave) immediately propagates to Firestore and refreshes the live dashboards on the <strong>Web Admin Portal</strong>.
                 </p>
               </div>
 
-              <div className="space-y-1 block border-t border-slate-850 pt-3">
-                <span className="font-bold text-white block">🇵🇰 FBR Tax Tables & Slabs</span>
+              <div className="space-y-1 border-t border-slate-800 pt-3">
+                <span className="font-bold text-white block">🇵🇰 FBR Tax Tables &amp; Slabs</span>
                 <p>
-                  Calculates annual taxable projection based on current active monthly gross salary and references the 6-stage FBR progressive salaried individual individual tax slabs.
+                  Calculates annual taxable projection based on current active monthly gross salary and references the 8-slab FBR progressive salaried individual tax table.
                 </p>
               </div>
 
-              <div className="space-y-1 border-t border-slate-850 pt-3">
-                <span className="font-bold text-emerald-400 block">🏢 EOBI Social Security Setup</span>
+              <div className="space-y-1 border-t border-slate-800 pt-3">
+                <span className="font-bold text-emerald-400 block">🏢 EOBI Social Security</span>
                 <p>
-                  Multi-tenant compliant tracking. Automatically deducts 1% employee quota and matches 5% employer contribution based directly on the latest FBR standard base minimum wage limit.
+                  Automatically deducts 1% employee quota and matches 5% employer contribution based on the FBR standard minimum wage.
                 </p>
               </div>
 
-              <div className="space-y-1 border-t border-slate-850 pt-3">
-                <span className="font-bold text-white block">🏦 Bank Bulk advice dispatches</span>
+              <div className="space-y-1 border-t border-slate-800 pt-3">
+                <span className="font-bold text-white block">🏦 Bank Bulk Advice</span>
                 <p>
-                  Calculates accurate Net Takehome salaries adjusted for unpaid absences and maps employee IBAN records to generate formatted csv bankAdvice sheets matching HBL and Alfalah enterprise layouts.
+                  Calculates net take-home adjusted for unpaid absences and generates formatted CSV bank advice sheets matching HBL and Alfalah enterprise layouts.
                 </p>
               </div>
 
-              <div className="bg-emerald-950/20 p-3.5 rounded-xl border border-emerald-900/30 text-[11px] text-emerald-300 space-y-1 flex items-start space-x-2">
+              <div className="bg-emerald-950/20 p-3.5 rounded-xl border border-emerald-900/30 text-[11px] text-emerald-300 flex items-start space-x-2">
                 <Info className="w-4 h-4 flex-shrink-0 mt-0.5 text-emerald-400" />
                 <p>
-                  <strong>Tip:</strong> Toggle to <strong>Windows Client</strong>, select an employee and trigger a 'Fingerprint swipe' scan. Then toggle back to <strong>Web Admin</strong> or check payroll registers to view immediate updates!
+                  <strong>Tip:</strong> All payroll, attendance, and leave data syncs live with Firestore. Changes appear instantly across all logged-in sessions.
                 </p>
+              </div>
+
+              {/* Statutory Lock */}
+              <div className="border-t border-slate-800 pt-4 space-y-2">
+                <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                  Statutory Lock
+                </h4>
+                <div className="bg-slate-900 rounded-lg p-3 space-y-2 border border-slate-800">
+                  <div className="flex justify-between text-[11px] font-mono">
+                    <span className="text-slate-400">FBR Minimum Wage:</span>
+                    <span className="text-emerald-300 font-bold">PKR {statConfig.minimumWage.toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between text-[11px] font-mono">
+                    <span className="text-slate-400">EOBI Employee:</span>
+                    <span className="text-slate-200">1% (FBR Base)</span>
+                  </div>
+                  <div className="flex justify-between text-[11px] font-mono">
+                    <span className="text-slate-400">EOBI Employer:</span>
+                    <span className="text-slate-200">5% (FBR Base)</span>
+                  </div>
+                  <div className="flex justify-between text-[11px] font-mono">
+                    <span className="text-slate-400">Prov. Security:</span>
+                    <span className="text-slate-200">6% Employer</span>
+                  </div>
+                </div>
               </div>
             </div>
           </aside>
         )}
 
       </div>
-
     </div>
   );
 }

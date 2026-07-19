@@ -10,27 +10,42 @@ import {
   PerformanceReview, CompanyAsset, JobPosting, JobApplication,
   GratuitySettlement, AppNotification
 } from '../types';
+import type { WageType } from '../types';
+import { resolveWageBasis } from './masterData';
 
 // Default FBR Income Tax Slabs for Salaried Individuals (Annual)
 export const DEFAULT_TAX_SLABS: TaxSlab[] = [
   { id: 't1', minIncome: 0, maxIncome: 600000, baseTax: 0, percentage: 0 },
-  { id: 't2', minIncome: 600000, maxIncome: 1200000, baseTax: 0, percentage: 5 },
-  { id: 't3', minIncome: 1200000, maxIncome: 2200000, baseTax: 30000, percentage: 15 },
-  { id: 't4', minIncome: 2200000, maxIncome: 3200000, baseTax: 180000, percentage: 25 },
-  { id: 't5', minIncome: 3200000, maxIncome: 4100000, baseTax: 430000, percentage: 30 },
-  { id: 't6', minIncome: 4100000, maxIncome: 99999999, baseTax: 700000, percentage: 35 }
+  { id: 't2', minIncome: 600000, maxIncome: 1200000, baseTax: 0, percentage: 1 },
+  { id: 't3', minIncome: 1200000, maxIncome: 2200000, baseTax: 6000, percentage: 11 },
+  { id: 't4', minIncome: 2200000, maxIncome: 3200000, baseTax: 116000, percentage: 20 },
+  { id: 't5', minIncome: 3200000, maxIncome: 4100000, baseTax: 316000, percentage: 25 },
+  { id: 't6', minIncome: 4100000, maxIncome: 5600000, baseTax: 541000, percentage: 29 },
+  { id: 't7', minIncome: 5600000, maxIncome: 7000000, baseTax: 976000, percentage: 32 },
+  { id: 't8', minIncome: 7000000, maxIncome: 999999999, baseTax: 1424000, percentage: 35 }
 ];
 
 // Default Pakistan Statutory Config
 export const DEFAULT_STATUTORY_CONFIG: StatutoryConfig = {
-  id: 'stat-pk-default',
+  id: 'stat-pk-2026-27',
   minimumWage: 37000, // PKR per month as of recent notices
   eobiEmployerRate: 5, // 5% of minimum wage (PKR 1,850)
   eobiEmployeeRate: 1, // 1% of minimum wage (PKR 370)
   pessiEmployerRate: 6, // 6% of basic salary (or capped wage)
   gratuityRateDaysPerYear: 30, // 30 days basic pay per year on final settlement
   providentFundMaxEmployeeContribution: 10,
-  updatedAt: '2026-06-17'
+  updatedAt: '2026-07-01',
+  effectiveFrom: '2026-07-01',
+  taxYear: '2027',
+  socialSecurityWageCeiling: 40000,
+  provincialSocialSecurityRates: {
+    Punjab: 6,
+    Sindh: 6,
+    KPK: 6,
+    Balochistan: 6
+  },
+  overtimeMultiplier: 2,
+  standardMonthlyHours: 208
 };
 
 // Default Organization Seeding
@@ -107,7 +122,7 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
     iban: 'PK42HABB0012345678901234',
     eobiNumber: '1090123456',
     socialSecurityNumber: 'SS-42-998877',
-    pictureUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=200',
+    pictureUrl: '',
     isZoneInCharge: true,
     zone: 'East Zone',
     ucTown: 'UC-2 Clifton Town',
@@ -140,7 +155,7 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
     iban: 'PK12MEZN0099021234567',
     eobiNumber: '1090123499',
     socialSecurityNumber: 'SS-42-991122',
-    pictureUrl: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=200',
+    pictureUrl: '',
     isZoneInCharge: false,
     zoneInChargeName: 'Ali Raza Khan',
     zone: 'East Zone',
@@ -174,7 +189,7 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
     iban: 'PK52ALFH004455889901',
     eobiNumber: '3590558899',
     socialSecurityNumber: 'SS-35-123456',
-    pictureUrl: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?auto=format&fit=crop&q=80&w=200',
+    pictureUrl: '',
     isZoneInCharge: true,
     zone: 'West Zone',
     ucTown: 'UC-9 Gulberg Town',
@@ -207,7 +222,7 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
     iban: 'PK86NBPA009876123456',
     eobiNumber: '3590443322',
     socialSecurityNumber: 'SS-35-987654',
-    pictureUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=200',
+    pictureUrl: '',
     isZoneInCharge: false,
     zoneInChargeName: 'Muhammad Usman',
     zone: 'West Zone',
@@ -245,7 +260,7 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
     iban: 'PK24JAZZ03454455667',
     eobiNumber: '',
     socialSecurityNumber: '',
-    pictureUrl: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=200',
+    pictureUrl: '',
     isZoneInCharge: false,
     zoneInChargeName: 'Muhammad Usman',
     zone: 'West Zone',
@@ -279,7 +294,7 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
     iban: 'PK42ASCB0012345678901234',
     eobiNumber: '1090123000',
     socialSecurityNumber: 'SS-42-000111',
-    pictureUrl: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&q=80&w=200',
+    pictureUrl: '',
     isZoneInCharge: false,
     zoneInChargeName: 'Ali Raza Khan',
     zone: 'East Zone',
@@ -399,14 +414,25 @@ export function computePayslipDetails(
   departments: Department[] = DEFAULT_DEPARTMENTS,
   designations: Designation[] = DEFAULT_DESIGNATIONS,
   branches: Branch[] = DEFAULT_BRANCHES,
-  loanAdvances: LoanAdvance[] = []
+  loanAdvances: LoanAdvance[] = [],
+  wageTypes: WageType[] = []
 ): Payslip {
   
   // Basic wage context
-  const isDailyWager = employee.wageType === 'Daily Wager';
+  const isDailyWager = resolveWageBasis(employee, wageTypes) === 'Daily';
   
   // Determine date boundaries
   const totalDaysInMonth = new Date(year, month, 0).getDate();
+  const periodStart = `${year}-${String(month).padStart(2, '0')}-01`;
+  const periodEnd = `${year}-${String(month).padStart(2, '0')}-${String(totalDaysInMonth).padStart(2, '0')}`;
+  const branch = branches.find(b => b.id === employee.branchId);
+
+  const overlapDays = (startDate: string, endDate: string): number => {
+    const start = new Date(`${startDate > periodStart ? startDate : periodStart}T00:00:00`);
+    const end = new Date(`${endDate < periodEnd ? endDate : periodEnd}T00:00:00`);
+    if (end < start) return 0;
+    return Math.floor((end.getTime() - start.getTime()) / 86400000) + 1;
+  };
   
   // Count relevant days
   const empAtts = attendances.filter(
@@ -415,7 +441,7 @@ export function computePayslipDetails(
   
   const presentDays = empAtts.filter(a => a.status === 'Present' || a.status === 'Late').length;
   const halfDays = empAtts.filter(a => a.status === 'Half Day').length;
-  const absentDays = empAtts.filter(a => a.status === 'Absent').length;
+  const absentAttendanceDates = empAtts.filter(a => a.status === 'Absent').map(a => a.date);
   const leaveDays = empAtts.filter(a => a.status === 'On Leave').length;
   
   // Overtime minutes
@@ -426,13 +452,20 @@ export function computePayslipDetails(
   // Filter approved leaves for this month
   const empLeaves = leaves.filter(
     l => l.employeeId === employee.id && 
-         l.status === 'Approved' && 
-         l.startDate.startsWith(`${year}-${String(month).padStart(2, '0')}`)
+         l.status === 'Approved' &&
+         l.startDate <= periodEnd && l.endDate >= periodStart
   );
   
   const unpaidLeaveDays = empLeaves
     .filter(l => l.leaveType === 'Unpaid')
-    .reduce((sum, l) => sum + l.totalDays, 0);
+    .reduce((sum, l) => sum + overlapDays(l.startDate, l.endDate), 0);
+  const explicitAbsentDays = absentAttendanceDates.filter(date =>
+    !empLeaves.some(l => l.leaveType === 'Unpaid' && l.startDate <= date && l.endDate >= date)
+  ).length;
+  const paidLeaveDays = empLeaves
+    .filter(l => l.leaveType !== 'Unpaid')
+    .reduce((sum, l) => sum + overlapDays(l.startDate, l.endDate), 0);
+  const absentDays = explicitAbsentDays + unpaidLeaveDays;
   
   // Allowances calculation: For salaried employees, Basic Wage is usually configured as 100% and broken into:
   // Base Wage = 50%
@@ -452,7 +485,7 @@ export function computePayslipDetails(
   
   if (isDailyWager) {
     // Daily wager gets paid for actual days present + (half days * 0.5)
-    const effectiveDaysPaid = presentDays + (halfDays * 0.5);
+    const effectiveDaysPaid = presentDays + (halfDays * 0.5) + paidLeaveDays;
     basicEarnings = effectiveDaysPaid * baseContractSalary;
     
     // Hourly rate derived from 8-hour shift structure
@@ -484,14 +517,14 @@ export function computePayslipDetails(
     
     // Standard calendar day deduction for absences & unpaid leaves
     const standardDailyDeduction = baseContractSalary / totalDaysInMonth;
-    unpaidLeaveDeduction = unpaidLeaveDays * standardDailyDeduction;
+    unpaidLeaveDeduction = absentDays * standardDailyDeduction;
     
     // Base basic earnings
     basicEarnings = basicComponent;
     
     // Calculate overtime base (basic component / 208 working standard hours per month in Pakistan)
-    const otBaseHourly = basicComponent / 208;
-    overtimePay = overtimeHours * otBaseHourly * 2.0; // 2x double OT rate standard in Punjab/Sindh Shops & Establishments
+    const otBaseHourly = basicComponent / (statConfigs.standardMonthlyHours || 208);
+    overtimePay = overtimeHours * otBaseHourly * (statConfigs.overtimeMultiplier || 2);
   }
   
   const grossSalary = Math.round(
@@ -520,9 +553,12 @@ export function computePayslipDetails(
   // 3. PESSI / SESSI (Provincial Social Security)
   // Employer pays 6% of basic salary capped at maximum threshold (typically capped closely to minimum wage or defined limit, let's say max basic salary of 40,000 for PESSI)
   let pessiEmployerContribution = 0;
-  const pessiWageBase = Math.min(basicEarnings, 40000); 
+  const socialSecurityRate = branch?.province
+    ? (statConfigs.provincialSocialSecurityRates?.[branch.province] ?? statConfigs.pessiEmployerRate)
+    : statConfigs.pessiEmployerRate;
+  const pessiWageBase = Math.min(basicEarnings, statConfigs.socialSecurityWageCeiling || 40000);
   if (employee.socialSecurityNumber || !isDailyWager) {
-    pessiEmployerContribution = Math.round(pessiWageBase * (statConfigs.pessiEmployerRate / 100));
+    pessiEmployerContribution = Math.round(pessiWageBase * (socialSecurityRate / 100));
   }
   
   // 4. Provident Fund Deduction
@@ -548,7 +584,7 @@ export function computePayslipDetails(
   // Resolve names via lookup
   const departmentName = departments.find(d => d.id === employee.departmentId)?.name || 'Unknown Dept';
   const designationTitle = designations.find(d => d.id === employee.designationId)?.title || 'Unknown Title';
-  const branchName = branches.find(b => b.id === employee.branchId)?.name || 'Unknown Branch';
+  const branchName = branch?.name || 'Unknown Branch';
 
   return {
     id: `pay-${employee.id}-${month}-${year}`,
@@ -560,6 +596,9 @@ export function computePayslipDetails(
     departmentName,
     designationTitle,
     branchName,
+    bankName: employee.bankName,
+    bankAccountNumber: employee.bankAccountNumber,
+    iban: employee.iban,
     
     totalDaysInMonth,
     daysPresent: presentDays,
@@ -587,7 +626,15 @@ export function computePayslipDetails(
     
     eobiEmployerContribution,
     pessiEmployerContribution,
-    providentFundEmployerContribution
+    providentFundEmployerContribution,
+    province: branch?.province,
+    paidDays: presentDays + paidLeaveDays + (halfDays * 0.5),
+    scheduledWorkingDays: totalDaysInMonth,
+    explicitAbsentDays,
+    statutoryConfigId: statConfigs.id,
+    calculationVersion: 'PK-PAYROLL-2.0',
+    periodMonth: month,
+    periodYear: year
   };
 }
 
@@ -624,51 +671,8 @@ export const DEFAULT_ROLES: Role[] = [
   }
 ];
 
-export const DEFAULT_USERS: UserAccount[] = [
-  {
-    id: 'usr-1',
-    username: 'admin',
-    email: 'admin@binishaq.com',
-    roleId: 'role-admin',
-    status: 'Active',
-    password: 'admin123'
-  },
-  {
-    id: 'usr-2',
-    username: 'sara.hr',
-    email: 'sara.ahmed@induslog.com',
-    roleId: 'role-hr',
-    employeeId: 'emp2',
-    status: 'Active',
-    password: 'sara123'
-  },
-  {
-    id: 'usr-3',
-    username: 'usman.payroll',
-    email: 'usman.m@induslog.com',
-    roleId: 'role-payroll',
-    employeeId: 'emp3',
-    status: 'Active',
-    password: 'usman123'
-  },
-  {
-    id: 'usr-4',
-    username: 'ali.raza',
-    email: 'ali.raza@induslog.com',
-    roleId: 'role-employee',
-    employeeId: 'emp1',
-    status: 'Active',
-    password: 'ali123'
-  },
-  {
-    id: 'usr-kiosk',
-    username: 'kiosk',
-    email: 'kiosk@binishaq.com',
-    roleId: 'role-kiosk',
-    status: 'Active',
-    password: 'kiosk123'
-  }
-];
+// Accounts are created through the initial administrator setup flow; never seed credentials.
+export const DEFAULT_USERS: UserAccount[] = [];
 
 // Pakistan Public Holidays 2026
 export const DEFAULT_HOLIDAYS: Holiday[] = [

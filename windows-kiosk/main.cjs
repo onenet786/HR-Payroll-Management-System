@@ -1,10 +1,11 @@
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, session } = require('electron');
 const { spawn } = require('child_process');
 const fs = require('fs');
 const net = require('net');
 const path = require('path');
 const https = require('https');
 const { pathToFileURL } = require('url');
+require('dotenv').config({ quiet: true });
 
 const bridgePort = 15896;
 let mainWindow;
@@ -147,26 +148,21 @@ function closeSplashWindow() {
 }
 
 const firebaseConfig = {
-  apiKey: 'AIzaSyAA7uvWdIsP9CqFGJEk5SB0FvLFF97DNk4',
-  authDomain: 'gen-lang-client-0314098400.firebaseapp.com',
-  projectId: 'gen-lang-client-0314098400',
-  databaseId: 'ai-studio-0ab7c3a1-e4ca-49b5-86f4-6883897b9163',
-  storageBucket: 'gen-lang-client-0314098400.firebasestorage.app',
-  messagingSenderId: '279125201448',
-  appId: '1:279125201448:web:60c148c137e9fd60a2db1d',
-  portalUrl: 'https://attendance.binishaqsoft.com',
+  apiKey: process.env.FIREBASE_API_KEY,
+  authDomain: process.env.FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.FIREBASE_PROJECT_ID,
+  databaseId: process.env.FIRESTORE_DATABASE_ID,
+  storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.FIREBASE_APP_ID,
+  portalUrl: process.env.PORTAL_URL,
 };
 
-let firebaseSdkPromise = null;
+if (Object.values(firebaseConfig).some(value => !value)) {
+  throw new Error('Missing required kiosk environment configuration. See .env.example.');
+}
 
-const seedEmployees = [
-  { id: 'emp1', employeeCode: 'IND-KHI-001', fullName: 'Ali Raza Khan', departmentId: 'd1', designationId: 'ds1', branchId: 'b1', status: 'Active', fingerprintTemplates: [] },
-  { id: 'emp2', employeeCode: 'IND-KHI-002', fullName: 'Sara Ahmed', departmentId: 'd2', designationId: 'ds2', branchId: 'b1', status: 'Active', fingerprintTemplates: [] },
-  { id: 'emp3', employeeCode: 'IND-LHR-003', fullName: 'Muhammad Usman', departmentId: 'd4', designationId: 'ds3', branchId: 'b2', status: 'Active', fingerprintTemplates: [] },
-  { id: 'emp4', employeeCode: 'IND-LHR-004', fullName: 'Tariq Mahmood', departmentId: 'd3', designationId: 'ds4', branchId: 'b2', status: 'Active', fingerprintTemplates: [] },
-  { id: 'emp5', employeeCode: 'IND-LHR-WS01', fullName: 'Kamran Bashir', departmentId: 'd3', designationId: 'ds5', branchId: 'b2', status: 'Active', fingerprintTemplates: [] },
-  { id: 'emp6', employeeCode: 'BINISHAQ-IT-00002', fullName: 'Aqeel Ur Rehman', departmentId: 'd1', designationId: 'ds1', branchId: 'b1', status: 'Active', fingerprintTemplates: [] },
-];
+let firebaseSdkPromise = null;
 
 const seedBranches = { b1: 'Karachi HQ Office', b2: 'Lahore Distribution Hub' };
 const seedDepartments = { d1: 'Information Technology', d2: 'Human Resources', d3: 'Warehouse & Logistics', d4: 'Finance & Accounts' };
@@ -205,7 +201,9 @@ function defaultStore() {
     terminal: {
       id: 'KIOSK-WIN-01',
       location: 'Main Entrance Gate-1',
+      branchId: '',
       ipCameraUrl: '',
+      allowCodeOnlyPunch: false,
       requireCodeWithFingerprint: false,
       requireCodeWithCamera: true,
       autoFullscreen: true,
@@ -224,17 +222,6 @@ function defaultStore() {
   };
 }
 
-function isDefaultSeedEmployeeList(employees) {
-  if (!Array.isArray(employees) || employees.length === 0) return false;
-  return employees.every(employee =>
-    seedEmployees.some(seed =>
-      seed.id === employee.id &&
-      seed.employeeCode === employee.employeeCode &&
-      seed.fullName === employee.fullName
-    )
-  );
-}
-
 function readStore() {
   try {
     const file = kioskStorePath();
@@ -242,11 +229,13 @@ function readStore() {
       const loaded = JSON.parse(fs.readFileSync(file, 'utf8'));
       const defaults = defaultStore();
       const store = { ...defaults, ...loaded, terminal: { ...defaults.terminal, ...(loaded.terminal || {}) } };
-      if (isDefaultSeedEmployeeList(store.employees)) store.employees = [];
+      store.employees = (store.employees || []).map(kioskStoredEmployee);
+      // Legacy event details could contain names, identifiers, paths, or raw errors.
+      store.events = [];
       return store;
     }
   } catch (error) {
-    console.warn('Could not read kiosk store:', error);
+    console.warn('Could not read kiosk store. Starting with an empty local store.');
   }
   return defaultStore();
 }
@@ -305,7 +294,7 @@ async function startUru4500Bridge() {
     bridgeProcess = null;
   });
   bridgeProcess.unref();
-  addEvent('device', 'Windows biometric driver host started', { bridgePath, logPath });
+  addEvent('device', 'Windows biometric driver host started');
   return { ok: true, message: 'Windows biometric driver host started.' };
 }
 
@@ -326,7 +315,7 @@ function startDriverWatchdog() {
         mainWindow.webContents.send('kiosk:driver-status', { running });
       }
     } catch (error) {
-      addEvent('device', 'Windows biometric driver host watchdog failed', error.message);
+      addEvent('device', 'Windows biometric driver host watchdog failed');
     }
   }, 15000);
 }
@@ -349,7 +338,7 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
       enableBlinkFeatures: 'FaceDetector',
     },
   });
@@ -359,6 +348,24 @@ function createWindow() {
     closeSplashWindow();
   });
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+}
+
+function configureCameraPermission() {
+  const rendererUrl = pathToFileURL(path.join(__dirname, 'renderer', 'index.html')).toString();
+  const isTrustedRenderer = webContents =>
+    !!webContents && !webContents.isDestroyed() && webContents.getURL() === rendererUrl;
+
+  session.defaultSession.setPermissionCheckHandler((webContents, permission, _origin, details) =>
+    permission === 'media' &&
+    isTrustedRenderer(webContents) &&
+    (!details?.mediaType || details.mediaType === 'video')
+  );
+
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
+    const mediaTypes = Array.isArray(details?.mediaTypes) ? details.mediaTypes : [];
+    const requestsVideoOnly = mediaTypes.includes('video') && !mediaTypes.includes('audio');
+    callback(permission === 'media' && isTrustedRenderer(webContents) && requestsVideoOnly);
+  });
 }
 
 // ─── Firestore REST Helpers ─────────────────────────────────────────────────
@@ -467,6 +474,29 @@ async function fetchFirestoreCollectionViaSdk(collectionName) {
   return snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() }));
 }
 
+async function fetchFirestoreCollectionByField(collectionName, fieldName, value) {
+  const { db, firestoreMod } = await getFirebaseSdkDb();
+  const ref = firestoreMod.collection(db, collectionName);
+  const queryRef = firestoreMod.query(ref, firestoreMod.where(fieldName, '==', value));
+  const snapshot = await firestoreMod.getDocs(queryRef);
+  return snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() }));
+}
+
+async function fetchFirestoreCollectionByIds(collectionName, fieldName, values) {
+  const unique = [...new Set((values || []).map(String).filter(Boolean))];
+  if (!unique.length) return [];
+  const { db, firestoreMod } = await getFirebaseSdkDb();
+  const records = [];
+  for (let offset = 0; offset < unique.length; offset += 30) {
+    const chunk = unique.slice(offset, offset + 30);
+    const ref = firestoreMod.collection(db, collectionName);
+    const queryRef = firestoreMod.query(ref, firestoreMod.where(fieldName, 'in', chunk));
+    const snapshot = await firestoreMod.getDocs(queryRef);
+    records.push(...snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() })));
+  }
+  return records;
+}
+
 async function putFirestoreDocumentViaSdk(collectionName, docId, data) {
   const { db, firestoreMod } = await getFirebaseSdkDb();
   await firestoreMod.setDoc(firestoreMod.doc(db, collectionName, docId), data, { merge: true });
@@ -482,12 +512,7 @@ async function fetchFirestoreCollection(collectionName) {
   } catch (restError) {
     try {
       const records = await fetchFirestoreCollectionViaSdk(collectionName);
-      addEvent('sync', `Firestore REST failed for ${collectionName}; Firebase SDK fallback succeeded`, {
-        restError: restError.message,
-        statusCode: restError.statusCode || null,
-        url: restError.url || null,
-        count: records.length,
-      });
+      addEvent('sync', `Firestore REST failed for ${collectionName}; Firebase SDK fallback succeeded`, { count: records.length });
       return records;
     } catch (sdkError) {
       const error = new Error(`${restError.message}; SDK fallback: ${sdkError.message}`);
@@ -504,11 +529,7 @@ async function putFirestoreDocument(collectionName, docId, data) {
   } catch (restError) {
     try {
       await putFirestoreDocumentViaSdk(collectionName, docId, data);
-      addEvent('sync', `Firestore REST write failed for ${collectionName}/${docId}; Firebase SDK fallback succeeded`, {
-        restError: restError.message,
-        statusCode: restError.statusCode || null,
-        url: restError.url || null,
-      });
+      addEvent('sync', `Firestore REST write failed for ${collectionName}; Firebase SDK fallback succeeded`);
     } catch (sdkError) {
       const error = new Error(`${restError.message}; SDK fallback: ${sdkError.message}`);
       error.statusCode = restError.statusCode || null;
@@ -525,44 +546,71 @@ async function performSync() {
   const report = { employees: 0, attendances: 0, branches: 0, departments: 0, designations: 0, biometricTemplates: 0, pushed: 0, changed: false, errors: [] };
 
   try {
-    const employees = await fetchFirestoreCollection('employees');
+    const records = await fetchFirestoreCollection('branches');
+    report.changed = report.changed || JSON.stringify(store.branches || []) !== JSON.stringify(records);
+    store.branches = records;
+    report.branches = records.length;
+  } catch (error) {
+    report.errors.push('branches: sync failed');
+  }
+
+  try {
+    const departments = store.terminal.branchId
+      ? await fetchFirestoreCollectionByField('departments', 'branchId', store.terminal.branchId)
+      : await fetchFirestoreCollection('departments');
+    const designations = store.terminal.branchId
+      ? await fetchFirestoreCollectionByIds('designations', 'departmentId', departments.map(department => department.id))
+      : await fetchFirestoreCollection('designations');
+    report.changed = report.changed || JSON.stringify(store.departments || []) !== JSON.stringify(departments);
+    report.changed = report.changed || JSON.stringify(store.designations || []) !== JSON.stringify(designations);
+    store.departments = departments;
+    store.designations = designations;
+    report.departments = departments.length;
+    report.designations = designations.length;
+  } catch (error) {
+    report.errors.push('departments/designations: branch sync failed');
+  }
+
+  try {
+    const employeeRecords = store.terminal.branchId
+      ? await fetchFirestoreCollectionByField('employees', 'branchId', store.terminal.branchId)
+      : await fetchFirestoreCollection('employees');
+    const employees = employeeRecords.map(kioskStoredEmployee);
     report.changed = report.changed || JSON.stringify(store.employees || []) !== JSON.stringify(employees);
     store.employees = employees;
     report.employees = employees.length;
   } catch (error) {
-    report.errors.push(`employees: ${error.message}`);
-  }
-
-  for (const collectionName of ['branches', 'departments', 'designations']) {
-    try {
-      const records = await fetchFirestoreCollection(collectionName);
-      report.changed = report.changed || JSON.stringify(store[collectionName] || []) !== JSON.stringify(records);
-      store[collectionName] = records;
-      report[collectionName] = records.length;
-    } catch (error) {
-      report.errors.push(`${collectionName}: ${error.message}`);
-    }
+    report.errors.push('employees: branch sync failed');
   }
 
   try {
-    const records = await fetchFirestoreCollection('biometricTemplates');
+    const records = store.terminal.branchId
+      ? await fetchFirestoreCollectionByIds('biometricTemplates', 'employeeId', (store.employees || []).map(employee => employee.id))
+      : await fetchFirestoreCollection('biometricTemplates');
     report.changed = report.changed || JSON.stringify(store.biometricTemplates || []) !== JSON.stringify(records);
     store.biometricTemplates = records;
     report.biometricTemplates = (store.biometricTemplates || []).length;
   } catch (error) {
-    report.errors.push(`biometricTemplates: ${error.message}`);
+    report.errors.push('biometricTemplates: sync failed');
   }
 
   try {
-    const attendances = await fetchFirestoreCollection('attendances');
-    if (attendances.length) {
-      const localById = new Map((store.attendances || []).map(item => [item.id, item]));
-      for (const log of attendances) localById.set(log.id, { ...localById.get(log.id), ...log });
-      store.attendances = Array.from(localById.values());
-      report.attendances = attendances.length;
+    const attendances = store.terminal.branchId
+      ? await fetchFirestoreCollectionByIds('attendances', 'employeeId', (store.employees || []).map(employee => employee.id))
+      : await fetchFirestoreCollection('attendances');
+    const localById = new Map((store.attendances || []).map(item => [item.id, item]));
+    const reconciledById = new Map(attendances.map(log => [log.id, { ...localById.get(log.id), ...log }]));
+    for (const item of store.pendingSync || []) {
+      if (item.collection !== 'attendances') continue;
+      const pendingLog = localById.get(item.id) || item.data;
+      if (pendingLog) reconciledById.set(item.id, pendingLog);
     }
+    const reconciled = Array.from(reconciledById.values());
+    report.changed = report.changed || JSON.stringify(store.attendances || []) !== JSON.stringify(reconciled);
+    store.attendances = reconciled;
+    report.attendances = attendances.length;
   } catch (error) {
-    report.errors.push(`attendances: ${error.message}`);
+    report.errors.push('attendances: sync failed');
   }
 
   const remaining = [];
@@ -572,7 +620,7 @@ async function performSync() {
       report.pushed += 1;
     } catch (error) {
       remaining.push(item);
-      report.errors.push(`${item.id}: ${error.message}`);
+      report.errors.push('pending item: sync failed');
     }
   }
   store.pendingSync = remaining;
@@ -589,11 +637,30 @@ async function performSync() {
 function findEmployeeByCode(employees, rawCode) {
   const code = String(rawCode || '').trim().toLowerCase();
   if (!code) return null;
-  return employees.find(emp => {
-    const employeeCode = String(emp.employeeCode || '').toLowerCase();
-    const id = String(emp.id || '').toLowerCase();
-    return employeeCode === code || id === code || employeeCode.endsWith(code);
-  }) || null;
+  return employees.find(emp => String(emp.employeeCode || '').toLowerCase() === code) || null;
+}
+
+async function findEmployeeForCrossBranchCamera(rawCode, terminalBranchId) {
+  const code = String(rawCode || '').trim();
+  if (!code || !terminalBranchId) return null;
+  const variants = [...new Set([code, code.toUpperCase()])];
+  let matches = [];
+  for (const variant of variants) {
+    matches = await fetchFirestoreCollectionByField('employees', 'employeeCode', variant);
+    if (matches.length) break;
+  }
+  if (matches.length !== 1) return null;
+  const rawEmployee = matches[0];
+  if (!rawEmployee.branchId || rawEmployee.branchId === terminalBranchId) return null;
+  const storedEmployee = kioskStoredEmployee(rawEmployee);
+  const templates = await fetchFirestoreCollectionByField('biometricTemplates', 'employeeId', storedEmployee.id);
+  return mergeEmployeeBiometricTemplates([storedEmployee], templates)[0];
+}
+
+async function loadCrossBranchAttendanceContext(store, employeeId) {
+  const records = await fetchFirestoreCollectionByField('attendances', 'employeeId', employeeId);
+  const otherEmployeeLogs = (store.attendances || []).filter(log => log.employeeId !== employeeId);
+  store.attendances = [...otherEmployeeLogs, ...records];
 }
 
 function todayDate() { return new Date().toISOString().slice(0, 10); }
@@ -620,12 +687,29 @@ function getBranchName(employee) {
 function kioskEmployee(employee) {
   if (!employee) return null;
   return {
-    ...employee,
-    fingerprintTemplates: getFingerprintTemplates(employee),
+    employeeCode: employee.employeeCode,
+    fullName: employee.fullName,
+    status: employee.status,
     departmentName: getDepartmentName(employee),
     designationName: getDesignationName(employee),
     branchName: getBranchName(employee),
+    branchId: employee.branchId || '',
     pictureUrl: employee.pictureUrl || employee.photoUrl || employee.profileImage || employee.imageUrl || '',
+  };
+}
+
+function kioskStoredEmployee(employee) {
+  return {
+    id: employee.id,
+    employeeCode: employee.employeeCode,
+    fullName: employee.fullName,
+    status: employee.status,
+    branchId: employee.branchId,
+    departmentId: employee.departmentId,
+    designationId: employee.designationId,
+    pictureUrl: employee.pictureUrl || '',
+    fingerprintTemplates: getFingerprintTemplates(employee),
+    faceDescriptors: getFaceDescriptors(employee),
   };
 }
 
@@ -716,7 +800,11 @@ function identifyFaceDescriptor(employees, probe, threshold = 0.18) {
 
   if (!best) return { ok: false, message: 'No v2 camera face profiles found. Re-enroll employee faces from HR biometric setup.' };
   if (best.score > threshold) {
-    return { ok: false, message: 'Face not recognized. Improve lighting or re-enroll the employee camera profile.', score: best.score };
+    return {
+      ok: false,
+      message: `Face not recognized (score ${best.score.toFixed(3)}, required ${threshold.toFixed(3)} or lower). Move back until the full head and face fit inside the oval, matching the enrollment distance.`,
+      score: best.score,
+    };
   }
   const margin = secondScore - best.score;
   if (secondEmployeeId && Number.isFinite(secondScore) && secondScore < threshold && margin < 0.04) {
@@ -788,6 +876,21 @@ function savePunch(store, employee, method, evidence, meta) {
   const date = todayDate();
   const existing = (store.attendances || []).find(log => log.employeeId === employee.id && log.date === date);
   const at = nowTime();
+  if (existing?.punchIn && existing?.punchOut) {
+    return {
+      ok: false,
+      message: `Attendance is already completed today (${existing.punchIn} to ${existing.punchOut}). Contact HR if it needs correction.`,
+      employee: kioskEmployee(employee),
+      attendance: {
+        date: existing.date,
+        punchIn: existing.punchIn,
+        punchOut: existing.punchOut,
+        method: existing.method,
+        status: existing.status,
+      },
+      action: 'OUT',
+    };
+  }
   const lastPunchTime = existing?.punchOut || existing?.punchIn || '';
   if (lastPunchTime) {
     const secondsSinceLastPunch = timeToSeconds(at) - timeToSeconds(lastPunchTime);
@@ -813,7 +916,13 @@ function savePunch(store, employee, method, evidence, meta) {
       reasons: checkoutReasons,
     };
   }
-  const log = { ...computePunch(existing, method, store.terminal, evidence?.id, outReason, at), employeeId: employee.id };
+  const log = {
+    ...computePunch(existing, method, store.terminal, evidence?.id, outReason, at),
+    employeeId: employee.id,
+    employeeBranchId: employee.branchId || '',
+    terminalBranchId: store.terminal.branchId || '',
+    crossBranch: !!(store.terminal.branchId && employee.branchId && store.terminal.branchId !== employee.branchId),
+  };
   const next = existing
     ? store.attendances.map(item => item.id === existing.id ? log : item)
     : [log, ...(store.attendances || [])];
@@ -823,7 +932,7 @@ function savePunch(store, employee, method, evidence, meta) {
     { id: log.id, collection: 'attendances', data: log, createdAt: new Date().toISOString() },
   ];
   store.events = [
-    { id: `evt-${Date.now()}`, at: new Date().toISOString(), type: 'punch', message: `${employee.fullName} ${log.punchOut ? 'OUT' : 'IN'} via ${method}`, detail: { employeeId: employee.id, ...meta } },
+    { id: `evt-${Date.now()}`, at: new Date().toISOString(), type: 'punch', message: `[REDACTED] ${log.punchOut ? 'OUT' : 'IN'} via ${method}`, detail: null },
     ...(store.events || []),
   ].slice(0, 500);
   writeStore(store);
@@ -835,12 +944,12 @@ function savePunch(store, employee, method, evidence, meta) {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('kiosk:punch-synced', { id: log.id });
     }
-  }).catch(error => addEvent('sync-error', `Firestore sync pending for ${log.id}`, error.message));
+  }).catch(() => addEvent('sync-error', 'Firestore attendance sync pending'));
 
   return {
     ok: true,
     employee: kioskEmployee(employee),
-    log,
+    attendance: { date: log.date, punchIn: log.punchIn, punchOut: log.punchOut, method: log.method, status: log.status },
     action: log.punchOut ? 'OUT' : 'IN',
     outReason: log.punchOut ? (log.outReason || outReason) : '',
   };
@@ -850,19 +959,26 @@ function savePunch(store, employee, method, evidence, meta) {
 
 ipcMain.handle('kiosk:get-state', async () => {
   const store = readStore();
-  const employees = mergeEmployeeBiometricTemplates(store.employees || [], store.biometricTemplates || []);
+  const branches = (store.branches || []).map(branch => ({
+    id: branch.id,
+    name: branch.name || branch.branchName || branch.id,
+    code: branch.code || '',
+    city: branch.city || '',
+  }));
   return {
-    ...store,
-    employees,
+    terminal: store.terminal,
+    lastSync: store.lastSync || null,
+    employees: (store.employees || []).map(kioskEmployee),
+    branches,
+    assignedBranch: branches.find(branch => branch.id === store.terminal.branchId) || null,
     syncTarget: {
       portalUrl: firebaseConfig.portalUrl,
       projectId: firebaseConfig.projectId,
       databaseId: firebaseConfig.databaseId,
-      collections: ['employees', 'biometricTemplates', 'branches', 'departments', 'designations', 'attendances'],
+      collections: ['employees', 'attendances', 'branches', 'departments', 'designations', 'biometricTemplates'],
     },
     platform: process.platform,
     bridgeRunning: await isBridgePortOpen(),
-    storePath: kioskStorePath(),
   };
 });
 
@@ -877,7 +993,7 @@ ipcMain.handle('kiosk:lookup-employee', async (_event, code) => {
   return {
     found: true,
     employee: kioskEmployee(employee),
-    todayLog,
+    todayLog: todayLog ? { punchIn: todayLog.punchIn, punchOut: todayLog.punchOut, status: todayLog.status } : null,
     action,
     fingerprintCount: getFingerprintTemplates(employee).length,
   };
@@ -908,15 +1024,53 @@ ipcMain.handle('kiosk:get-events', async () => {
   return (store.events || []).slice(0, 100);
 });
 
-ipcMain.handle('kiosk:save-settings', async (_event, settings) => {
+ipcMain.handle('kiosk:clear-local-attendance-cache', async () => {
   const store = readStore();
-  store.terminal = { ...store.terminal, ...settings };
+  const clearedCount = (store.attendances || []).length;
+  const discardedPendingCount = (store.pendingSync || [])
+    .filter(item => item.collection === 'attendances').length;
+  store.attendances = [];
+  store.pendingSync = (store.pendingSync || [])
+    .filter(item => item.collection !== 'attendances');
+  writeStore(store);
+  addEvent(
+    'settings',
+    `Local attendance cache cleared (${clearedCount} records and ${discardedPendingCount} pending uploads removed)`
+  );
+  return { ok: true, clearedCount, discardedPendingCount };
+});
+
+ipcMain.handle('kiosk:save-settings', async (_event, settings) => {
+  if (!settings || typeof settings !== 'object') throw new Error('Invalid settings payload.');
+  const store = readStore();
+  const requestedBranchId = String(settings.branchId || '');
+  const cameraUrl = String(settings.ipCameraUrl || '').trim();
+  if (cameraUrl) {
+    const parsed = new URL(cameraUrl);
+    if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || cameraUrl.length > 500) {
+      throw new Error('Invalid IP camera URL.');
+    }
+  }
+  store.terminal = {
+    ...store.terminal,
+    id: /^[A-Za-z0-9_-]{1,40}$/.test(String(settings.id || '')) ? String(settings.id) : store.terminal.id,
+    location: String(settings.location || '').trim().slice(0, 120),
+    branchId: (store.branches || []).some(branch => branch.id === requestedBranchId)
+      ? requestedBranchId
+      : store.terminal.branchId,
+    ipCameraUrl: cameraUrl,
+    allowCodeOnlyPunch: !!settings.allowCodeOnlyPunch,
+    requireCodeWithFingerprint: !!settings.requireCodeWithFingerprint,
+    requireCodeWithCamera: !!settings.requireCodeWithCamera,
+    autoCaptureCamera: !!settings.autoCaptureCamera,
+    autoFullscreen: !!settings.autoFullscreen,
+  };
   writeStore(store);
   if (mainWindow) {
     mainWindow.setKiosk(!!store.terminal.autoFullscreen);
     mainWindow.setFullScreen(!!store.terminal.autoFullscreen);
   }
-  addEvent('settings', 'Settings saved', settings);
+  addEvent('settings', 'Settings saved');
   return store.terminal;
 });
 
@@ -926,11 +1080,11 @@ ipcMain.handle('kiosk:sync', async () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('kiosk:sync-complete', { report: result.report, timestamp: result.store.lastSync });
     }
-    return result;
+    return { report: result.report, lastSync: result.store.lastSync };
   } catch (error) {
     return {
       report: {
-        errors: [error.message],
+        errors: ['Kiosk sync failed'],
         employees: 0,
         attendances: 0,
         branches: 0,
@@ -939,15 +1093,29 @@ ipcMain.handle('kiosk:sync', async () => {
         pushed: 0,
         changed: false,
       },
-      store: readStore(),
+      lastSync: null,
     };
   }
 });
 
 ipcMain.handle('kiosk:punch-by-code', async (_event, payload) => {
   const store = readStore();
+  if (!store.terminal.allowCodeOnlyPunch) {
+    addEvent('security', 'Blocked code-only attendance attempt while the mode is disabled');
+    return {
+      ok: false,
+      message: 'Code-only attendance is disabled on this kiosk. Use fingerprint or camera verification.',
+    };
+  }
   const employee = findEmployeeByCode(store.employees || [], payload.code);
-  if (!employee) return { ok: false, message: 'Employee code not found in terminal database.' };
+  if (!employee) {
+    return {
+      ok: false,
+      message: store.terminal.branchId
+        ? 'Employee is not in this kiosk branch. Cross-branch attendance requires the Camera tab, full employee ID, and face verification.'
+        : 'Employee code not found in terminal database.',
+    };
+  }
   if (employee.status === 'Terminated') return { ok: false, message: 'This employee account is terminated.' };
   if (employee.status === 'Suspended') return { ok: false, message: 'This employee account is suspended.' };
   return savePunch(store, employee, payload.method || 'RFID', payload.evidence || null, payload.meta || {});
@@ -956,17 +1124,36 @@ ipcMain.handle('kiosk:punch-by-code', async (_event, payload) => {
 ipcMain.handle('kiosk:punch-camera', async (_event, payload) => {
   const store = readStore();
   const employees = mergeEmployeeBiometricTemplates(store.employees || [], store.biometricTemplates || []);
-  const typedEmployee = payload.code ? findEmployeeByCode(employees, payload.code) : null;
+  let typedEmployee = payload.code ? findEmployeeByCode(employees, payload.code) : null;
+  let crossBranch = false;
+  if (payload.code && !typedEmployee && store.terminal.branchId) {
+    try {
+      typedEmployee = await findEmployeeForCrossBranchCamera(payload.code, store.terminal.branchId);
+      if (typedEmployee) {
+        crossBranch = true;
+        await loadCrossBranchAttendanceContext(store, typedEmployee.id);
+      }
+    } catch {
+      return { ok: false, message: 'Cross-branch verification could not securely retrieve this employee. Check the full employee ID and network connection.' };
+    }
+  }
   if (store.terminal.requireCodeWithCamera && !store.terminal.autoCaptureCamera && !typedEmployee) {
     return { ok: false, message: 'Please enter your employee code before camera punch.' };
   }
-  if (payload.code && !typedEmployee) return { ok: false, message: 'Employee code not found in terminal database.' };
+  if (payload.code && !typedEmployee) {
+    return { ok: false, message: 'Employee ID was not found. Cross-branch attendance requires the complete employee ID and face verification.' };
+  }
 
   const candidates = typedEmployee ? [typedEmployee] : employees;
   if (typedEmployee && !getFaceDescriptors(typedEmployee).length) {
     return { ok: false, message: 'No camera face profile is enrolled for this employee. Enroll face from HR biometric setup first.' };
   }
-  const match = identifyFaceDescriptor(candidates, payload.descriptor);
+  // Camera distance causes normal kiosk captures to score around 0.22 even
+  // when enrollment samples of the same employee are much closer. Code-free
+  // identification gets only the tolerance needed for that variation, while
+  // identifyFaceDescriptor still rejects ambiguous cross-employee matches.
+  const matchThreshold = typedEmployee ? 0.24 : 0.23;
+  const match = identifyFaceDescriptor(candidates, payload.descriptor, matchThreshold);
   if (!match.ok) return match;
 
   const employee = match.employee;
@@ -977,7 +1164,8 @@ ipcMain.handle('kiosk:punch-camera', async (_event, payload) => {
     ...(payload.meta || {}),
     camera: payload.meta?.camera || 'webcam',
     score: match.score,
-    recognizedBy: typedEmployee ? 'camera-code-confirmed' : 'camera-face',
+    recognizedBy: crossBranch ? 'cross-branch-code-and-face' : typedEmployee ? 'camera-code-confirmed' : 'camera-face',
+    crossBranch,
   });
 });
 
@@ -985,6 +1173,10 @@ ipcMain.handle('kiosk:punch-fingerprint', async (_event, payload) => {
   const store = readStore();
   let employees = mergeEmployeeBiometricTemplates(store.employees || [], store.biometricTemplates || []);
   const typedEmployee = payload.code ? findEmployeeByCode(employees, payload.code) : null;
+
+  if (payload.code && !typedEmployee && store.terminal.branchId) {
+    return { ok: false, message: 'Cross-branch attendance is allowed only through Camera with the full employee ID and face verification.' };
+  }
 
   if (store.terminal.requireCodeWithFingerprint && !typedEmployee) {
     return { ok: false, message: 'Please enter your employee code before fingerprint scan.' };
@@ -1000,7 +1192,7 @@ ipcMain.handle('kiosk:punch-fingerprint', async (_event, payload) => {
       employees = syncedEmployees;
       gallery = buildFingerprintGallery(syncedTypedEmployee ? [syncedTypedEmployee] : syncedEmployees);
     } catch (error) {
-      addEvent('sync-error', 'Fingerprint scan could not refresh employee templates', error.message);
+      addEvent('sync-error', 'Fingerprint scan could not refresh employee templates');
     }
   }
 
@@ -1031,23 +1223,38 @@ ipcMain.handle('kiosk:punch-fingerprint', async (_event, payload) => {
 
 ipcMain.handle('kiosk:test-fingerprint-scanner', async () => {
   const result = await testFingerprintScanner();
-  addEvent(result.ok ? 'device' : 'error', result.ok ? 'Fingerprint scanner test passed' : 'Fingerprint scanner test failed', result);
+  addEvent(result.ok ? 'device' : 'error', result.ok ? 'Fingerprint scanner test passed' : 'Fingerprint scanner test failed');
   return result;
 });
 
 ipcMain.handle('kiosk:save-evidence', async (_event, payload) => {
+  if (!payload || typeof payload !== 'object') throw new Error('Invalid evidence payload.');
   const store = readStore();
   const evidenceDir = path.join(app.getPath('userData'), 'evidence');
   fs.mkdirSync(evidenceDir, { recursive: true });
   const id = `ev-${Date.now()}`;
   const dataUrl = String(payload.dataUrl || '');
-  const base64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
+  const match = /^data:image\/jpeg;base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
+  if (!match) throw new Error('Evidence must be a JPEG image.');
+  const base64 = match[1];
+  if (base64.length > 2_800_000) throw new Error('Evidence image exceeds the 2 MB limit.');
+  const bytes = Buffer.from(base64, 'base64');
+  if (bytes.length > 2 * 1024 * 1024 || bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8 || bytes[2] !== 0xff) {
+    throw new Error('Evidence image is invalid.');
+  }
   const file = path.join(evidenceDir, `${id}.jpg`);
-  fs.writeFileSync(file, Buffer.from(base64, 'base64'));
-  const evidence = { id, file, type: payload.type || 'camera', at: new Date().toISOString(), source: payload.source || '' };
-  store.evidence = [evidence, ...(store.evidence || [])].slice(0, 1000);
+  fs.writeFileSync(file, bytes, { flag: 'wx' });
+  const evidence = { id, file, type: 'camera', at: new Date().toISOString(), source: payload.source === 'ip-camera' ? 'ip-camera' : 'webcam' };
+  const staleEvidence = (store.evidence || []).slice(99);
+  for (const stale of staleEvidence) {
+    try {
+      const stalePath = path.resolve(String(stale.file || ''));
+      if (stalePath.startsWith(path.resolve(evidenceDir) + path.sep)) fs.unlinkSync(stalePath);
+    } catch {}
+  }
+  store.evidence = [evidence, ...(store.evidence || [])].slice(0, 100);
   writeStore(store);
-  return evidence;
+  return { id: evidence.id, type: evidence.type, at: evidence.at, source: evidence.source };
 });
 
 ipcMain.handle('kiosk:start-bridge', ensureBiometricDriverHost);
@@ -1055,11 +1262,6 @@ ipcMain.handle('kiosk:start-bridge', ensureBiometricDriverHost);
 ipcMain.handle('kiosk:check-bridge', async () => {
   const status = await ensureBiometricDriverHost();
   return { running: !!status.running, message: status.running ? 'Windows biometric driver host is online.' : status.message };
-});
-
-ipcMain.handle('kiosk:open-store', async () => {
-  await shell.openPath(path.dirname(kioskStorePath()));
-  return true;
 });
 
 ipcMain.handle('kiosk:exit', async () => {
@@ -1114,7 +1316,7 @@ function identifyFingerprint(gallery) {
     });
     socket.on('error', error => {
       clearTimeout(timeout);
-      resolve({ ok: false, message: `Fingerprint reader not connected: ${error.message}` });
+      resolve({ ok: false, message: 'Fingerprint reader is unavailable.', correlationId: require('crypto').randomUUID() });
     });
   });
 }
@@ -1164,7 +1366,7 @@ function testFingerprintScanner() {
     });
     socket.on('error', error => {
       clearTimeout(timeout);
-      resolve({ ok: false, message: `Scanner test could not connect to driver host: ${error.message}` });
+      resolve({ ok: false, message: 'Scanner test could not connect to the driver host.', correlationId: require('crypto').randomUUID() });
     });
   });
 }
@@ -1263,6 +1465,7 @@ if (!gotLock) {
   });
 
   app.whenReady().then(async () => {
+    configureCameraPermission();
     createSplashWindow();
     writeStore(readStore());
     if (process.platform === 'win32') {
@@ -1280,7 +1483,7 @@ if (!gotLock) {
       const result = await performSync();
       addEvent('sync', result.report.changed ? 'Startup sync updated local kiosk data' : 'Startup sync checked local kiosk data', result.report);
     } catch (err) {
-      addEvent('sync', 'Startup sync failed; kiosk will use local cache', err.message);
+      addEvent('sync', 'Startup sync failed; kiosk will use local cache');
     }
 
     createWindow();
@@ -1297,7 +1500,7 @@ if (!gotLock) {
             });
           }
         } catch (err) {
-          console.warn('Auto-sync error:', err.message);
+          console.warn('Auto-sync failed. Check local diagnostics and connectivity.');
         }
       }, 5 * 60 * 1000);
     });
@@ -1315,5 +1518,7 @@ app.on('window-all-closed', () => {
 });
 
 process.on('uncaughtException', error => {
-  dialog.showErrorBox('Attendance Kiosk Error', error.stack || error.message);
+  const correlationId = require('crypto').randomUUID();
+  console.error(`[${correlationId}] Kiosk process failure`, error);
+  dialog.showErrorBox('Attendance Kiosk Error', `An unexpected error occurred. Reference: ${correlationId}`);
 });

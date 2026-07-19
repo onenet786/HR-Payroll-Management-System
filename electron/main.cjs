@@ -175,7 +175,7 @@ async function startUru4500Bridge() {
   if (!fs.existsSync(bridgePath)) {
     dialog.showErrorBox(
       'URU 4500 Bridge Missing',
-      `Fingerprint bridge not found:\n${bridgePath}`
+      'Fingerprint bridge is unavailable. Reinstall the application or contact support.'
     );
     return;
   }

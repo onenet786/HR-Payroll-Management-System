@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('kioskApi', {
   lookupEmployee: (code) => ipcRenderer.invoke('kiosk:lookup-employee', code),
   getStats: () => ipcRenderer.invoke('kiosk:get-stats'),
   getEvents: () => ipcRenderer.invoke('kiosk:get-events'),
+  clearLocalAttendanceCache: () => ipcRenderer.invoke('kiosk:clear-local-attendance-cache'),
   saveSettings: settings => ipcRenderer.invoke('kiosk:save-settings', settings),
   sync: () => ipcRenderer.invoke('kiosk:sync'),
   punchByCode: payload => ipcRenderer.invoke('kiosk:punch-by-code', payload),
@@ -14,7 +15,6 @@ contextBridge.exposeInMainWorld('kioskApi', {
   saveEvidence: payload => ipcRenderer.invoke('kiosk:save-evidence', payload),
   startBridge: () => ipcRenderer.invoke('kiosk:start-bridge'),
   checkBridge: () => ipcRenderer.invoke('kiosk:check-bridge'),
-  openStore: () => ipcRenderer.invoke('kiosk:open-store'),
   exit: () => ipcRenderer.invoke('kiosk:exit'),
   onSyncComplete: (callback) => {
     ipcRenderer.on('kiosk:sync-complete', (_event, data) => callback(data));

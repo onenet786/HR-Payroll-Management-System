@@ -123,7 +123,7 @@ namespace Uru4500Bridge
                     }
                     catch (Exception ex)
                     {
-                        Log("AcceptLoop error: " + ex);
+                        Log("AcceptLoop error [REDACTED]");
                     }
                 }
             }
@@ -190,8 +190,8 @@ namespace Uru4500Bridge
                 }
                 catch (Exception ex)
                 {
-                    try { SendText(stream, ErrorJson(ex.Message)); } catch { }
-                    Console.WriteLine("Client error: " + ex.Message);
+                    try { SendText(stream, ErrorJson("Biometric bridge request failed.")); } catch { }
+                    Console.WriteLine("Client error [REDACTED]");
                 }
             }
         }
@@ -218,7 +218,7 @@ namespace Uru4500Bridge
             }
             catch (Exception ex)
             {
-                diagnostics.Add("DigitalPersona reader scan failed: " + ex.Message);
+                diagnostics.Add("DigitalPersona reader scan failed. Reference the server log.");
             }
 
             var secuGenAssembly = FindSecuGenAssemblyPath();
@@ -260,7 +260,7 @@ namespace Uru4500Bridge
                 }
                 catch (Exception ex)
                 {
-                    return ErrorJson(ex.Message);
+                    return ErrorJson("Fingerprint capture failed.");
                 }
             }
         }
@@ -367,7 +367,7 @@ namespace Uru4500Bridge
                             }
                             catch (Exception ex)
                             {
-                                Log("SecuGen identify compare error for employee=" + item.EmployeeId + " error=" + ex.Message);
+                                Log("SecuGen identify comparison failed for employee=[REDACTED]");
                             }
                         }
                     }
@@ -382,7 +382,7 @@ namespace Uru4500Bridge
                                 var enrolledResult = Importer.ImportFmd(bytes, Constants.Formats.Fmd.ANSI, Constants.Formats.Fmd.ANSI);
                                 if (enrolledResult == null || enrolledResult.Data == null || enrolledResult.ResultCode != Constants.ResultCode.DP_SUCCESS)
                                 {
-                                    Log("ImportFmd failed for employee=" + item.EmployeeId);
+                                    Log("ImportFmd failed for employee=[REDACTED]");
                                     continue;
                                 }
 
@@ -395,7 +395,7 @@ namespace Uru4500Bridge
                             }
                             catch (Exception ex)
                             {
-                                Log("Identify compare error for employee=" + item.EmployeeId + " error=" + ex.Message);
+                                Log("Identify comparison failed for employee=[REDACTED]");
                             }
                         }
                     }
@@ -412,7 +412,7 @@ namespace Uru4500Bridge
                 }
                 catch (Exception ex)
                 {
-                    return ErrorJson(ex.Message);
+                    return ErrorJson("Fingerprint identification failed.");
                 }
             }
         }
@@ -431,7 +431,7 @@ namespace Uru4500Bridge
                 }
 
                 reader = readers[0];
-                Log("Using reader name=" + reader.Description.Name + " sn=" + reader.Description.SerialNumber);
+                Log("Using fingerprint reader; serial=[REDACTED]");
                 var open = reader.Open(Constants.CapturePriority.DP_PRIORITY_EXCLUSIVE);
                 Log("Reader.Open exclusive result=" + open);
                 if (open != Constants.ResultCode.DP_SUCCESS)
@@ -566,7 +566,7 @@ namespace Uru4500Bridge
             }
             catch (Exception ex)
             {
-                Log("SecuGen SDK directory scan skipped: " + ex.Message);
+                Log("SecuGen SDK directory scan skipped [REDACTED]");
             }
         }
 
@@ -608,7 +608,7 @@ namespace Uru4500Bridge
             {
                 if (FindSecuGenNativePath().Length > 0)
                 {
-                    Log("Managed SecuGen load failed; falling back to native sgfplib.dll. Error=" + ex.Message);
+                    Log("Managed SecuGen load failed; falling back to native library [REDACTED]");
                     return CaptureSecuGenTemplateNative();
                 }
                 throw;
@@ -712,7 +712,7 @@ namespace Uru4500Bridge
             }
             catch (Exception ex)
             {
-                Log("SecuGen native GetDeviceInfo skipped: " + ex.Message);
+                Log("SecuGen native GetDeviceInfo skipped [REDACTED]");
             }
 
             var image = new byte[Math.Max(1, width * height)];
@@ -730,7 +730,7 @@ namespace Uru4500Bridge
             }
             catch (Exception ex)
             {
-                Log("SecuGen native GetImageQuality skipped: " + ex.Message);
+                Log("SecuGen native GetImageQuality skipped [REDACTED]");
             }
 
             var maxTemplateSize = 400;
@@ -740,7 +740,7 @@ namespace Uru4500Bridge
             }
             catch (Exception ex)
             {
-                Log("SecuGen native GetMaxTemplateSize skipped: " + ex.Message);
+                Log("SecuGen native GetMaxTemplateSize skipped [REDACTED]");
             }
             maxTemplateSize = Math.Max(128, maxTemplateSize);
 
@@ -820,7 +820,7 @@ namespace Uru4500Bridge
             }
             catch (Exception ex)
             {
-                Log("SecuGen " + methodName + " failed: " + ex.Message);
+                Log("SecuGen operation failed [REDACTED]");
                 return false;
             }
         }
@@ -836,7 +836,7 @@ namespace Uru4500Bridge
             }
             catch (Exception ex)
             {
-                Log("SecuGen " + methodName + " failed: " + ex.Message);
+                Log("SecuGen operation failed [REDACTED]");
                 return false;
             }
         }
@@ -1038,7 +1038,8 @@ namespace Uru4500Bridge
 
         private static string ErrorJson(string message)
         {
-            return "{\"status\":\"Error\",\"error\":\"" + Json(message) + "\"}";
+            var correlationId = Guid.NewGuid().ToString("N");
+            return "{\"status\":\"Error\",\"error\":\"" + Json(message) + "\",\"correlationId\":\"" + correlationId + "\"}";
         }
 
         private static string Json(string value)

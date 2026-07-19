@@ -71,7 +71,7 @@ export function KioskTerminal({
       setStreamActive(true);
       setHasWebcam(true);
     } catch (err) {
-      console.warn('Webcam permission denied or unavailable:', err);
+      console.warn('Webcam permission denied or unavailable.');
       setHasWebcam(false);
       setStreamActive(false);
     }
@@ -168,27 +168,13 @@ export function KioskTerminal({
     setMessage('Place finger firmly on the URU 4500 / SecuGen Hamster Pro fingerprint reader...');
 
     try {
-      const result = await captureBiometric();
-      const typedEmp = empIdInput
-        ? employees.find(e =>
-            e.employeeCode.toUpperCase() === empIdInput.toUpperCase() ||
-            e.employeeCode.toLowerCase().endsWith(empIdInput.toLowerCase())
-          )
-        : null;
-      const enrolledEmp = employees.find(e => (e.fingerprintTemplates?.length || 0) > 0);
-      const emp = typedEmp || enrolledEmp || employees[0];
-
-      if (emp) {
-        setMessage(`Fingerprint captured from ${result.device?.type || 'URU 4500 / SecuGen Hamster Pro'} at ${result.quality}% quality.`);
-        triggerPunch(emp, 'Biometric');
-      } else {
-        setStatus('error');
-        setMessage('Fingerprint captured, but no employee record is available.');
-        setTimeout(() => setStatus('idle'), 3000);
-      }
-    } catch (error) {
+      await captureBiometric();
       setStatus('error');
-      setMessage(error instanceof Error ? error.message : String(error));
+      setMessage('Browser biometric punching is disabled because it cannot securely prove template ownership. Use the authenticated desktop kiosk.');
+      setTimeout(() => setStatus('idle'), 5000);
+    } catch {
+      setStatus('error');
+      setMessage('Fingerprint verification failed. Try again or contact an administrator.');
       setTimeout(() => setStatus('idle'), 4000);
     }
   };
@@ -199,6 +185,11 @@ export function KioskTerminal({
 
     setStatus('scanning');
     setMessage('Align your face inside the framing box. Comparing enrolled camera profile...');
+
+    setStatus('error');
+    setMessage('Browser face punching is disabled because client-side matching can be tampered with. Use the authenticated desktop kiosk.');
+    setTimeout(() => setStatus('idle'), 5000);
+    return;
 
     try {
       if (!videoRef.current || !streamActive) {
@@ -218,9 +209,9 @@ export function KioskTerminal({
       }
       setMessage(`Face match confidence ${(Math.max(0, 1 - match.score / FACE_MATCH_THRESHOLD) * 100).toFixed(1)}%.`);
       triggerPunch(match.employee, 'Camera');
-    } catch (error) {
+    } catch {
       setStatus('error');
-      setMessage(error instanceof Error ? error.message : String(error));
+      setMessage('Face verification failed. Try again or contact an administrator.');
       setTimeout(() => setStatus('idle'), 3500);
     }
   };

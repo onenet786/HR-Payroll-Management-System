@@ -4,18 +4,69 @@
  */
 
 import React, { useState, useEffect } from 'react';
+import { Eye, EyeOff } from 'lucide-react';
 import { computePayslipDetails } from './data/defaults';
 import {
-  Employee, AttendanceLog, LeaveRequest, StatutoryConfig, TaxSlab, PayrollRun,
+  Employee, AttendanceLog, LeaveRequest, StatutoryConfig, TaxSlab, PayrollRun, Payslip,
   Role, UserAccount, Branch, Department, Designation, Holiday, LoanAdvance, SalaryRevision,
-  PerformanceReview, CompanyAsset, JobPosting, JobApplication, GratuitySettlement, AppNotification
+  PerformanceReview, CompanyAsset, JobPosting, JobApplication, GratuitySettlement, AppNotification, Company, CompanySetupPayload, Zone, UcTown, WageType, NewUserAccount
 } from './types';
 import { DeviceEmulator } from './components/DeviceEmulator';
-import { MobileApp } from './components/MobileApp';
-import { db, isFirebaseConfigured } from './firebase';
+import { auth, db, isFirebaseConfigured, provisionFirebaseUser } from './firebase';
+import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import {
-  collection, deleteDoc, doc, setDoc, updateDoc, onSnapshot
+  collection, deleteDoc, doc, getDoc, setDoc, updateDoc, onSnapshot, writeBatch
 } from 'firebase/firestore';
+
+// HR and payroll records must never be persisted in browser-accessible storage.
+// Remove legacy cache entries and keep application state in memory/Firestore only.
+const privacyStorage = {
+  getItem: (_key: string): string | null => null,
+  setItem: (_key: string, _value: string): void => undefined,
+  removeItem: (key: string): void => localStorage.removeItem(key),
+};
+
+const publicUser = ({ passwordHash: _passwordHash, ...profile }: UserAccount): UserAccount => profile;
+
+const authErrorCode = (error: unknown): string =>
+  typeof error === 'object' && error && 'code' in error
+    ? String((error as { code?: unknown }).code)
+    : '';
+
+const safeAuthErrorMessage = (error: unknown): string => {
+  const code = authErrorCode(error);
+  switch (code) {
+    case 'auth/operation-not-allowed':
+      return 'Email/password sign-in is not enabled in Firebase Authentication.';
+    case 'auth/network-request-failed':
+      return 'Unable to reach Firebase Authentication. Check DNS, proxy, firewall, and internet access.';
+    case 'auth/too-many-requests':
+      return 'Too many sign-in attempts. Wait before trying again or reset the password.';
+    case 'auth/unauthorized-domain':
+      return 'This application domain is not authorized in Firebase Authentication.';
+    case 'auth/configuration-not-found':
+      return 'Firebase Authentication is not configured for this project. Enable Email/Password sign-in.';
+    case 'auth/app-not-authorized':
+      return 'This application is not authorized to use Firebase Authentication with the configured API key.';
+    case 'auth/invalid-api-key':
+    case 'auth/api-key-not-valid.-please-pass-a-valid-api-key.':
+      return 'The Firebase web API key is invalid or is not permitted to use Firebase Authentication.';
+    case 'auth/user-disabled':
+      return 'This account is disabled. Contact your administrator.';
+    case 'auth/invalid-credential':
+    case 'auth/invalid-login-credentials':
+    case 'auth/user-not-found':
+    case 'auth/wrong-password':
+      return 'Invalid email or password. Confirm the account exists under Firebase Authentication → Users.';
+    default:
+      return 'Invalid email or password.';
+  }
+};
+
+for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+  const key = localStorage.key(index);
+  if (key?.startsWith('hr_') || key?.startsWith('webauthn_')) localStorage.removeItem(key);
+}
 
 type BiometricTemplateRecord = {
   id: string;
@@ -100,7 +151,13 @@ export default function App() {
     pessiEmployerRate: 0,
     gratuityRateDaysPerYear: 0,
     providentFundMaxEmployeeContribution: 0,
-    updatedAt: ''
+    updatedAt: '',
+    effectiveFrom: '',
+    taxYear: '',
+    socialSecurityWageCeiling: 0,
+    provincialSocialSecurityRates: { Punjab: 6, Sindh: 6, KPK: 6, Balochistan: 6 },
+    overtimeMultiplier: 2,
+    standardMonthlyHours: 208
   };
 
   const emptyUserAccount: UserAccount = {
@@ -113,10 +170,10 @@ export default function App() {
 
   const getInitialValue = <T,>(key: string, fallback: T): T => {
     try {
-      const saved = localStorage.getItem(key);
+      const saved = privacyStorage.getItem(key);
       if (saved) return JSON.parse(saved);
     } catch (e) {
-      console.warn(`localStorage read error for ${key}:`, e);
+      console.warn(`localStorage read error for ${key}:`);
     }
     return fallback;
   };
@@ -131,8 +188,12 @@ export default function App() {
   const [statConfig, setStatConfig] = useState<StatutoryConfig>(emptyStatConfig);
   const [taxSlabs, setTaxSlabs] = useState<TaxSlab[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
+  const [companies, setCompanies] = useState<Company[]>(() => getInitialValue('hr_companies', []));
   const [departments, setDepartments] = useState<Department[]>([]);
   const [designations, setDesignations] = useState<Designation[]>([]);
+  const [zones, setZones] = useState<Zone[]>(() => getInitialValue('hr_zones', []));
+  const [ucTowns, setUcTowns] = useState<UcTown[]>(() => getInitialValue('hr_uc_towns', []));
+  const [wageTypes, setWageTypes] = useState<WageType[]>(() => getInitialValue('hr_wage_types', []));
   const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [loanAdvances, setLoanAdvances] = useState<LoanAdvance[]>([]);
   const [salaryRevisions, setSalaryRevisions] = useState<SalaryRevision[]>([]);
@@ -142,6 +203,7 @@ export default function App() {
   const [jobApplications, setJobApplications] = useState<JobApplication[]>([]);
   const [gratuitySettlements, setGratuitySettlements] = useState<GratuitySettlement[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [payrollPayslips, setPayrollPayslips] = useState<Payslip[]>([]);
 
   // User & RBAC States
   const [loggedInUser, setLoggedInUser] = useState<UserAccount | null>(() => getInitialValue('hr_logged_in_user', null));
@@ -149,6 +211,8 @@ export default function App() {
   const [users, setUsers] = useState<UserAccount[]>(() => getInitialValue('hr_users', []));
   const [rolesLoaded, setRolesLoaded] = useState(() => !isFirebaseConfigured());
   const [usersLoaded, setUsersLoaded] = useState(() => !isFirebaseConfigured());
+  const [authReady, setAuthReady] = useState(false);
+  const [authMessage, setAuthMessage] = useState('');
   const [firestoreSyncStatus, setFirestoreSyncStatus] = useState<FirestoreSyncStatus>(() =>
     isFirebaseConfigured()
       ? { state: 'syncing', message: 'Loading server data...' }
@@ -160,74 +224,79 @@ export default function App() {
     return storedCurrent || storedLoggedIn || emptyUserAccount;
   });
 
-  const handleLogin = (user: UserAccount) => {
-    setLoggedInUser(user);
-    localStorage.setItem('hr_logged_in_user', JSON.stringify(user));
-    setCurrentUserAccount(user);
-    localStorage.setItem('hr_current_user', JSON.stringify(user));
+  useEffect(() => onAuthStateChanged(auth, async firebaseUser => {
+    if (!firebaseUser) {
+      setLoggedInUser(null);
+      setCurrentUserAccount(emptyUserAccount);
+      setAuthReady(true);
+      return;
+    }
+
+    try {
+      const profileSnapshot = await getDoc(doc(db, 'users', firebaseUser.uid));
+      if (!profileSnapshot.exists()) {
+        setAuthMessage('This Firebase account has no HR profile. Ask an administrator to provision it.');
+        await signOut(auth);
+        return;
+      }
+
+      const profile = publicUser({
+        ...profileSnapshot.data(),
+        id: firebaseUser.uid,
+        email: firebaseUser.email || profileSnapshot.data().email || '',
+      } as UserAccount);
+      if (profile.status !== 'Active') {
+        setAuthMessage('This account is suspended. Contact your administrator.');
+        await signOut(auth);
+        return;
+      }
+
+      setAuthMessage('');
+      setLoggedInUser(profile);
+      setCurrentUserAccount(profile);
+    } catch {
+      setAuthMessage('Unable to load the HR account profile. Contact your administrator.');
+      await signOut(auth).catch(() => undefined);
+    } finally {
+      setAuthReady(true);
+    }
+  }), []);
+
+  const handleLogin = async (email: string, password: string) => {
+    setAuthMessage('');
+    try {
+      await signInWithEmailAndPassword(auth, email.trim(), password);
+    } catch (error) {
+      const code = authErrorCode(error);
+      console.warn(`Firebase sign-in rejected (${code || 'unknown-error'}).`);
+      throw new Error(safeAuthErrorMessage(error));
+    }
   };
 
   const handleLogout = () => {
+    void signOut(auth);
     setLoggedInUser(null);
     setCurrentUserAccount(emptyUserAccount);
-    localStorage.removeItem('hr_logged_in_user');
-    localStorage.removeItem('hr_current_user');
+    privacyStorage.removeItem('hr_logged_in_user');
+    privacyStorage.removeItem('hr_current_user');
   };
 
   useEffect(() => {
     if (!loggedInUser) return;
     setCurrentUserAccount(prev => {
       if (prev.id === loggedInUser.id && prev.roleId) return prev;
-      const hydrated = users.find(u => u.id === loggedInUser.id) || loggedInUser;
-      localStorage.setItem('hr_current_user', JSON.stringify(hydrated));
+      const hydrated = publicUser(users.find(u => u.id === loggedInUser.id) || loggedInUser);
+      privacyStorage.setItem('hr_current_user', JSON.stringify(hydrated));
       return hydrated;
     });
   }, [loggedInUser, users]);
-
-  const handleCreateInitialAdmin = async (payload: { username: string; email: string; password: string }) => {
-    const adminRole: Role = {
-      id: 'role-admin',
-      name: 'Super Admin',
-      description: 'Full administrative control of the system.',
-      permissions: [
-        'view_dashboard',
-        'manage_employees',
-        'manage_attendance',
-        'manage_leaves',
-        'manage_payroll',
-        'manage_settings',
-        'manage_access'
-      ]
-    };
-
-    const adminUser: UserAccount = {
-      id: `usr-admin-${Date.now()}`,
-      username: payload.username,
-      email: payload.email,
-      roleId: adminRole.id,
-      status: 'Active',
-      password: payload.password
-    };
-
-    await setDoc(doc(db, 'roles', adminRole.id), cleanData(adminRole));
-    await setDoc(doc(db, 'users', adminUser.id), cleanData(adminUser));
-
-    setRoles([adminRole]);
-    setUsers([adminUser]);
-    setUsersLoaded(true);
-    setLoggedInUser(adminUser);
-    setCurrentUserAccount(adminUser);
-    localStorage.setItem('hr_roles', JSON.stringify([adminRole]));
-    localStorage.setItem('hr_users', JSON.stringify([adminUser]));
-    localStorage.setItem('hr_logged_in_user', JSON.stringify(adminUser));
-    localStorage.setItem('hr_current_user', JSON.stringify(adminUser));
-  };
 
   const [payrollRuns, setPayrollRuns] = useState<PayrollRun[]>([]);
 
   // Firestore Real-time Sync
   useEffect(() => {
     if (!isFirebaseConfigured()) return;
+    if (!loggedInUser) return;
 
     const unsubscribes: (() => void)[] = [];
     const requiredSnapshots = new Set([
@@ -236,8 +305,12 @@ export default function App() {
       'attendances',
       'leaves',
       'branches',
+      'companies',
       'departments',
       'designations',
+      'zones',
+      'ucTowns',
+      'wageTypes',
       'taxSlabs',
       'roles',
       'holidays',
@@ -251,6 +324,7 @@ export default function App() {
       'notifications',
       'users',
       'payrollRuns',
+      'payrollPayslips',
       'statConfig',
     ]);
     const loadedSnapshots = new Set<string>();
@@ -268,8 +342,7 @@ export default function App() {
     };
 
     const markSnapshotWarning = (collectionName: string, err: unknown) => {
-      const message = err instanceof Error ? err.message : String(err);
-      setFirestoreSyncStatus({ state: 'warning', message: `${collectionName} sync failed: ${message}` });
+      setFirestoreSyncStatus({ state: 'warning', message: `${collectionName} sync failed. Contact an administrator.` });
     };
 
     const registerCollectionListener = <T extends { id: string }>(
@@ -286,17 +359,17 @@ export default function App() {
           });
 
           stateSetter(fetched);
-          localStorage.setItem(storageKey, JSON.stringify(fetched));
+          privacyStorage.setItem(storageKey, JSON.stringify(fetched));
           onLoaded?.();
           markSnapshotLoaded(collectionName);
         }, (err) => {
           markSnapshotWarning(collectionName, err);
-          console.warn(`Firestore listener failed for ${collectionName}:`, err);
+          console.warn(`Firestore listener failed for ${collectionName}:`);
         });
         unsubscribes.push(unsub);
       } catch (err) {
         markSnapshotWarning(collectionName, err);
-        console.warn(`Firestore subscription deferred for ${collectionName}:`, err);
+        console.warn(`Firestore subscription deferred for ${collectionName}:`);
       }
     };
 
@@ -305,8 +378,12 @@ export default function App() {
     registerCollectionListener('attendances', setAttendances, 'hr_attendances');
     registerCollectionListener('leaves', setLeaves, 'hr_leaves');
     registerCollectionListener('branches', setBranches, 'hr_branches');
+    registerCollectionListener('companies', setCompanies, 'hr_companies');
     registerCollectionListener('departments', setDepartments, 'hr_departments');
     registerCollectionListener('designations', setDesignations, 'hr_designations');
+    registerCollectionListener('zones', setZones, 'hr_zones');
+    registerCollectionListener('ucTowns', setUcTowns, 'hr_uc_towns');
+    registerCollectionListener('wageTypes', setWageTypes, 'hr_wage_types');
     registerCollectionListener('taxSlabs', setTaxSlabs, 'hr_tax_slabs');
     registerCollectionListener('roles', setRoles, 'hr_roles', () => setRolesLoaded(true));
     registerCollectionListener('holidays', setHolidays, 'hr_holidays');
@@ -329,41 +406,42 @@ export default function App() {
 
         setUsersLoaded(true);
         setUsers(fetched);
-        localStorage.setItem('hr_users', JSON.stringify(fetched));
+        privacyStorage.setItem('hr_users', JSON.stringify(fetched));
 
           if (fetched.length === 0) {
             setLoggedInUser(null);
             setCurrentUserAccount(emptyUserAccount);
-            localStorage.removeItem('hr_logged_in_user');
-            localStorage.removeItem('hr_current_user');
+            privacyStorage.removeItem('hr_logged_in_user');
+            privacyStorage.removeItem('hr_current_user');
             markSnapshotLoaded('users');
             return;
           }
 
-        const storedCurrentUser = localStorage.getItem('hr_current_user');
+        const storedCurrentUser = privacyStorage.getItem('hr_current_user');
         if (storedCurrentUser) {
           const parsed = JSON.parse(storedCurrentUser) as UserAccount;
           const updatedCurrent = fetched.find(u => u.id === parsed.id);
           if (updatedCurrent) {
-            setCurrentUserAccount(updatedCurrent);
-            localStorage.setItem('hr_current_user', JSON.stringify(updatedCurrent));
+            setCurrentUserAccount(publicUser(updatedCurrent));
+            privacyStorage.setItem('hr_current_user', JSON.stringify(updatedCurrent));
           }
         }
         markSnapshotLoaded('users');
       }, (err) => {
         setUsersLoaded(true);
         markSnapshotWarning('users', err);
-        console.warn('Firestore users listener failed:', err);
+        console.warn('Firestore users listener failed:');
       });
       unsubscribes.push(unsubUsers);
     } catch (err) {
       setUsersLoaded(true);
       markSnapshotWarning('users', err);
-      console.warn('Firestore users subscription deferred:', err);
+      console.warn('Firestore users subscription deferred:');
     }
 
     // PayrollRuns Sync
     registerCollectionListener('payrollRuns', setPayrollRuns, 'hr_payroll_runs');
+    registerCollectionListener('payrollPayslips', setPayrollPayslips, 'hr_payroll_payslips');
 
     // StatConfig Sync (single document)
     try {
@@ -375,33 +453,33 @@ export default function App() {
 
         if (fetchedConfig) {
           setStatConfig(fetchedConfig);
-          localStorage.setItem('hr_stat_config', JSON.stringify(fetchedConfig));
+          privacyStorage.setItem('hr_stat_config', JSON.stringify(fetchedConfig));
         }
         markSnapshotLoaded('statConfig');
       }, (err) => {
         markSnapshotWarning('statConfig', err);
-        console.warn('Firestore statConfig listener failed:', err);
+        console.warn('Firestore statConfig listener failed:');
       });
       unsubscribes.push(unsubConfig);
     } catch (err) {
       markSnapshotWarning('statConfig', err);
-      console.warn('Firestore statConfig subscription deferred:', err);
+      console.warn('Firestore statConfig subscription deferred:');
     }
 
     return () => unsubscribes.forEach(unsub => unsub());
-  }, []);
+  }, [loggedInUser?.id]);
 
   // ─── Employee Handlers ────────────────────────────────────────────────────
   const handleAddEmployee = async (newEmp: Employee) => {
     setEmployees(prev => {
       const updated = [...prev, newEmp];
-      localStorage.setItem('hr_employees', JSON.stringify(updated));
+      privacyStorage.setItem('hr_employees', JSON.stringify(updated));
       return updated;
     });
     try {
       await setDoc(doc(db, 'employees', newEmp.id), cleanData(newEmp));
     } catch (err) {
-      console.warn('Firebase employee add delayed:', err);
+      console.warn('Firebase employee add delayed:');
     }
   };
 
@@ -415,7 +493,7 @@ export default function App() {
 
     setEmployees(prev => {
       const updated = prev.map(e => e.id === updatedEmp.id ? employeeForSave : e);
-      localStorage.setItem('hr_employees', JSON.stringify(updated));
+      privacyStorage.setItem('hr_employees', JSON.stringify(updated));
       return updated;
     });
     try {
@@ -434,20 +512,20 @@ export default function App() {
             biometricRecord,
             ...prev.filter(item => item.id !== employeeForSave.id && item.employeeId !== employeeForSave.id),
           ];
-          localStorage.setItem('hr_biometric_templates', JSON.stringify(updated));
+          privacyStorage.setItem('hr_biometric_templates', JSON.stringify(updated));
           return updated;
         });
       } else if (hasExplicitFingerprintTemplates) {
         await deleteDoc(doc(db, 'biometricTemplates', employeeForSave.id));
         setBiometricTemplates(prev => {
           const updated = prev.filter(item => item.id !== employeeForSave.id && item.employeeId !== employeeForSave.id);
-          localStorage.setItem('hr_biometric_templates', JSON.stringify(updated));
+          privacyStorage.setItem('hr_biometric_templates', JSON.stringify(updated));
           return updated;
         });
       }
       await setDoc(doc(db, 'employees', employeeForSave.id), cleanData(employeeForSave), { merge: true });
     } catch (err) {
-      console.warn('Firebase employee update delayed:', err);
+      console.warn('Firebase employee update delayed:');
       throw err;
     }
   };
@@ -455,23 +533,23 @@ export default function App() {
   // ─── Statutory Config Handlers ────────────────────────────────────────────
   const handleUpdateStatConfig = async (newConfig: StatutoryConfig) => {
     setStatConfig(newConfig);
-    localStorage.setItem('hr_stat_config', JSON.stringify(newConfig));
+    privacyStorage.setItem('hr_stat_config', JSON.stringify(newConfig));
     try {
       await setDoc(doc(db, 'statConfig', newConfig.id), newConfig);
     } catch (err) {
-      console.warn('Firebase statConfig update delayed:', err);
+      console.warn('Firebase statConfig update delayed:');
     }
   };
 
   const handleUpdateTaxSlabs = async (newSlabs: TaxSlab[]) => {
     setTaxSlabs(newSlabs);
-    localStorage.setItem('hr_tax_slabs', JSON.stringify(newSlabs));
+    privacyStorage.setItem('hr_tax_slabs', JSON.stringify(newSlabs));
     try {
       for (const slab of newSlabs) {
         await setDoc(doc(db, 'taxSlabs', slab.id), slab);
       }
     } catch (err) {
-      console.warn('Firebase tax slabs update delayed:', err);
+      console.warn('Firebase tax slabs update delayed:');
     }
   };
 
@@ -484,7 +562,7 @@ export default function App() {
       const updated = prev.map(l =>
         l.id === id ? { ...l, status: 'Approved', approvedBy: approverName, approvedOn: today } as LeaveRequest : l
       );
-      localStorage.setItem('hr_leaves', JSON.stringify(updated));
+      privacyStorage.setItem('hr_leaves', JSON.stringify(updated));
       return updated;
     });
 
@@ -518,10 +596,10 @@ export default function App() {
       if (autoLogs.length > 0) {
         setAttendances((prev: AttendanceLog[]) => {
           const updated = [...prev, ...autoLogs];
-          localStorage.setItem('hr_attendances', JSON.stringify(updated));
+          privacyStorage.setItem('hr_attendances', JSON.stringify(updated));
           for (const log of autoLogs) {
             setDoc(doc(db, 'attendances', log.id), log).catch(err =>
-              console.warn('Firebase auto-attendance sync delayed:', err)
+              console.warn('Firebase auto-attendance sync delayed:')
             );
           }
           return updated;
@@ -536,7 +614,7 @@ export default function App() {
         approvedOn: today
       });
     } catch (err) {
-      console.warn('Firebase leave approval delayed:', err);
+      console.warn('Firebase leave approval delayed:');
     }
   };
 
@@ -546,26 +624,26 @@ export default function App() {
       const updated = prev.map(l =>
         l.id === id ? { ...l, status: 'Rejected', approvedBy: loggedInUser?.username, approvedOn: today } as LeaveRequest : l
       );
-      localStorage.setItem('hr_leaves', JSON.stringify(updated));
+      privacyStorage.setItem('hr_leaves', JSON.stringify(updated));
       return updated;
     });
     try {
       await updateDoc(doc(db, 'leaves', id), { status: 'Rejected' });
     } catch (err) {
-      console.warn('Firebase leave rejection delayed:', err);
+      console.warn('Firebase leave rejection delayed:');
     }
   };
 
   const handleApplyLeave = async (leave: LeaveRequest) => {
     setLeaves(prev => {
       const updated = [...prev, leave];
-      localStorage.setItem('hr_leaves', JSON.stringify(updated));
+      privacyStorage.setItem('hr_leaves', JSON.stringify(updated));
       return updated;
     });
     try {
       await setDoc(doc(db, 'leaves', leave.id), cleanData(leave));
     } catch (err) {
-      console.warn('Firebase leave apply delayed:', err);
+      console.warn('Firebase leave apply delayed:');
     }
   };
 
@@ -575,13 +653,13 @@ export default function App() {
       const updated = prev.map(att =>
         att.id === id ? { ...att, status: 'Present', regularizationApproved: true } as AttendanceLog : att
       );
-      localStorage.setItem('hr_attendances', JSON.stringify(updated));
+      privacyStorage.setItem('hr_attendances', JSON.stringify(updated));
       return updated;
     });
     try {
       await updateDoc(doc(db, 'attendances', id), { status: 'Present', regularizationApproved: true });
     } catch (err) {
-      console.warn('Firebase regularization approval delayed:', err);
+      console.warn('Firebase regularization approval delayed:');
     }
   };
 
@@ -590,13 +668,13 @@ export default function App() {
       const updated = prev.map(att =>
         att.id === id ? { ...att, regularizationApproved: false } : att
       );
-      localStorage.setItem('hr_attendances', JSON.stringify(updated));
+      privacyStorage.setItem('hr_attendances', JSON.stringify(updated));
       return updated;
     });
     try {
       await updateDoc(doc(db, 'attendances', id), { regularizationApproved: false });
     } catch (err) {
-      console.warn('Firebase regularization rejection delayed:', err);
+      console.warn('Firebase regularization rejection delayed:');
     }
   };
 
@@ -628,13 +706,13 @@ export default function App() {
         const updated = [...prev];
         const idx = updated.findIndex(a => a.id === updatedLog.id);
         if (idx !== -1) updated[idx] = updatedLog;
-        localStorage.setItem('hr_attendances', JSON.stringify(updated));
+        privacyStorage.setItem('hr_attendances', JSON.stringify(updated));
         return updated;
       });
       try {
         await setDoc(doc(db, 'attendances', updatedLog.id), cleanData(updatedLog));
       } catch (err) {
-        console.warn('Firebase punch-out sync failed:', err);
+        console.warn('Firebase punch-out sync failed:');
       }
     } else {
       // Punch in — create new log
@@ -656,13 +734,13 @@ export default function App() {
       };
       setAttendances(prev => {
         const updated = [...prev, newLog];
-        localStorage.setItem('hr_attendances', JSON.stringify(updated));
+        privacyStorage.setItem('hr_attendances', JSON.stringify(updated));
         return updated;
       });
       try {
         await setDoc(doc(db, 'attendances', newLog.id), cleanData(newLog));
       } catch (err) {
-        console.warn('Firebase punch-in sync failed:', err);
+        console.warn('Firebase punch-in sync failed:');
       }
     }
   };
@@ -680,36 +758,44 @@ export default function App() {
     };
     setAttendances(prev => {
       const updated = [...prev, newRegLog];
-      localStorage.setItem('hr_attendances', JSON.stringify(updated));
+      privacyStorage.setItem('hr_attendances', JSON.stringify(updated));
       return updated;
     });
     try {
       await setDoc(doc(db, 'attendances', newRegLog.id), cleanData(newRegLog));
     } catch (err) {
-      console.warn('Firebase regularization delayed:', err);
+      console.warn('Firebase regularization delayed:');
     }
   };
 
   const handleAddAttendance = async (newAtt: AttendanceLog) => {
     setAttendances(prev => {
       const updated = [...prev, newAtt];
-      localStorage.setItem('hr_attendances', JSON.stringify(updated));
+      privacyStorage.setItem('hr_attendances', JSON.stringify(updated));
       return updated;
     });
     try {
       await setDoc(doc(db, 'attendances', newAtt.id), cleanData(newAtt));
     } catch (err) {
-      console.warn('Firebase attendance add delayed:', err);
+      console.warn('Firebase attendance add delayed:');
     }
   };
 
   // ─── Payroll Handler ──────────────────────────────────────────────────────
   const handleCreatePayrollRun = async (title: string, month: number, year: number) => {
+    if (payrollRuns.some(run => run.periodMonth === month && run.periodYear === year)) {
+      alert('A payroll run already exists for this period. Open the existing run instead of creating a duplicate.');
+      return;
+    }
     const lastDay = new Date(year, month, 0).getDate();
+    const eligibleEmployees = employees.filter(emp => emp.status === 'Active' || emp.status === 'On Leave');
+    const runId = `run-${month}-${year}-${Date.now()}`;
 
-    const sheets = employees.map(emp =>
-      computePayslipDetails(emp, month, year, attendances, leaves, statConfig, taxSlabs, departments, designations, branches, loanAdvances)
-    );
+    const sheets = eligibleEmployees.map(emp => ({
+      ...computePayslipDetails(emp, month, year, attendances, leaves, statConfig, taxSlabs, departments, designations, branches, loanAdvances, wageTypes),
+      id: `${runId}-${emp.id}`,
+      payrollRunId: runId
+    }));
 
     const totalGrossPay = sheets.reduce((sum, s) => sum + s.grossSalary, 0);
     const totalDeductions = sheets.reduce((sum, s) => sum + s.totalDeductions, 0);
@@ -718,7 +804,7 @@ export default function App() {
     const totalSocialSecurityEmployer = sheets.reduce((sum, s) => sum + s.pessiEmployerContribution, 0);
 
     const newRun: PayrollRun = {
-      id: `run-${month}-${year}-${Date.now()}`,
+      id: runId,
       title,
       periodMonth: month,
       periodYear: year,
@@ -730,66 +816,105 @@ export default function App() {
       totalDeductions,
       totalNetPay,
       totalEobiEmployer,
-      totalSocialSecurityEmployer
+      totalSocialSecurityEmployer,
+      employeeCount: eligibleEmployees.length,
+      statutoryConfigId: statConfig.id,
+      statutoryEffectiveFrom: statConfig.effectiveFrom,
+      auditTrail: [{ action: 'Created', at: new Date().toISOString(), by: currentUserAccount.username }]
     };
 
     setPayrollRuns(prev => {
       const updated = [...prev, newRun];
-      localStorage.setItem('hr_payroll_runs', JSON.stringify(updated));
+      privacyStorage.setItem('hr_payroll_runs', JSON.stringify(updated));
       return updated;
     });
 
     // Process loan installments — reduce remaining installments
-    const updatedLoans = loanAdvances.map((loan: LoanAdvance) => {
-      const hasInstallmentThisMonth = employees.some((e: Employee) => e.id === loan.employeeId) &&
-        loan.status === 'Active' && loan.remainingInstallments > 0;
-      if (!hasInstallmentThisMonth) return loan;
-      const remaining = loan.remainingInstallments - 1;
-      const totalRepaid = loan.totalRepaid + loan.monthlyInstallment;
-      return {
-        ...loan,
-        remainingInstallments: remaining,
-        totalRepaid,
-        status: remaining === 0 ? 'Closed' : 'Active' as LoanAdvance['status']
-      };
+    setPayrollPayslips(prev => {
+      const updated = [...prev, ...sheets];
+      privacyStorage.setItem('hr_payroll_payslips', JSON.stringify(updated));
+      return updated;
     });
-    setLoanAdvances(updatedLoans);
-    localStorage.setItem('hr_loans', JSON.stringify(updatedLoans));
 
     try {
       await setDoc(doc(db, 'payrollRuns', newRun.id), cleanData(newRun));
+      await Promise.all(sheets.map(sheet => setDoc(doc(db, 'payrollPayslips', sheet.id), cleanData(sheet))));
     } catch (err) {
-      console.warn('Firebase payroll run sync delayed:', err);
+      console.warn('Firebase payroll run sync delayed:');
     }
 
-    alert(`Payroll processed for ${employees.length} employees!\nGross Pay: PKR ${totalGrossPay.toLocaleString()}\nNet Pay: PKR ${totalNetPay.toLocaleString()}\nEOBI Employer: PKR ${totalEobiEmployer.toLocaleString()}`);
+    alert(`Draft payroll created for ${eligibleEmployees.length} employees. Review and approve it before loan deductions or disbursement.\nGross Pay: PKR ${totalGrossPay.toLocaleString()}\nNet Pay: PKR ${totalNetPay.toLocaleString()}`);
+  };
+
+  const handleUpdatePayrollStatus = async (runId: string, nextStatus: 'Approved' | 'Disbursed') => {
+    const run = payrollRuns.find(item => item.id === runId);
+    if (!run || (nextStatus === 'Approved' && run.status !== 'Draft') || (nextStatus === 'Disbursed' && run.status !== 'Approved')) return;
+    const now = new Date().toISOString();
+    const updatedRun: PayrollRun = {
+      ...run,
+      status: nextStatus,
+      ...(nextStatus === 'Approved'
+        ? { approvedAt: now, approvedBy: currentUserAccount.username }
+        : { disbursedAt: now, disbursedBy: currentUserAccount.username }),
+      auditTrail: [...(run.auditTrail || []), { action: nextStatus, at: now, by: currentUserAccount.username }]
+    };
+
+    setPayrollRuns(prev => {
+      const updated = prev.map(item => item.id === runId ? updatedRun : item);
+      privacyStorage.setItem('hr_payroll_runs', JSON.stringify(updated));
+      return updated;
+    });
+    await setDoc(doc(db, 'payrollRuns', runId), cleanData(updatedRun));
+
+    if (nextStatus === 'Approved') {
+      const runEmployeeIds = new Set(payrollPayslips.filter(p => p.payrollRunId === runId).map(p => p.employeeId));
+      const updatedLoans = loanAdvances.map((loan: LoanAdvance) => {
+        if (!runEmployeeIds.has(loan.employeeId) || loan.status !== 'Active' || loan.remainingInstallments <= 0) return loan;
+        const remainingInstallments = loan.remainingInstallments - 1;
+        return {
+          ...loan,
+          remainingInstallments,
+          totalRepaid: loan.totalRepaid + loan.monthlyInstallment,
+          status: remainingInstallments === 0 ? 'Closed' : 'Active' as LoanAdvance['status']
+        };
+      });
+      setLoanAdvances(updatedLoans);
+      privacyStorage.setItem('hr_loans', JSON.stringify(updatedLoans));
+      await Promise.all(updatedLoans.map(loan => setDoc(doc(db, 'loanAdvances', loan.id), cleanData(loan))));
+    }
   };
 
   // ─── Role & User Handlers ─────────────────────────────────────────────────
   const handleAddRole = async (newRole: Role) => {
     setRoles(prev => {
       const updated = [...prev, newRole];
-      localStorage.setItem('hr_roles', JSON.stringify(updated));
+      privacyStorage.setItem('hr_roles', JSON.stringify(updated));
       return updated;
     });
     try {
       await setDoc(doc(db, 'roles', newRole.id), cleanData(newRole));
     } catch (err) {
-      console.warn('Firebase role sync delayed:', err);
+      console.warn('Firebase role sync delayed:');
     }
   };
 
-  const handleAddUser = async (newUser: UserAccount) => {
-    setUsers(prev => {
-      const updated = [...prev, newUser];
-      localStorage.setItem('hr_users', JSON.stringify(updated));
-      return updated;
+  const handleAddUser = async (newUser: NewUserAccount) => {
+    const { password, id: _temporaryId, ...profile } = newUser;
+    if (password.length < 12) throw new Error('Password must be at least 12 characters.');
+
+    await provisionFirebaseUser(profile.email, password, async uid => {
+      const securedUser: UserAccount = {
+        ...profile,
+        id: uid,
+        email: profile.email.trim().toLowerCase(),
+      };
+      await setDoc(doc(db, 'users', uid), cleanData(securedUser));
+      setUsers(prev => {
+        const updated = [...prev.filter(user => user.id !== uid), securedUser];
+        privacyStorage.setItem('hr_users', JSON.stringify(updated));
+        return updated;
+      });
     });
-    try {
-      await setDoc(doc(db, 'users', newUser.id), cleanData(newUser));
-    } catch (err) {
-      console.warn('Firebase user sync delayed:', err);
-    }
   };
 
   const handleUpdateUserRole = async (userId: string, roleId: string) => {
@@ -802,14 +927,14 @@ export default function App() {
         }
         return u;
       });
-      localStorage.setItem('hr_users', JSON.stringify(updated));
+      privacyStorage.setItem('hr_users', JSON.stringify(updated));
       return updated;
     });
 
     if (currentUserAccount.id === userId) {
       setCurrentUserAccount(prev => {
         const updated = { ...prev, roleId };
-        localStorage.setItem('hr_current_user', JSON.stringify(updated));
+        privacyStorage.setItem('hr_current_user', JSON.stringify(updated));
         return updated;
       });
     }
@@ -818,53 +943,149 @@ export default function App() {
       try {
         await updateDoc(doc(db, 'users', userId), { roleId });
       } catch (err) {
-        console.warn('Firebase user role update delayed:', err);
+        console.warn('Firebase user role update delayed:');
       }
     }
   };
 
+  const handleDeleteUser = async (userId: string) => {
+    const user = users.find(item => item.id === userId);
+    if (!user) return;
+    const employeeId = user.employeeId;
+    await deleteDoc(doc(db, 'users', userId));
+
+    if (employeeId) {
+      const deletions = [
+        ...attendances.filter(item => item.employeeId === employeeId).map(item => deleteDoc(doc(db, 'attendances', item.id))),
+        ...leaves.filter(item => item.employeeId === employeeId).map(item => deleteDoc(doc(db, 'leaves', item.id))),
+        ...loanAdvances.filter(item => item.employeeId === employeeId).map(item => deleteDoc(doc(db, 'loanAdvances', item.id))),
+        ...salaryRevisions.filter(item => item.employeeId === employeeId).map(item => deleteDoc(doc(db, 'salaryRevisions', item.id))),
+        ...performanceReviews.filter(item => item.employeeId === employeeId || item.reviewerId === employeeId).map(item => deleteDoc(doc(db, 'performanceReviews', item.id))),
+        ...gratuitySettlements.filter(item => item.employeeId === employeeId).map(item => deleteDoc(doc(db, 'gratuitySettlements', item.id))),
+      ];
+      await Promise.allSettled(deletions);
+      await Promise.allSettled([
+        deleteDoc(doc(db, 'employees', employeeId)),
+        deleteDoc(doc(db, 'biometricTemplates', employeeId)),
+      ]);
+
+      const affectedPayslips = payrollPayslips.filter(item => item.employeeId === employeeId);
+      await Promise.all(affectedPayslips.map(item => setDoc(doc(db, 'payrollPayslips', item.id), {
+        ...item,
+        employeeId: `deleted-${userId}`,
+        employeeName: '[REDACTED]',
+        employeeCode: '[REDACTED]',
+        cnic: '[REDACTED]',
+        bankName: '',
+        bankAccountNumber: '',
+        iban: '',
+      })));
+      setEmployees(prev => prev.filter(item => item.id !== employeeId));
+      setAttendances(prev => prev.filter(item => item.employeeId !== employeeId));
+      setLeaves(prev => prev.filter(item => item.employeeId !== employeeId));
+      setLoanAdvances(prev => prev.filter(item => item.employeeId !== employeeId));
+      setSalaryRevisions(prev => prev.filter(item => item.employeeId !== employeeId));
+      setPerformanceReviews(prev => prev.filter(item => item.employeeId !== employeeId && item.reviewerId !== employeeId));
+      setGratuitySettlements(prev => prev.filter(item => item.employeeId !== employeeId));
+      setPayrollPayslips(prev => prev.map(item => item.employeeId === employeeId ? {
+        ...item, employeeId: `deleted-${userId}`, employeeName: '[REDACTED]', employeeCode: '[REDACTED]',
+        cnic: '[REDACTED]', bankName: '', bankAccountNumber: '', iban: '',
+      } : item));
+    }
+    setUsers(prev => prev.filter(item => item.id !== userId));
+    if (loggedInUser?.id === userId) handleLogout();
+  };
+
   const handleSetCurrentUserAccount = (user: UserAccount) => {
     setCurrentUserAccount(user);
-    localStorage.setItem('hr_current_user', JSON.stringify(user));
+    privacyStorage.setItem('hr_current_user', JSON.stringify(user));
   };
 
   // ─── Org Structure Handlers ───────────────────────────────────────────────
+  const handleSaveCompanySetup = async (payload: CompanySetupPayload) => {
+    const nextCompanies = [payload.company, ...companies.filter(item => item.id !== payload.company.id)];
+    const nextBranches = [payload.branch, ...branches.filter(item => item.id !== payload.branch.id)];
+    const departmentIds = new Set(payload.departments.map(item => item.id));
+    const designationIds = new Set(payload.designations.map(item => item.id));
+    const nextDepartments = [...payload.departments, ...departments.filter(item => !departmentIds.has(item.id))];
+    const nextDesignations = [...payload.designations, ...designations.filter(item => !designationIds.has(item.id))];
+    if (isFirebaseConfigured()) {
+      const batch = writeBatch(db);
+      batch.set(doc(db, 'companies', payload.company.id), cleanData(payload.company), { merge: true });
+      batch.set(doc(db, 'branches', payload.branch.id), cleanData(payload.branch), { merge: true });
+      payload.departments.forEach(item => batch.set(doc(db, 'departments', item.id), cleanData(item), { merge: true }));
+      payload.designations.forEach(item => batch.set(doc(db, 'designations', item.id), cleanData(item), { merge: true }));
+      batch.set(doc(db, 'statConfig', payload.statutoryConfig.id), cleanData(payload.statutoryConfig), { merge: true });
+      await batch.commit();
+    }
+    setCompanies(nextCompanies); setBranches(nextBranches); setDepartments(nextDepartments); setDesignations(nextDesignations); setStatConfig(payload.statutoryConfig);
+    privacyStorage.setItem('hr_companies', JSON.stringify(nextCompanies)); privacyStorage.setItem('hr_branches', JSON.stringify(nextBranches));
+    privacyStorage.setItem('hr_departments', JSON.stringify(nextDepartments)); privacyStorage.setItem('hr_designations', JSON.stringify(nextDesignations));
+    privacyStorage.setItem('hr_stat_config', JSON.stringify(payload.statutoryConfig));
+  };
+
   const handleAddBranch = async (newBranch: Branch) => {
     setBranches(prev => {
       const updated = [...prev, newBranch];
-      localStorage.setItem('hr_branches', JSON.stringify(updated));
+      privacyStorage.setItem('hr_branches', JSON.stringify(updated));
       return updated;
     });
     try {
       await setDoc(doc(db, 'branches', newBranch.id), cleanData(newBranch));
     } catch (err) {
-      console.warn('Firebase branch sync delayed:', err);
+      console.warn('Firebase branch sync delayed:');
     }
   };
 
   const handleAddDepartment = async (newDept: Department) => {
     setDepartments(prev => {
       const updated = [...prev, newDept];
-      localStorage.setItem('hr_departments', JSON.stringify(updated));
+      privacyStorage.setItem('hr_departments', JSON.stringify(updated));
       return updated;
     });
     try {
       await setDoc(doc(db, 'departments', newDept.id), cleanData(newDept));
     } catch (err) {
-      console.warn('Firebase department sync delayed:', err);
+      console.warn('Firebase department sync delayed:');
     }
   };
 
   const handleAddDesignation = async (newDesg: Designation) => {
     setDesignations(prev => {
       const updated = [...prev, newDesg];
-      localStorage.setItem('hr_designations', JSON.stringify(updated));
+      privacyStorage.setItem('hr_designations', JSON.stringify(updated));
       return updated;
     });
     try {
       await setDoc(doc(db, 'designations', newDesg.id), cleanData(newDesg));
     } catch (err) {
-      console.warn('Firebase designation sync delayed:', err);
+      console.warn('Firebase designation sync delayed:');
+    }
+  };
+
+  const handleSaveMasterData = async (
+    kind: 'branch' | 'department' | 'designation' | 'zone' | 'ucTown' | 'wageType',
+    record: Branch | Department | Designation | Zone | UcTown | WageType
+  ) => {
+    const config = {
+      branch: { collectionName: 'branches', storageKey: 'hr_branches', set: setBranches },
+      department: { collectionName: 'departments', storageKey: 'hr_departments', set: setDepartments },
+      designation: { collectionName: 'designations', storageKey: 'hr_designations', set: setDesignations },
+      zone: { collectionName: 'zones', storageKey: 'hr_zones', set: setZones },
+      ucTown: { collectionName: 'ucTowns', storageKey: 'hr_uc_towns', set: setUcTowns },
+      wageType: { collectionName: 'wageTypes', storageKey: 'hr_wage_types', set: setWageTypes },
+    }[kind] as { collectionName: string; storageKey: string; set: React.Dispatch<React.SetStateAction<any[]>> };
+    config.set(previous => {
+      const updated = previous.some(item => item.id === record.id)
+        ? previous.map(item => item.id === record.id ? record : item)
+        : [...previous, record];
+      privacyStorage.setItem(config.storageKey, JSON.stringify(updated));
+      return updated;
+    });
+    try {
+      await setDoc(doc(db, config.collectionName, record.id), cleanData(record), { merge: true });
+    } catch (error) {
+      if (isFirebaseConfigured()) throw error;
     }
   };
 
@@ -872,33 +1093,33 @@ export default function App() {
   const handleAddHoliday = async (holiday: Holiday) => {
     setHolidays(prev => {
       const updated = [...prev, holiday];
-      localStorage.setItem('hr_holidays', JSON.stringify(updated));
+      privacyStorage.setItem('hr_holidays', JSON.stringify(updated));
       return updated;
     });
     try {
       await setDoc(doc(db, 'holidays', holiday.id), cleanData(holiday));
     } catch (err) {
-      console.warn('Firebase holiday add delayed:', err);
+      console.warn('Firebase holiday add delayed:');
     }
   };
 
   const handleUpdateHoliday = async (holiday: Holiday) => {
     setHolidays((prev: Holiday[]) => {
       const updated = prev.map((h: Holiday) => h.id === holiday.id ? holiday : h);
-      localStorage.setItem('hr_holidays', JSON.stringify(updated));
+      privacyStorage.setItem('hr_holidays', JSON.stringify(updated));
       return updated;
     });
     try {
       await setDoc(doc(db, 'holidays', holiday.id), cleanData(holiday));
     } catch (err) {
-      console.warn('Firebase holiday update delayed:', err);
+      console.warn('Firebase holiday update delayed:');
     }
   };
 
   const handleDeleteHoliday = async (id: string) => {
     setHolidays((prev: Holiday[]) => {
       const updated = prev.filter((h: Holiday) => h.id !== id);
-      localStorage.setItem('hr_holidays', JSON.stringify(updated));
+      privacyStorage.setItem('hr_holidays', JSON.stringify(updated));
       return updated;
     });
     // Soft delete: no Firestore delete to avoid accidental data loss
@@ -908,13 +1129,13 @@ export default function App() {
   const handleApplyLoan = async (loan: LoanAdvance) => {
     setLoanAdvances(prev => {
       const updated = [...prev, loan];
-      localStorage.setItem('hr_loans', JSON.stringify(updated));
+      privacyStorage.setItem('hr_loans', JSON.stringify(updated));
       return updated;
     });
     try {
       await setDoc(doc(db, 'loanAdvances', loan.id), cleanData(loan));
     } catch (err) {
-      console.warn('Firebase loan apply delayed:', err);
+      console.warn('Firebase loan apply delayed:');
     }
   };
 
@@ -925,26 +1146,26 @@ export default function App() {
       const updated = prev.map((l: LoanAdvance) =>
         l.id === id ? { ...l, status: 'Active' as LoanAdvance['status'], approvedBy: approverName, approvedOn: today, disbursedDate: today } : l
       );
-      localStorage.setItem('hr_loans', JSON.stringify(updated));
+      privacyStorage.setItem('hr_loans', JSON.stringify(updated));
       return updated;
     });
     try {
       await updateDoc(doc(db, 'loanAdvances', id), { status: 'Active', approvedBy: approverName, approvedOn: today, disbursedDate: today });
     } catch (err) {
-      console.warn('Firebase loan approval delayed:', err);
+      console.warn('Firebase loan approval delayed:');
     }
   };
 
   const handleRejectLoan = async (id: string) => {
     setLoanAdvances((prev: LoanAdvance[]) => {
       const updated = prev.map((l: LoanAdvance) => l.id === id ? { ...l, status: 'Rejected' as LoanAdvance['status'] } : l);
-      localStorage.setItem('hr_loans', JSON.stringify(updated));
+      privacyStorage.setItem('hr_loans', JSON.stringify(updated));
       return updated;
     });
     try {
       await updateDoc(doc(db, 'loanAdvances', id), { status: 'Rejected' });
     } catch (err) {
-      console.warn('Firebase loan rejection delayed:', err);
+      console.warn('Firebase loan rejection delayed:');
     }
   };
 
@@ -958,13 +1179,13 @@ export default function App() {
 
     setSalaryRevisions(prev => {
       const updated = [...prev, revision];
-      localStorage.setItem('hr_salary_revisions', JSON.stringify(updated));
+      privacyStorage.setItem('hr_salary_revisions', JSON.stringify(updated));
       return updated;
     });
     try {
       await setDoc(doc(db, 'salaryRevisions', revision.id), cleanData(revision));
     } catch (err) {
-      console.warn('Firebase salary revision delayed:', err);
+      console.warn('Firebase salary revision delayed:');
     }
   };
 
@@ -972,26 +1193,26 @@ export default function App() {
   const handleAddPerformanceReview = async (review: PerformanceReview) => {
     setPerformanceReviews((prev: PerformanceReview[]) => {
       const updated = [...prev, review];
-      localStorage.setItem('hr_perf_reviews', JSON.stringify(updated));
+      privacyStorage.setItem('hr_perf_reviews', JSON.stringify(updated));
       return updated;
     });
     try {
       await setDoc(doc(db, 'performanceReviews', review.id), cleanData(review));
     } catch (err) {
-      console.warn('Firebase performance review add delayed:', err);
+      console.warn('Firebase performance review add delayed:');
     }
   };
 
   const handleUpdatePerformanceReview = async (review: PerformanceReview) => {
     setPerformanceReviews((prev: PerformanceReview[]) => {
       const updated = prev.map((r: PerformanceReview) => r.id === review.id ? review : r);
-      localStorage.setItem('hr_perf_reviews', JSON.stringify(updated));
+      privacyStorage.setItem('hr_perf_reviews', JSON.stringify(updated));
       return updated;
     });
     try {
       await setDoc(doc(db, 'performanceReviews', review.id), cleanData(review));
     } catch (err) {
-      console.warn('Firebase performance review update delayed:', err);
+      console.warn('Firebase performance review update delayed:');
     }
   };
 
@@ -999,26 +1220,26 @@ export default function App() {
   const handleAddAsset = async (asset: CompanyAsset) => {
     setCompanyAssets((prev: CompanyAsset[]) => {
       const updated = [...prev, asset];
-      localStorage.setItem('hr_assets', JSON.stringify(updated));
+      privacyStorage.setItem('hr_assets', JSON.stringify(updated));
       return updated;
     });
     try {
       await setDoc(doc(db, 'companyAssets', asset.id), cleanData(asset));
     } catch (err) {
-      console.warn('Firebase asset add delayed:', err);
+      console.warn('Firebase asset add delayed:');
     }
   };
 
   const handleUpdateAsset = async (asset: CompanyAsset) => {
     setCompanyAssets((prev: CompanyAsset[]) => {
       const updated = prev.map((a: CompanyAsset) => a.id === asset.id ? asset : a);
-      localStorage.setItem('hr_assets', JSON.stringify(updated));
+      privacyStorage.setItem('hr_assets', JSON.stringify(updated));
       return updated;
     });
     try {
       await setDoc(doc(db, 'companyAssets', asset.id), cleanData(asset));
     } catch (err) {
-      console.warn('Firebase asset update delayed:', err);
+      console.warn('Firebase asset update delayed:');
     }
   };
 
@@ -1026,52 +1247,52 @@ export default function App() {
   const handleAddJobPosting = async (posting: JobPosting) => {
     setJobPostings((prev: JobPosting[]) => {
       const updated = [...prev, posting];
-      localStorage.setItem('hr_job_postings', JSON.stringify(updated));
+      privacyStorage.setItem('hr_job_postings', JSON.stringify(updated));
       return updated;
     });
     try {
       await setDoc(doc(db, 'jobPostings', posting.id), cleanData(posting));
     } catch (err) {
-      console.warn('Firebase job posting add delayed:', err);
+      console.warn('Firebase job posting add delayed:');
     }
   };
 
   const handleUpdateJobPosting = async (posting: JobPosting) => {
     setJobPostings((prev: JobPosting[]) => {
       const updated = prev.map((p: JobPosting) => p.id === posting.id ? posting : p);
-      localStorage.setItem('hr_job_postings', JSON.stringify(updated));
+      privacyStorage.setItem('hr_job_postings', JSON.stringify(updated));
       return updated;
     });
     try {
       await setDoc(doc(db, 'jobPostings', posting.id), cleanData(posting));
     } catch (err) {
-      console.warn('Firebase job posting update delayed:', err);
+      console.warn('Firebase job posting update delayed:');
     }
   };
 
   const handleAddJobApplication = async (app: JobApplication) => {
     setJobApplications((prev: JobApplication[]) => {
       const updated = [...prev, app];
-      localStorage.setItem('hr_job_apps', JSON.stringify(updated));
+      privacyStorage.setItem('hr_job_apps', JSON.stringify(updated));
       return updated;
     });
     try {
       await setDoc(doc(db, 'jobApplications', app.id), cleanData(app));
     } catch (err) {
-      console.warn('Firebase job application add delayed:', err);
+      console.warn('Firebase job application add delayed:');
     }
   };
 
   const handleUpdateJobApplication = async (app: JobApplication) => {
     setJobApplications((prev: JobApplication[]) => {
       const updated = prev.map((a: JobApplication) => a.id === app.id ? app : a);
-      localStorage.setItem('hr_job_apps', JSON.stringify(updated));
+      privacyStorage.setItem('hr_job_apps', JSON.stringify(updated));
       return updated;
     });
     try {
       await setDoc(doc(db, 'jobApplications', app.id), cleanData(app));
     } catch (err) {
-      console.warn('Firebase job application update delayed:', err);
+      console.warn('Firebase job application update delayed:');
     }
   };
 
@@ -1079,26 +1300,26 @@ export default function App() {
   const handleAddGratuitySettlement = async (settlement: GratuitySettlement) => {
     setGratuitySettlements((prev: GratuitySettlement[]) => {
       const updated = [...prev, settlement];
-      localStorage.setItem('hr_gratuity', JSON.stringify(updated));
+      privacyStorage.setItem('hr_gratuity', JSON.stringify(updated));
       return updated;
     });
     try {
       await setDoc(doc(db, 'gratuitySettlements', settlement.id), cleanData(settlement));
     } catch (err) {
-      console.warn('Firebase gratuity settlement add delayed:', err);
+      console.warn('Firebase gratuity settlement add delayed:');
     }
   };
 
   const handleUpdateGratuitySettlement = async (settlement: GratuitySettlement) => {
     setGratuitySettlements((prev: GratuitySettlement[]) => {
       const updated = prev.map((s: GratuitySettlement) => s.id === settlement.id ? settlement : s);
-      localStorage.setItem('hr_gratuity', JSON.stringify(updated));
+      privacyStorage.setItem('hr_gratuity', JSON.stringify(updated));
       return updated;
     });
     try {
       await setDoc(doc(db, 'gratuitySettlements', settlement.id), cleanData(settlement));
     } catch (err) {
-      console.warn('Firebase gratuity settlement update delayed:', err);
+      console.warn('Firebase gratuity settlement update delayed:');
     }
   };
 
@@ -1106,13 +1327,13 @@ export default function App() {
   const handleAddNotification = async (notification: AppNotification) => {
     setNotifications((prev: AppNotification[]) => {
       const updated = [...prev, notification];
-      localStorage.setItem('hr_notifications', JSON.stringify(updated));
+      privacyStorage.setItem('hr_notifications', JSON.stringify(updated));
       return updated;
     });
     try {
       await setDoc(doc(db, 'notifications', notification.id), cleanData(notification));
     } catch (err) {
-      console.warn('Firebase notification add delayed:', err);
+      console.warn('Firebase notification add delayed:');
     }
   };
 
@@ -1122,7 +1343,7 @@ export default function App() {
       const updated = prev.map((n: AppNotification) =>
         n.id === id && !n.readBy.includes(empId) ? { ...n, readBy: [...n.readBy, empId] } : n
       );
-      localStorage.setItem('hr_notifications', JSON.stringify(updated));
+      privacyStorage.setItem('hr_notifications', JSON.stringify(updated));
       return updated;
     });
     try {
@@ -1131,7 +1352,7 @@ export default function App() {
         await updateDoc(doc(db, 'notifications', id), { readBy: [...notif.readBy, empId] });
       }
     } catch (err) {
-      console.warn('Firebase notification mark-read delayed:', err);
+      console.warn('Firebase notification mark-read delayed:');
     }
   };
 
@@ -1141,7 +1362,7 @@ export default function App() {
       const updated = prev.map((n: AppNotification) =>
         n.readBy.includes(empId) ? n : { ...n, readBy: [...n.readBy, empId] }
       );
-      localStorage.setItem('hr_notifications', JSON.stringify(updated));
+      privacyStorage.setItem('hr_notifications', JSON.stringify(updated));
       return updated;
     });
   };
@@ -1149,37 +1370,16 @@ export default function App() {
   const handleDeleteNotification = async (id: string) => {
     setNotifications((prev: AppNotification[]) => {
       const updated = prev.filter((n: AppNotification) => n.id !== id);
-      localStorage.setItem('hr_notifications', JSON.stringify(updated));
+      privacyStorage.setItem('hr_notifications', JSON.stringify(updated));
       return updated;
     });
   };
 
-  // ─── Mobile Platform Detection ────────────────────────────────────────────
-  const isMobilePlatform = (window as any).Capacitor || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
   const accessControlLoaded = !isFirebaseConfigured() || (rolesLoaded && usersLoaded);
   const employeesWithFingerprints = mergeEmployeeFingerprintTemplates(employees, biometricTemplates);
 
-  if (isMobilePlatform) {
-    if (!loggedInUser) {
-      return <LoginScreen users={users} usersLoaded={usersLoaded} onLogin={handleLogin} onCreateInitialAdmin={handleCreateInitialAdmin} />;
-    }
-    return (
-      <MobileApp
-        employees={employeesWithFingerprints}
-        attendances={attendances}
-        leaves={leaves}
-        onApplyLeave={handleApplyLeave}
-        onSimulatePunch={handleSimulatePunch}
-        onAddRegularization={handleAddRegularization}
-        hideMockPhoneFrame={true}
-        loggedInUser={loggedInUser}
-        onLogout={handleLogout}
-      />
-    );
-  }
-
   if (!loggedInUser) {
-    return <LoginScreen users={users} usersLoaded={usersLoaded} onLogin={handleLogin} onCreateInitialAdmin={handleCreateInitialAdmin} />;
+    return <LoginScreen authReady={authReady} authMessage={authMessage} onLogin={handleLogin} />;
   }
 
   return (
@@ -1190,6 +1390,7 @@ export default function App() {
       statConfig={statConfig}
       taxSlabs={taxSlabs}
       payrollRuns={payrollRuns}
+      payrollPayslips={payrollPayslips}
       onAddEmployee={handleAddEmployee}
       onUpdateEmployee={handleUpdateEmployee}
       onUpdateStatConfig={handleUpdateStatConfig}
@@ -1199,23 +1400,31 @@ export default function App() {
       onApproveRegularization={handleApproveRegularization}
       onRejectRegularization={handleRejectRegularization}
       onCreatePayrollRun={handleCreatePayrollRun}
+      onUpdatePayrollStatus={handleUpdatePayrollStatus}
       onSimulatePunch={handleSimulatePunch}
       onApplyLeave={handleApplyLeave}
       onAddRegularization={handleAddRegularization}
       onAddAttendance={handleAddAttendance}
       branches={branches}
+      companies={companies}
+      onSaveCompanySetup={handleSaveCompanySetup}
       departments={departments}
       designations={designations}
+      zones={zones}
+      ucTowns={ucTowns}
+      wageTypes={wageTypes}
+      onSaveMasterData={handleSaveMasterData}
       onAddBranch={handleAddBranch}
       onAddDepartment={handleAddDepartment}
       onAddDesignation={handleAddDesignation}
       roles={roles}
-      users={users}
+      users={users.map(publicUser)}
       currentUserAccount={currentUserAccount}
       accessControlLoaded={accessControlLoaded}
       onSetCurrentUserAccount={handleSetCurrentUserAccount}
       onAddRole={handleAddRole}
       onAddUser={handleAddUser}
+      onDeleteUser={handleDeleteUser}
       onUpdateUserRole={handleUpdateUserRole}
       loggedInUser={loggedInUser}
       onLogout={handleLogout}
@@ -1256,88 +1465,34 @@ export default function App() {
 
 // Login Screen
 function LoginScreen({
-  users,
-  usersLoaded,
-  onLogin,
-  onCreateInitialAdmin
+  authReady,
+  authMessage,
+  onLogin
 }: {
-  users: UserAccount[],
-  usersLoaded: boolean,
-  onLogin: (user: UserAccount) => void,
-  onCreateInitialAdmin: (payload: { username: string; email: string; password: string }) => Promise<void>
+  authReady: boolean,
+  authMessage: string,
+  onLogin: (email: string, password: string) => Promise<void>
 }) {
   const [loginId, setLoginId] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const [showHelper, setShowHelper] = useState(true);
-  const [setupUsername, setSetupUsername] = useState('admin');
-  const [setupEmail, setSetupEmail] = useState('admin@company.com');
-  const [setupPassword, setSetupPassword] = useState('');
-  const [setupConfirmPassword, setSetupConfirmPassword] = useState('');
-  const [isCreatingAdmin, setIsCreatingAdmin] = useState(false);
+  const [isPasswordVisible, setIsPasswordVisible] = useState(false);
 
-  const handleSubmit = (e: React.SyntheticEvent) => {
+  const handleSubmit = async (e: React.SyntheticEvent) => {
     e.preventDefault();
     setError('');
 
-    const match = users.find(
-      u => u.username.toLowerCase() === loginId.toLowerCase() ||
-           u.email.toLowerCase() === loginId.toLowerCase()
-    );
-
-    if (!match) {
-      setError('Invalid username or email address.');
-      return;
-    }
-    if (match.status === 'Inactive') {
-      setError('This account is suspended. Contact your Super Admin.');
-      return;
-    }
-    if (match.password && password !== match.password) {
-      setError('Incorrect password. Please try again.');
-      return;
-    }
-
-    onLogin(match);
-  };
-
-  const handleCreateAdminSubmit = async (e: React.SyntheticEvent) => {
-    e.preventDefault();
-    setError('');
-
-    if (!setupUsername.trim() || !setupEmail.trim() || !setupPassword) {
-      setError('Enter username, email, and password for the first Super Admin.');
-      return;
-    }
-    if (setupPassword.length < 6) {
-      setError('Password must be at least 6 characters.');
-      return;
-    }
-    if (setupPassword !== setupConfirmPassword) {
-      setError('Password and confirm password do not match.');
-      return;
-    }
-
-    setIsCreatingAdmin(true);
     try {
-      await onCreateInitialAdmin({
-        username: setupUsername.trim(),
-        email: setupEmail.trim(),
-        password: setupPassword
-      });
-    } catch (setupError) {
-      setError(`Unable to create Super Admin: ${setupError instanceof Error ? setupError.message : String(setupError)}`);
-    } finally {
-      setIsCreatingAdmin(false);
+      await onLogin(loginId, password);
+    } catch (loginError) {
+      setError(loginError instanceof Error ? loginError.message : 'Unable to sign in.');
     }
   };
 
-  const autofill = (usr: string, pass: string) => { setLoginId(usr); setPassword(pass); setError(''); };
-
-  const renderError = () => error ? (
+  const renderError = () => (error || authMessage) ? (
     <div className="bg-rose-950/30 border border-rose-900/50 p-3.5 rounded-xl text-rose-400 text-xs flex items-center space-x-2">
       <span className="font-bold text-base leading-none">!</span>
-      <span>{error}</span>
+      <span>{error || authMessage}</span>
     </div>
   ) : null;
 
@@ -1347,6 +1502,9 @@ function LoginScreen({
       <div className="absolute bottom-1/4 right-1/4 w-96 h-96 rounded-full bg-blue-500/10 blur-3xl pointer-events-none"></div>
 
       <div className="w-full max-w-md bg-slate-950/80 backdrop-blur-md p-8 rounded-3xl border border-slate-800 shadow-2xl relative z-10 space-y-6">
+        <span aria-hidden="true" className="pointer-events-none absolute left-[26px] top-[26px] h-1.5 w-1.5 rounded-full bg-slate-600" />
+        <span aria-hidden="true" className="pointer-events-none absolute bottom-[26px] left-[26px] h-1.5 w-1.5 rounded-full bg-slate-600" />
+        <span aria-hidden="true" className="pointer-events-none absolute bottom-[26px] right-[26px] h-1.5 w-1.5 rounded-full bg-slate-600" />
         <div className="text-center space-y-2">
           <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-600 to-green-500 mx-auto flex items-center justify-center shadow-lg text-white font-bold text-xl">
             HR
@@ -1357,74 +1515,31 @@ function LoginScreen({
           </div>
         </div>
 
-        {!usersLoaded ? (
+        {!authReady ? (
           <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-xl text-xs text-slate-300">
-            Loading user accounts from Firestore...
+            Checking authentication session...
           </div>
-        ) : users.length === 0 ? (
-          <form onSubmit={handleCreateAdminSubmit} className="space-y-4">
-            {renderError()}
-            <div className="bg-amber-950/30 border border-amber-900/50 p-3.5 rounded-xl text-amber-200 text-xs">
-              No user accounts exist. Create the first Super Admin to unlock the system.
-            </div>
-            <div className="space-y-1">
-              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">Admin Username</label>
-              <input type="text" required value={setupUsername} onChange={e => setSetupUsername(e.target.value)} className="w-full text-sm p-3 bg-slate-900 border border-slate-800 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none text-white" />
-            </div>
-            <div className="space-y-1">
-              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">Admin Email</label>
-              <input type="email" required value={setupEmail} onChange={e => setSetupEmail(e.target.value)} className="w-full text-sm p-3 bg-slate-900 border border-slate-800 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none text-white" />
-            </div>
-            <div className="space-y-1">
-              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">Password</label>
-              <input type="password" required value={setupPassword} onChange={e => setSetupPassword(e.target.value)} className="w-full text-sm p-3 bg-slate-900 border border-slate-800 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none text-white" />
-            </div>
-            <div className="space-y-1">
-              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">Confirm Password</label>
-              <input type="password" required value={setupConfirmPassword} onChange={e => setSetupConfirmPassword(e.target.value)} className="w-full text-sm p-3 bg-slate-900 border border-slate-800 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none text-white" />
-            </div>
-            <button type="submit" disabled={isCreatingAdmin} className="w-full bg-gradient-to-r from-emerald-600 to-green-500 hover:from-emerald-500 hover:to-green-400 disabled:opacity-50 text-white font-bold py-3.5 rounded-xl shadow-lg transition duration-200 text-sm">
-              {isCreatingAdmin ? 'Creating Super Admin...' : 'Create Super Admin'}
-            </button>
-          </form>
         ) : (
           <>
             <form onSubmit={handleSubmit} className="space-y-4">
               {renderError()}
               <div className="space-y-1">
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">Username or Email</label>
-                <input type="text" required value={loginId} onChange={e => setLoginId(e.target.value)} placeholder="admin" className="w-full text-sm p-3 bg-slate-900 border border-slate-800 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none text-white placeholder-slate-500" />
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">Email</label>
+                <input type="email" autoComplete="username" required value={loginId} onChange={e => setLoginId(e.target.value)} placeholder="admin@company.com" className="w-full text-sm p-3 bg-slate-900 border border-slate-800 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none text-white placeholder-slate-500" />
               </div>
               <div className="space-y-1">
                 <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">Password</label>
-                <input type="password" required value={password} onChange={e => setPassword(e.target.value)} placeholder="Password" className="w-full text-sm p-3 bg-slate-900 border border-slate-800 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none text-white placeholder-slate-500 font-mono" />
+                <div className="relative">
+                  <input type={isPasswordVisible ? 'text' : 'password'} autoComplete="current-password" required value={password} onChange={e => setPassword(e.target.value)} placeholder="Password" className="w-full text-sm py-3 pl-3 pr-12 bg-slate-900 border border-slate-800 rounded-xl focus:ring-2 focus-visible:ring-emerald-500 focus:outline-none text-white placeholder-slate-500 font-mono" />
+                  <button type="button" onClick={() => setIsPasswordVisible(visible => !visible)} aria-label={isPasswordVisible ? 'Hide password' : 'Show password'} aria-pressed={isPasswordVisible} className="absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-xl text-slate-400 transition-colors hover:text-emerald-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-500">
+                    {isPasswordVisible ? <EyeOff className="h-4 w-4" aria-hidden="true" /> : <Eye className="h-4 w-4" aria-hidden="true" />}
+                  </button>
+                </div>
               </div>
               <button type="submit" className="w-full bg-gradient-to-r from-emerald-600 to-green-500 hover:from-emerald-500 hover:to-green-400 text-white font-bold py-3.5 rounded-xl shadow-lg transition duration-200 text-sm">
                 Sign In to System
               </button>
             </form>
-
-            <div className="border-t border-slate-900 pt-5 space-y-3">
-              <div className="flex justify-between items-center">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Quick Access Panel</span>
-                <button type="button" onClick={() => setShowHelper(!showHelper)} className="text-[10px] text-emerald-400 font-bold hover:underline">
-                  {showHelper ? 'Hide' : 'Show'}
-                </button>
-              </div>
-              {showHelper && (
-                <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-900 text-[10px] space-y-2.5">
-                  <p className="text-slate-400">Click any existing profile to autofill credentials:</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    {users.slice(0, 4).map((user) => (
-                      <button key={user.id} type="button" onClick={() => autofill(user.username, user.password || '')} className="bg-slate-950 hover:bg-slate-800 p-2 rounded-lg text-left border border-slate-850 hover:border-emerald-500 transition text-[10px]">
-                        <span className="font-bold block text-white">{user.username}</span>
-                        <span className="text-slate-400 font-mono">{user.email}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
           </>
         )}
       </div>

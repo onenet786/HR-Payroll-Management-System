@@ -23,8 +23,33 @@ export interface FaceFrameQuality {
 const GRID_W = 16;
 const GRID_H = 20;
 const V2_LENGTH = GRID_W * GRID_H * 4;
+const FACE_FRAME_ASPECT = 4 / 3;
 export const FACE_MATCH_THRESHOLD = 0.18;
 export const FACE_MATCH_MARGIN = 0.04;
+
+function drawNormalizedFaceFrame(
+  ctx: CanvasRenderingContext2D,
+  video: HTMLVideoElement,
+  width: number,
+  height: number,
+): void {
+  const sourceWidth = video.videoWidth;
+  const sourceHeight = video.videoHeight;
+  let sourceX = 0;
+  let sourceY = 0;
+  let cropWidth = sourceWidth;
+  let cropHeight = sourceHeight;
+
+  if (sourceWidth / sourceHeight > FACE_FRAME_ASPECT) {
+    cropWidth = sourceHeight * FACE_FRAME_ASPECT;
+    sourceX = (sourceWidth - cropWidth) / 2;
+  } else if (sourceWidth / sourceHeight < FACE_FRAME_ASPECT) {
+    cropHeight = sourceWidth / FACE_FRAME_ASPECT;
+    sourceY = (sourceHeight - cropHeight) / 2;
+  }
+
+  ctx.drawImage(video, sourceX, sourceY, cropWidth, cropHeight, 0, 0, width, height);
+}
 
 export function getFaceDescriptors(employee: Employee): FaceDescriptor[] {
   const values = employee.faceDescriptors || [];
@@ -47,7 +72,7 @@ export function createFaceDescriptorFromVideo(video: HTMLVideoElement, source = 
   if (!ctx) throw new Error('Camera descriptor canvas is unavailable.');
   if (!video.videoWidth || !video.videoHeight) throw new Error('Camera is not ready yet.');
 
-  ctx.drawImage(video, 0, 0, GRID_W, GRID_H);
+  drawNormalizedFaceFrame(ctx, video, GRID_W, GRID_H);
   const image = ctx.getImageData(0, 0, GRID_W, GRID_H).data;
   const luma: number[] = [];
 
@@ -206,11 +231,11 @@ export function assessFaceFrame(video: HTMLVideoElement): FaceFrameQuality {
       }
 
       const yNorm = y / height;
-      if (yNorm > 0.33 && yNorm < 0.49 && lum < 0.34) {
+      if (yNorm > 0.28 && yNorm < 0.54 && lum < 0.44) {
         if (x < width / 2) leftEyeDarkPixels += 1;
         else rightEyeDarkPixels += 1;
       }
-      if (yNorm > 0.62 && yNorm < 0.80 && lum < 0.38) mouthDarkPixels += 1;
+      if (yNorm > 0.58 && yNorm < 0.83 && lum < 0.46) mouthDarkPixels += 1;
     }
   }
 

@@ -6,6 +6,7 @@
 import React, { useState } from 'react';
 import { Plus, ChevronDown, ChevronUp } from 'lucide-react';
 import { PerformanceReview, KpiScore, Employee } from '../types';
+import { empAvatarUrl } from '../utils/avatar';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface PerformanceModuleProps {
@@ -163,10 +164,7 @@ export function PerformanceModule({ reviews, employees, currentUserAccount, canM
               <div className="flex items-center justify-between p-4 cursor-pointer hover:bg-slate-700/20 transition"
                 onClick={() => setExpandedId(isExpanded ? null : review.id)}>
                 <div className="flex items-center gap-3">
-                  {emp?.pictureUrl
-                    ? <img src={emp.pictureUrl} className="w-9 h-9 rounded-xl object-cover" alt="" />
-                    : <div className="w-9 h-9 rounded-xl bg-slate-700 flex items-center justify-center text-sm font-bold text-slate-300">{getEmpName(review.employeeId)[0]}</div>
-                  }
+                  <img src={empAvatarUrl(emp)} className="w-9 h-9 rounded-xl object-cover" alt="" />
                   <div>
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-bold text-white">{getEmpName(review.employeeId)}</span>

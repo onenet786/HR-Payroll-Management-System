@@ -6,6 +6,7 @@
 import React, { useState } from 'react';
 import { Plus, CheckCircle, XCircle } from 'lucide-react';
 import { LoanAdvance, Employee } from '../types';
+import { empAvatarUrl } from '../utils/avatar';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface LoansModuleProps {
@@ -35,7 +36,7 @@ export function LoansModule({
   const [filterEmpId, setFilterEmpId] = useState<string>('All');
 
   const [form, setForm] = useState({
-    employeeId: currentUserEmployeeId || employees[0]?.id || '',
+    employeeId: currentUserEmployeeId || '',
     type: 'Advance' as LoanAdvance['type'],
     principalAmount: 25000,
     totalInstallments: 2,
@@ -142,13 +143,7 @@ export function LoansModule({
               <div key={loan.id} className="bg-slate-800/40 border border-slate-700/50 rounded-2xl p-4">
                 <div className="flex items-start justify-between">
                   <div className="flex items-center gap-3">
-                    {emp?.pictureUrl ? (
-                      <img src={emp.pictureUrl} alt="" className="w-9 h-9 rounded-xl object-cover" />
-                    ) : (
-                      <div className="w-9 h-9 rounded-xl bg-slate-700 flex items-center justify-center text-slate-400 text-sm font-bold">
-                        {getEmployeeName(loan.employeeId).charAt(0)}
-                      </div>
-                    )}
+                    <img src={empAvatarUrl(emp)} alt="" className="w-9 h-9 rounded-xl object-cover" />
                     <div>
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-bold text-white">{getEmployeeName(loan.employeeId)}</span>

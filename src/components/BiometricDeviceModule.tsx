@@ -167,8 +167,8 @@ export function BiometricDeviceModule({
   // ── WebSocket message handler ─────────────────────────────────────────────────
   const handleMsg = useCallback((raw: string) => {
     let msg: Record<string, unknown>;
-    try { msg = JSON.parse(raw); } catch { log('← ' + raw.slice(0, 80)); return; }
-    log('← ' + JSON.stringify(msg).slice(0, 80));
+    try { msg = JSON.parse(raw); } catch { log('← Unparseable device response [REDACTED]'); return; }
+    log(`← Biometric device event: ${String(msg?.type || msg?.action || 'response')}`);
 
     // Device list
     if (msg.status === 'DeviceList' || Array.isArray(msg.devices)) {
@@ -178,7 +178,7 @@ export function BiometricDeviceModule({
         const d = devList[0];
         setDeviceDiagnostics([]);
         setDevice({ sn: d.sn || d.id || 'BIO-DEVICE-001', type: d.type || d.name || 'Fingerprint Reader' });
-        log(`✓ Found: ${d.type || d.name || 'Fingerprint Reader'} (SN: ${d.sn || d.id})`);
+        log(`✓ Found fingerprint reader (serial [REDACTED])`);
       } else {
         setDevice(null);
         setDeviceDiagnostics(diagnostics);
@@ -208,7 +208,7 @@ export function BiometricDeviceModule({
     // Errors
     if (msg.status === 'Error' || msg.error) {
       setCaptureState('error');
-      log(`✗ Device error: ${msg.error || msg.message || msg.status}`);
+      log('✗ Device error [REDACTED]');
     }
   }, [captureState, captureQuality, log]);
 
@@ -220,14 +220,14 @@ export function BiometricDeviceModule({
         setWsStatus('connected');
         setIsSimMode(false);
         setIsWebHID(false);
-        log(`✓ Connected to ${url} — querying device list...`);
+        log('✓ Connected to local biometric bridge.');
         ws.send(JSON.stringify({ action: 'GetDeviceList' }));
       };
       ws.onmessage = e => handleMsg(e.data);
       ws.onerror = () => {
         const nextUrl = fallbacks[0];
         if (nextUrl) {
-          log(`✗ ${url} failed — trying ${nextUrl}...`);
+          log('✗ Local biometric bridge connection failed; trying fallback.');
           connectWs(nextUrl, fallbacks.slice(1));
         } else {
           setWsStatus('error');
@@ -242,7 +242,7 @@ export function BiometricDeviceModule({
       wsRef.current = ws;
     } catch (e) {
       setWsStatus('error');
-      log('WebSocket API unavailable: ' + e);
+        log('WebSocket API unavailable.');
     }
   }, [handleMsg, log]);
 
@@ -353,11 +353,11 @@ export function BiometricDeviceModule({
       log('Requesting USB HID access (select DigitalPersona U.are.U 4500 or SecuGen Hamster Pro if visible)...');
       const allDevices: any[] = await hidApi.getDevices();
       if (allDevices.length > 0) {
-        log(`→ Previously granted HID devices: ${allDevices.map((d: any) => `${d.productName || 'Unknown'} (0x${(d.vendorId as number).toString(16).toUpperCase().padStart(4,'0')}:0x${(d.productId as number).toString(16).toUpperCase().padStart(4,'0')})`).join(', ')}`);
+        log(`→ Previously granted HID devices: ${allDevices.length} device(s) [REDACTED]`);
       }
       let devList: any[] = allDevices.filter(isSupportedFingerprintDevice);
       if (devList.length > 0) {
-        log(`→ Reusing granted fingerprint reader: ${devList[0].productName || 'Fingerprint Reader'}`);
+        log('→ Reusing granted fingerprint reader [REDACTED]');
       } else {
         log('→ No granted supported fingerprint reader found. Opening the full HID device chooser...');
         devList = await hidApi.requestDevice({
@@ -390,7 +390,7 @@ export function BiometricDeviceModule({
           ],
           endpoint: `${hid.productName || 'HID device'} (${formatUsbId(hid.vendorId)}:${formatUsbId(hid.productId)})`,
         });
-        log(`✗ Ignored non-reader HID device: ${hid.productName || 'Unknown'} (${formatUsbId(hid.vendorId)}:${formatUsbId(hid.productId)})`);
+        log('✗ Ignored non-reader HID device [REDACTED]');
         return;
       }
       if (!hid.opened) {
@@ -407,7 +407,7 @@ export function BiometricDeviceModule({
             ],
             endpoint: 'USB HID / WebHID',
           });
-          log(`✗ Fingerprint reader was selected but could not be opened: ${e?.message || e}`);
+          log('✗ Fingerprint reader could not be opened.');
           return;
         }
       }
@@ -419,7 +419,7 @@ export function BiometricDeviceModule({
       const vendorId = formatUsbId(hid.vendorId as number);
       const productId = formatUsbId(hid.productId as number);
       setDevice({ sn: hid.serialNumber || `BIO-${vendorId}${productId}`, type: productName });
-      log(`✓ WebHID connected: ${productName} (${vendorId}:${productId})`);
+      log('✓ WebHID connected: device [REDACTED]');
       log(`→ HID collections: ${JSON.stringify(hid.collections?.map((c: any) => ({ usagePage: c.usagePage, usage: c.usage, reportIds: c.reportIds })) || [])}`);
       hid.addEventListener('inputreport', (event: any) => {
         const bytes = new Uint8Array(event.data.buffer || event.data);
@@ -438,7 +438,7 @@ export function BiometricDeviceModule({
         ],
         endpoint: 'USB HID / WebHID',
       });
-      log(`✗ WebHID error: ${e?.message || e}`);
+      log('✗ WebHID error [REDACTED]');
     }
   }, [webHIDSupported, handleHIDInputReport, log]);
 
@@ -467,7 +467,7 @@ export function BiometricDeviceModule({
         setCapturedTemplate(tmpl);
         setCaptureQuality(capped);
         setCaptureState('captured');
-        log(`[SIM] Capture complete. Quality: ${capped}. Template: ${tmpl.slice(0, 16)}...`);
+        log(`[SIM] Capture complete. Quality: ${capped}. Template: [REDACTED]`);
       }
     }, 140);
   }, [log]);
@@ -504,7 +504,7 @@ export function BiometricDeviceModule({
           try {
             await webHIDRef.current.sendReport(outputReports[0], new Uint8Array([0x01]));
           } catch (e: any) {
-            log(`⚠ HID capture trigger was ignored: ${e?.message || e}`);
+            log('⚠ HID capture trigger was ignored [REDACTED]');
           }
         } else {
           log('→ No HID output report exposed; waiting for sensor input report.');
@@ -578,12 +578,11 @@ export function BiometricDeviceModule({
     try {
       await onUpdateEmployee(updated);
       setEnrollMsg({ type: 'ok', text: `✓ ${enrollSamples.length} fingerprint samples enrolled for ${emp.fullName} and saved to Firestore.` });
-      log(`✓ Enrollment saved: ${emp.fullName} (${enrollSamples.length} templates)`);
+      log(`✓ Enrollment saved: [REDACTED] (${enrollSamples.length} templates)`);
       setTimeout(() => setEnrollMsg(null), 4000);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown Firestore error';
-      setEnrollMsg({ type: 'err', text: `Enrollment captured, but Firestore rejected the save: ${message}` });
-      log(`✗ Enrollment save failed: ${message}`);
+    } catch {
+      setEnrollMsg({ type: 'err', text: 'Enrollment captured, but the secure save failed.' });
+      log('✗ Enrollment save failed [REDACTED]');
     }
   };
 
@@ -609,11 +608,10 @@ export function BiometricDeviceModule({
       await onUpdateEmployee(updated);
       resetEnrollment();
       setEnrollMsg({ type: 'ok', text: `Removed saved fingerprint samples for ${emp.fullName}. You can enroll new samples now.` });
-      log(`Fingerprint enrollment removed: ${emp.fullName}`);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown Firestore error';
-      setEnrollMsg({ type: 'err', text: `Could not remove fingerprint samples: ${message}` });
-      log(`Fingerprint enrollment remove failed: ${message}`);
+      log('Fingerprint enrollment removed: [REDACTED]');
+    } catch {
+      setEnrollMsg({ type: 'err', text: 'Could not remove fingerprint samples.' });
+      log('Fingerprint enrollment remove failed [REDACTED]');
     }
   };
 
@@ -630,11 +628,10 @@ export function BiometricDeviceModule({
       await onUpdateEmployee(updated);
       setRecognizedFaceMatch(null);
       setFaceMsg({ type: 'ok', text: `Removed saved face profiles for ${emp.fullName}. Save a new face when ready.` });
-      log(`Camera face enrollment removed: ${emp.fullName}`);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown Firestore error';
-      setFaceMsg({ type: 'err', text: `Could not remove face profiles: ${message}` });
-      log(`Camera face remove failed: ${message}`);
+      log('Camera face enrollment removed: [REDACTED]');
+    } catch {
+      setFaceMsg({ type: 'err', text: 'Could not remove face profiles.' });
+      log('Camera face remove failed [REDACTED]');
     }
   };
 
@@ -656,12 +653,11 @@ export function BiometricDeviceModule({
       setRecognizedFaceMatch(null);
       setFaceMsg({ type: 'ok', text: `Removed all saved biometrics for ${emp.fullName}.` });
       setEnrollMsg({ type: 'ok', text: `Removed all saved biometrics for ${emp.fullName}. You can enroll fresh samples now.` });
-      log(`All biometric enrollments removed: ${emp.fullName}`);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown Firestore error';
-      setEnrollMsg({ type: 'err', text: `Could not remove biometrics: ${message}` });
-      setFaceMsg({ type: 'err', text: `Could not remove biometrics: ${message}` });
-      log(`Biometric remove failed: ${message}`);
+      log('All biometric enrollments removed: [REDACTED]');
+    } catch {
+      setEnrollMsg({ type: 'err', text: 'Could not remove biometrics.' });
+      setFaceMsg({ type: 'err', text: 'Could not remove biometrics.' });
+      log('Biometric remove failed [REDACTED]');
     }
   };
 
@@ -689,7 +685,7 @@ export function BiometricDeviceModule({
       setFaceCameraReady(true);
     } catch (error) {
       setFaceCameraReady(false);
-      setFaceMsg({ type: 'err', text: error instanceof Error ? error.message : 'Camera access failed.' });
+      setFaceMsg({ type: 'err', text: 'Camera access failed. Check permission and try again.' });
     }
   }, []);
 
@@ -730,11 +726,10 @@ export function BiometricDeviceModule({
       await onUpdateEmployee(updated);
       setRecognizedFaceMatch(null);
       setFaceMsg({ type: 'ok', text: `3 camera face samples saved for ${emp.fullName}. Click Verify Face to test this enrollment.` });
-      log(`Camera face enrollment saved: ${emp.fullName} (3 samples)`);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown camera enrollment error';
-      setFaceMsg({ type: 'err', text: message });
-      log(`Camera enrollment failed: ${message}`);
+      log('Camera face enrollment saved: [REDACTED] (3 samples)');
+    } catch {
+      setFaceMsg({ type: 'err', text: 'Camera enrollment failed.' });
+      log('Camera enrollment failed [REDACTED]');
     }
   };
 
@@ -798,22 +793,21 @@ export function BiometricDeviceModule({
       const margin = secondEmployee && Number.isFinite(secondScore) ? secondScore - bestScore : Number.POSITIVE_INFINITY;
       if (secondEmployee && margin < FACE_MATCH_MARGIN) {
         setFaceMsg({ type: 'err', text: `Face match is not unique enough. Best is ${bestEmployee.fullName}, close to ${secondEmployee.fullName}. Score ${bestScore.toFixed(3)}, margin ${margin.toFixed(3)}.` });
-        log(`Camera face recognition ambiguous: best=${bestEmployee.fullName} second=${secondEmployee.fullName} score=${bestScore.toFixed(3)} margin=${margin.toFixed(3)}`);
+        log(`Camera face recognition ambiguous: identities [REDACTED], score=${bestScore.toFixed(3)} margin=${margin.toFixed(3)}`);
         return;
       }
 
       if (bestScore <= FACE_MATCH_THRESHOLD) {
         setRecognizedFaceMatch({ employee: bestEmployee, score: bestScore, margin });
         setFaceMsg({ type: 'ok', text: `Face recognized: ${bestEmployee.fullName} (${bestEmployee.employeeCode}). Match score ${bestScore.toFixed(3)}.` });
-        log(`Camera face recognized: ${bestEmployee.fullName} score=${bestScore.toFixed(3)}`);
+        log(`Camera face recognized: [REDACTED], score=${bestScore.toFixed(3)}`);
       } else {
         setFaceMsg({ type: 'err', text: `Not verified. Score ${bestScore.toFixed(3)} is too high. Re-save with full face centered and even light.` });
-        log(`Camera face recognition failed: best=${bestEmployee.fullName} score=${bestScore.toFixed(3)}`);
+        log(`Camera face recognition failed: identity [REDACTED], score=${bestScore.toFixed(3)}`);
       }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown camera verification error';
-      setFaceMsg({ type: 'err', text: message });
-      log(`Camera verification failed: ${message}`);
+    } catch {
+      setFaceMsg({ type: 'err', text: 'Camera verification failed.' });
+      log('Camera verification failed [REDACTED]');
     }
   };
 
@@ -847,7 +841,7 @@ export function BiometricDeviceModule({
     if (!hasTemplates) {
       setAttResult('failed');
       setAttSummary(`${emp.fullName} has no enrolled fingerprints. Go to Enroll tab first.`);
-      log(`✗ ${emp.fullName} — not enrolled`);
+      log('✗ [REDACTED] — not enrolled');
       return;
     }
 
@@ -873,7 +867,7 @@ export function BiometricDeviceModule({
 
     setAttResult('verified');
     setAttSummary(`${emp.fullName} — ${isCheckIn ? 'Check-In' : 'Check-Out'} at ${timeStr} (quality: ${captureQuality}%)`);
-    log(`✓ ${emp.fullName} ${isCheckIn ? 'IN' : 'OUT'} at ${timeStr}`);
+    log(`✓ [REDACTED] ${isCheckIn ? 'IN' : 'OUT'} at ${timeStr}`);
 
     setTimeout(() => {
       setAttResult(null);

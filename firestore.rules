@@ -1,0 +1,124 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function hasProfile() {
+      return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function profile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function hasPermission(permission) {
+      return hasProfile()
+        && profile().status == 'Active'
+        && exists(/databases/$(database)/documents/roles/$(profile().roleId))
+        && permission in get(/databases/$(database)/documents/roles/$(profile().roleId)).data.permissions;
+    }
+
+    function isSelfEmployee(employeeId) {
+      return hasProfile() && profile().employeeId == employeeId;
+    }
+
+    function ownsNewEmployeeRecord() {
+      return request.resource.data.employeeId is string
+        && isSelfEmployee(request.resource.data.employeeId);
+    }
+
+    function ownsExistingEmployeeRecord() {
+      return resource.data.employeeId is string
+        && isSelfEmployee(resource.data.employeeId);
+    }
+
+    function validEmployeePayload() {
+      return (!('pictureUrl' in request.resource.data)
+          || (request.resource.data.pictureUrl is string
+            && request.resource.data.pictureUrl.size() <= 700000
+            && (request.resource.data.pictureUrl == ''
+              || request.resource.data.pictureUrl.matches('^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$'))))
+        && request.resource.data.basicSalary is number
+        && request.resource.data.basicSalary >= 0
+        && request.resource.data.basicSalary <= 100000000;
+    }
+
+    match /users/{userId} {
+      allow read: if signedIn() && (request.auth.uid == userId || hasPermission('manage_access'));
+      allow create, update, delete: if hasPermission('manage_access');
+    }
+
+    match /roles/{roleId} {
+      allow read: if signedIn();
+      allow write: if hasPermission('manage_access');
+    }
+
+    match /employees/{employeeId} {
+      allow read: if isSelfEmployee(employeeId) || hasPermission('manage_employees') || hasPermission('manage_payroll');
+      allow write: if hasPermission('manage_employees') && validEmployeePayload();
+    }
+
+    match /biometricTemplates/{employeeId} {
+      allow read, write: if hasPermission('manage_employees');
+    }
+
+    match /attendances/{documentId} {
+      allow read: if ownsExistingEmployeeRecord() || hasPermission('manage_attendance') || hasPermission('manage_payroll');
+      allow create: if ownsNewEmployeeRecord() || hasPermission('manage_attendance');
+      allow update: if (ownsExistingEmployeeRecord() && request.resource.data.employeeId == resource.data.employeeId)
+        || hasPermission('manage_attendance');
+      allow delete: if hasPermission('manage_attendance');
+    }
+
+    match /leaves/{documentId} {
+      allow read: if ownsExistingEmployeeRecord() || hasPermission('manage_leaves') || hasPermission('manage_employees');
+      allow create: if ownsNewEmployeeRecord();
+      allow update, delete: if hasPermission('manage_leaves');
+    }
+
+    match /payrollPayslips/{documentId} {
+      allow read: if ownsExistingEmployeeRecord() || hasPermission('manage_payroll');
+      allow write: if hasPermission('manage_payroll');
+    }
+
+    match /payrollRuns/{documentId} {
+      allow read, write: if hasPermission('manage_payroll');
+    }
+
+    match /loanAdvances/{documentId} {
+      allow read: if ownsExistingEmployeeRecord() || hasPermission('manage_payroll') || hasPermission('manage_employees');
+      allow create: if ownsNewEmployeeRecord();
+      allow update, delete: if hasPermission('manage_payroll') || hasPermission('manage_employees');
+    }
+
+    match /notifications/{documentId} {
+      allow read: if signedIn() && (resource.data.targetEmployeeId == null
+        || isSelfEmployee(resource.data.targetEmployeeId)
+        || hasPermission('manage_employees'));
+      allow write: if hasPermission('manage_employees') || hasPermission('manage_payroll');
+    }
+
+    match /{collection}/{documentId} {
+      allow read: if signedIn() && collection in [
+        'companies', 'branches', 'departments', 'designations', 'zones', 'ucTowns',
+        'wageTypes', 'holidays', 'taxSlabs', 'statConfig', 'jobPostings'
+      ];
+      allow write: if hasPermission('manage_settings');
+    }
+
+    match /{collection}/{documentId} {
+      allow read, write: if hasPermission('manage_employees') && collection in [
+        'salaryRevisions', 'performanceReviews', 'companyAssets', 'jobApplications'
+      ];
+      allow read, write: if hasPermission('manage_payroll') && collection in [
+        'salaryRevisions', 'gratuitySettlements'
+      ];
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

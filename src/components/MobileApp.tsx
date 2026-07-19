@@ -8,8 +8,7 @@ import {
   Scan, ShieldCheck, MapPin, Camera, CameraOff,
   Calendar, FileText, User, Fingerprint, CheckCircle, AlertCircle, Clock
 } from 'lucide-react';
-import { Employee, AttendanceLog, LeaveRequest, UserAccount } from '../types';
-import { computePayslipDetails } from '../data/defaults';
+import { Employee, AttendanceLog, LeaveRequest, Payslip, UserAccount } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface MobileAppProps {
@@ -22,6 +21,7 @@ interface MobileAppProps {
   hideMockPhoneFrame?: boolean;
   loggedInUser?: UserAccount;
   onLogout?: () => void;
+  payrollPayslips?: Payslip[];
 }
 
 type PunchStep = 'preview' | 'done';
@@ -34,6 +34,7 @@ function nowTimeStr() {
 
 // True when running inside Capacitor native shell (Android/iOS APK)
 const isCapacitorApp = !!(window as any).Capacitor?.isNativePlatform?.();
+const biometricCredentialIds = new Map<string, string>();
 
 export function MobileApp({
   employees,
@@ -44,7 +45,8 @@ export function MobileApp({
   onAddRegularization,
   hideMockPhoneFrame,
   loggedInUser,
-  onLogout
+  onLogout,
+  payrollPayslips = []
 }: MobileAppProps) {
   const [mobileTab, setMobileTab] = useState<'home' | 'punch' | 'leave' | 'payslips'>('home');
   const [waNotice, setWaNotice] = useState<string | null>(null);
@@ -75,14 +77,17 @@ export function MobileApp({
     reason: ''
   });
 
-  // Resolved by loggedInUser.employeeId when available; fallback to first employee
+  // Fail closed: never substitute another employee when the authenticated profile is unlinked or invalid.
   const currentEmp = loggedInUser?.employeeId
-    ? (employees.find(e => e.id === loggedInUser.employeeId) ?? employees[0])
-    : employees[0];
+    ? employees.find(e => e.id === loggedInUser.employeeId)
+    : undefined;
   const myPunches = attendances.filter(a => a.employeeId === currentEmp?.id);
   const todayStr = new Date().toISOString().split('T')[0];
   const isCheckedInToday = myPunches.some(p => p.date === todayStr);
-  const myPayslip = currentEmp ? computePayslipDetails(currentEmp, 6, 2026, attendances, leaves) : null;
+  const myPayslip = currentEmp ? [...payrollPayslips].reverse().find(p => p.employeeId === currentEmp.id) || null : null;
+  const payslipPeriod = myPayslip?.periodMonth && myPayslip.periodYear
+    ? new Date(myPayslip.periodYear, myPayslip.periodMonth - 1).toLocaleString('en-PK', { month: 'long', year: 'numeric' })
+    : 'Latest approved period';
 
   // Clock tick
   useEffect(() => {
@@ -124,9 +129,7 @@ export function MobileApp({
         setCameraError('Camera access denied. Please allow camera in browser settings.');
       } else if (msg.includes('NotFound') || msg.includes('DevicesNotFound')) {
         setCameraError('No camera detected on this device.');
-      } else {
-        setCameraError('Could not start camera: ' + msg);
-      }
+      } else setCameraError('Could not start camera.');
     }
   }, []);
 
@@ -181,7 +184,7 @@ export function MobileApp({
         publicKey: {
           challenge,
           rp: { name: 'HR Management System', id: window.location.hostname || 'localhost' },
-          user: { id: userId, name: emp.email || emp.id, displayName: emp.fullName },
+          user: { id: userId, name: emp.id, displayName: 'Employee' },
           pubKeyCredParams: [
             { type: 'public-key', alg: -7 },
             { type: 'public-key', alg: -257 }
@@ -196,15 +199,15 @@ export function MobileApp({
       }) as PublicKeyCredential | null;
       if (cred) {
         const credIdB64 = btoa(String.fromCharCode(...new Uint8Array(cred.rawId)));
-        localStorage.setItem(getBiometricCredKey(emp.id), credIdB64);
+        biometricCredentialIds.set(getBiometricCredKey(emp.id), credIdB64);
         return true;
       }
-    } catch (e) { console.warn('Biometric registration failed:', e); }
+    } catch { console.warn('Biometric registration failed.'); }
     return false;
   };
 
   const verifyBiometric = async (empId: string): Promise<boolean> => {
-    const saved = localStorage.getItem(getBiometricCredKey(empId));
+    const saved = biometricCredentialIds.get(getBiometricCredKey(empId));
     try {
       const challenge = crypto.getRandomValues(new Uint8Array(32));
       const allowCredentials: PublicKeyCredentialDescriptor[] = saved
@@ -271,7 +274,7 @@ export function MobileApp({
         finishPunch('Biometric');
       } else {
         // WebAuthn for Chrome/Edge browser (desktop/web)
-        const hasCredential = !!localStorage.getItem(getBiometricCredKey(currentEmp.id));
+        const hasCredential = !!biometricCredentialIds.get(getBiometricCredKey(currentEmp.id));
         const ok = hasCredential
           ? await verifyBiometric(currentEmp.id)
           : await registerBiometric(currentEmp);
@@ -500,7 +503,7 @@ export function MobileApp({
                       className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 active:scale-95 text-white font-bold py-3 rounded-xl transition text-sm shadow-lg shadow-indigo-900/30"
                     >
                       <Fingerprint size={16} />
-                      {localStorage.getItem(getBiometricCredKey(currentEmp?.id || ''))
+                      {biometricCredentialIds.get(getBiometricCredKey(currentEmp?.id || ''))
                         ? 'Verify Biometric & Punch'
                         : 'Register Biometric & Punch'}
                     </button>
@@ -664,14 +667,14 @@ export function MobileApp({
           <div className="p-3 space-y-3">
             <div className="pt-1">
               <h3 className="font-bold text-white text-sm">My Payslip</h3>
-              <p className="text-[10px] text-slate-400">June 2026 — {currentEmp?.fullName}</p>
+              <p className="text-[10px] text-slate-400">{payslipPeriod} — {currentEmp?.fullName}</p>
             </div>
 
             {myPayslip ? (
               <div className="bg-slate-800/60 border border-slate-700/50 rounded-2xl overflow-hidden">
                 <div className="bg-slate-700/60 px-3 py-2 flex justify-between items-center">
                   <span className="text-[10px] font-bold text-white uppercase tracking-wide">Paycheck Receipt</span>
-                  <span className="text-[9px] text-slate-400 font-mono">Jun 2026</span>
+                  <span className="text-[9px] text-slate-400 font-mono">{payslipPeriod}</span>
                 </div>
                 <div className="p-3 space-y-2 font-mono text-[11px]">
                   {[

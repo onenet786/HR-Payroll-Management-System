@@ -64,8 +64,8 @@ export function WindowsApp({
         `Reader: ${result.device?.type || 'U.are.U 4500 / SecuGen Hamster Pro'}`,
         `Serial: ${result.device?.sn || 'Unknown'}`,
         `Quality: ${result.quality}%`,
-        `Template: ${result.template.length} chars`,
-        `Employee: ${emp.fullName} (${emp.employeeCode})`,
+        'Template: [REDACTED]',
+        'Employee: [REDACTED]',
         `Punch: ${isCheckIn ? 'IN' : 'OUT'} ${timeStr}`,
       ]);
       setHardwareMessage(`${emp.fullName} biometric ${isCheckIn ? 'check-in' : 'check-out'} committed at ${timeStr}.`);
@@ -74,8 +74,8 @@ export function WindowsApp({
         setHardwareStatus('IDLE');
         setHardwareMessage('URU 4500 / SecuGen Hamster Pro bridge ready on ws://127.0.0.1:15896');
       }, 3000);
-    } catch (error) {
-      const text = error instanceof Error ? error.message : String(error);
+    } catch {
+      const text = 'Biometric operation failed. Check the secured device log.';
       setHardwareStatus('ERROR');
       setHardwareMessage(text);
       setHardwareDetails(prev => [`Error: ${text}`, ...prev].slice(0, 6));

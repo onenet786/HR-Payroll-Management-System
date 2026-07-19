@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob: http: https:; connect-src 'self' ws://127.0.0.1:* ws://localhost:*; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'" />
   <title>Bin Ishaq Attendance Kiosk</title>
   <link rel="stylesheet" href="./styles.css" />
 </head>
@@ -22,11 +23,11 @@
       </div>
 
       <nav class="mode-nav" id="modeNav">
-        <button class="mode-btn active" data-mode="code">
+        <button class="mode-btn hidden" id="codeModeBtn" data-mode="code">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h.01M12 9h.01M15 9h.01M9 12h.01M12 12h.01M15 12h.01M9 15h.01M12 15h.01M15 15h.01"/></svg>
           <span>Employee Code</span>
         </button>
-        <button class="mode-btn" data-mode="fingerprint">
+        <button class="mode-btn active" data-mode="fingerprint">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2C8 2 5 5 5 9c0 5.4 6.5 12 7 12s7-6.6 7-12c0-4-3-7-7-7z"/><path d="M12 6c-1.7 0-3 1.3-3 3 0 3.2 2.5 7.2 3 7.2s3-4 3-7.2c0-1.7-1.3-3-3-3z"/><path d="M12 10v2"/></svg>
           <span>Fingerprint</span>
         </button>
@@ -197,7 +198,12 @@
       <section class="center-panel" id="centerPanel">
 
         <!-- Camera Feed -->
-        <div class="camera-view hidden" id="cameraView">
+        <div class="camera-stack hidden" id="cameraStack">
+          <div class="captured-photo-card hidden" id="capturedPhotoCard" aria-live="polite">
+            <img id="capturedPhotoImg" alt="Captured attendance photo" />
+            <span>CAPTURED</span>
+          </div>
+        <div class="camera-view" id="cameraView">
           <video id="webcamEl" autoplay muted></video>
           <img id="ipcamEl" alt="IP Camera" />
           <canvas id="snapCanvas" class="snap-canvas" width="1280" height="720"></canvas>
@@ -209,6 +215,7 @@
               <span id="camAutoLabel">Scanning for face…</span>
             </div>
           </div>
+        </div>
         </div>
 
         <!-- Result Card -->
@@ -294,6 +301,85 @@
     </div>
   </div>
 
+  <div class="overlay message-overlay hidden" id="messageOverlay" aria-hidden="true">
+    <section class="message-dialog" id="messageDialog" data-tone="info" role="alertdialog" aria-modal="true" aria-labelledby="messageTitle" aria-describedby="messageText messageDetail" tabindex="-1">
+      <header class="message-header">
+        <div class="message-heading">
+          <div class="message-tone-orb" aria-hidden="true">
+            <svg class="message-tone-icon message-tone-icon-info" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
+            <svg class="message-tone-icon message-tone-icon-warning" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 2.9 1.8 17.2A2 2 0 0 0 3.5 20h17a2 2 0 0 0 1.7-2.8L13.7 2.9a2 2 0 0 0-3.4 0Z"/><path d="M12 8v5M12 17h.01"/></svg>
+            <svg class="message-tone-icon message-tone-icon-danger" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h4M16 17l5-5-5-5M21 12H9"/></svg>
+            <svg class="message-tone-icon message-tone-icon-success" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8 12 2.7 2.7L16.5 9"/></svg>
+          </div>
+          <div><div class="message-eyebrow" id="messageEyebrow">Kiosk Notice</div><h2 id="messageTitle">Confirm action</h2></div>
+        </div>
+        <button class="message-close" id="messageClose" type="button" aria-label="Cancel and close dialog" title="Cancel"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+      </header>
+      <div class="message-content"><p class="message-text" id="messageText"></p><p class="message-detail hidden" id="messageDetail"></p></div>
+      <footer class="message-footer">
+        <span class="message-safety-note">No action is taken until you confirm.</span>
+        <div class="message-actions"><button class="btn btn-ghost message-cancel" id="messageCancel" type="button">Cancel</button><button class="btn message-confirm" id="messageConfirm" type="button">Confirm</button></div>
+      </footer>
+    </section>
+  </div>
+
+  <div class="overlay maintenance-overlay hidden" id="maintenanceConfirmOverlay" aria-hidden="true">
+    <section class="maintenance-dialog" id="maintenanceConfirmDialog" role="dialog" aria-modal="true" aria-labelledby="maintenanceConfirmTitle" aria-describedby="maintenanceConfirmMessage" tabindex="-1">
+      <header class="maintenance-header">
+        <div class="maintenance-heading">
+          <div class="maintenance-risk-orb" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 2.9 1.8 17.2A2 2 0 0 0 3.5 20h17a2 2 0 0 0 1.7-2.8L13.7 2.9a2 2 0 0 0-3.4 0Z"/><path d="M12 8v5"/><path d="M12 17h.01"/></svg>
+          </div>
+          <div>
+            <div class="maintenance-eyebrow">Local Data Maintenance</div>
+            <h2 id="maintenanceConfirmTitle">Clear local attendance?</h2>
+          </div>
+        </div>
+        <button class="maintenance-close" id="maintenanceConfirmClose" type="button" aria-label="Cancel and close dialog" title="Cancel">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18"/></svg>
+        </button>
+      </header>
+
+      <div class="maintenance-content">
+        <div class="maintenance-progress" aria-label="Confirmation progress">
+          <div class="maintenance-step is-current" data-maintenance-step="1"><span>1</span><small>Review</small></div>
+          <div class="maintenance-rail"></div>
+          <div class="maintenance-step" data-maintenance-step="2"><span>2</span><small>Impact</small></div>
+          <div class="maintenance-rail"></div>
+          <div class="maintenance-step" data-maintenance-step="3"><span>3</span><small>Confirm</small></div>
+        </div>
+
+        <div class="maintenance-step-label" id="maintenanceConfirmStep">Step 1 of 3</div>
+        <p class="maintenance-message" id="maintenanceConfirmMessage"></p>
+
+        <div class="maintenance-impact" aria-label="Data impact summary">
+          <div class="impact-group impact-removed">
+            <div class="impact-label">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2m-9 0 1 14h8l1-14M10 10v6m4-6v6"/></svg>
+              Removed from this kiosk
+            </div>
+            <ul><li>Cached attendance records</li><li>Pending offline attendance uploads</li></ul>
+          </div>
+          <div class="impact-group impact-protected">
+            <div class="impact-label">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/></svg>
+              Remains protected
+            </div>
+            <ul><li>Employees, settings, and evidence</li><li>All attendance stored in Firestore</li></ul>
+          </div>
+        </div>
+      </div>
+
+      <footer class="maintenance-footer">
+        <span class="maintenance-safety-note">No action occurs before the final confirmation.</span>
+        <div class="maintenance-actions">
+          <button class="btn btn-ghost maintenance-cancel" id="maintenanceConfirmCancel" type="button">Cancel</button>
+          <button class="btn maintenance-continue" id="maintenanceConfirmContinue" type="button">Continue</button>
+        </div>
+      </footer>
+    </section>
+  </div>
+
   <div class="overlay hidden" id="settingsOverlay">
     <div class="dialog" id="settingsDialog">
       <div class="dialog-header">
@@ -316,6 +402,13 @@
               <input id="stLocation" class="form-input" placeholder="Main Entrance Gate-1" />
             </label>
             <label class="form-field full">
+              <span class="form-label">Assigned Branch <small>(controls the local employee and biometric cache)</small></span>
+              <select id="stBranchId" class="form-input">
+                <option value="">Select a branch…</option>
+              </select>
+              <small class="form-help">Other-branch employees must use Camera and provide their complete employee ID for ID + face verification.</small>
+            </label>
+            <label class="form-field full">
               <span class="form-label">IP Camera URL <small>(MJPEG stream or snapshot URL)</small></span>
               <input id="stIpCamUrl" class="form-input" placeholder="http://192.168.1.100/snapshot.jpg" />
             </label>
@@ -325,6 +418,14 @@
         <div class="dialog-section">
           <h3 class="dialog-section-title">Punch Options</h3>
           <div class="toggle-list">
+            <label class="toggle-row security-sensitive">
+              <input type="checkbox" id="stAllowCodeOnlyPunch" class="toggle-input" />
+              <div class="toggle-switch"></div>
+              <div class="toggle-text">
+                <span>Enable code-only attendance tab <strong>HIGH RISK</strong></span>
+                <small>Allows a punch using an employee ID without biometric proof. Keep disabled except for a controlled, temporary fallback.</small>
+              </div>
+            </label>
             <label class="toggle-row">
               <input type="checkbox" id="stReqCodeFp" class="toggle-input" />
               <div class="toggle-switch"></div>
@@ -365,6 +466,17 @@
           <div class="info-box" id="stSyncInfo">Loading…</div>
         </div>
 
+        <div class="dialog-section danger-zone">
+          <h3 class="dialog-section-title">Danger Zone</h3>
+          <div class="danger-action">
+            <div>
+              <strong>Clear Local Attendance Cache</strong>
+              <small>Removes local attendance and queued attendance uploads. Employees, settings, evidence, and Firestore are not deleted.</small>
+            </div>
+            <button class="btn btn-danger" id="stClearAttendanceCache">Clear Local Cache</button>
+          </div>
+        </div>
+
         <div class="dialog-section">
           <h3 class="dialog-section-title">Recent Events Log</h3>
           <div class="events-table" id="stEventsLog"></div>
@@ -375,7 +487,6 @@
         <div class="dialog-footer-left">
           <button class="btn btn-ghost" id="stStartBridge">Check Biometric Driver Host</button>
           <button class="btn btn-ghost" id="stTestScanner">Test Scanner</button>
-          <button class="btn btn-ghost" id="stOpenStore">Open Local Store</button>
         </div>
         <button class="btn btn-primary" id="stSave">Save Settings</button>
       </div>
@@ -385,5 +496,3 @@
   <script src="./app.js"></script>
 </body>
 </html>
-
-

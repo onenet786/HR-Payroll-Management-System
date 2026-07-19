@@ -4,10 +4,14 @@ import { AlertTriangle, CheckCircle, Database, Download, RefreshCw, RotateCcw, T
 import { db } from '../firebase';
 
 type CollectionKey =
+  | 'companies'
   | 'employees'
   | 'branches'
   | 'departments'
   | 'designations'
+  | 'zones'
+  | 'ucTowns'
+  | 'wageTypes'
   | 'taxSlabs'
   | 'roles'
   | 'users'
@@ -42,10 +46,14 @@ type BackupFile = {
 };
 
 const REQUIRED_COLLECTIONS: CollectionKey[] = [
+  'companies',
   'employees',
   'branches',
   'departments',
   'designations',
+  'zones',
+  'ucTowns',
+  'wageTypes',
   'taxSlabs',
   'roles',
   'users',
@@ -70,10 +78,14 @@ const OPERATIONAL_COLLECTIONS: CollectionKey[] = [
 const ALL_COLLECTIONS: CollectionKey[] = [...REQUIRED_COLLECTIONS, ...OPERATIONAL_COLLECTIONS];
 
 const COLLECTION_LABELS: Record<CollectionKey, string> = {
+  companies: 'Companies',
   employees: 'Employees',
   branches: 'Branches',
   departments: 'Departments',
   designations: 'Designations',
+  zones: 'Zones',
+  ucTowns: 'UC/Towns',
+  wageTypes: 'Wage Types',
   taxSlabs: 'Tax Slabs',
   roles: 'Roles',
   users: 'Users',
@@ -93,10 +105,14 @@ const COLLECTION_LABELS: Record<CollectionKey, string> = {
 };
 
 const COLLECTION_STORAGE_KEYS: Record<CollectionKey, string[]> = {
+  companies: ['hr_companies'],
   employees: ['hr_employees'],
   branches: ['hr_branches'],
   departments: ['hr_departments'],
   designations: ['hr_designations'],
+  zones: ['hr_zones'],
+  ucTowns: ['hr_uc_towns'],
+  wageTypes: ['hr_wage_types'],
   taxSlabs: ['hr_tax_slabs'],
   roles: ['hr_roles'],
   users: ['hr_users', 'hr_logged_in_user', 'hr_current_user'],
@@ -215,7 +231,7 @@ export function FirestoreMaintenanceModule() {
       setCounts(nextCounts);
       setStatus('Collection counts updated.');
     } catch (error) {
-      setStatus(`Failed to refresh counts: ${error instanceof Error ? error.message : String(error)}`);
+      setStatus('Failed to refresh counts. Check server logs.');
     } finally {
       setIsBusy(false);
     }
@@ -229,8 +245,8 @@ export function FirestoreMaintenanceModule() {
     const backup: BackupFile = {
       metadata: {
         app: 'Bin Ishaq HR Suite',
-        projectId: 'gen-lang-client-0314098400',
-        databaseId: 'ai-studio-0ab7c3a1-e4ca-49b5-86f4-6883897b9163',
+        projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+        databaseId: import.meta.env.VITE_FIRESTORE_DATABASE_ID,
         createdAt: new Date().toISOString(),
         collections: collectionsToBackup,
       },
@@ -257,7 +273,7 @@ export function FirestoreMaintenanceModule() {
       await downloadBackup(ALL_COLLECTIONS, 'full');
       setStatus('Full backup downloaded.');
     } catch (error) {
-      setStatus(`Backup failed: ${error instanceof Error ? error.message : String(error)}`);
+      setStatus('Backup failed. Check server logs.');
     } finally {
       setIsBusy(false);
     }
@@ -270,7 +286,7 @@ export function FirestoreMaintenanceModule() {
       await downloadBackup(selectedCollections, 'selected');
       setStatus('Selected collection backup downloaded.');
     } catch (error) {
-      setStatus(`Backup failed: ${error instanceof Error ? error.message : String(error)}`);
+      setStatus('Backup failed. Check server logs.');
     } finally {
       setIsBusy(false);
     }
@@ -295,7 +311,7 @@ export function FirestoreMaintenanceModule() {
       setConfirmText('');
       setStatus('Cleanup complete. No dummy data was inserted.');
     } catch (error) {
-      setStatus(`Cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
+      setStatus('Cleanup failed. Check server logs.');
     } finally {
       setIsBusy(false);
     }
@@ -324,7 +340,7 @@ export function FirestoreMaintenanceModule() {
       setConfirmText('');
       setStatus('Selected delete complete. No dummy data was inserted.');
     } catch (error) {
-      setStatus(`Delete failed: ${error instanceof Error ? error.message : String(error)}`);
+      setStatus('Delete failed. Check server logs.');
     } finally {
       setIsBusy(false);
     }
@@ -344,7 +360,7 @@ export function FirestoreMaintenanceModule() {
         setRestoreCollections(availableCollections);
         setStatus(`Backup loaded: ${file.name}`);
       } catch (error) {
-        setStatus(`Invalid backup file: ${error instanceof Error ? error.message : String(error)}`);
+        setStatus('Invalid backup file.');
       }
     };
     reader.readAsText(file);
@@ -377,7 +393,7 @@ export function FirestoreMaintenanceModule() {
       setConfirmText('');
       setStatus('Restore complete.');
     } catch (error) {
-      setStatus(`Restore failed: ${error instanceof Error ? error.message : String(error)}`);
+      setStatus('Restore failed. Check server logs.');
     } finally {
       setIsBusy(false);
     }

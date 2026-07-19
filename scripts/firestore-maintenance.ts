@@ -12,6 +12,7 @@
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import * as dotenv from 'dotenv';
 import { initializeApp } from 'firebase/app';
 import {
   collection,
@@ -23,16 +24,21 @@ import {
   type Firestore,
 } from 'firebase/firestore';
 
+dotenv.config({ quiet: true });
+
 const firebaseConfig = {
-  apiKey: 'AIzaSyAA7uvWdIsP9CqFGJEk5SB0FvLFF97DNk4',
-  authDomain: 'gen-lang-client-0314098400.firebaseapp.com',
-  projectId: 'gen-lang-client-0314098400',
-  storageBucket: 'gen-lang-client-0314098400.firebasestorage.app',
-  messagingSenderId: '279125201448',
-  appId: '1:279125201448:web:60c148c137e9fd60a2db1d',
+  apiKey: process.env.FIREBASE_API_KEY,
+  authDomain: process.env.FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.FIREBASE_PROJECT_ID,
+  storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.FIREBASE_APP_ID,
 };
 
-const firestoreDatabaseId = 'ai-studio-0ab7c3a1-e4ca-49b5-86f4-6883897b9163';
+const firestoreDatabaseId = process.env.FIRESTORE_DATABASE_ID;
+if (Object.values(firebaseConfig).some(value => !value) || !firestoreDatabaseId) {
+  throw new Error('Missing required Firebase environment configuration. See .env.example.');
+}
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app, firestoreDatabaseId);
 
@@ -362,6 +368,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
-  console.error('Firestore maintenance failed:', error instanceof Error ? error.message : error);
+  console.error('Firestore maintenance failed. Review local diagnostics without sharing credentials.');
   process.exitCode = 1;
 });

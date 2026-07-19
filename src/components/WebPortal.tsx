@@ -4,18 +4,20 @@
  */
 
 import React, { useState } from 'react';
+import { empAvatarUrl } from '../utils/avatar';
 import {
   Users, Calendar, CreditCard, ShieldCheck, FileText, Download, UserPlus,
   CheckCircle, AlertTriangle, Building, MapPin, Layers, Sliders, Info,
   CalendarDays, Banknote, TrendingUp, Star, Package, Briefcase, Calculator, Bell, Fingerprint,
-  Database
+  Database, BookOpen, Menu, X, ChevronDown, ListTree
 } from 'lucide-react';
 import {
   Employee, AttendanceLog, LeaveRequest, StatutoryConfig, TaxSlab, PayrollRun, Payslip,
-  Role, UserAccount, Branch, Department, Designation, Holiday, LoanAdvance, SalaryRevision,
-  PerformanceReview, CompanyAsset, JobPosting, JobApplication, GratuitySettlement, AppNotification
+  Role, UserAccount, NewUserAccount, Branch, Department, Designation, Holiday, LoanAdvance, SalaryRevision,
+  PerformanceReview, CompanyAsset, JobPosting, JobApplication, GratuitySettlement, AppNotification, Company, CompanySetupPayload, Zone, UcTown, WageType
 } from '../types';
 import { computePayslipDetails } from '../data/defaults';
+import { resolveRecordId, resolveUcTownName, resolveWageBasis, resolveWageTypeName, resolveZoneName, validateEmployeeMasterSelection } from '../data/masterData';
 import { HolidayModule } from './HolidayModule';
 import { LoansModule } from './LoansModule';
 import { SalaryRevisionModule } from './SalaryRevisionModule';
@@ -26,6 +28,8 @@ import { GratuityModule } from './GratuityModule';
 import { NotificationCenter } from './NotificationCenter';
 import { BiometricDeviceModule } from './BiometricDeviceModule';
 import { FirestoreMaintenanceModule } from './FirestoreMaintenanceModule';
+import { CompanySetupModule } from './CompanySetupModule';
+import { MasterDataModule } from './MasterDataModule';
 import { motion, AnimatePresence } from 'motion/react';
 import type { FirestoreSyncStatus } from '../App';
 
@@ -67,6 +71,7 @@ interface WebPortalProps {
   statConfig: StatutoryConfig;
   taxSlabs: TaxSlab[];
   payrollRuns: PayrollRun[];
+  payrollPayslips: Payslip[];
   onAddEmployee: (emp: Employee) => void;
   onUpdateEmployee: (emp: Employee) => void;
   onUpdateStatConfig: (config: StatutoryConfig) => void;
@@ -76,18 +81,26 @@ interface WebPortalProps {
   onApproveRegularization: (id: string) => void;
   onRejectRegularization: (id: string) => void;
   onCreatePayrollRun: (title: string, month: number, year: number) => void;
+  onUpdatePayrollStatus: (runId: string, status: 'Approved' | 'Disbursed') => void;
   onApplyLeave: (leave: LeaveRequest) => void;
   onAddAttendance: (log: AttendanceLog) => void;
   branches: Branch[];
+  companies: Company[];
+  onSaveCompanySetup: (payload: CompanySetupPayload) => Promise<void>;
   departments: Department[];
   designations: Designation[];
+  zones: Zone[];
+  ucTowns: UcTown[];
+  wageTypes: WageType[];
+  onSaveMasterData: (kind: 'branch' | 'department' | 'designation' | 'zone' | 'ucTown' | 'wageType', record: Branch | Department | Designation | Zone | UcTown | WageType) => Promise<void>;
   roles: Role[];
   users: UserAccount[];
   currentUserAccount: UserAccount;
   accessControlLoaded: boolean;
   onSetCurrentUserAccount: (user: UserAccount) => void;
   onAddRole: (role: Role) => void;
-  onAddUser: (user: UserAccount) => void;
+  onAddUser: (user: NewUserAccount) => Promise<void>;
+  onDeleteUser: (userId: string) => Promise<void>;
   onUpdateUserRole: (userId: string, roleId: string) => void;
   onLogout: () => void;
   onAddBranch?: (branch: Branch) => void;
@@ -128,6 +141,9 @@ interface WebPortalProps {
   firestoreSyncStatus: FirestoreSyncStatus;
 }
 
+type PortalTab = 'dashboard' | 'employees' | 'attendance' | 'leaves' | 'payroll' | 'settings' | 'company-setup' | 'master-data' | 'access' | 'maintenance' | 'holidays' | 'loans' | 'revisions' | 'performance' | 'assets' | 'recruitment' | 'gratuity' | 'notifications' | 'biometric' | 'help';
+type NavGroupKey = 'people' | 'time' | 'payroll' | 'system';
+
 export function WebPortal({
   employees,
   attendances,
@@ -135,20 +151,28 @@ export function WebPortal({
   statConfig,
   taxSlabs,
   payrollRuns,
+  payrollPayslips,
   onAddEmployee,
   onUpdateEmployee,
   onUpdateStatConfig,
-  onUpdateTaxSlabs: _onUpdateTaxSlabs,
+  onUpdateTaxSlabs,
   onApproveLeave,
   onRejectLeave,
   onApproveRegularization,
   onRejectRegularization,
   onCreatePayrollRun,
+  onUpdatePayrollStatus,
   onApplyLeave,
   onAddAttendance,
   branches,
+  companies,
+  onSaveCompanySetup,
   departments,
   designations,
+  zones,
+  ucTowns,
+  wageTypes,
+  onSaveMasterData,
   roles,
   users,
   currentUserAccount,
@@ -156,6 +180,7 @@ export function WebPortal({
   onSetCurrentUserAccount: _onSetCurrentUserAccount,
   onAddRole,
   onAddUser,
+  onDeleteUser,
   onUpdateUserRole,
   onLogout,
   onAddBranch,
@@ -195,10 +220,25 @@ export function WebPortal({
   onSimulatePunch,
   firestoreSyncStatus
 }: WebPortalProps) {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'employees' | 'attendance' | 'leaves' | 'payroll' | 'settings' | 'access' | 'maintenance' | 'holidays' | 'loans' | 'revisions' | 'performance' | 'assets' | 'recruitment' | 'gratuity' | 'notifications' | 'biometric'>('dashboard');
+  const [activeTab, setActiveTab] = useState<PortalTab>('dashboard');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [expandedNavGroup, setExpandedNavGroup] = useState<NavGroupKey | null>(null);
+  const closeSidebar = () => setSidebarOpen(false);
+  const updateTaxSlab = (id: string, field: keyof Pick<TaxSlab, 'minIncome' | 'maxIncome' | 'baseTax' | 'percentage'>, value: number) =>
+    onUpdateTaxSlabs(taxSlabs.map(slab => slab.id === id ? { ...slab, [field]: value } : slab));
 
-  const existingUcs = Array.from(new Set(employees.map(e => e.ucTown).filter(Boolean))) as string[];
-  const existingZones = Array.from(new Set(employees.map(e => e.zone).filter(Boolean))) as string[];
+  const primaryCompany = companies[0];
+  const companyDisplayName = primaryCompany?.name || 'Bin Ishaq';
+  const companyLegalName = primaryCompany?.legalName || companyDisplayName;
+  const companyCode = primaryCompany?.code || 'IND-KHI-456';
+  const primaryBranch = branches.find(branch => branch.companyId === primaryCompany?.id);
+  const companyAddressLine = [primaryCompany?.registeredAddress, primaryCompany?.city, primaryCompany?.province].filter(Boolean).join(', ');
+  const companyRegistrationLine = [
+    primaryCompany?.ntn || primaryCompany?.taxRegistrationNumber ? `NTN: ${primaryCompany?.ntn || primaryCompany?.taxRegistrationNumber}` : '',
+    primaryCompany?.strn ? `STRN: ${primaryCompany.strn}` : '',
+    primaryCompany?.eobiRegistration || primaryCompany?.eobiRegistrationNumber ? `EOBI: ${primaryCompany?.eobiRegistration || primaryCompany?.eobiRegistrationNumber}` : '',
+    primaryCompany?.socialSecurityRegistration ? `Social Security: ${primaryCompany.socialSecurityRegistration}` : '',
+  ].filter(Boolean).join(' • ');
 
   const currentUserRole = roles.find(r => r.id === currentUserAccount.roleId);
   const userPermissions = currentUserRole ? currentUserRole.permissions : [];
@@ -228,6 +268,8 @@ export function WebPortal({
     if (tab === 'leaves') return userPermissions.includes('manage_leaves');
     if (tab === 'payroll') return userPermissions.includes('manage_payroll');
     if (tab === 'settings') return userPermissions.includes('manage_settings');
+    if (tab === 'company-setup') return userPermissions.includes('manage_settings');
+    if (tab === 'master-data') return userPermissions.includes('manage_settings');
     if (tab === 'access') return userPermissions.includes('manage_access');
     if (tab === 'maintenance') return userPermissions.includes('manage_access') || userPermissions.includes('manage_settings');
     if (tab === 'holidays') return userPermissions.includes('manage_attendance') || userPermissions.includes('manage_settings');
@@ -238,6 +280,7 @@ export function WebPortal({
     if (tab === 'recruitment') return userPermissions.includes('manage_employees');
     if (tab === 'gratuity') return userPermissions.includes('manage_payroll');
     if (tab === 'notifications') return true;
+    if (tab === 'help') return true;
     if (tab === 'biometric') return userPermissions.includes('manage_attendance') || userPermissions.includes('manage_employees');
     return false;
   };
@@ -261,6 +304,9 @@ export function WebPortal({
     branchId: 'b1',
     departmentId: 'd1',
     designationId: 'ds1',
+    zoneId: '',
+    ucTownId: '',
+    wageTypeId: '',
     wageType: 'Salaried' as string,
     basicSalary: 85000,
     providentFundOptIn: true,
@@ -272,7 +318,7 @@ export function WebPortal({
     eobiNumber: '1090123000',
     socialSecurityNumber: 'SS-42-000111',
     // Custom onboarding fields
-    pictureUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=200',
+    pictureUrl: '',
     isZoneInCharge: false,
     zoneInChargeName: '',
     zone: 'East Zone',
@@ -297,6 +343,9 @@ export function WebPortal({
     branchId: 'b1',
     departmentId: 'd1',
     designationId: 'ds1',
+    zoneId: '',
+    ucTownId: '',
+    wageTypeId: '',
     wageType: 'Salaried' as string,
     basicSalary: 85000,
     providentFundOptIn: true,
@@ -322,24 +371,23 @@ export function WebPortal({
     maritalStatus: 'Single'
   });
 
-  const payrollMonth = 6;
-  const payrollYear = 2026;
+  const now = new Date();
+  const [payrollMonth, setPayrollMonth] = useState(now.getMonth() + 1);
+  const [payrollYear, setPayrollYear] = useState(now.getFullYear());
 
   // Settlement manual additions for offboarding
   const [settlementLeavesEncash, setSettlementLeavesEncash] = useState(10);
 
   // System country settings (defaulting to Pakistan)
-  const [selectedCountry, setSelectedCountry] = useState('Pakistan');
+  const selectedCountry = 'Pakistan';
 
   // Local state copies of branches, departments, designations
   const [localBranches, setLocalBranches] = useState(branches);
   const [localDepartments, setLocalDepartments] = useState(departments);
   const [localDesignations, setLocalDesignations] = useState(designations);
-  const [localWageTypes, setLocalWageTypes] = useState(['Salaried', 'Daily Wager']);
-
-  // Custom UC/Town and Zone runtime options
-  const [localUcs, setLocalUcs] = useState<string[]>([]);
-  const [localZones, setLocalZones] = useState<string[]>([]);
+  const companyBranches = localBranches.filter(branch => !primaryCompany || branch.companyId === primaryCompany.id);
+  const activeZones = zones.filter(zone => (!primaryCompany || zone.companyId === primaryCompany.id) && zone.status === 'Active');
+  const activeWageTypes = wageTypes.filter(wage => (!primaryCompany || wage.companyId === primaryCompany.id) && wage.status === 'Active');
 
   React.useEffect(() => { setLocalBranches(branches); }, [branches]);
   React.useEffect(() => { setLocalDepartments(departments); }, [departments]);
@@ -379,6 +427,17 @@ export function WebPortal({
   const handlePictureFileChange = (e: React.ChangeEvent<HTMLInputElement>, isEdit: boolean) => {
     const file = e.target.files?.[0];
     if (file) {
+      const allowedTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
+      if (!allowedTypes.has(file.type)) {
+        alert('Only JPEG, PNG, or WebP profile images are allowed.');
+        e.target.value = '';
+        return;
+      }
+      if (file.size > 512 * 1024) {
+        alert('Profile images must be 512 KB or smaller.');
+        e.target.value = '';
+        return;
+      }
       const reader = new FileReader();
       reader.onloadend = () => {
         const base64String = reader.result as string;
@@ -453,7 +512,7 @@ export function WebPortal({
   const handleCreateBranch = (name: string, city: string, province: any) => {
     const newB = {
       id: 'b-' + Date.now(),
-      companyId: 'c1',
+      companyId: primaryCompany?.id ?? 'c1',
       name,
       city,
       province,
@@ -498,16 +557,17 @@ export function WebPortal({
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
 
   const [attPeriodType, setAttPeriodType] = useState<'daily' | 'weekly' | 'monthly' | 'yearly'>('daily');
-  const [selectedAttDate, setSelectedAttDate] = useState('2026-06-17');
+  const [selectedAttDate, setSelectedAttDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [selectedAttEmployeeId, setSelectedAttEmployeeId] = useState('all');
 
   const [leavePeriodType, setLeavePeriodType] = useState<'daily' | 'weekly' | 'monthly' | 'yearly'>('daily');
-  const [selectedLeaveDate, setSelectedLeaveDate] = useState('2026-06-17');
+  const [selectedLeaveDate, setSelectedLeaveDate] = useState(() => new Date().toISOString().split('T')[0]);
 
   // Manual Modals state
   const [showAddAttendanceModal, setShowAddAttendanceModal] = useState(false);
   const [newAttendanceForm, setNewAttendanceForm] = useState({
     employeeId: '',
-    date: '2026-06-17',
+    date: new Date().toISOString().split('T')[0],
     punchIn: '09:00',
     punchOut: '17:00',
     method: 'Manual' as const,
@@ -518,8 +578,8 @@ export function WebPortal({
   const [newLeaveForm, setNewLeaveForm] = useState({
     employeeId: '',
     leaveType: 'Casual' as const,
-    startDate: '2026-06-17',
-    endDate: '2026-06-17',
+    startDate: new Date().toISOString().split('T')[0],
+    endDate: new Date().toISOString().split('T')[0],
     reason: ''
   });
 
@@ -527,7 +587,7 @@ export function WebPortal({
   const totalCount = employees.length;
   const activeCount = employees.filter(e => e.status === 'Active').length;
   
-  const todayStr = '2026-06-17';
+  const todayStr = new Date().toISOString().split('T')[0];
   const todayPunches = attendances.filter(a => a.date === todayStr);
   const presentToday = todayPunches.filter(p => p.status === 'Present' || p.status === 'Late').length;
   const attendanceRate = totalCount > 0 ? Math.round((presentToday / totalCount) * 100) : 0;
@@ -537,7 +597,7 @@ export function WebPortal({
 
   // Compute live payroll estimation
   const totalSalaries = employees.reduce((sum, emp) => {
-    if (emp.wageType === 'Daily Wager') {
+    if (resolveWageBasis(emp, wageTypes) === 'Daily') {
       return sum + (emp.basicSalary * 26); // assuming 26 days average
     }
     return sum + emp.basicSalary;
@@ -556,9 +616,14 @@ export function WebPortal({
       alert('CNIC format must be valid (e.g. 42101-1234567-3)');
       return;
     }
+    const masterErrors = validateEmployeeMasterSelection(newEmpForm, { branches: companyBranches, departments: localDepartments, designations: localDesignations, zones, ucTowns, wageTypes });
+    if (masterErrors.length) { alert(`Please correct the employee assignment:\n• ${masterErrors.join('\n• ')}`); return; }
 
     const generatedCode = newEmpForm.branchId === 'b1' ? `IND-KHI-${Math.floor(100 + Math.random() * 900)}` : `IND-LHR-${Math.floor(100 + Math.random() * 900)}`;
 
+    const selectedZone = zones.find(item => item.id === newEmpForm.zoneId);
+    const selectedUcTown = ucTowns.find(item => item.id === newEmpForm.ucTownId);
+    const selectedWageType = wageTypes.find(item => item.id === newEmpForm.wageTypeId);
     const newEmp: Employee = {
       id: 'emp-' + Date.now(),
       companyId: 'c1',
@@ -574,7 +639,8 @@ export function WebPortal({
       dateOfBirth: newEmpForm.dateOfBirth,
       dateOfJoining: todayStr,
       status: 'Active',
-      wageType: newEmpForm.wageType,
+      wageTypeId: selectedWageType?.id,
+      wageType: selectedWageType?.name ?? newEmpForm.wageType,
       basicSalary: Number(newEmpForm.basicSalary),
       providentFundOptIn: newEmpForm.providentFundOptIn,
       providentFundRate: Number(newEmpForm.providentFundRate),
@@ -589,8 +655,10 @@ export function WebPortal({
       pictureUrl: newEmpForm.pictureUrl,
       isZoneInCharge: newEmpForm.isZoneInCharge,
       zoneInChargeName: newEmpForm.isZoneInCharge ? undefined : newEmpForm.zoneInChargeName,
-      zone: newEmpForm.zone,
-      ucTown: newEmpForm.ucTown,
+      zoneId: selectedZone?.id,
+      ucTownId: selectedUcTown?.id,
+      zone: selectedZone?.name ?? newEmpForm.zone,
+      ucTown: selectedUcTown?.name ?? newEmpForm.ucTown,
       houseRentAllowance: newEmpForm.houseRentAllowance > 0 ? Number(newEmpForm.houseRentAllowance) : undefined,
       conveyanceAllowance: newEmpForm.conveyanceAllowance > 0 ? Number(newEmpForm.conveyanceAllowance) : undefined,
       medicalAllowance: newEmpForm.medicalAllowance > 0 ? Number(newEmpForm.medicalAllowance) : undefined,
@@ -613,6 +681,9 @@ export function WebPortal({
       branchId: 'b1',
       departmentId: 'd1',
       designationId: 'ds1',
+      zoneId: '',
+      ucTownId: '',
+      wageTypeId: activeWageTypes[0]?.id ?? '',
       wageType: 'Salaried',
       basicSalary: 85000,
       providentFundOptIn: true,
@@ -623,7 +694,7 @@ export function WebPortal({
       iban: 'PK42HABB0012345678901234',
       eobiNumber: '1090123000',
       socialSecurityNumber: 'SS-42-000111',
-      pictureUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=200',
+      pictureUrl: '',
       isZoneInCharge: false,
       zoneInChargeName: '',
       zone: 'East Zone',
@@ -652,9 +723,14 @@ export function WebPortal({
       alert('CNIC format must be valid (e.g. 42101-1234567-3)');
       return;
     }
+    const masterErrors = validateEmployeeMasterSelection(editEmpForm, { branches: companyBranches, departments: localDepartments, designations: localDesignations, zones, ucTowns, wageTypes });
+    if (masterErrors.length) { alert(`Please correct the employee assignment:\n• ${masterErrors.join('\n• ')}`); return; }
 
     if (!editingEmployee) return;
 
+    const selectedZone = zones.find(item => item.id === editEmpForm.zoneId);
+    const selectedUcTown = ucTowns.find(item => item.id === editEmpForm.ucTownId);
+    const selectedWageType = wageTypes.find(item => item.id === editEmpForm.wageTypeId);
     const updatedEmp: Employee = {
       ...editingEmployee,
       branchId: editEmpForm.branchId,
@@ -667,7 +743,8 @@ export function WebPortal({
       cnic: editEmpForm.cnic,
       gender: editEmpForm.gender,
       dateOfBirth: editEmpForm.dateOfBirth,
-      wageType: editEmpForm.wageType,
+      wageTypeId: selectedWageType?.id,
+      wageType: selectedWageType?.name ?? editEmpForm.wageType,
       basicSalary: Number(editEmpForm.basicSalary),
       providentFundOptIn: editEmpForm.providentFundOptIn,
       providentFundRate: Number(editEmpForm.providentFundRate),
@@ -681,8 +758,10 @@ export function WebPortal({
       pictureUrl: editEmpForm.pictureUrl,
       isZoneInCharge: editEmpForm.isZoneInCharge,
       zoneInChargeName: editEmpForm.isZoneInCharge ? undefined : editEmpForm.zoneInChargeName,
-      zone: editEmpForm.zone,
-      ucTown: editEmpForm.ucTown,
+      zoneId: selectedZone?.id,
+      ucTownId: selectedUcTown?.id,
+      zone: selectedZone?.name ?? editEmpForm.zone,
+      ucTown: selectedUcTown?.name ?? editEmpForm.ucTown,
       houseRentAllowance: editEmpForm.houseRentAllowance > 0 ? Number(editEmpForm.houseRentAllowance) : undefined,
       conveyanceAllowance: editEmpForm.conveyanceAllowance > 0 ? Number(editEmpForm.conveyanceAllowance) : undefined,
       medicalAllowance: editEmpForm.medicalAllowance > 0 ? Number(editEmpForm.medicalAllowance) : undefined,
@@ -698,6 +777,9 @@ export function WebPortal({
   };
 
   const openEditEmployee = (emp: Employee) => {
+    const resolvedZoneId = resolveRecordId(zones, emp.zoneId, emp.zone);
+    const resolvedUcTownId = resolveRecordId(ucTowns.filter(item => item.zoneId === resolvedZoneId), emp.ucTownId, emp.ucTown);
+    const resolvedWageTypeId = resolveRecordId(wageTypes, emp.wageTypeId, emp.wageType);
     setEditingEmployee(emp);
     setEditEmpForm({
       fullName: emp.fullName,
@@ -709,6 +791,9 @@ export function WebPortal({
       branchId: emp.branchId,
       departmentId: emp.departmentId,
       designationId: emp.designationId,
+      zoneId: resolvedZoneId,
+      ucTownId: resolvedUcTownId,
+      wageTypeId: resolvedWageTypeId,
       wageType: emp.wageType,
       basicSalary: emp.basicSalary,
       providentFundOptIn: emp.providentFundOptIn,
@@ -719,7 +804,7 @@ export function WebPortal({
       iban: emp.iban,
       eobiNumber: emp.eobiNumber || '',
       socialSecurityNumber: emp.socialSecurityNumber || '',
-      pictureUrl: emp.pictureUrl || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=200',
+      pictureUrl: emp.pictureUrl || '',
       isZoneInCharge: emp.isZoneInCharge || false,
       zoneInChargeName: emp.zoneInChargeName || '',
       zone: emp.zone || 'East Zone',
@@ -796,48 +881,36 @@ export function WebPortal({
   };
 
   const handleAddBranchChange = (branchId: string) => {
-    const depts = localDepartments.filter(d => d.branchId === branchId);
-    const firstDeptId = depts[0]?.id || '';
-    const desigs = localDesignations.filter(ds => ds.departmentId === firstDeptId);
-    const firstDesigId = desigs[0]?.id || '';
     setNewEmpForm(prev => ({
       ...prev,
       branchId,
-      departmentId: firstDeptId,
-      designationId: firstDesigId
+      departmentId: '',
+      designationId: ''
     }));
   };
 
   const handleAddDeptChange = (departmentId: string) => {
-    const desigs = localDesignations.filter(ds => ds.departmentId === departmentId);
-    const firstDesigId = desigs[0]?.id || '';
     setNewEmpForm(prev => ({
       ...prev,
       departmentId,
-      designationId: firstDesigId
+      designationId: ''
     }));
   };
 
   const handleEditBranchChange = (branchId: string) => {
-    const depts = localDepartments.filter(d => d.branchId === branchId);
-    const firstDeptId = depts[0]?.id || '';
-    const desigs = localDesignations.filter(ds => ds.departmentId === firstDeptId);
-    const firstDesigId = desigs[0]?.id || '';
     setEditEmpForm(prev => ({
       ...prev,
       branchId,
-      departmentId: firstDeptId,
-      designationId: firstDesigId
+      departmentId: '',
+      designationId: ''
     }));
   };
 
   const handleEditDeptChange = (departmentId: string) => {
-    const desigs = localDesignations.filter(ds => ds.departmentId === departmentId);
-    const firstDesigId = desigs[0]?.id || '';
     setEditEmpForm(prev => ({
       ...prev,
       departmentId,
-      designationId: firstDesigId
+      designationId: ''
     }));
   };
 
@@ -851,7 +924,7 @@ export function WebPortal({
     
     // Calculate final settlement amount
     const completedYears = 3; // mock completed scale
-    const baseBasic = showOffboardModal.wageType === 'Daily Wager' ? showOffboardModal.basicSalary * 26 : showOffboardModal.basicSalary;
+    const baseBasic = resolveWageBasis(showOffboardModal, wageTypes) === 'Daily' ? showOffboardModal.basicSalary * 26 : showOffboardModal.basicSalary;
     const gratuityCalculated = showOffboardModal.gratuityOptIn 
       ? Math.round((baseBasic / 30) * statConfig.gratuityRateDaysPerYear * completedYears)
       : 0;
@@ -867,298 +940,233 @@ export function WebPortal({
     setShowOffboardModal(null);
   };
 
+  const openAddEmployee = () => {
+    const branchId = companyBranches.find(item => item.id === newEmpForm.branchId)?.id ?? companyBranches[0]?.id ?? '';
+    const availableDepartments = localDepartments.filter(item => item.branchId === branchId);
+    const departmentId = availableDepartments.find(item => item.id === newEmpForm.departmentId)?.id ?? availableDepartments[0]?.id ?? '';
+    const availableDesignations = localDesignations.filter(item => item.departmentId === departmentId);
+    const designationId = availableDesignations.find(item => item.id === newEmpForm.designationId)?.id ?? availableDesignations[0]?.id ?? '';
+    const wageTypeId = activeWageTypes.find(item => item.id === newEmpForm.wageTypeId)?.id ?? activeWageTypes[0]?.id ?? '';
+    setNewEmpForm(previous => ({ ...previous, branchId, departmentId, designationId, wageTypeId }));
+    setShowAddEmpModal(true);
+  };
+
+  const navigateFromSidebar = (tab: PortalTab, group?: NavGroupKey) => {
+    if (group) setExpandedNavGroup(group);
+    setActiveTab(tab);
+    closeSidebar();
+  };
+
+  const navGroups: Array<{
+    key: NavGroupKey;
+    label: string;
+    icon: React.ElementType;
+    items: Array<{ tab: PortalTab; label: string; icon: React.ElementType; badge?: React.ReactNode }>;
+  }> = [
+    {
+      key: 'people', label: 'People', icon: Users,
+      items: [
+        { tab: 'employees', label: 'Employee Directory', icon: Users },
+        { tab: 'recruitment', label: 'Recruitment', icon: Briefcase, badge: jobPostings.filter(j => j.status === 'Open').length > 0 ? `${jobPostings.filter(j => j.status === 'Open').length} open` : undefined },
+        { tab: 'performance', label: 'Performance', icon: Star, badge: performanceReviews.length },
+        { tab: 'assets', label: 'Asset Management', icon: Package, badge: companyAssets.length }
+      ]
+    },
+    {
+      key: 'time', label: 'Time & Attendance', icon: CalendarDays,
+      items: [
+        { tab: 'attendance', label: 'Attendance Logs', icon: Calendar, badge: pendingRegularizationsCount || undefined },
+        { tab: 'leaves', label: 'Leave Management', icon: FileText, badge: pendingLeavesCount || undefined },
+        { tab: 'holidays', label: 'Holiday Calendar', icon: CalendarDays, badge: holidays.length },
+        { tab: 'biometric', label: 'Biometric Enrollment', icon: Fingerprint, badge: 'Face + Fingerprint' }
+      ]
+    },
+    {
+      key: 'payroll', label: 'Payroll & Benefits', icon: CreditCard,
+      items: [
+        { tab: 'payroll', label: 'Payroll Processing', icon: CreditCard },
+        { tab: 'revisions', label: 'Salary Revisions', icon: TrendingUp },
+        { tab: 'loans', label: 'Loans & Advances', icon: Banknote, badge: loanAdvances.filter(l => l.status === 'Pending').length > 0 ? `${loanAdvances.filter(l => l.status === 'Pending').length} pending` : undefined },
+        { tab: 'gratuity', label: 'Gratuity & Settlement', icon: Calculator },
+        { tab: 'settings', label: 'Statutory Config (FBR)', icon: Sliders }
+      ]
+    },
+    {
+      key: 'system', label: 'System', icon: ShieldCheck,
+      items: [
+        { tab: 'company-setup', label: 'Company Setup', icon: Building },
+        { tab: 'master-data', label: 'Master Data', icon: ListTree },
+        { tab: 'access', label: 'Access Control', icon: ShieldCheck },
+        { tab: 'maintenance', label: 'Data Backup', icon: Database },
+        { tab: 'notifications', label: 'Notifications', icon: Bell, badge: notifications.filter(n => !n.readBy.includes(loggedInUser?.employeeId || loggedInUser?.username || '')).length || undefined },
+        { tab: 'help', label: 'User Guide', icon: BookOpen, badge: 'NEW' }
+      ]
+    }
+  ];
+
   return (
     <div className="flex flex-col h-full bg-slate-50 text-slate-800 font-sans" id="web-portal-root">
       
       {/* Upper Navigation Header */}
-      <header className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between" id="web-hdr">
-        <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 rounded-lg bg-emerald-600 flex items-center justify-center text-white font-bold text-xl shadow-md shadow-emerald-200">
-            B
+      <header className="bg-white border-b border-slate-200 px-3 sm:px-6 py-3 flex items-center justify-between gap-2 flex-shrink-0" id="web-hdr">
+        {/* Hamburger — mobile only */}
+        <button
+          className="md:hidden p-2 rounded-lg hover:bg-slate-100 text-slate-600 flex-shrink-0"
+          onClick={() => setSidebarOpen(v => !v)}
+          aria-label="Toggle menu"
+        >
+          <Menu className="w-5 h-5" />
+        </button>
+
+        {/* Brand */}
+        <div className="flex items-center space-x-2 sm:space-x-3 min-w-0">
+          <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-emerald-600 flex items-center justify-center text-white font-bold text-base sm:text-xl shadow-md shadow-emerald-200 flex-shrink-0">
+            {companyDisplayName.charAt(0).toUpperCase()}
           </div>
-          <div>
-            <h1 className="font-bold text-lg text-slate-900 leading-tight">Bin Ishaq HR &amp; Payroll</h1>
-            <p className="text-xs text-slate-500 font-mono">Company ID: IND-KHI-456 • Pakistan Statutory Portal</p>
+          <div className="min-w-0">
+            <h1 className="font-bold text-sm sm:text-lg text-slate-900 leading-tight truncate">{companyDisplayName} HR &amp; Payroll</h1>
+            <p className="text-xs text-slate-500 font-mono hidden sm:block">Company ID: {companyCode} • Pakistan Statutory Portal</p>
           </div>
         </div>
 
-        <div className="flex items-center space-x-4">
-          {/* Active user session profile info and Logout button */}
-          <div className="flex items-center space-x-3 bg-slate-100 px-3.5 py-1.5 rounded-xl border border-slate-200 select-none">
-            <div className="flex flex-col text-left">
-              <span className="text-[9px] font-bold uppercase text-slate-400 font-sans tracking-wide">
-                Signed in as
-              </span>
-              <span className="text-xs font-extrabold text-slate-800 font-sans">
-                {currentUserAccount.username}
-              </span>
-              <span className="text-[9px] text-slate-500 italic">
-                {currentUserRole?.name || (isRoleResolving ? 'Loading role...' : 'No Role')}
-              </span>
-            </div>
-            <button 
-              onClick={onLogout}
-              className="bg-slate-200 hover:bg-rose-50 text-slate-600 hover:text-rose-600 font-bold px-2.5 py-1 rounded-md text-[10px] transition uppercase tracking-wider border border-slate-300 hover:border-rose-200 cursor-pointer"
-            >
-              Logout
-            </button>
-          </div>
-
-          <div className="text-right">
+        {/* Right actions */}
+        <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+          {/* Sync badge — hidden on mobile */}
+          <div className="hidden lg:block text-right">
             <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border ${syncBadgeClass}`}>
               ● {syncLabel}
             </span>
             <div className="text-[10px] text-slate-400 font-mono mt-0.5">{firestoreSyncStatus.message}</div>
           </div>
-          
+
+          {/* User chip */}
+          <div className="flex items-center gap-2 bg-slate-100 px-2 sm:px-3.5 py-1.5 rounded-xl border border-slate-200 select-none">
+            <div className="flex flex-col text-left hidden sm:flex">
+              <span className="text-[9px] font-bold uppercase text-slate-400 tracking-wide">Signed in as</span>
+              <span className="text-xs font-extrabold text-slate-800">{currentUserAccount.username}</span>
+              <span className="text-[9px] text-slate-500 italic">{currentUserRole?.name || (isRoleResolving ? 'Loading…' : 'No Role')}</span>
+            </div>
+            <span className="text-xs font-extrabold text-slate-800 sm:hidden">{currentUserAccount.username}</span>
+            <button
+              onClick={onLogout}
+              className="bg-slate-200 hover:bg-rose-50 text-slate-600 hover:text-rose-600 font-bold px-2 sm:px-2.5 py-1 rounded-md text-[10px] transition uppercase tracking-wider border border-slate-300 hover:border-rose-200 cursor-pointer whitespace-nowrap"
+            >
+              Logout
+            </button>
+          </div>
+
+          {/* Onboard — icon-only on mobile */}
           {userPermissions.includes('manage_employees') && (
-            <button 
-              onClick={() => setShowAddEmpModal(true)}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-sm px-4 py-2 rounded-lg shadow-sm transition flex items-center space-x-1"
+            <button
+              onClick={openAddEmployee}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-sm px-2 sm:px-4 py-2 rounded-lg shadow-sm transition flex items-center space-x-1"
             >
               <UserPlus className="w-4 h-4" />
-              <span>Onboard Staff</span>
+              <span className="hidden sm:inline">Onboard Staff</span>
             </button>
           )}
         </div>
       </header>
 
       {/* Main Framework Divider */}
-      <div className="flex flex-1 overflow-hidden" id="web-main-container">
-        
+      <div className="flex flex-1 overflow-hidden relative" id="web-main-container">
+
+        {/* Mobile backdrop */}
+        {sidebarOpen && (
+          <div
+            className="fixed inset-0 bg-black/50 z-40 md:hidden"
+            onClick={closeSidebar}
+          />
+        )}
+
         {/* Sidebar Nav */}
-        <nav className="w-64 bg-slate-900 text-slate-300 flex flex-col p-4 border-r border-slate-800" id="web-sidebar">
-          <div className="space-y-1 flex-1 overflow-y-auto">
-            {userPermissions.includes('view_dashboard') && (
-              <button 
-                onClick={() => setActiveTab('dashboard')}
-                className={`w-full text-left px-3.5 py-3 rounded-lg text-sm font-medium flex items-center space-x-3 transition ${activeTab === 'dashboard' ? 'bg-emerald-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
+        <nav
+          className={`fixed inset-y-0 left-0 z-50 w-72 bg-slate-900 text-slate-300 flex flex-col p-4 border-r border-slate-800 transition-transform duration-300 ease-in-out
+            md:static md:z-auto md:w-52 xl:w-64 md:p-3 xl:p-4 md:flex-shrink-0 md:translate-x-0
+            ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}
+          id="web-sidebar"
+        >
+          {/* Close button — mobile only */}
+          <div className="flex items-center justify-between mb-3 md:hidden">
+            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Menu</span>
+            <button onClick={closeSidebar} className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto pr-1 space-y-2" aria-label="HR portal navigation">
+            {hasPermission('dashboard') && (
+              <button
+                type="button"
+                onClick={() => navigateFromSidebar('dashboard')}
+                aria-current={activeTab === 'dashboard' ? 'page' : undefined}
+                className={`w-full text-left px-3 py-2.5 rounded-lg text-sm font-semibold flex items-center gap-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 ${activeTab === 'dashboard' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
               >
-                <Layers className="w-4 h-4" />
+                <Layers className="w-4 h-4 shrink-0" />
                 <span>Operations Dashboard</span>
               </button>
             )}
 
-            {userPermissions.includes('manage_employees') && (
-              <button 
-                onClick={() => setActiveTab('employees')}
-                className={`w-full text-left px-3.5 py-3 rounded-lg text-sm font-medium flex items-center space-x-3 transition ${activeTab === 'employees' ? 'bg-emerald-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
-              >
-                <Users className="w-4 h-4" />
-                <span>Employee Directory</span>
-              </button>
-            )}
+            <div className="border-t border-slate-800" />
 
-            {userPermissions.includes('manage_attendance') && (
-              <button 
-                onClick={() => setActiveTab('attendance')}
-                className={`w-full text-left px-3.5 py-3 rounded-lg text-sm font-medium flex items-center space-x-3 transition ${activeTab === 'attendance' ? 'bg-emerald-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
-              >
-                <Calendar className="w-4 h-4" />
-                <span className="flex-1">Attendance Logs</span>
-                {pendingRegularizationsCount > 0 && (
-                  <span className="bg-amber-500 text-slate-905 font-bold text-[10px] px-1.5 py-0.5 rounded-full">
-                    {pendingRegularizationsCount}
-                  </span>
-                )}
-              </button>
-            )}
+            {navGroups.map(group => {
+              const permittedItems = group.items.filter(item => hasPermission(item.tab));
+              if (permittedItems.length === 0) return null;
+              const isExpanded = expandedNavGroup === group.key;
+              const containsActiveTab = permittedItems.some(item => item.tab === activeTab);
+              const GroupIcon = group.icon;
+              const panelId = `sidebar-group-${group.key}`;
 
-            {userPermissions.includes('manage_leaves') && (
-              <button 
-                onClick={() => setActiveTab('leaves')}
-                className={`w-full text-left px-3.5 py-3 rounded-lg text-sm font-medium flex items-center space-x-3 transition ${activeTab === 'leaves' ? 'bg-emerald-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
-              >
-                <FileText className="w-4 h-4" />
-                <span className="flex-1">Leave Management</span>
-                {pendingLeavesCount > 0 && (
-                  <span className="bg-amber-400 text-slate-950 font-semibold text-[10px] px-2 py-0.5 rounded-full">
-                    {pendingLeavesCount}
-                  </span>
-                )}
-              </button>
-            )}
+              return (
+                <section key={group.key} aria-labelledby={`${panelId}-toggle`}>
+                  <button
+                    id={`${panelId}-toggle`}
+                    type="button"
+                    aria-expanded={isExpanded}
+                    aria-controls={panelId}
+                    onClick={() => setExpandedNavGroup(current => current === group.key ? null : group.key)}
+                    className={`w-full min-h-10 px-3 py-2 rounded-lg flex items-center gap-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 ${containsActiveTab ? 'bg-emerald-500/10 text-emerald-300' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'}`}
+                  >
+                    <GroupIcon className="w-4 h-4 shrink-0" />
+                    <span className="flex-1 text-[11px] font-bold uppercase tracking-[0.12em]">{group.label}</span>
+                    <span className="sr-only">{isExpanded ? 'Collapse' : 'Expand'} {group.label}</span>
+                    <ChevronDown className={`w-3.5 h-3.5 shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`} aria-hidden="true" />
+                  </button>
 
-            {userPermissions.includes('manage_payroll') && (
-              <button 
-                onClick={() => setActiveTab('payroll')}
-                className={`w-full text-left px-3.5 py-3 rounded-lg text-sm font-medium flex items-center space-x-3 transition ${activeTab === 'payroll' ? 'bg-emerald-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
-              >
-                <CreditCard className="w-4 h-4" />
-                <span>Payroll Processing</span>
-              </button>
-            )}
-
-            {userPermissions.includes('manage_settings') && (
-              <button 
-                onClick={() => setActiveTab('settings')}
-                className={`w-full text-left px-3.5 py-3 rounded-lg text-sm font-medium flex items-center space-x-3 transition ${activeTab === 'settings' ? 'bg-emerald-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
-              >
-                <Sliders className="w-4 h-4" />
-                <span>Statutory config (FBR)</span>
-              </button>
-            )}
-
-            {userPermissions.includes('manage_access') && (
-              <button
-                onClick={() => setActiveTab('access')}
-                className={`w-full text-left px-3.5 py-3 rounded-lg text-sm font-medium flex items-center space-x-3 transition ${activeTab === 'access' ? 'bg-emerald-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
-              >
-                <ShieldCheck className="w-4 h-4" />
-                <span>Access Control</span>
-              </button>
-            )}
-
-            {hasPermission('maintenance') && (
-              <button
-                onClick={() => setActiveTab('maintenance')}
-                className={`w-full text-left px-3.5 py-3 rounded-lg text-sm font-medium flex items-center space-x-3 transition ${activeTab === 'maintenance' ? 'bg-emerald-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
-              >
-                <Database className="w-4 h-4" />
-                <span>Data Backup</span>
-              </button>
-            )}
-
-            {hasPermission('biometric') && (
-              <button
-                onClick={() => setActiveTab('biometric')}
-                className={`w-full text-left px-3.5 py-3 rounded-lg text-sm font-medium flex items-center space-x-3 transition ${activeTab === 'biometric' ? 'bg-emerald-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
-              >
-                <Fingerprint className="w-4 h-4" />
-                <span>Biometric Enrollment</span>
-                <span className="ml-auto text-[10px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded-md font-bold">Face + Fingerprint</span>
-              </button>
-            )}
-
-            <div className="border-t border-slate-700 my-1 pt-1">
-              <p className="text-[10px] text-slate-500 uppercase tracking-widest px-3 pb-1">Advanced</p>
-            </div>
-
-            {hasPermission('holidays') && (
-              <button
-                onClick={() => setActiveTab('holidays')}
-                className={`w-full text-left px-3.5 py-3 rounded-lg text-sm font-medium flex items-center space-x-3 transition ${activeTab === 'holidays' ? 'bg-emerald-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
-              >
-                <CalendarDays className="w-4 h-4" />
-                <span>Holiday Calendar</span>
-                <span className="ml-auto text-[10px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded-md font-bold">{holidays.length}</span>
-              </button>
-            )}
-
-            {hasPermission('loans') && (
-              <button
-                onClick={() => setActiveTab('loans')}
-                className={`w-full text-left px-3.5 py-3 rounded-lg text-sm font-medium flex items-center space-x-3 transition ${activeTab === 'loans' ? 'bg-emerald-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
-              >
-                <Banknote className="w-4 h-4" />
-                <span>Loans & Advances</span>
-                {loanAdvances.filter(l => l.status === 'Pending').length > 0 && (
-                  <span className="ml-auto text-[10px] bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded-md font-bold">
-                    {loanAdvances.filter(l => l.status === 'Pending').length} pending
-                  </span>
-                )}
-              </button>
-            )}
-
-            {hasPermission('revisions') && (
-              <button
-                onClick={() => setActiveTab('revisions')}
-                className={`w-full text-left px-3.5 py-3 rounded-lg text-sm font-medium flex items-center space-x-3 transition ${activeTab === 'revisions' ? 'bg-emerald-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
-              >
-                <TrendingUp className="w-4 h-4" />
-                <span>Salary Revisions</span>
-              </button>
-            )}
-
-            <div className="border-t border-slate-700 my-1 pt-1">
-              <p className="text-[10px] text-slate-500 uppercase tracking-widest px-3 pb-1">People Ops</p>
-            </div>
-
-            {hasPermission('performance') && (
-              <button
-                onClick={() => setActiveTab('performance')}
-                className={`w-full text-left px-3.5 py-3 rounded-lg text-sm font-medium flex items-center space-x-3 transition ${activeTab === 'performance' ? 'bg-emerald-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
-              >
-                <Star className="w-4 h-4" />
-                <span>Performance</span>
-                <span className="ml-auto text-[10px] bg-slate-700 text-slate-400 px-1.5 py-0.5 rounded-md font-bold">{performanceReviews.length}</span>
-              </button>
-            )}
-
-            {hasPermission('assets') && (
-              <button
-                onClick={() => setActiveTab('assets')}
-                className={`w-full text-left px-3.5 py-3 rounded-lg text-sm font-medium flex items-center space-x-3 transition ${activeTab === 'assets' ? 'bg-emerald-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
-              >
-                <Package className="w-4 h-4" />
-                <span>Asset Management</span>
-                <span className="ml-auto text-[10px] bg-slate-700 text-slate-400 px-1.5 py-0.5 rounded-md font-bold">{companyAssets.length}</span>
-              </button>
-            )}
-
-            {hasPermission('recruitment') && (
-              <button
-                onClick={() => setActiveTab('recruitment')}
-                className={`w-full text-left px-3.5 py-3 rounded-lg text-sm font-medium flex items-center space-x-3 transition ${activeTab === 'recruitment' ? 'bg-emerald-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
-              >
-                <Briefcase className="w-4 h-4" />
-                <span>Recruitment</span>
-                {jobPostings.filter(j => j.status === 'Open').length > 0 && (
-                  <span className="ml-auto text-[10px] bg-violet-500/20 text-violet-400 px-1.5 py-0.5 rounded-md font-bold">
-                    {jobPostings.filter(j => j.status === 'Open').length} open
-                  </span>
-                )}
-              </button>
-            )}
-
-            {hasPermission('gratuity') && (
-              <button
-                onClick={() => setActiveTab('gratuity')}
-                className={`w-full text-left px-3.5 py-3 rounded-lg text-sm font-medium flex items-center space-x-3 transition ${activeTab === 'gratuity' ? 'bg-emerald-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
-              >
-                <Calculator className="w-4 h-4" />
-                <span>Gratuity & Settlement</span>
-              </button>
-            )}
-
-            {hasPermission('notifications') && (
-              <button
-                onClick={() => setActiveTab('notifications')}
-                className={`w-full text-left px-3.5 py-3 rounded-lg text-sm font-medium flex items-center space-x-3 transition ${activeTab === 'notifications' ? 'bg-emerald-600 text-white' : 'hover:bg-slate-800 hover:text-white'}`}
-              >
-                <Bell className="w-4 h-4" />
-                <span>Notifications</span>
-                {notifications.filter(n => !n.readBy.includes(loggedInUser?.employeeId || loggedInUser?.username || '')).length > 0 && (
-                  <span className="ml-auto text-[10px] bg-rose-500/20 text-rose-400 px-1.5 py-0.5 rounded-md font-bold">
-                    {notifications.filter(n => !n.readBy.includes(loggedInUser?.employeeId || loggedInUser?.username || '')).length}
-                  </span>
-                )}
-              </button>
-            )}
+                  {isExpanded && (
+                    <div id={panelId} className="relative ml-5 mt-1 space-y-0.5 border-l border-slate-700/80 pl-2">
+                      {permittedItems.map(item => {
+                        const ItemIcon = item.icon;
+                        const isActive = item.tab === activeTab;
+                        return (
+                          <button
+                            key={item.tab}
+                            type="button"
+                            onClick={() => navigateFromSidebar(item.tab, group.key)}
+                            aria-current={isActive ? 'page' : undefined}
+                            className={`group/item w-full min-h-10 text-left px-2.5 py-2 rounded-md text-[12px] font-medium flex items-center gap-2.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 ${isActive ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
+                          >
+                            <ItemIcon className={`w-3.5 h-3.5 shrink-0 ${isActive ? 'text-emerald-100' : 'text-slate-500 group-hover/item:text-slate-300'}`} />
+                            <span className="flex-1 leading-tight">{item.label}</span>
+                            {item.badge !== undefined && (
+                              <span className={`shrink-0 max-w-24 truncate rounded px-1.5 py-0.5 text-[9px] font-bold leading-tight ${isActive ? 'bg-white/15 text-white' : item.tab === 'attendance' || item.tab === 'leaves' || item.tab === 'loans' ? 'bg-amber-500/15 text-amber-300' : item.tab === 'notifications' ? 'bg-rose-500/15 text-rose-300' : 'bg-slate-700 text-slate-300'}`}>
+                                {item.badge}
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </section>
+              );
+            })}
           </div>
 
-          <div className="bg-slate-850 p-3 rounded-lg space-y-1 border border-slate-800" id="stat-info-pkt">
-            <h4 className="text-xs font-semibold text-white uppercase tracking-wider mb-2 flex items-center">
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 mr-1" />
-              Statutory Lock
-            </h4>
-            <div className="flex justify-between text-[11px] font-mono">
-              <span className="text-slate-400">FBR Minimum:</span>
-              <span className="text-emerald-300 font-bold">PKR {statConfig.minimumWage.toLocaleString()}</span>
-            </div>
-            <div className="flex justify-between text-[11px] font-mono">
-              <span className="text-slate-400">EOBI Employee:</span>
-              <span className="text-slate-200">1% (FBR Base)</span>
-            </div>
-            <div className="flex justify-between text-[11px] font-mono">
-              <span className="text-slate-400">Prov. Security:</span>
-              <span className="text-slate-200">6% Employer</span>
-            </div>
-          </div>
+
         </nav>
 
         {/* Dynamic Display Area */}
-        <main className="flex-1 overflow-y-auto pt-3 px-6 pb-6 bg-slate-50" id="web-main-panel">
+        <main className="flex-1 overflow-y-auto overflow-x-hidden pt-3 px-3 sm:px-4 xl:px-6 pb-6 bg-slate-50 min-w-0 w-full" id="web-main-panel">
           
           {isRoleResolving ? (
             <div className="flex flex-col items-center justify-center p-12 bg-white rounded-2xl border border-slate-200 shadow-md text-center space-y-4 max-w-lg mx-auto mt-12 select-none">
@@ -1197,7 +1205,7 @@ export function WebPortal({
                     <div className="space-y-0">
                       <h2 className="text-sm font-bold tracking-tight">Assalam-o-Alaikum!</h2>
                       <p className="text-emerald-100 text-[10px] max-w-xl">
-                        Welcome to the Bin Ishaq Logistics corporate portal. Today is <strong>June 17, 2026</strong>.
+                        Welcome to the {companyDisplayName} corporate portal. Today is <strong>June 17, 2026</strong>.
                       </p>
                     </div>
                     <div className="mt-1.5 md:mt-0 flex space-x-1.5 bg-emerald-900/40 py-0.5 px-2 rounded border border-emerald-500/20 font-mono text-[10px]">
@@ -1290,13 +1298,6 @@ export function WebPortal({
                         })}
                       </div>
 
-                      {/* Quick System Information Alert */}
-                      <div className="bg-blue-50 border-l-4 border-blue-500 p-4 rounded-r-lg flex items-start space-x-3 text-xs text-blue-800">
-                        <Info className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                        <p>
-                          <strong>Pakistan Compliance Guideline:</strong> Regional Shops &amp; Establishment Ordinances require varying work hours, casual leave allowances and overtime multipliers. Karachi office tracks Sindh laws, and Lahore tracks Punjab PESSI wage ceiling benchmarks.
-                        </p>
-                      </div>
                     </div>
 
                     <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
@@ -1354,11 +1355,11 @@ export function WebPortal({
                   <div className="flex flex-col md:flex-row justify-between items-start md:items-center space-y-2 md:space-y-0">
                     <div>
                       <h2 className="text-xl font-bold text-slate-900">Central Employee Master</h2>
-                      <p className="text-xs text-slate-500">Total {employees.length} records mapped across Bin Ishaq</p>
+                      <p className="text-xs text-slate-500">Total {employees.length} records mapped across {companyDisplayName}</p>
                     </div>
                     <div className="flex space-x-2">
                       <button 
-                        onClick={() => setShowAddEmpModal(true)}
+                        onClick={openAddEmployee}
                         className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3 py-2 rounded-lg flex items-center space-x-1.5 shadow"
                       >
                         <UserPlus className="w-4 h-4" />
@@ -1409,7 +1410,7 @@ export function WebPortal({
                                   <td className="px-6 py-4 whitespace-nowrap">
                                     <div className="flex items-center space-x-3">
                                       <img 
-                                        src={emp.pictureUrl || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=200'} 
+                                        src={empAvatarUrl(emp)}
                                         alt={emp.fullName} 
                                         className="w-9 h-9 rounded-full object-cover border border-slate-200" 
                                       />
@@ -1439,7 +1440,7 @@ export function WebPortal({
                                       PKR {emp.basicSalary.toLocaleString()}
                                     </span>
                                     <span className="text-[10px] text-slate-400 block font-sans">
-                                      {emp.wageType} {emp.providentFundOptIn ? '+ 5% PF' : ''}
+                                      {resolveWageTypeName(emp, wageTypes)} {emp.providentFundOptIn ? '+ 5% PF' : ''}
                                     </span>
                                   </td>
                                   <td className="px-6 py-4 whitespace-nowrap text-right space-x-2">
@@ -1505,21 +1506,21 @@ export function WebPortal({
                         <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
                           {(() => {
                             const uniqueGroups = Array.from(new Set(employees.map(e => {
-                              if (reportGrouping === 'uc') return e.ucTown || 'Unassigned';
-                              if (reportGrouping === 'zone') return e.zone || 'Unassigned';
+                              if (reportGrouping === 'uc') return resolveUcTownName(e, ucTowns) || 'Unassigned';
+                              if (reportGrouping === 'zone') return resolveZoneName(e, zones) || 'Unassigned';
                               return e.zoneInChargeName || (e.isZoneInCharge ? 'Zone In Charge (Self)' : 'Unassigned');
                             })));
 
                             return uniqueGroups.map(groupName => {
                               const matchingEmps = employees.filter(e => {
-                                if (reportGrouping === 'uc') return (e.ucTown || 'Unassigned') === groupName;
-                                if (reportGrouping === 'zone') return (e.zone || 'Unassigned') === groupName;
+                                if (reportGrouping === 'uc') return (resolveUcTownName(e, ucTowns) || 'Unassigned') === groupName;
+                                if (reportGrouping === 'zone') return (resolveZoneName(e, zones) || 'Unassigned') === groupName;
                                 const supervisor = e.zoneInChargeName || (e.isZoneInCharge ? 'Zone In Charge (Self)' : 'Unassigned');
                                 return supervisor === groupName;
                               });
 
                               const totalSalary = matchingEmps.reduce((sum, e) => {
-                                const wage = e.wageType === 'Daily Wager' ? e.basicSalary * 26 : e.basicSalary;
+                                const wage = resolveWageBasis(e, wageTypes) === 'Daily' ? e.basicSalary * 26 : e.basicSalary;
                                 return sum + wage;
                               }, 0);
 
@@ -1560,8 +1561,8 @@ export function WebPortal({
                             </h3>
                             <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold px-2 py-0.5 rounded text-[10px] uppercase font-sans">
                               {employees.filter(e => {
-                                if (reportGrouping === 'uc') return (e.ucTown || 'Unassigned') === selectedGroup;
-                                if (reportGrouping === 'zone') return (e.zone || 'Unassigned') === selectedGroup;
+                                if (reportGrouping === 'uc') return (resolveUcTownName(e, ucTowns) || 'Unassigned') === selectedGroup;
+                                if (reportGrouping === 'zone') return (resolveZoneName(e, zones) || 'Unassigned') === selectedGroup;
                                 const supervisor = e.zoneInChargeName || (e.isZoneInCharge ? 'Zone In Charge (Self)' : 'Unassigned');
                                 return supervisor === selectedGroup;
                               }).length} Staff Members
@@ -1581,14 +1582,14 @@ export function WebPortal({
                               </thead>
                               <tbody className="divide-y divide-slate-200 text-slate-700">
                                 {employees.filter(e => {
-                                  if (reportGrouping === 'uc') return (e.ucTown || 'Unassigned') === selectedGroup;
-                                  if (reportGrouping === 'zone') return (e.zone || 'Unassigned') === selectedGroup;
+                                  if (reportGrouping === 'uc') return (resolveUcTownName(e, ucTowns) || 'Unassigned') === selectedGroup;
+                                  if (reportGrouping === 'zone') return (resolveZoneName(e, zones) || 'Unassigned') === selectedGroup;
                                   const supervisor = e.zoneInChargeName || (e.isZoneInCharge ? 'Zone In Charge (Self)' : 'Unassigned');
                                   return supervisor === selectedGroup;
                                 }).map(emp => (
                                   <tr key={emp.id} className="hover:bg-slate-50 transition">
                                     <td className="px-3 py-2.5 font-sans font-medium text-slate-850 flex items-center space-x-2">
-                                      <img src={emp.pictureUrl || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=200'} alt="" className="w-6 h-6 rounded-full object-cover border" />
+                                      <img src={empAvatarUrl(emp)}alt="" className="w-6 h-6 rounded-full object-cover border" />
                                       <span>{emp.fullName}</span>
                                     </td>
                                     <td className="px-3 py-2.5 font-mono">{emp.employeeCode}</td>
@@ -1726,7 +1727,7 @@ export function WebPortal({
                                   <tr key={att.id} className="hover:bg-slate-50/50">
                                     <td className="px-6 py-3 whitespace-nowrap">
                                       <div className="flex items-center space-x-2">
-                                        <img src={emp?.pictureUrl || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=200'} alt="" className="w-6 h-6 rounded-full object-cover border" />
+                                        <img src={empAvatarUrl(emp)} alt="" className="w-6 h-6 rounded-full object-cover border" />
                                         <div>
                                           <div className="font-semibold text-slate-800 text-xs">{emp?.fullName || 'Wager employee'}</div>
                                           <div className="text-[10px] text-slate-400 font-mono">{emp?.fullName ? emp.employeeCode : 'SYSTEM'}</div>
@@ -1788,15 +1789,44 @@ export function WebPortal({
 
                         {/* Parameter selections depending on period */}
                         {attPeriodType === 'daily' && (
-                          <div className="flex items-center space-x-2 text-xs">
-                            <span className="text-slate-500 font-medium">Select Register Date:</span>
-                            <input
-                              type="date"
-                              aria-label="Select Attendance Register Date"
-                              value={selectedAttDate}
-                              onChange={(e) => setSelectedAttDate(e.target.value)}
-                              className="p-1.5 border rounded font-mono text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                            />
+                          <div className="grid w-full grid-cols-1 gap-3 text-xs sm:grid-cols-2 md:w-auto">
+                            <label className="flex flex-col gap-1.5 text-slate-500 font-medium">
+                              <span>Select Register Date</span>
+                              <input
+                                type="date"
+                                aria-label="Select Attendance Register Date"
+                                value={selectedAttDate}
+                                onChange={(e) => setSelectedAttDate(e.target.value)}
+                                className="min-h-9 rounded border border-slate-300 bg-white px-2 py-1.5 font-mono text-slate-800 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                              />
+                            </label>
+                            <label className="flex flex-col gap-1.5 text-slate-500 font-medium">
+                              <span className="flex items-center justify-between gap-4">
+                                <span>Audit Scope</span>
+                                <span className={`text-[9px] font-bold uppercase tracking-wider ${selectedAttEmployeeId === 'all' ? 'text-slate-400' : 'text-emerald-700'}`}>
+                                  {selectedAttEmployeeId === 'all' ? `${employees.length} employees` : 'Focused view'}
+                                </span>
+                              </span>
+                              <span className="relative block">
+                                <Users aria-hidden="true" className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-emerald-600" />
+                                <select
+                                  aria-label="Filter Daily Attendance Register by Employee"
+                                  value={selectedAttEmployeeId}
+                                  onChange={(e) => setSelectedAttEmployeeId(e.target.value)}
+                                  className="min-h-9 w-full min-w-64 rounded border border-slate-300 bg-white py-1.5 pl-8 pr-8 text-slate-800 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                                >
+                                  <option value="all">All Employees</option>
+                                  {selectedAttEmployeeId !== 'all' && !employees.some(emp => emp.id === selectedAttEmployeeId) && (
+                                    <option value={selectedAttEmployeeId}>Selected employee is no longer available</option>
+                                  )}
+                                  {[...employees]
+                                    .sort((a, b) => a.fullName.localeCompare(b.fullName, undefined, { sensitivity: 'base' }))
+                                    .map(emp => (
+                                      <option key={emp.id} value={emp.id}>{emp.fullName} ({emp.employeeCode})</option>
+                                    ))}
+                                </select>
+                              </span>
+                            </label>
                           </div>
                         )}
                       </div>
@@ -1806,15 +1836,19 @@ export function WebPortal({
                         <div className="space-y-4">
                           {/* Metrics summary */}
                           {(() => {
-                            const dayPunches = attendances.filter(a => a.date === selectedAttDate);
+                            const scopedEmployees = selectedAttEmployeeId === 'all'
+                              ? employees
+                              : employees.filter(emp => emp.id === selectedAttEmployeeId);
+                            const scopedEmployeeIds = new Set(scopedEmployees.map(emp => emp.id));
+                            const dayPunches = attendances.filter(a => a.date === selectedAttDate && scopedEmployeeIds.has(a.employeeId));
                             const pCount = dayPunches.filter(a => a.status === 'Present').length;
                             const lCount = dayPunches.filter(a => a.status === 'Late').length;
                             const hdCount = dayPunches.filter(a => a.status === 'Half Day').length;
                             const olCount = dayPunches.filter(a => a.status === 'On Leave').length;
-                            const aCount = employees.length - pCount - lCount - hdCount - olCount;
+                            const aCount = scopedEmployees.length - pCount - lCount - hdCount - olCount;
 
                             return (
-                              <div className="grid grid-cols-5 gap-4">
+                              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5 lg:gap-4">
                                 <div className="bg-white p-4 rounded-xl border shadow-sm text-center">
                                   <div className="text-2xl font-bold text-emerald-600">{pCount}</div>
                                   <div className="text-[10px] uppercase font-bold tracking-wider text-slate-400 mt-1">Present</div>
@@ -1841,30 +1875,52 @@ export function WebPortal({
 
                           {/* Detail table */}
                           <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-                            <table className="min-w-full text-xs text-left">
+                            <div className="overflow-x-auto">
+                            <table className="min-w-[900px] w-full text-xs text-left">
                               <thead className="bg-slate-50 font-bold text-slate-550 uppercase tracking-wider">
                                 <tr>
                                   <th className="px-4 py-3">Employee</th>
                                   <th className="px-4 py-3">In Punch</th>
                                   <th className="px-4 py-3">Out Punch</th>
+                                  <th className="px-4 py-3">Out Reason</th>
                                   <th className="px-4 py-3">Method</th>
                                   <th className="px-4 py-3">Overtime</th>
                                   <th className="px-4 py-3">Status</th>
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-slate-200 text-slate-700">
-                                {employees.map(emp => {
+                                {employees
+                                  .filter(emp => selectedAttEmployeeId === 'all' || emp.id === selectedAttEmployeeId)
+                                  .map(emp => {
                                   const punch = attendances.find(a => a.employeeId === emp.id && a.date === selectedAttDate);
                                   const status = punch ? punch.status : 'Absent';
                                   
                                   return (
                                     <tr key={emp.id} className="hover:bg-slate-50">
                                       <td className="px-4 py-3 font-medium flex items-center space-x-2">
-                                        <img src={emp.pictureUrl} alt="" className="w-6 h-6 rounded-full object-cover border" />
+                                        <img src={empAvatarUrl(emp)} alt="" className="w-6 h-6 rounded-full object-cover border" />
                                         <span>{emp.fullName} ({emp.employeeCode})</span>
                                       </td>
                                       <td className="px-4 py-3 font-mono text-emerald-700">{punch?.punchIn || '--:--'}</td>
                                       <td className="px-4 py-3 font-mono text-indigo-700">{punch?.punchOut || '--:--'}</td>
+                                      <td className="px-4 py-3">
+                                        {punch?.punchOut ? (
+                                          punch.outReason?.trim() ? (
+                                            <span
+                                              title={punch.outReason.trim()}
+                                              className="inline-flex max-w-48 truncate rounded border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-800"
+                                            >
+                                              {punch.outReason.trim()}
+                                            </span>
+                                          ) : (
+                                            <span className="inline-flex rounded border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
+                                              Not recorded
+                                            </span>
+                                          )
+                                        ) : (
+                                          <span className="text-slate-400" aria-label="No punch-out">&mdash;</span>
+                                        )}
+                                      </td>
                                       <td className="px-4 py-3 text-slate-500">{punch?.method || 'N/A'}</td>
                                       <td className="px-4 py-3 font-mono">{punch?.overtimeMinutes ? `${punch.overtimeMinutes}m` : 'None'}</td>
                                       <td className="px-4 py-3">
@@ -1881,8 +1937,21 @@ export function WebPortal({
                                     </tr>
                                   );
                                 })}
+                                {employees.filter(emp => selectedAttEmployeeId === 'all' || emp.id === selectedAttEmployeeId).length === 0 && (
+                                  <tr>
+                                    <td colSpan={7} className="px-6 py-12 text-center">
+                                      <div className="mx-auto max-w-md">
+                                        <div className="font-semibold text-slate-700">No employee attendance to display</div>
+                                        <div className="mt-1 text-xs leading-5 text-slate-500">
+                                          The selected employee is no longer available, or there are no employees in this register. Choose All Employees to review the current workforce.
+                                        </div>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                )}
                               </tbody>
                             </table>
+                            </div>
                           </div>
                         </div>
                       )}
@@ -1934,7 +2003,7 @@ export function WebPortal({
                       {/* MONTHLY REGISTER VIEW */}
                       {attPeriodType === 'monthly' && (
                         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden p-5 space-y-4">
-                          <h3 className="font-bold text-slate-800 text-sm border-b pb-2">Monthly Aggregate Register: June 2026</h3>
+                          <h3 className="font-bold text-slate-800 text-sm border-b pb-2">Monthly Aggregate Register: {new Date(`${selectedAttDate.slice(0, 7)}-01T00:00:00`).toLocaleString('en-PK', { month: 'long', year: 'numeric' })}</h3>
                           <div className="overflow-x-auto">
                             <table className="min-w-full text-xs text-left">
                               <thead className="bg-slate-50 font-bold text-slate-500 uppercase tracking-wider">
@@ -1951,7 +2020,7 @@ export function WebPortal({
                               <tbody className="divide-y divide-slate-200 text-slate-700">
                                 {employees.map(emp => {
                                   const monthPunches = attendances.filter(
-                                    a => a.employeeId === emp.id && a.date.startsWith('2026-06')
+                                    a => a.employeeId === emp.id && a.date.startsWith(selectedAttDate.slice(0, 7))
                                   );
                                   const present = monthPunches.filter(a => a.status === 'Present').length;
                                   const late = monthPunches.filter(a => a.status === 'Late').length;
@@ -1963,7 +2032,7 @@ export function WebPortal({
                                   return (
                                     <tr key={emp.id} className="hover:bg-slate-50">
                                       <td className="px-3 py-2.5 font-medium flex items-center space-x-2">
-                                        <img src={emp.pictureUrl} alt="" className="w-5 h-5 rounded-full object-cover border" />
+                                        <img src={empAvatarUrl(emp)} alt="" className="w-5 h-5 rounded-full object-cover border" />
                                         <span>{emp.fullName}</span>
                                       </td>
                                       <td className="px-3 py-2.5 text-center font-bold text-emerald-600">{present}</td>
@@ -1999,7 +2068,7 @@ export function WebPortal({
                               </thead>
                               <tbody className="divide-y divide-slate-200 text-slate-700">
                                 {employees.map(emp => {
-                                  const yrPunches = attendances.filter(a => a.employeeId === emp.id && a.date.startsWith('2026'));
+                                  const yrPunches = attendances.filter(a => a.employeeId === emp.id && a.date.startsWith(selectedAttDate.slice(0, 4)));
                                   const present = yrPunches.filter(a => a.status === 'Present').length;
                                   const late = yrPunches.filter(a => a.status === 'Late').length;
                                   const half = yrPunches.filter(a => a.status === 'Half Day').length;
@@ -2009,7 +2078,7 @@ export function WebPortal({
                                   return (
                                     <tr key={emp.id} className="hover:bg-slate-50">
                                       <td className="px-3 py-2.5 font-medium flex items-center space-x-2">
-                                        <img src={emp.pictureUrl} alt="" className="w-5 h-5 rounded-full object-cover border" />
+                                        <img src={empAvatarUrl(emp)} alt="" className="w-5 h-5 rounded-full object-cover border" />
                                         <span>{emp.fullName}</span>
                                       </td>
                                       <td className="px-3 py-2.5 text-center font-bold text-emerald-600">{present}</td>
@@ -2222,7 +2291,7 @@ export function WebPortal({
                                           return (
                                             <tr key={l.id} className="hover:bg-slate-50">
                                               <td className="px-3 py-2.5 font-medium flex items-center space-x-2">
-                                                <img src={emp?.pictureUrl} alt="" className="w-5 h-5 rounded-full object-cover border" />
+                                                <img src={empAvatarUrl(emp)} alt="" className="w-5 h-5 rounded-full object-cover border" />
                                                 <span>{emp?.fullName}</span>
                                               </td>
                                               <td className="px-3 py-2.5">
@@ -2279,7 +2348,7 @@ export function WebPortal({
                       {/* MONTHLY LEAVES VIEW */}
                       {leavePeriodType === 'monthly' && (
                         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-4">
-                          <h3 className="font-bold text-slate-800 text-sm border-b pb-2">Monthly Leave Log Summary: June 2026</h3>
+                          <h3 className="font-bold text-slate-800 text-sm border-b pb-2">Monthly Leave Log Summary: {new Date(`${selectedLeaveDate.slice(0, 7)}-01T00:00:00`).toLocaleString('en-PK', { month: 'long', year: 'numeric' })}</h3>
                           <div className="overflow-x-auto">
                             <table className="min-w-full text-xs text-left">
                               <thead className="bg-slate-50 font-bold text-slate-500 uppercase tracking-wider">
@@ -2295,7 +2364,7 @@ export function WebPortal({
                               <tbody className="divide-y divide-slate-200 text-slate-700">
                                 {employees.map(emp => {
                                   const monthLeaves = leaves.filter(
-                                    l => l.employeeId === emp.id && l.status === 'Approved' && l.startDate.startsWith('2026-06')
+                                    l => l.employeeId === emp.id && l.status === 'Approved' && l.startDate.startsWith(selectedLeaveDate.slice(0, 7))
                                   );
                                   const casual = monthLeaves.filter(l => l.leaveType === 'Casual').reduce((sum, l) => sum + l.totalDays, 0);
                                   const sick = monthLeaves.filter(l => l.leaveType === 'Sick').reduce((sum, l) => sum + l.totalDays, 0);
@@ -2306,7 +2375,7 @@ export function WebPortal({
                                   return (
                                     <tr key={emp.id} className="hover:bg-slate-50">
                                       <td className="px-3 py-2.5 font-medium flex items-center space-x-2">
-                                        <img src={emp.pictureUrl} alt="" className="w-5 h-5 rounded-full object-cover border" />
+                                        <img src={empAvatarUrl(emp)} alt="" className="w-5 h-5 rounded-full object-cover border" />
                                         <span>{emp.fullName}</span>
                                       </td>
                                       <td className="px-3 py-2.5 text-center font-semibold text-slate-800">{casual || '-'}</td>
@@ -2326,7 +2395,7 @@ export function WebPortal({
                       {/* YEARLY LEAVES VIEW */}
                       {leavePeriodType === 'yearly' && (
                         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-4">
-                          <h3 className="font-bold text-slate-800 text-sm border-b pb-2">Annual Leave Log Summary: Calendar Year 2026</h3>
+                          <h3 className="font-bold text-slate-800 text-sm border-b pb-2">Annual Leave Log Summary: Calendar Year {selectedLeaveDate.slice(0, 4)}</h3>
                           <div className="overflow-x-auto">
                             <table className="min-w-full text-xs text-left">
                               <thead className="bg-slate-50 font-bold text-slate-500 uppercase tracking-wider">
@@ -2341,7 +2410,7 @@ export function WebPortal({
                               <tbody className="divide-y divide-slate-200 text-slate-705">
                                 {employees.map(emp => {
                                   const yrLeaves = leaves.filter(
-                                    l => l.employeeId === emp.id && l.status === 'Approved' && l.startDate.startsWith('2026')
+                                    l => l.employeeId === emp.id && l.status === 'Approved' && l.startDate.startsWith(selectedLeaveDate.slice(0, 4))
                                   );
                                   const casual = yrLeaves.filter(l => l.leaveType === 'Casual').reduce((sum, l) => sum + l.totalDays, 0);
                                   const sick = yrLeaves.filter(l => l.leaveType === 'Sick').reduce((sum, l) => sum + l.totalDays, 0);
@@ -2351,7 +2420,7 @@ export function WebPortal({
                                   return (
                                     <tr key={emp.id} className="hover:bg-slate-50">
                                       <td className="px-3 py-2.5 font-medium flex items-center space-x-2">
-                                        <img src={emp.pictureUrl} alt="" className="w-5 h-5 rounded-full object-cover border" />
+                                        <img src={empAvatarUrl(emp)} alt="" className="w-5 h-5 rounded-full object-cover border" />
                                         <span>{emp.fullName}</span>
                                       </td>
                                       <td className="px-3 py-2.5 text-center font-semibold text-slate-850">{casual || '-'}</td>
@@ -2382,9 +2451,13 @@ export function WebPortal({
                       <h2 className="text-xl font-bold text-slate-900">FBR &amp; Regional Statutory Payroll Engine</h2>
                       <p className="text-xs text-slate-500">Calculate EOBI, Provincial PESSI contributions, individual 12-month annualized tax slabs and download HBL/Alfalah files</p>
                     </div>
-                    <div>
+                    <div className="flex items-center gap-2">
+                      <select aria-label="Payroll month" value={payrollMonth} onChange={e => setPayrollMonth(Number(e.target.value))} className="border border-slate-300 rounded-lg px-2 py-2 text-xs bg-white text-slate-800">
+                        {Array.from({ length: 12 }, (_, i) => <option key={i + 1} value={i + 1}>{new Date(2000, i).toLocaleString('en-PK', { month: 'long' })}</option>)}
+                      </select>
+                      <input aria-label="Payroll year" type="number" min="2020" max="2100" value={payrollYear} onChange={e => setPayrollYear(Number(e.target.value))} className="w-24 border border-slate-300 rounded-lg px-2 py-2 text-xs bg-white text-slate-800" />
                       <button 
-                        onClick={() => onCreatePayrollRun('Payroll - June 2026', payrollMonth, payrollYear)}
+                        onClick={() => onCreatePayrollRun(`Payroll - ${new Date(payrollYear, payrollMonth - 1).toLocaleString('en-PK', { month: 'long', year: 'numeric' })}`, payrollMonth, payrollYear)}
                         className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3 py-2 rounded-lg flex items-center space-x-1 shadow transition"
                       >
                         <span>Run New Payroll Cycle</span>
@@ -2411,7 +2484,7 @@ export function WebPortal({
                               
                               <div className="flex justify-between font-mono text-[11px] text-slate-500">
                                 <span>Month: {run.periodMonth}/{run.periodYear}</span>
-                                <span>Disbursed</span>
+                                <span>{run.employeeCount || 0} employees</span>
                               </div>
 
                               <div className="flex justify-between font-bold text-slate-800 text-xs">
@@ -2426,6 +2499,8 @@ export function WebPortal({
                                 >
                                   <Download className="w-3 h-3 mr-0.5" /> Bank Advice File
                                 </button>
+                                {run.status === 'Draft' && <button onClick={() => onUpdatePayrollStatus(run.id, 'Approved')} className="text-blue-700 hover:underline">Approve</button>}
+                                {run.status === 'Approved' && <button onClick={() => onUpdatePayrollStatus(run.id, 'Disbursed')} className="text-emerald-700 hover:underline">Mark Disbursed</button>}
                               </div>
                             </div>
                           );
@@ -2437,7 +2512,7 @@ export function WebPortal({
                     <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm md:col-span-2 space-y-4">
                       <div className="flex justify-between items-center border-b border-slate-200 pb-3">
                         <div>
-                          <h3 className="font-bold text-slate-800 text-xs uppercase tracking-wide font-mono">Simulated Register (June 2026 Run)</h3>
+                          <h3 className="font-bold text-slate-800 text-xs uppercase tracking-wide font-mono">Payroll Preview ({new Date(payrollYear, payrollMonth - 1).toLocaleString('en-PK', { month: 'long', year: 'numeric' })})</h3>
                           <p className="text-xs text-slate-400">Reflecting calculated deductions based on latest configured statutory parameters</p>
                         </div>
                       </div>
@@ -2459,7 +2534,7 @@ export function WebPortal({
                           <tbody className="divide-y divide-slate-200 text-slate-700 font-mono">
                             {employees.map(emp => {
                               const sheet = computePayslipDetails(
-                                emp, payrollMonth, payrollYear, attendances, leaves, statConfig, taxSlabs, departments, designations, branches, loanAdvances
+                                emp, payrollMonth, payrollYear, attendances, leaves, statConfig, taxSlabs, departments, designations, branches, loanAdvances, wageTypes
                               );
                               return (
                                 <tr key={emp.id} className="hover:bg-slate-50/50">
@@ -2530,15 +2605,15 @@ export function WebPortal({
                             <div className="flex-1 grid grid-cols-3 gap-2">
                               <div>
                                 <span className="block text-[10px] text-slate-400 font-sans">Min Annual (PKR):</span>
-                                <span className="font-bold">{slab.minIncome.toLocaleString()}</span>
+                                <input aria-label={`Slab ${idx + 1} minimum`} type="number" value={slab.minIncome} onChange={e => updateTaxSlab(slab.id, 'minIncome', Number(e.target.value))} className="w-full font-bold bg-white border border-slate-200 rounded px-1 py-0.5" />
                               </div>
                               <div>
                                 <span className="block text-[10px] text-slate-400 font-sans">Max Annual (PKR):</span>
-                                <span className="font-bold">{slab.maxIncome === 99999999 ? 'No upper limit' : slab.maxIncome.toLocaleString()}</span>
+                                <input aria-label={`Slab ${idx + 1} maximum`} type="number" value={slab.maxIncome} onChange={e => updateTaxSlab(slab.id, 'maxIncome', Number(e.target.value))} className="w-full font-bold bg-white border border-slate-200 rounded px-1 py-0.5" />
                               </div>
                               <div>
                                 <span className="block text-[10px] text-slate-400 font-sans">Formula:</span>
-                                <span className="font-bold">{slab.baseTax ? `PKR ${slab.baseTax.toLocaleString()} + ` : ''}{slab.percentage}%</span>
+                                <div className="flex gap-1"><input aria-label={`Slab ${idx + 1} base tax`} type="number" value={slab.baseTax} onChange={e => updateTaxSlab(slab.id, 'baseTax', Number(e.target.value))} className="w-2/3 font-bold bg-white border border-slate-200 rounded px-1 py-0.5" /><input aria-label={`Slab ${idx + 1} percentage`} type="number" step="0.01" value={slab.percentage} onChange={e => updateTaxSlab(slab.id, 'percentage', Number(e.target.value))} className="w-1/3 font-bold bg-white border border-slate-200 rounded px-1 py-0.5" /></div>
                               </div>
                             </div>
                           </div>
@@ -2556,19 +2631,24 @@ export function WebPortal({
                       
                       <div className="space-y-4">
                         <div>
+                          <label className="block text-xs font-semibold text-slate-700 uppercase tracking-widest mb-1.5">Tax year / effective date:</label>
+                          <div className="grid grid-cols-2 gap-2">
+                            <input aria-label="FBR tax year" value={statConfig.taxYear || ''} onChange={e => onUpdateStatConfig({ ...statConfig, taxYear: e.target.value, updatedAt: new Date().toISOString() })} placeholder="2027" className="w-full text-xs font-mono p-2 border border-slate-300 rounded" />
+                            <input aria-label="Statutory effective from" type="date" value={statConfig.effectiveFrom || ''} onChange={e => onUpdateStatConfig({ ...statConfig, effectiveFrom: e.target.value, updatedAt: new Date().toISOString() })} className="w-full text-xs font-mono p-2 border border-slate-300 rounded" />
+                          </div>
+                        </div>
+
+                        <div>
                           <label className="block text-xs font-semibold text-slate-700 uppercase tracking-widest mb-1.5">System Country Setting:</label>
                           <select
                             aria-label="System Country Setting"
                             value={selectedCountry}
-                            onChange={(e) => setSelectedCountry(e.target.value)}
+                            disabled
                             className="w-full text-xs p-2 bg-white border border-slate-300 rounded focus:ring-1 focus:ring-emerald-500 focus:outline-none"
                           >
                             <option value="Pakistan">Pakistan</option>
-                            <option value="United Kingdom">United Kingdom</option>
-                            <option value="United Arab Emirates">United Arab Emirates</option>
-                            <option value="Other">Other (Loads All Pakistan Banks)</option>
                           </select>
-                          <span className="text-[10px] text-slate-400">Determines the local bank lists loaded during employee onboarding disbursal setups.</span>
+                          <span className="text-[10px] text-slate-400">Pakistan-only payroll and statutory configuration.</span>
                         </div>
 
                         <div>
@@ -2584,14 +2664,15 @@ export function WebPortal({
                         </div>
 
                         <div>
-                          <label className="block text-xs font-semibold text-slate-700 uppercase tracking-widest mb-1.5">PESSI Employer Contribution %:</label>
-                          <input
-                            type="number"
-                            aria-label="PESSI Employer Contribution %"
-                            value={statConfig.pessiEmployerRate}
-                            onChange={(e) => onUpdateStatConfig({ ...statConfig, pessiEmployerRate: Number(e.target.value) })}
-                            className="w-full text-xs font-mono p-2 border border-slate-300 rounded focus:ring-1 focus:ring-emerald-500 focus:outline-none"
-                          />
+                          <label className="block text-xs font-semibold text-slate-700 uppercase tracking-widest mb-1.5">Provincial social security employer %:</label>
+                          <div className="grid grid-cols-2 gap-2">
+                            {(['Punjab', 'Sindh', 'KPK', 'Balochistan'] as const).map(province => <label key={province} className="text-[10px] text-slate-500">{province}<input type="number" min="0" step="0.01" value={statConfig.provincialSocialSecurityRates?.[province] ?? statConfig.pessiEmployerRate} onChange={e => onUpdateStatConfig({ ...statConfig, provincialSocialSecurityRates: { ...statConfig.provincialSocialSecurityRates, [province]: Number(e.target.value) }, updatedAt: new Date().toISOString() })} className="mt-1 w-full text-xs font-mono p-2 border border-slate-300 rounded" /></label>)}
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-700 uppercase tracking-widest mb-1.5">Social security wage ceiling (PKR):</label>
+                          <input type="number" value={statConfig.socialSecurityWageCeiling || 0} onChange={e => onUpdateStatConfig({ ...statConfig, socialSecurityWageCeiling: Number(e.target.value), updatedAt: new Date().toISOString() })} className="w-full text-xs font-mono p-2 border border-slate-300 rounded" />
                         </div>
 
                         <div>
@@ -2675,12 +2756,15 @@ export function WebPortal({
                                     </span>
                                   </td>
                                   <td className="px-4 py-3 text-right">
-                                    <button 
-                                      onClick={() => alert(`Simulated toggle status for user: ${u.username}`)}
-                                      className="text-xs text-slate-500 hover:text-slate-900 underline"
-                                    >
-                                      Toggle Status
-                                    </button>
+                                    <button
+                                      disabled={u.id === loggedInUser.id}
+                                      onClick={async () => {
+                                        if (window.confirm('Permanently delete this account and associated personal data? Payroll history will be anonymized.')) {
+                                          await onDeleteUser(u.id);
+                                        }
+                                      }}
+                                      className="text-xs text-rose-600 hover:text-rose-800 underline disabled:text-slate-300 disabled:no-underline"
+                                    >Delete data</button>
                                   </td>
                                 </tr>
                               );
@@ -2697,7 +2781,7 @@ export function WebPortal({
                       <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-3">
                         <h3 className="font-bold text-slate-800 text-xs uppercase tracking-wide font-mono">Onboard System User</h3>
                         
-                        <form onSubmit={(e) => {
+                        <form onSubmit={async (e) => {
                           e.preventDefault();
                           const form = e.target as any;
                           const username = form.elements.username.value;
@@ -2711,18 +2795,34 @@ export function WebPortal({
                             return;
                           }
 
-                          onAddUser({
-                            id: 'usr-' + Date.now(),
-                            username,
-                            email,
-                            roleId,
-                            employeeId: employeeId || undefined,
-                            status: 'Active',
-                            password
-                          });
+                          if (password.length < 12) {
+                            alert('Password must be at least 12 characters.');
+                            return;
+                          }
 
-                          form.reset();
-                          alert('Success: User account created successfully.');
+                          try {
+                            await onAddUser({
+                              id: '',
+                              username: username.trim(),
+                              email: email.trim(),
+                              roleId,
+                              employeeId: employeeId || undefined,
+                              status: 'Active',
+                              password
+                            });
+                            form.reset();
+                            alert('Success: Firebase Authentication account and HR profile created.');
+                          } catch (error) {
+                            const code = typeof error === 'object' && error && 'code' in error
+                              ? String((error as { code?: unknown }).code)
+                              : '';
+                            const message = code === 'auth/email-already-in-use'
+                              ? 'An Authentication account already uses this email.'
+                              : code === 'auth/weak-password'
+                                ? 'Firebase rejected this password as too weak.'
+                                : 'Unable to create the user account. No partial HR profile was saved.';
+                            alert(message);
+                          }
                         }} className="space-y-3">
                           <div>
                             <label htmlFor="username" className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Username:</label>
@@ -2844,6 +2944,18 @@ export function WebPortal({
                 </motion.div>
               )}
 
+              {activeTab === 'company-setup' && (
+                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="h-full">
+                  <CompanySetupModule companies={companies} branches={branches} departments={departments} designations={designations} statutoryConfig={statConfig} taxSlabs={taxSlabs} onSave={onSaveCompanySetup} />
+                </motion.div>
+              )}
+
+              {activeTab === 'master-data' && (
+                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="h-full">
+                  <MasterDataModule companies={companies} branches={branches} departments={departments} designations={designations} zones={zones} ucTowns={ucTowns} wageTypes={wageTypes} employees={employees} onSave={onSaveMasterData} />
+                </motion.div>
+              )}
+
               {/* TAB 8: HOLIDAY CALENDAR */}
               {activeTab === 'holidays' && (
                 <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
@@ -2949,6 +3061,18 @@ export function WebPortal({
                     attendances={attendances}
                     onUpdateEmployee={onUpdateEmployee}
                     onSimulatePunch={onSimulatePunch}
+                  />
+                </motion.div>
+              )}
+
+              {/* TAB: USER GUIDE */}
+              {activeTab === 'help' && (
+                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="h-full -mx-6 -mt-3">
+                  <iframe
+                    src="/user-guide.html"
+                    title="Bin Ishaq HR Suite — User Guide"
+                    className="w-full border-0"
+                    style={{ height: 'calc(100vh - 64px)' }}
                   />
                 </motion.div>
               )}
@@ -3148,27 +3272,11 @@ export function WebPortal({
                           onChange={(e) => handleAddBranchChange(e.target.value)}
                           className="flex-1 p-1.5 bg-white border border-slate-300 rounded focus:ring-1"
                         >
-                          {localBranches.map(b => (
+                          <option value="">{companyBranches.length ? 'Select Branch' : 'No branches configured in Master Data'}</option>
+                          {companyBranches.map(b => (
                             <option key={b.id} value={b.id}>{b.name}</option>
                           ))}
                         </select>
-                        <button 
-                          type="button"
-                          onClick={() => {
-                            const name = window.prompt("Enter new Branch Name:");
-                            if (!name) return;
-                            const city = window.prompt("Enter Branch City (e.g. Karachi):");
-                            if (!city) return;
-                            const prov = window.prompt("Enter Branch Province (Punjab/Sindh/KPK/Balochistan):");
-                            if (!prov) return;
-                            const newId = handleCreateBranch(name, city, prov as any);
-                            handleAddBranchChange(newId);
-                          }}
-                          className="bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-700 px-2 py-1.5 rounded font-bold text-sm"
-                          title="Create New Branch"
-                        >
-                          +
-                        </button>
                       </div>
                     </div>
                     <div>
@@ -3180,25 +3288,11 @@ export function WebPortal({
                           onChange={(e) => handleAddDeptChange(e.target.value)}
                           className="flex-1 p-1.5 bg-white border border-slate-300 rounded focus:ring-1"
                         >
+                          <option value="">{!newEmpForm.branchId ? 'Select a branch first' : localDepartments.some(d => d.branchId === newEmpForm.branchId) ? 'Select Department' : 'No departments configured in Master Data'}</option>
                           {localDepartments.filter(d => d.branchId === newEmpForm.branchId).map(d => (
                             <option key={d.id} value={d.id}>{d.name}</option>
                           ))}
                         </select>
-                        <button 
-                          type="button"
-                          onClick={() => {
-                            const name = window.prompt("Enter new Department Name:");
-                            if (!name) return;
-                            const code = window.prompt("Enter Department Code (e.g. HR, ENG, OPS):");
-                            if (!code) return;
-                            const newId = handleCreateDepartment(newEmpForm.branchId, name, code);
-                            handleAddDeptChange(newId);
-                          }}
-                          className="bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-700 px-2 py-1.5 rounded font-bold text-sm"
-                          title="Create New Department"
-                        >
-                          +
-                        </button>
                       </div>
                     </div>
                     <div className="col-span-2">
@@ -3210,29 +3304,11 @@ export function WebPortal({
                           onChange={(e) => setNewEmpForm({ ...newEmpForm, designationId: e.target.value })}
                           className="flex-1 p-1.5 bg-white border border-slate-300 rounded focus:ring-1"
                         >
+                          <option value="">{!newEmpForm.departmentId ? 'Select a department first' : localDesignations.some(ds => ds.departmentId === newEmpForm.departmentId) ? 'Select Designation' : 'No designations configured in Master Data'}</option>
                           {localDesignations.filter(ds => ds.departmentId === newEmpForm.departmentId).map(ds => (
                             <option key={ds.id} value={ds.id}>{ds.title} (Grade {ds.grade})</option>
                           ))}
                         </select>
-                        <button 
-                          type="button"
-                          onClick={() => {
-                            if (!newEmpForm.departmentId) {
-                              alert("Kindly select/create a department first.");
-                              return;
-                            }
-                            const title = window.prompt("Enter Designation Title:");
-                            if (!title) return;
-                            const grade = window.prompt("Enter Designation Grade (e.g. M1, G2):");
-                            if (!grade) return;
-                            const newId = handleCreateDesignation(newEmpForm.departmentId, title, grade);
-                            setNewEmpForm(prev => ({ ...prev, designationId: newId }));
-                          }}
-                          className="bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-700 px-2 py-1.5 rounded font-bold text-sm"
-                          title="Create New Designation"
-                        >
-                          +
-                        </button>
                       </div>
                     </div>
                   </div>
@@ -3243,32 +3319,14 @@ export function WebPortal({
                       <div className="flex space-x-1 items-center">
                         <select
                           aria-label="UC / Town"
-                          value={newEmpForm.ucTown}
-                          onChange={(e) => setNewEmpForm({ ...newEmpForm, ucTown: e.target.value })}
+                          value={newEmpForm.ucTownId}
+                          onChange={(e) => setNewEmpForm({ ...newEmpForm, ucTownId: e.target.value })}
+                          disabled={!newEmpForm.zoneId}
                           className="flex-1 p-1.5 bg-white border border-slate-300 rounded focus:ring-1 focus:outline-none"
                         >
-                          <option value="">-- Select UC / Town --</option>
-                          {Array.from(new Set([...existingUcs, ...localUcs])).filter(Boolean).map(uc => (
-                            <option key={uc} value={uc}>{uc}</option>
-                          ))}
-                          {newEmpForm.ucTown && !existingUcs.includes(newEmpForm.ucTown) && !localUcs.includes(newEmpForm.ucTown) && (
-                            <option value={newEmpForm.ucTown}>{newEmpForm.ucTown}</option>
-                          )}
+                          <option value="">{!newEmpForm.zoneId ? 'Select a zone first' : ucTowns.filter(item => item.zoneId === newEmpForm.zoneId && item.status === 'Active').length ? 'Select UC / Town' : 'No UC/Towns configured in Master Data'}</option>
+                          {ucTowns.filter(item => item.zoneId === newEmpForm.zoneId && item.status === 'Active').map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
                         </select>
-                        <button 
-                          type="button"
-                          onClick={() => {
-                            const val = window.prompt("Enter new UC / Town (e.g. UC-2 Clifton Town):");
-                            if (val) {
-                              setLocalUcs(prev => [...prev, val]);
-                              setNewEmpForm(prev => ({ ...prev, ucTown: val }));
-                            }
-                          }}
-                          className="bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-700 px-2 py-1.5 rounded font-bold text-sm"
-                          title="Add custom UC/Town at runtime"
-                        >
-                          +
-                        </button>
                       </div>
                     </div>
                     <div>
@@ -3276,32 +3334,13 @@ export function WebPortal({
                       <div className="flex space-x-1 items-center">
                         <select
                           aria-label="Zone"
-                          value={newEmpForm.zone}
-                          onChange={(e) => setNewEmpForm({ ...newEmpForm, zone: e.target.value })}
+                          value={newEmpForm.zoneId}
+                          onChange={(e) => setNewEmpForm({ ...newEmpForm, zoneId: e.target.value, ucTownId: '' })}
                           className="flex-1 p-1.5 bg-white border border-slate-300 rounded focus:ring-1 focus:outline-none"
                         >
-                          <option value="">-- Select Zone --</option>
-                          {Array.from(new Set([...existingZones, ...localZones])).filter(Boolean).map(z => (
-                            <option key={z} value={z}>{z}</option>
-                          ))}
-                          {newEmpForm.zone && !existingZones.includes(newEmpForm.zone) && !localZones.includes(newEmpForm.zone) && (
-                            <option value={newEmpForm.zone}>{newEmpForm.zone}</option>
-                          )}
+                          <option value="">{activeZones.length ? 'Select Zone' : 'No zones configured in Master Data'}</option>
+                          {activeZones.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
                         </select>
-                        <button 
-                          type="button"
-                          onClick={() => {
-                            const val = window.prompt("Enter new Zone (e.g. East Zone):");
-                            if (val) {
-                              setLocalZones(prev => [...prev, val]);
-                              setNewEmpForm(prev => ({ ...prev, zone: val }));
-                            }
-                          }}
-                          className="bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-700 px-2 py-1.5 rounded font-bold text-sm"
-                          title="Add custom Zone at runtime"
-                        >
-                          +
-                        </button>
                       </div>
                     </div>
                     <div className="col-span-2 flex items-center space-x-3 pt-3">
@@ -3341,28 +3380,13 @@ export function WebPortal({
                       <div className="flex space-x-1 items-center">
                         <select
                           aria-label="Wage Type"
-                          value={newEmpForm.wageType}
-                          onChange={(e) => setNewEmpForm({ ...newEmpForm, wageType: e.target.value })}
+                          value={newEmpForm.wageTypeId}
+                          onChange={(e) => setNewEmpForm({ ...newEmpForm, wageTypeId: e.target.value })}
                           className="flex-1 p-1.5 bg-white border border-slate-300 rounded focus:ring-1"
                         >
-                          {localWageTypes.map(w => (
-                            <option key={w} value={w}>{w === 'Salaried' ? 'Salaried (Monthly)' : w === 'Daily Wager' ? 'Daily Wager (Calculated basic)' : w}</option>
-                          ))}
+                          <option value="">{activeWageTypes.length ? 'Select Wage Type' : 'No wage types configured in Master Data'}</option>
+                          {activeWageTypes.map(item => <option key={item.id} value={item.id}>{item.name} ({item.calculationBasis})</option>)}
                         </select>
-                        <button 
-                          type="button"
-                          onClick={() => {
-                            const val = window.prompt("Enter new Wage Type name (e.g. Contractual, Hourly):");
-                            if (val) {
-                              setLocalWageTypes(prev => [...prev, val]);
-                              setNewEmpForm(prev => ({ ...prev, wageType: val }));
-                            }
-                          }}
-                          className="bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-700 px-2.5 py-1.5 rounded font-bold text-sm"
-                          title="Add custom wage type"
-                        >
-                          +
-                        </button>
                       </div>
                     </div>
                     <div>
@@ -3435,7 +3459,7 @@ export function WebPortal({
                       />
                     </div>
                     <div className="col-span-2">
-                      {newEmpForm.wageType === 'Salaried' && (
+                      {wageTypes.find(item => item.id === newEmpForm.wageTypeId)?.calculationBasis === 'Monthly' && (
                         <div className="bg-slate-50 p-2 rounded-lg border border-slate-200">
                           <h4 className="font-bold text-slate-700 text-[9px] uppercase tracking-wider mb-1">Allowance Overrides (0 to default split)</h4>
                           <div className="grid grid-cols-4 gap-1.5">
@@ -3763,27 +3787,11 @@ export function WebPortal({
                           onChange={(e) => handleEditBranchChange(e.target.value)}
                           className="flex-1 p-1.5 bg-white border border-slate-300 rounded focus:ring-1"
                         >
-                          {localBranches.map(b => (
+                          <option value="">{companyBranches.length ? 'Select Branch' : 'No branches configured in Master Data'}</option>
+                          {companyBranches.map(b => (
                             <option key={b.id} value={b.id}>{b.name}</option>
                           ))}
                         </select>
-                        <button 
-                          type="button"
-                          onClick={() => {
-                            const name = window.prompt("Enter new Branch Name:");
-                            if (!name) return;
-                            const city = window.prompt("Enter Branch City (e.g. Karachi):");
-                            if (!city) return;
-                            const prov = window.prompt("Enter Branch Province (Punjab/Sindh/KPK/Balochistan):");
-                            if (!prov) return;
-                            const newId = handleCreateBranch(name, city, prov as any);
-                            handleEditBranchChange(newId);
-                          }}
-                          className="bg-indigo-50 hover:bg-indigo-100 border border-indigo-300 text-indigo-700 px-2 py-1.5 rounded font-bold text-sm"
-                          title="Create New Branch"
-                        >
-                          +
-                        </button>
                       </div>
                     </div>
                     <div>
@@ -3795,25 +3803,11 @@ export function WebPortal({
                           onChange={(e) => handleEditDeptChange(e.target.value)}
                           className="flex-1 p-1.5 bg-white border border-slate-300 rounded focus:ring-1"
                         >
+                          <option value="">{!editEmpForm.branchId ? 'Select a branch first' : localDepartments.some(d => d.branchId === editEmpForm.branchId) ? 'Select Department' : 'No departments configured in Master Data'}</option>
                           {localDepartments.filter(d => d.branchId === editEmpForm.branchId).map(d => (
                             <option key={d.id} value={d.id}>{d.name}</option>
                           ))}
                         </select>
-                        <button 
-                          type="button"
-                          onClick={() => {
-                            const name = window.prompt("Enter new Department Name:");
-                            if (!name) return;
-                            const code = window.prompt("Enter Department Code (e.g. HR, ENG, OPS):");
-                            if (!code) return;
-                            const newId = handleCreateDepartment(editEmpForm.branchId, name, code);
-                            handleEditDeptChange(newId);
-                          }}
-                          className="bg-indigo-50 hover:bg-indigo-100 border border-indigo-300 text-indigo-700 px-2 py-1.5 rounded font-bold text-sm"
-                          title="Create New Department"
-                        >
-                          +
-                        </button>
                       </div>
                     </div>
                     <div className="col-span-2">
@@ -3825,29 +3819,11 @@ export function WebPortal({
                           onChange={(e) => setEditEmpForm({ ...editEmpForm, designationId: e.target.value })}
                           className="flex-1 p-1.5 bg-white border border-slate-300 rounded focus:ring-1"
                         >
+                          <option value="">{!editEmpForm.departmentId ? 'Select a department first' : localDesignations.some(ds => ds.departmentId === editEmpForm.departmentId) ? 'Select Designation' : 'No designations configured in Master Data'}</option>
                           {localDesignations.filter(ds => ds.departmentId === editEmpForm.departmentId).map(ds => (
                             <option key={ds.id} value={ds.id}>{ds.title} (Grade {ds.grade})</option>
                           ))}
                         </select>
-                        <button 
-                          type="button"
-                          onClick={() => {
-                            if (!editEmpForm.departmentId) {
-                              alert("Kindly select/create a department first.");
-                              return;
-                            }
-                            const title = window.prompt("Enter Designation Title:");
-                            if (!title) return;
-                            const grade = window.prompt("Enter Designation Grade (e.g. M1, G2):");
-                            if (!grade) return;
-                            const newId = handleCreateDesignation(editEmpForm.departmentId, title, grade);
-                            setEditEmpForm(prev => ({ ...prev, designationId: newId }));
-                          }}
-                          className="bg-indigo-50 hover:bg-indigo-100 border border-indigo-300 text-indigo-700 px-2 py-1.5 rounded font-bold text-sm"
-                          title="Create New Designation"
-                        >
-                          +
-                        </button>
                       </div>
                     </div>
                   </div>
@@ -3858,32 +3834,14 @@ export function WebPortal({
                       <div className="flex space-x-1 items-center">
                         <select
                           aria-label="UC / Town"
-                          value={editEmpForm.ucTown}
-                          onChange={(e) => setEditEmpForm({ ...editEmpForm, ucTown: e.target.value })}
+                          value={editEmpForm.ucTownId}
+                          onChange={(e) => setEditEmpForm({ ...editEmpForm, ucTownId: e.target.value })}
+                          disabled={!editEmpForm.zoneId}
                           className="flex-1 p-1.5 bg-white border border-slate-300 rounded focus:ring-1 focus:outline-none"
                         >
-                          <option value="">-- Select UC / Town --</option>
-                          {Array.from(new Set([...existingUcs, ...localUcs])).filter(Boolean).map(uc => (
-                            <option key={uc} value={uc}>{uc}</option>
-                          ))}
-                          {editEmpForm.ucTown && !existingUcs.includes(editEmpForm.ucTown) && !localUcs.includes(editEmpForm.ucTown) && (
-                            <option value={editEmpForm.ucTown}>{editEmpForm.ucTown}</option>
-                          )}
+                          <option value="">{!editEmpForm.zoneId && editEmpForm.ucTown ? `Legacy: ${editEmpForm.ucTown}` : !editEmpForm.zoneId ? 'Select a zone first' : ucTowns.filter(item => item.zoneId === editEmpForm.zoneId && (item.status === 'Active' || item.id === editEmpForm.ucTownId)).length ? 'Select UC / Town' : 'No UC/Towns configured in Master Data'}</option>
+                          {ucTowns.filter(item => item.zoneId === editEmpForm.zoneId && (item.status === 'Active' || item.id === editEmpForm.ucTownId)).map(item => <option key={item.id} value={item.id}>{item.name}{item.status === 'Inactive' ? ' (Inactive)' : ''}</option>)}
                         </select>
-                        <button 
-                          type="button"
-                          onClick={() => {
-                            const val = window.prompt("Enter new UC / Town (e.g. UC-2 Clifton Town):");
-                            if (val) {
-                              setLocalUcs(prev => [...prev, val]);
-                              setEditEmpForm(prev => ({ ...prev, ucTown: val }));
-                            }
-                          }}
-                          className="bg-indigo-50 hover:bg-indigo-100 border border-indigo-300 text-indigo-700 px-2 py-1.5 rounded font-bold text-sm"
-                          title="Add custom UC/Town at runtime"
-                        >
-                          +
-                        </button>
                       </div>
                     </div>
                     <div>
@@ -3891,32 +3849,13 @@ export function WebPortal({
                       <div className="flex space-x-1 items-center">
                         <select
                           aria-label="Zone"
-                          value={editEmpForm.zone}
-                          onChange={(e) => setEditEmpForm({ ...editEmpForm, zone: e.target.value })}
+                          value={editEmpForm.zoneId}
+                          onChange={(e) => setEditEmpForm({ ...editEmpForm, zoneId: e.target.value, ucTownId: '' })}
                           className="flex-1 p-1.5 bg-white border border-slate-300 rounded focus:ring-1 focus:outline-none"
                         >
-                          <option value="">-- Select Zone --</option>
-                          {Array.from(new Set([...existingZones, ...localZones])).filter(Boolean).map(z => (
-                            <option key={z} value={z}>{z}</option>
-                          ))}
-                          {editEmpForm.zone && !existingZones.includes(editEmpForm.zone) && !localZones.includes(editEmpForm.zone) && (
-                            <option value={editEmpForm.zone}>{editEmpForm.zone}</option>
-                          )}
+                          <option value="">{!editEmpForm.zoneId && editEmpForm.zone ? `Legacy: ${editEmpForm.zone}` : zones.filter(item => (!primaryCompany || item.companyId === primaryCompany.id) && (item.status === 'Active' || item.id === editEmpForm.zoneId)).length ? 'Select Zone' : 'No zones configured in Master Data'}</option>
+                          {zones.filter(item => (!primaryCompany || item.companyId === primaryCompany.id) && (item.status === 'Active' || item.id === editEmpForm.zoneId)).map(item => <option key={item.id} value={item.id}>{item.name}{item.status === 'Inactive' ? ' (Inactive)' : ''}</option>)}
                         </select>
-                        <button 
-                          type="button"
-                          onClick={() => {
-                            const val = window.prompt("Enter new Zone (e.g. East Zone):");
-                            if (val) {
-                              setLocalZones(prev => [...prev, val]);
-                              setEditEmpForm(prev => ({ ...prev, zone: val }));
-                            }
-                          }}
-                          className="bg-indigo-50 hover:bg-indigo-100 border border-indigo-300 text-indigo-700 px-2 py-1.5 rounded font-bold text-sm"
-                          title="Add custom Zone at runtime"
-                        >
-                          +
-                        </button>
                       </div>
                     </div>
                     <div className="col-span-2 flex items-center space-x-3 pt-3">
@@ -3956,28 +3895,13 @@ export function WebPortal({
                       <div className="flex space-x-1 items-center">
                         <select
                           aria-label="Wage Type"
-                          value={editEmpForm.wageType}
-                          onChange={(e) => setEditEmpForm({ ...editEmpForm, wageType: e.target.value })}
+                          value={editEmpForm.wageTypeId}
+                          onChange={(e) => setEditEmpForm({ ...editEmpForm, wageTypeId: e.target.value })}
                           className="flex-1 p-1.5 bg-white border border-slate-300 rounded focus:ring-1"
                         >
-                          {localWageTypes.map(w => (
-                            <option key={w} value={w}>{w === 'Salaried' ? 'Salaried (Monthly)' : w === 'Daily Wager' ? 'Daily Wager (Calculated basic)' : w}</option>
-                          ))}
+                          <option value="">{!editEmpForm.wageTypeId && editEmpForm.wageType ? `Legacy: ${editEmpForm.wageType}` : wageTypes.filter(item => (!primaryCompany || item.companyId === primaryCompany.id) && (item.status === 'Active' || item.id === editEmpForm.wageTypeId)).length ? 'Select Wage Type' : 'No wage types configured in Master Data'}</option>
+                          {wageTypes.filter(item => (!primaryCompany || item.companyId === primaryCompany.id) && (item.status === 'Active' || item.id === editEmpForm.wageTypeId)).map(item => <option key={item.id} value={item.id}>{item.name} ({item.calculationBasis}){item.status === 'Inactive' ? ' — Inactive' : ''}</option>)}
                         </select>
-                        <button 
-                          type="button"
-                          onClick={() => {
-                            const val = window.prompt("Enter new Wage Type name (e.g. Contractual, Hourly):");
-                            if (val) {
-                              setLocalWageTypes(prev => [...prev, val]);
-                              setEditEmpForm(prev => ({ ...prev, wageType: val }));
-                            }
-                          }}
-                          className="bg-indigo-50 hover:bg-indigo-100 border border-indigo-300 text-indigo-700 px-2.5 py-1.5 rounded font-bold text-sm"
-                          title="Add custom wage type"
-                        >
-                          +
-                        </button>
                       </div>
                     </div>
                     <div>
@@ -4050,7 +3974,7 @@ export function WebPortal({
                       />
                     </div>
                     <div className="col-span-2">
-                      {editEmpForm.wageType === 'Salaried' && (
+                      {(wageTypes.find(item => item.id === editEmpForm.wageTypeId)?.calculationBasis ?? (editEmpForm.wageType === 'Daily Wager' ? 'Daily' : 'Monthly')) === 'Monthly' && (
                         <div className="bg-slate-50 p-2 rounded-lg border border-slate-200">
                           <h4 className="font-bold text-slate-700 text-[9px] uppercase tracking-wider mb-1">Allowance Overrides (0 to default split)</h4>
                           <div className="grid grid-cols-4 gap-1.5">
@@ -4224,7 +4148,7 @@ export function WebPortal({
                 <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-2">
                   <div className="flex items-center space-x-3">
                     <img 
-                      src={showOffboardModal.pictureUrl || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=200'} 
+                      src={empAvatarUrl(showOffboardModal)}
                       alt="" 
                       className="w-10 h-10 rounded-full object-cover border border-slate-200" 
                     />
@@ -4236,7 +4160,7 @@ export function WebPortal({
                   
                   <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-100 text-[10px] text-slate-650 font-sans">
                     <div>
-                      <span className="font-bold">Wage Type:</span> {showOffboardModal.wageType}
+                      <span className="font-bold">Wage Type:</span> {resolveWageTypeName(showOffboardModal, wageTypes)}
                     </div>
                     <div>
                       <span className="font-bold">Basic Rate:</span> PKR {showOffboardModal.basicSalary.toLocaleString()}
@@ -4269,7 +4193,7 @@ export function WebPortal({
                     <h5 className="font-bold text-rose-800 uppercase tracking-wider text-[9px]">Calculated Settlement Values</h5>
                     
                     {(() => {
-                      const baseBasic = showOffboardModal.wageType === 'Daily Wager' ? showOffboardModal.basicSalary * 26 : showOffboardModal.basicSalary;
+                      const baseBasic = resolveWageBasis(showOffboardModal, wageTypes) === 'Daily' ? showOffboardModal.basicSalary * 26 : showOffboardModal.basicSalary;
                       const completedYears = 3; // mock scale
                       const gratuityCalculated = showOffboardModal.gratuityOptIn 
                         ? Math.round((baseBasic / 30) * statConfig.gratuityRateDaysPerYear * completedYears)
@@ -4341,13 +4265,14 @@ export function WebPortal({
                 {/* Header info */}
                 <div className="flex justify-between border-b pb-3 items-start">
                   <div>
-                    <h4 className="font-bold text-base text-slate-900 uppercase">Bin Ishaq Logistics Ltd.</h4>
-                    <p className="text-slate-400 font-mono text-[10px]">NTN: 4567891-2 • PK Registered Office</p>
+                    <h4 className="font-bold text-base text-slate-900 uppercase">{companyLegalName}</h4>
+                    {companyAddressLine && <p className="text-slate-500 font-mono text-[10px]">{companyAddressLine}</p>}
+                    {companyRegistrationLine && <p className="text-slate-400 font-mono text-[10px]">{companyRegistrationLine}</p>}
                   </div>
                   <div className="text-right font-mono text-[10px] text-slate-500">
                     <p><strong>Payslip Reference ID:</strong></p>
                     <p className="text-slate-800 font-bold">{showPayslipModal.id}</p>
-                    <p className="mt-1">Period: June 2026</p>
+                    <p className="mt-1">Period: {showPayslipModal.periodMonth && showPayslipModal.periodYear ? new Date(showPayslipModal.periodYear, showPayslipModal.periodMonth - 1).toLocaleString('en-PK', { month: 'long', year: 'numeric' }) : 'Payroll preview'}</p>
                   </div>
                 </div>
 
@@ -4474,7 +4399,7 @@ export function WebPortal({
 
                 {/* Audit & declaration compliance footnote */}
                 <div className="bg-slate-50 p-2.5 rounded-lg text-[10px] text-slate-400 font-serif leading-relaxed mt-4 border-t">
-                  * Generated by Bin Ishaq Logistics Ltd. under the Shops &amp; Establishments Ordinance. Salary disbursed directly via automated HBL bulk online bank advice file. Fully compliant values.
+                  * Generated by {companyLegalName} under the Shops &amp; Establishments Ordinance. Salary disbursed directly via automated HBL bulk online bank advice file. Fully compliant values.
                 </div>
 
               </div>
@@ -4542,13 +4467,13 @@ export function WebPortal({
                 <div className="flex justify-between text-[11px] bg-slate-55 mb-2 p-3 rounded-lg border border-slate-200 font-mono text-slate-600 leading-relaxed">
                   <div>
                     <h5 className="font-bold text-slate-900 text-xs">Debit Authorization account info</h5>
-                    <p>Paying Account Name: Bin Ishaq Logistics Karachi</p>
-                    <p>Paying IBAN: PK91HABB006744882199341</p>
-                    <p>Origin Bank Code: HABIB BANK LIMITED (HBL)</p>
+                    <p>Paying Account Name: {companyLegalName}</p>
+                    {primaryBranch && <p>Originating Branch: {primaryBranch.name}</p>}
+                    <p>Source account: selected and authorized in the bank portal</p>
                   </div>
                   <div className="text-right">
-                    <p className="font-bold text-emerald-800">Authorization Code: IN-PK-Advice-62</p>
-                    <p>Total Staff: {employees.length}</p>
+                    <p className="font-bold text-amber-700">Not bank-authorized until uploaded and approved in the bank portal</p>
+                    <p>Total Staff: {payrollPayslips.filter(p => p.payrollRunId === showBankFileModal.id).length}</p>
                     <p>Disbursal Amount: <strong>PKR {showBankFileModal.totalNetPay.toLocaleString()}</strong></p>
                   </div>
                 </div>
@@ -4564,15 +4489,12 @@ export function WebPortal({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200 text-slate-705">
-                      {employees.map(emp => {
-                        const sheet = computePayslipDetails(
-                          emp, showBankFileModal!.periodMonth, showBankFileModal!.periodYear, attendances, leaves, statConfig, taxSlabs, departments, designations, branches, loanAdvances
-                        );
+                      {payrollPayslips.filter(p => p.payrollRunId === showBankFileModal.id).map(sheet => {
                         return (
-                          <tr key={emp.id} className="hover:bg-slate-50">
-                            <td className="px-3 py-2 font-sans font-medium">{emp.fullName}</td>
-                            <td className="px-3 py-2">{emp.iban}</td>
-                            <td className="px-3 py-2 text-slate-400 font-sans text-[10px]">{emp.bankName}</td>
+                          <tr key={sheet.id} className="hover:bg-slate-50">
+                            <td className="px-3 py-2 font-sans font-medium">{sheet.employeeName}</td>
+                            <td className="px-3 py-2">{sheet.iban}</td>
+                            <td className="px-3 py-2 text-slate-400 font-sans text-[10px]">{sheet.bankName}</td>
                             <td className="px-3 py-2 text-right font-bold text-slate-900">{sheet.netSalary.toLocaleString()}</td>
                           </tr>
                         );
@@ -4582,14 +4504,25 @@ export function WebPortal({
                 </div>
 
                 <div className="bg-emerald-50 rounded-lg p-3 text-[11px] text-emerald-900 border border-emerald-100 italic leading-relaxed select-none">
-                  * Downloaded files conform strictly to the state standard **HBL Bulk Transfer Flat CSV / Excel Schema 5.3** ensuring 1-click execution in corporate internet banking.
+                  Bank advice is generated from the approved payroll snapshot. Confirm the import layout with your bank before uploading; bank schemas can differ by institution and corporate arrangement.
                 </div>
               </div>
 
               <div className="px-6 py-4 bg-slate-50 border-t flex justify-end space-x-2">
                 <button 
                   onClick={() => {
-                    alert('HBL / Bank advice flat file csv layout download initiated!');
+                    const rows = payrollPayslips.filter(p => p.payrollRunId === showBankFileModal.id);
+                    const csvCell = (value: string | number | undefined) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+                    const csv = [
+                      ['Employee Code', 'Beneficiary Name', 'Bank', 'IBAN', 'Account Number', 'Net Amount PKR'].map(csvCell).join(','),
+                      ...rows.map(p => [p.employeeCode, p.employeeName, p.bankName, p.iban, p.bankAccountNumber, p.netSalary].map(csvCell).join(','))
+                    ].join('\r\n');
+                    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = `bank-advice-${showBankFileModal.periodYear}-${String(showBankFileModal.periodMonth).padStart(2, '0')}.csv`;
+                    link.click();
+                    URL.revokeObjectURL(url);
                     setShowBankFileModal(null);
                   }}
                   className="bg-slate-900 text-white font-semibold text-xs px-4 py-2 rounded-lg"

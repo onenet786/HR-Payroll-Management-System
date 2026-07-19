@@ -11,14 +11,45 @@ export interface Company {
   id: string;
   name: string;
   industry: string;
-  taxRegistrationNumber: string; // NTN
+  taxRegistrationNumber: string; // NTN (legacy alias)
   eobiRegistrationNumber: string;
   socialSecurityRegion: string;
+  code?: string;
+  legalName?: string;
+  legalType?: string;
+  ntn?: string;
+  strn?: string;
+  eobiRegistration?: string;
+  socialSecurityRegistration?: string;
+  registeredAddress?: string;
+  city?: string;
+  province?: Province;
+  postalCode?: string;
+  phone?: string;
+  email?: string;
+  website?: string;
+  fiscalYearStartMonth?: number;
+  payrollFrequency?: 'Monthly' | 'Biweekly' | 'Weekly';
+  defaultCurrency?: string;
+  timezone?: string;
+  status?: 'Active' | 'Inactive';
+  createdAt?: string;
+  updatedAt?: string;
+  setupCompletedAt?: string;
+}
+
+export interface CompanySetupPayload {
+  company: Company;
+  branch: Branch;
+  departments: Department[];
+  designations: Designation[];
+  statutoryConfig: StatutoryConfig;
 }
 
 export interface Branch {
   id: string;
   companyId: string;
+  code?: string;
   name: string;
   city: string;
   province: Province;
@@ -37,6 +68,31 @@ export interface Designation {
   departmentId: string;
   title: string;
   grade: string;
+}
+
+export interface Zone {
+  id: string;
+  companyId: string;
+  code: string;
+  name: string;
+  status: 'Active' | 'Inactive';
+}
+
+export interface UcTown {
+  id: string;
+  zoneId: string;
+  code: string;
+  name: string;
+  status: 'Active' | 'Inactive';
+}
+
+export interface WageType {
+  id: string;
+  companyId: string;
+  code: string;
+  name: string;
+  calculationBasis: 'Monthly' | 'Daily';
+  status: 'Active' | 'Inactive';
 }
 
 // Shifts
@@ -69,6 +125,9 @@ export interface Employee {
   
   // Employment Details
   wageType: string;
+  wageTypeId?: string;
+  zoneId?: string;
+  ucTownId?: string;
   basicSalary: number; // Basic Monthly Wage or Daily Wage Rate
   providentFundOptIn: boolean;
   providentFundRate: number; // Percentage e.g. 5% or 8.33%
@@ -97,6 +156,10 @@ export interface Employee {
   eobiEnabled?: boolean;
   fbrEnabled?: boolean;
   maritalStatus?: 'Single' | 'Married' | 'Divorced' | 'Widowed';
+  emergencyContactName?: string;
+  emergencyContactNumber?: string;
+  reportingManagerId?: string;
+  ntn?: string;
   fingerprintTemplates?: string[]; // base64 FMD templates from Digital Persona URU 4500
   faceDescriptors?: {
     version: 1 | 2;
@@ -114,6 +177,9 @@ export interface AttendanceLog {
   punchIn?: string; // HH:MM:SS
   punchOut?: string; // HH:MM:SS
   outReason?: string;
+  employeeBranchId?: string;
+  terminalBranchId?: string;
+  crossBranch?: boolean;
   method: 'Biometric' | 'Camera' | 'Mobile GPS' | 'RFID' | 'Manual' | 'Web Punch';
   status: 'Present' | 'Late' | 'Half Day' | 'Absent' | 'On Leave' | 'Holiday';
   overtimeMinutes: number;
@@ -171,6 +237,13 @@ export interface StatutoryConfig {
   gratuityRateDaysPerYear: number; // e.g. 30 days basic pay per completed year of service
   providentFundMaxEmployeeContribution: number; // e.g. 10%
   updatedAt: string; // timestamp
+  effectiveFrom?: string;
+  effectiveTo?: string;
+  taxYear?: string;
+  socialSecurityWageCeiling?: number;
+  provincialSocialSecurityRates?: Partial<Record<Province, number>>;
+  overtimeMultiplier?: number;
+  standardMonthlyHours?: number;
 }
 
 // Payroll Run Instance
@@ -188,6 +261,21 @@ export interface PayrollRun {
   totalNetPay: number;
   totalEobiEmployer: number;
   totalSocialSecurityEmployer: number;
+  employeeCount?: number;
+  statutoryConfigId?: string;
+  statutoryEffectiveFrom?: string;
+  approvedAt?: string;
+  approvedBy?: string;
+  disbursedAt?: string;
+  disbursedBy?: string;
+  payslips?: Payslip[];
+  auditTrail?: PayrollAuditEvent[];
+}
+
+export interface PayrollAuditEvent {
+  action: 'Created' | 'Approved' | 'Disbursed';
+  at: string;
+  by: string;
 }
 
 // Individual Payslip details calculated under a Payroll Run
@@ -201,6 +289,9 @@ export interface Payslip {
   departmentName: string;
   designationTitle: string;
   branchName: string;
+  bankName?: string;
+  bankAccountNumber?: string;
+  iban?: string;
   
   // Attendances & Days
   totalDaysInMonth: number;
@@ -235,6 +326,14 @@ export interface Payslip {
   eobiEmployerContribution: number; // 5% of min wage
   pessiEmployerContribution: number; // 6% of payroll (capped)
   providentFundEmployerContribution: number;
+  province?: Province;
+  paidDays?: number;
+  scheduledWorkingDays?: number;
+  explicitAbsentDays?: number;
+  statutoryConfigId?: string;
+  calculationVersion?: string;
+  periodMonth?: number;
+  periodYear?: number;
 }
 
 // Bank advice item
@@ -262,8 +361,10 @@ export interface UserAccount {
   roleId: string;
   employeeId?: string; // Links to Employee if they represent an internal worker
   status: 'Active' | 'Inactive';
-  password?: string;
+  passwordHash?: string;
 }
+
+export type NewUserAccount = Omit<UserAccount, 'passwordHash'> & { password: string };
 
 // Holiday Management
 export interface Holiday {
