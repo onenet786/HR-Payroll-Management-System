@@ -10,34 +10,38 @@ const {
   canReturnFromTemporaryExit,
   resumeFromTemporaryExit,
 } = require('./attendance-state.cjs');
+const { createChallengeManager, isValidAttestation } = require('./liveness.cjs');
+const { authorizeCameraAttempt, requireSecureEnrollment } = require('./camera-authorization.cjs');
 
 dotenv.config({ quiet: true });
 
-// Vite reads .env.local automatically, but Electron does not. During local
-// development, load the same file and map its browser-safe Firebase settings
-// to the unprefixed names used by the kiosk main process. Packaged builds stay
-// strict and continue to require their deployment environment configuration.
-if (!app.isPackaged) {
-  dotenv.config({ path: path.join(__dirname, '..', '.env.local'), quiet: true, override: false });
-  const localFirebaseKeys = [
-    'FIREBASE_API_KEY',
-    'FIREBASE_AUTH_DOMAIN',
-    'FIREBASE_PROJECT_ID',
-    'FIREBASE_STORAGE_BUCKET',
-    'FIREBASE_MESSAGING_SENDER_ID',
-    'FIREBASE_APP_ID',
-    'FIRESTORE_DATABASE_ID',
-  ];
-  for (const key of localFirebaseKeys) {
-    if (!process.env[key] && process.env[`VITE_${key}`]) process.env[key] = process.env[`VITE_${key}`];
-  }
-  if (!process.env.PORTAL_URL) process.env.PORTAL_URL = 'http://localhost:3000';
+// Vite reads .env.local automatically, but Electron does not. The kiosk build
+// bundles only that browser-safe Firebase configuration as kiosk.env beside
+// the packaged resources; no service-account credentials are included.
+const kioskEnvironmentPath = app.isPackaged
+  ? path.join(process.resourcesPath, 'kiosk.env')
+  : path.join(__dirname, '..', '.env.local');
+dotenv.config({ path: kioskEnvironmentPath, quiet: true, override: false });
+const localFirebaseKeys = [
+  'FIREBASE_API_KEY',
+  'FIREBASE_AUTH_DOMAIN',
+  'FIREBASE_PROJECT_ID',
+  'FIREBASE_STORAGE_BUCKET',
+  'FIREBASE_MESSAGING_SENDER_ID',
+  'FIREBASE_APP_ID',
+  'FIRESTORE_DATABASE_ID',
+];
+for (const key of localFirebaseKeys) {
+  if (!process.env[key] && process.env[`VITE_${key}`]) process.env[key] = process.env[`VITE_${key}`];
 }
+if (!process.env.PORTAL_URL) process.env.PORTAL_URL = 'http://localhost:3000';
 
 const bridgePort = 15896;
 let mainWindow;
 let splashWindow;
 let bridgeProcess = null;
+const cameraChallenges = createChallengeManager();
+const cameraReasonAuthorizations = new Map();
 let autoSyncTimer = null;
 let driverWatchTimer = null;
 
@@ -232,7 +236,9 @@ function defaultStore() {
       ipCameraUrl: '',
       allowCodeOnlyPunch: false,
       requireCodeWithFingerprint: false,
-      requireCodeWithCamera: true,
+      requireCodeWithCamera: false,
+      autoCaptureCamera: true,
+      autoCaptureConfigVersion: 1,
       autoFullscreen: true,
     },
     employees: [],
@@ -256,6 +262,12 @@ function readStore() {
       const loaded = JSON.parse(fs.readFileSync(file, 'utf8'));
       const defaults = defaultStore();
       const store = { ...defaults, ...loaded, terminal: { ...defaults.terminal, ...(loaded.terminal || {}) } };
+      // Earlier builds hardcoded auto-capture off and exposed no usable choice.
+      // Migrate that legacy value once; subsequent user changes are preserved.
+      if (!loaded.terminal?.autoCaptureConfigVersion) {
+        store.terminal.autoCaptureCamera = true;
+        store.terminal.autoCaptureConfigVersion = 1;
+      }
       store.employees = (store.employees || []).map(kioskStoredEmployee);
       // Legacy event details could contain names, identifiers, paths, or raw errors.
       store.events = [];
@@ -767,15 +779,18 @@ function getFingerprintTemplates(employee) {
   return list.map(normalizeFingerprintTemplate).filter(Boolean);
 }
 
-function normalizeFaceDescriptor(value) {
+function normalizeFaceDescriptor(value, requireSecure = true) {
   if (!value || typeof value !== 'object') return null;
   const vector = Array.isArray(value.vector) ? value.vector.map(Number).filter(Number.isFinite) : [];
-  if (value.version !== 2 || vector.length !== 1280) return null;
+  const attestation = value.liveness;
+  if (vector.length !== 1280) return null;
+  if (requireSecure && (value.version !== 3 || !isValidAttestation(attestation))) return null;
   return {
-    version: 2,
+    version: requireSecure ? 3 : Number(value.version || 2),
     vector,
     capturedAt: value.capturedAt || '',
     source: value.source || '',
+    liveness: attestation,
   };
 }
 
@@ -802,7 +817,7 @@ function compareFaceDescriptors(a, b) {
 }
 
 function identifyFaceDescriptor(employees, probe, threshold = 0.18) {
-  const normalizedProbe = normalizeFaceDescriptor(probe);
+  const normalizedProbe = normalizeFaceDescriptor(probe, false);
   if (!normalizedProbe) return { ok: false, message: 'Camera face descriptor was invalid. Try another capture.' };
 
   let best = null;
@@ -825,7 +840,7 @@ function identifyFaceDescriptor(employees, probe, threshold = 0.18) {
     }
   }
 
-  if (!best) return { ok: false, message: 'No v2 camera face profiles found. Re-enroll employee faces from HR biometric setup.' };
+  if (!best) return { ok: false, message: 'Secure face re-enrollment required. Legacy camera profiles cannot be used for attendance.' };
   if (best.score > threshold) {
     return {
       ok: false,
@@ -1129,8 +1144,8 @@ ipcMain.handle('kiosk:save-settings', async (_event, settings) => {
     ipCameraUrl: cameraUrl,
     allowCodeOnlyPunch: !!settings.allowCodeOnlyPunch,
     requireCodeWithFingerprint: !!settings.requireCodeWithFingerprint,
-    requireCodeWithCamera: !!settings.requireCodeWithCamera,
-    autoCaptureCamera: !!settings.autoCaptureCamera,
+    requireCodeWithCamera: false,
+    autoCaptureCamera: settings.autoCaptureCamera !== false,
     autoFullscreen: !!settings.autoFullscreen,
   };
   writeStore(store);
@@ -1166,6 +1181,17 @@ ipcMain.handle('kiosk:sync', async () => {
   }
 });
 
+ipcMain.handle('kiosk:begin-camera-liveness', async () => {
+  const store = readStore();
+  if (store.terminal.ipCameraUrl) return { ok: false, message: 'IP camera attendance is blocked because still-image streams cannot prove liveness. Use the local webcam or fingerprint.' };
+  return cameraChallenges.begin(store.terminal.id || 'kiosk');
+});
+
+ipcMain.handle('kiosk:cancel-camera-liveness', async (_event, challengeId) => {
+  const store = readStore();
+  return cameraChallenges.cancel(store.terminal.id || 'kiosk', String(challengeId || ''));
+});
+
 ipcMain.handle('kiosk:punch-by-code', async (_event, payload) => {
   const store = readStore();
   if (!store.terminal.allowCodeOnlyPunch) {
@@ -1191,6 +1217,14 @@ ipcMain.handle('kiosk:punch-by-code', async (_event, payload) => {
 
 ipcMain.handle('kiosk:punch-camera', async (_event, payload) => {
   const store = readStore();
+  const terminalId = store.terminal.id || 'kiosk';
+  const authorization = authorizeCameraAttempt({ payload, terminal: store.terminal, terminalId, challengeManager: cameraChallenges, reasonAuthorizations: cameraReasonAuthorizations });
+  if (!authorization.ok) {
+    if (!authorization.liveness?.ok) addEvent('security', `Camera liveness rejected: ${authorization.liveness?.message || authorization.message}`);
+    const lockMessage = authorization.lockedUntil ? ` Camera is locked until ${new Date(authorization.lockedUntil).toLocaleTimeString()}; use fingerprint.` : '';
+    return { ok: false, message: `${authorization.message}${lockMessage}` };
+  }
+  const liveness = authorization.liveness;
   const employees = mergeEmployeeBiometricTemplates(store.employees || [], store.biometricTemplates || []);
   let typedEmployee = payload.code ? findEmployeeByCode(employees, payload.code) : null;
   let crossBranch = false;
@@ -1205,36 +1239,46 @@ ipcMain.handle('kiosk:punch-camera', async (_event, payload) => {
       return { ok: false, message: 'Cross-branch verification could not securely retrieve this employee. Check the full employee ID and network connection.' };
     }
   }
-  if (store.terminal.requireCodeWithCamera && !store.terminal.autoCaptureCamera && !typedEmployee) {
-    return { ok: false, message: 'Please enter your employee code before camera punch.' };
-  }
   if (payload.code && !typedEmployee) {
+    cameraChallenges.recordFailure(terminalId);
     return { ok: false, message: 'Employee ID was not found. Cross-branch attendance requires the complete employee ID and face verification.' };
   }
 
   const candidates = typedEmployee ? [typedEmployee] : employees;
-  if (typedEmployee && !getFaceDescriptors(typedEmployee).length) {
-    return { ok: false, message: 'No camera face profile is enrolled for this employee. Enroll face from HR biometric setup first.' };
+  const secureDescriptorCount = candidates.reduce((count, employee) => count + getFaceDescriptors(employee).length, 0);
+  const enrollmentGate = requireSecureEnrollment(secureDescriptorCount);
+  if (!enrollmentGate.ok) {
+    cameraChallenges.recordFailure(terminalId);
+    return enrollmentGate;
   }
-  // Camera distance causes normal kiosk captures to score around 0.22 even
-  // when enrollment samples of the same employee are much closer. Code-free
-  // identification gets only the tolerance needed for that variation, while
-  // identifyFaceDescriptor still rejects ambiguous cross-employee matches.
+  // A typed code narrows the gallery; without one the same descriptor matcher
+  // searches every securely enrolled employee and enforces uniqueness margin.
   const matchThreshold = typedEmployee ? 0.24 : 0.23;
   const match = identifyFaceDescriptor(candidates, payload.descriptor, matchThreshold);
-  if (!match.ok) return match;
+  if (!match.ok) {
+    const failure = cameraChallenges.recordFailure(terminalId);
+    return { ...match, lockedUntil: failure.lockedUntil || undefined };
+  }
 
   const employee = match.employee;
   if (employee.status === 'Terminated') return { ok: false, message: 'This employee account is terminated.' };
   if (employee.status === 'Suspended') return { ok: false, message: 'This employee account is suspended.' };
 
-  return savePunch(store, employee, 'Camera', payload.evidence || null, {
+  const result = await savePunch(store, employee, 'Camera', payload.evidence || null, {
     ...(payload.meta || {}),
     camera: payload.meta?.camera || 'webcam',
     score: match.score,
-    recognizedBy: crossBranch ? 'cross-branch-code-and-face' : typedEmployee ? 'camera-code-confirmed' : 'camera-face',
+    recognizedBy: crossBranch ? 'cross-branch-code-face-liveness' : typedEmployee ? 'camera-code-face-liveness' : 'camera-face-liveness',
     crossBranch,
+    livenessMethod: 'active-turn-v1',
   });
+  if (result?.needsOutReason) {
+    const token = require('crypto').randomBytes(24).toString('hex');
+    cameraReasonAuthorizations.set(token, { terminalId, code: String(payload.code).trim(), expiresAt: Date.now() + 60_000, summary: liveness.summary });
+    return { ...result, cameraAuthorization: token };
+  }
+  if (result?.ok) cameraChallenges.reset(terminalId);
+  return result;
 });
 
 ipcMain.handle('kiosk:punch-fingerprint', async (_event, payload) => {

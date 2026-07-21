@@ -8,15 +8,18 @@ import {
   Scan, ShieldCheck, MapPin, Camera, CameraOff,
   Calendar, FileText, User, Fingerprint, CheckCircle, AlertCircle, Clock
 } from 'lucide-react';
-import { Employee, AttendanceLog, LeaveRequest, Payslip, UserAccount } from '../types';
+import { Employee, AttendanceLog, LeaveRequest, Payslip, UserAccount, MobileAttendanceAction, MobilePunchDetails, MobileDutyAuthorization } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
+import { assessBrowserFaceDetection, createFaceDescriptorFromVideo, findBestFaceMatch, hasFaceEnrollment } from '../utils/faceRecognition';
+import { performActiveLiveness, randomLivenessOrder } from '../utils/faceLiveness';
 
 interface MobileAppProps {
   employees: Employee[];
   attendances: AttendanceLog[];
+  mobileDutyAuthorizations: MobileDutyAuthorization[];
   leaves: LeaveRequest[];
   onApplyLeave: (leave: LeaveRequest) => void;
-  onSimulatePunch: (employeeId: string, punchIn: string, punchOut: string, method: string, lat?: number, lon?: number) => void;
+  onSimulatePunch: (employeeId: string, punchIn: string, punchOut: string, method: string, lat?: number, lon?: number, locationAccuracyMeters?: number, locationCapturedAt?: string, locationAddress?: string, mobileDetails?: MobilePunchDetails) => void | Promise<void>;
   onAddRegularization: (employeeId: string, date: string, reason: string) => void;
   hideMockPhoneFrame?: boolean;
   loggedInUser?: UserAccount;
@@ -32,6 +35,17 @@ function nowTimeStr() {
   return `${String(n.getHours()).padStart(2, '0')}:${String(n.getMinutes()).padStart(2, '0')}:${String(n.getSeconds()).padStart(2, '0')}`;
 }
 
+function localDateStr(date = new Date()) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+const actionLabel = (action: MobileAttendanceAction) => ({
+  'workday-in': 'Start Day',
+  'workday-out': 'Finish Day',
+  'visit-in': 'Client / Field Check In',
+  'visit-out': 'Client / Field Check Out',
+}[action]);
+
 // True when running inside Capacitor native shell (Android/iOS APK)
 const isCapacitorApp = !!(window as any).Capacitor?.isNativePlatform?.();
 const biometricCredentialIds = new Map<string, string>();
@@ -39,6 +53,7 @@ const biometricCredentialIds = new Map<string, string>();
 export function MobileApp({
   employees,
   attendances,
+  mobileDutyAuthorizations,
   leaves,
   onApplyLeave,
   onSimulatePunch,
@@ -59,11 +74,17 @@ export function MobileApp({
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [cameraReady, setCameraReady] = useState(false);
   const [capturedPhoto, setCapturedPhoto] = useState<string | null>(null);
-  const [gpsCoords, setGpsCoords] = useState<{ lat: number; lon: number } | null>(null);
+  const [gpsCoords, setGpsCoords] = useState<{ lat: number; lon: number; address?: string } | null>(null);
   const [biometricStatus, setBiometricStatus] = useState<BiometricStatus>('idle');
   const [biometricSupported, setBiometricSupported] = useState(false);
   const [punchStep, setPunchStep] = useState<PunchStep>('preview');
   const [punchMethod, setPunchMethod] = useState('');
+  const [faceStatus, setFaceStatus] = useState('Center your face inside the oval.');
+  const [selectedAction, setSelectedAction] = useState<MobileAttendanceAction>('workday-in');
+  const [completedAction, setCompletedAction] = useState<MobileAttendanceAction | null>(null);
+  const [punchReason, setPunchReason] = useState({ category: 'Work from home', note: '', clientName: '' });
+  const facePunchBusyRef = useRef(false);
+  const autoFaceStableFramesRef = useRef(0);
 
   // Forms state
   const [leaveForm, setLeaveForm] = useState({
@@ -82,12 +103,32 @@ export function MobileApp({
     ? employees.find(e => e.id === loggedInUser.employeeId)
     : undefined;
   const myPunches = attendances.filter(a => a.employeeId === currentEmp?.id);
-  const todayStr = new Date().toISOString().split('T')[0];
-  const isCheckedInToday = myPunches.some(p => p.date === todayStr);
+  const todayStr = localDateStr();
+  const activeMobileDuty = mobileDutyAuthorizations.find(item => item.employeeId === currentEmp?.id && item.status === 'Approved' && item.validFrom <= todayStr && item.validTo >= todayStr);
+  const todayAttendance = myPunches.find(p => p.date === todayStr);
+  const isWorkdayActive = Boolean(todayAttendance?.punchIn && !todayAttendance?.punchOut);
+  const isWorkdayComplete = Boolean(todayAttendance?.punchOut);
+  const activeVisit = todayAttendance?.fieldVisits?.find(visit => !visit.checkOut);
+  const authorizationAllowsVisits = Boolean(activeMobileDuty && (
+    activeMobileDuty.allowFieldVisits
+    || ['Client visit', 'Market / field duty', 'Out of station', 'Official travel', 'Direct reporting to worksite'].includes(activeMobileDuty.dutyType)
+  ));
+  const canSubmitSelectedAction = Boolean(activeMobileDuty) && (selectedAction === 'workday-in' ? !todayAttendance?.punchIn
+    : selectedAction === 'workday-out' ? isWorkdayActive && !activeVisit
+    : selectedAction === 'visit-in' ? authorizationAllowsVisits && isWorkdayActive && !activeVisit
+    : authorizationAllowsVisits && Boolean(activeVisit));
+  const nextAction: MobileAttendanceAction | null = !todayAttendance?.punchIn ? 'workday-in'
+    : activeVisit ? 'visit-out'
+    : isWorkdayActive ? (authorizationAllowsVisits ? 'visit-in' : 'workday-out')
+    : null;
   const myPayslip = currentEmp ? [...payrollPayslips].reverse().find(p => p.employeeId === currentEmp.id) || null : null;
   const payslipPeriod = myPayslip?.periodMonth && myPayslip.periodYear
     ? new Date(myPayslip.periodYear, myPayslip.periodMonth - 1).toLocaleString('en-PK', { month: 'long', year: 'numeric' })
     : 'Latest approved period';
+
+  useEffect(() => {
+    if (!activeMobileDuty && mobileTab === 'punch') setMobileTab('home');
+  }, [activeMobileDuty, mobileTab]);
 
   // Clock tick
   useEffect(() => {
@@ -139,6 +180,9 @@ export function MobileApp({
       setCapturedPhoto(null);
       setGpsCoords(null);
       setBiometricStatus('idle');
+      setFaceStatus('Center your face inside the oval.');
+      setCompletedAction(null);
+      setSelectedAction(!todayAttendance?.punchIn ? 'workday-in' : activeVisit ? 'visit-out' : isWorkdayActive ? (authorizationAllowsVisits ? 'visit-in' : 'workday-out') : 'workday-out');
       startCamera();
       checkBiometricSupport();
     } else {
@@ -224,41 +268,53 @@ export function MobileApp({
   // Async so we can await GPS before writing to the server
   const finishPunch = async (method: string) => {
     if (!currentEmp) return;
+    if (!activeMobileDuty) throw new Error('Mobile attendance is not authorized for today.');
+    if (!canSubmitSelectedAction) throw new Error(isWorkdayComplete ? 'Today’s workday is complete.' : 'This attendance action is not currently available.');
+    const reasonCategory = activeMobileDuty.dutyType;
+    const reasonNote = punchReason.note.trim();
+    const clientName = punchReason.clientName.trim();
+    if (!reasonCategory) throw new Error('Select a reason for this mobile action.');
+    if (!reasonNote) throw new Error('Enter the business reason or visit details before verification.');
+    if (selectedAction === 'visit-in' && !clientName) throw new Error('Enter the client or field location name.');
     const photo = captureFrame();
     setCapturedPhoto(photo);
     setPunchMethod(method);
 
     const timeStr = nowTimeStr();
 
-    // Get GPS first (cached OK, 3 s max wait) so it's included in the Firestore write
-    let lat: number | undefined;
-    let lon: number | undefined;
-    if (navigator.geolocation) {
+    // Mobile attendance is location-bound. Require a fresh, reasonably accurate
+    // device fix and persist its accuracy/timestamp with the Firestore record.
+    if (!navigator.geolocation) throw new Error('Location is unavailable on this device. Attendance was not recorded.');
+    const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        maximumAge: 0,
+        timeout: 12000,
+        enableHighAccuracy: true,
+      });
+    });
+    const lat = pos.coords.latitude;
+    const lon = pos.coords.longitude;
+    const accuracy = pos.coords.accuracy;
+    if (![lat, lon, accuracy].every(Number.isFinite) || accuracy <= 0 || accuracy > 100) {
+      throw new Error(`GPS accuracy is ${Math.round(accuracy || 0)} m. Move to an open area and retry (100 m required).`);
+    }
+    const locationCapturedAt = new Date(pos.timestamp).toISOString();
+    let locationAddress = '';
+    if (isCapacitorApp) {
       try {
-        const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
-          navigator.geolocation.getCurrentPosition(resolve, reject, {
-            maximumAge: 60000,
-            timeout: 3000,
-            enableHighAccuracy: false
-          });
-        });
-        lat = pos.coords.latitude;
-        lon = pos.coords.longitude;
-        setGpsCoords({ lat, lon });
-      } catch {
-        setGpsCoords(null);
-      }
+        const resolved = await (window as any).Capacitor.Plugins.LocationPlugin.reverseGeocode({ latitude: lat, longitude: lon });
+        locationAddress = String(resolved?.address || '').trim().slice(0, 300);
+      } catch { /* Coordinates remain valid evidence when the device geocoder is unavailable. */ }
     }
+    setGpsCoords({ lat, lon, address: locationAddress || undefined });
 
-    // Pass time in the correct slot: punchIn for first punch, punchOut for second
-    if (isCheckedInToday) {
-      onSimulatePunch(currentEmp.id, '', timeStr, method, lat, lon);   // Punch OUT
-    } else {
-      onSimulatePunch(currentEmp.id, timeStr, '', method, lat, lon);   // Punch IN
-    }
+    const details: MobilePunchDetails = { action: selectedAction, reasonCategory, reasonNote, verificationMethod: method === 'Biometric' ? 'Biometric' : 'Camera', ...(clientName && { clientName }) };
+    const isOutAction = selectedAction === 'workday-out' || selectedAction === 'visit-out';
+    await onSimulatePunch(currentEmp.id, isOutAction ? '' : timeStr, isOutAction ? timeStr : '', 'Mobile GPS', lat, lon, accuracy, locationCapturedAt, locationAddress, details);
+    setCompletedAction(selectedAction);
     setPunchStep('done');
     setBiometricStatus('success');
-    triggerWaToast(`✅ ${currentEmp.fullName}: ${isCheckedInToday ? 'Punch OUT' : 'Punch IN'} recorded at ${timeStr} via ${method}`);
+    triggerWaToast(`✅ ${currentEmp.fullName}: ${actionLabel(selectedAction)} recorded at ${timeStr} via ${method}`);
   };
 
   const handleBiometricPunch = async () => {
@@ -269,7 +325,7 @@ export function MobileApp({
         // Native Android BiometricPrompt via our registered Capacitor plugin
         await (window as any).Capacitor.Plugins.BiometricPlugin.authenticate({
           title: 'Attendance Verification',
-          reason: `${isCheckedInToday ? 'Punch OUT' : 'Punch IN'} — ${currentEmp.fullName}`
+          reason: `${actionLabel(selectedAction)} — ${currentEmp.fullName}`
         });
         finishPunch('Biometric');
       } else {
@@ -286,10 +342,55 @@ export function MobileApp({
     }
   };
 
-  const handleCameraPunch = () => {
-    if (!currentEmp) return;
-    finishPunch('Camera'); // selfie captured if camera ready; punch records regardless
-  };
+  const handleCameraPunch = useCallback(async () => {
+    const video = videoRef.current;
+    if (!currentEmp || !video || facePunchBusyRef.current) return;
+    facePunchBusyRef.current = true;
+    setBiometricStatus('scanning');
+    try {
+      if (!cameraReady) throw new Error('Front camera is not ready.');
+      if (!hasFaceEnrollment(currentEmp)) throw new Error('Secure face enrollment is required before mobile attendance.');
+      const quality = await assessBrowserFaceDetection(video);
+      if (!quality?.ok) throw new Error(quality?.message || 'Keep one complete face centered inside the oval.');
+
+      const order = randomLivenessOrder();
+      const liveness = await performActiveLiveness(video, order, message => setFaceStatus(message));
+      if (!liveness.ok) throw new Error(liveness.message);
+
+      const probe = createFaceDescriptorFromVideo(video, 'mobile-front-camera');
+      const match = findBestFaceMatch([currentEmp], probe, 0.24);
+      if (!match || match.employee.id !== currentEmp.id) throw new Error('Face does not match the signed-in employee. Attendance was not recorded.');
+
+      setFaceStatus('Face verified. Capturing secure GPS location…');
+      await finishPunch('Camera');
+    } catch (error) {
+      setBiometricStatus('failed');
+      setFaceStatus(error instanceof Error ? error.message : 'Face verification failed.');
+    } finally {
+      facePunchBusyRef.current = false;
+    }
+  }, [cameraReady, currentEmp, finishPunch]);
+
+  // Hands-free fallback: three stable centered detections start the same secure
+  // path as the manual button. The busy lock prevents duplicate submissions.
+  useEffect(() => {
+    if (mobileTab !== 'punch' || punchStep !== 'preview' || !cameraReady || !currentEmp || !canSubmitSelectedAction || !punchReason.note.trim() || (selectedAction === 'visit-in' && !punchReason.clientName.trim())) return;
+    const timer = window.setInterval(async () => {
+      if (facePunchBusyRef.current || !videoRef.current) return;
+      try {
+        const quality = await assessBrowserFaceDetection(videoRef.current);
+        autoFaceStableFramesRef.current = quality?.ok ? autoFaceStableFramesRef.current + 1 : 0;
+        if (!quality?.ok) setFaceStatus(quality?.message || 'Center your face inside the oval.');
+        if (autoFaceStableFramesRef.current >= 3) {
+          autoFaceStableFramesRef.current = 0;
+          void handleCameraPunch();
+        }
+      } catch {
+        autoFaceStableFramesRef.current = 0;
+      }
+    }, 700);
+    return () => window.clearInterval(timer);
+  }, [cameraReady, canSubmitSelectedAction, currentEmp, handleCameraPunch, mobileTab, punchReason.clientName, punchReason.note, punchStep, selectedAction]);
 
   const handleApplyLeaveSubmit = (e: React.SyntheticEvent) => {
     e.preventDefault();
@@ -368,6 +469,16 @@ export function MobileApp({
         </AnimatePresence>
 
         {/* ── HOME TAB ── */}
+        {mobileTab === 'home' && !currentEmp && (
+          <div className="p-4">
+            <div className="rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4 text-amber-100">
+              <h3 className="text-sm font-bold">Employee account is not linked</h3>
+              <p className="mt-2 text-xs leading-relaxed text-amber-200/80">
+                This login is not linked to an available employee record. Ask an administrator to open User Management, edit this user, and select the correct employee. Mobile-duty attendance will appear after the link is saved.
+              </p>
+            </div>
+          </div>
+        )}
         {mobileTab === 'home' && currentEmp && (
           <div className="p-3 space-y-3">
             {/* Greeting */}
@@ -385,8 +496,8 @@ export function MobileApp({
             <div className="bg-slate-800/60 border border-slate-700/50 rounded-2xl p-3 space-y-2">
               <div className="flex justify-between items-center">
                 <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">Today's Status</span>
-                <span className={`px-2 py-0.5 rounded-full text-[9px] uppercase font-bold ${isCheckedInToday ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'}`}>
-                  {isCheckedInToday ? '● Clocked In' : '○ Not Clocked'}
+                <span className={`px-2 py-0.5 rounded-full text-[9px] uppercase font-bold ${isWorkdayActive ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-slate-700 text-slate-300 border border-slate-600'}`}>
+                  {isWorkdayComplete ? '✓ Day Finished' : isWorkdayActive ? '● Day Active' : '○ Not Started'}
                 </span>
               </div>
               <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
@@ -413,15 +524,22 @@ export function MobileApp({
               ))}
             </div>
 
-            {/* Quick punch CTA */}
-            <button
+            {activeMobileDuty && <div className="rounded-2xl border border-indigo-500/30 bg-indigo-500/10 p-3 text-[10px] text-indigo-200">
+              <div className="font-bold">Assigned Mobile Duty: {activeMobileDuty.dutyType}</div>
+              <div className="mt-1">Valid {activeMobileDuty.validFrom} to {activeMobileDuty.validTo}</div>
+              {activeMobileDuty.assignedLocation && <div className="mt-1 text-slate-300">Location: {activeMobileDuty.assignedLocation}</div>}
+              {activeMobileDuty.instructions && <div className="mt-1 text-slate-300">{activeMobileDuty.instructions}</div>}
+              <div className="mt-1 text-slate-400">Assigned by {activeMobileDuty.assignedByName}</div>
+            </div>}
+
+            {activeMobileDuty && <button
               type="button"
               onClick={() => setMobileTab('punch')}
               className="w-full bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-bold p-3 rounded-xl flex items-center justify-center gap-2 transition shadow-lg shadow-emerald-900/30"
             >
               <Camera className="w-4 h-4" />
               <span className="text-sm">Mark Attendance</span>
-            </button>
+            </button>}
           </div>
         )}
 
@@ -433,8 +551,41 @@ export function MobileApp({
               <>
                 <div className="text-center pt-1">
                   <h3 className="font-bold text-white text-sm">Attendance Verification</h3>
-                  <p className="text-[10px] text-slate-400 mt-0.5">{isCheckedInToday ? 'Punch OUT' : 'Punch IN'} • {currentEmp?.fullName}</p>
+                  <p className="text-[10px] text-slate-400 mt-0.5">{actionLabel(selectedAction)} • {currentEmp?.fullName}</p>
                 </div>
+
+                <div className="space-y-2">
+                  <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-3">
+                    <div className="mb-2 flex items-center justify-between">
+                      <div><p className="text-[11px] font-bold text-white">Workday Attendance</p><p className="text-[9px] text-slate-400">One Start Day and Finish Day per date</p></div>
+                      <span className="text-[9px] font-semibold text-emerald-400">{isWorkdayComplete ? 'Completed' : isWorkdayActive ? 'Active' : 'Not started'}</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button type="button" disabled={Boolean(todayAttendance?.punchIn)} onClick={() => setSelectedAction('workday-in')} className={`rounded-xl border px-2 py-2 text-[10px] font-bold disabled:opacity-35 ${selectedAction === 'workday-in' ? 'border-emerald-400 bg-emerald-500/20 text-emerald-300' : 'border-slate-700 bg-slate-800 text-slate-300'}`}>Start Day</button>
+                      <button type="button" disabled={!isWorkdayActive || Boolean(activeVisit)} onClick={() => setSelectedAction('workday-out')} className={`rounded-xl border px-2 py-2 text-[10px] font-bold disabled:opacity-35 ${selectedAction === 'workday-out' ? 'border-emerald-400 bg-emerald-500/20 text-emerald-300' : 'border-slate-700 bg-slate-800 text-slate-300'}`}>Finish Day</button>
+                    </div>
+                  </div>
+                  <div className="rounded-2xl border border-indigo-500/20 bg-indigo-500/5 p-3">
+                    <div className="mb-2 flex items-center justify-between">
+                      <div><p className="text-[11px] font-bold text-white">Client &amp; Field Visits</p><p className="text-[9px] text-slate-400">Repeat for every client visited today</p></div>
+                      <span className="text-[9px] font-semibold text-indigo-300">{activeVisit ? `At ${activeVisit.clientName}` : `${todayAttendance?.fieldVisits?.length || 0} visit(s)`}</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button type="button" disabled={!authorizationAllowsVisits || !isWorkdayActive || Boolean(activeVisit)} onClick={() => setSelectedAction('visit-in')} className={`rounded-xl border px-2 py-2 text-[10px] font-bold disabled:opacity-35 ${selectedAction === 'visit-in' ? 'border-indigo-400 bg-indigo-500/20 text-indigo-300' : 'border-slate-700 bg-slate-800 text-slate-300'}`}>Check In</button>
+                      <button type="button" disabled={!authorizationAllowsVisits || !activeVisit} onClick={() => setSelectedAction('visit-out')} className={`rounded-xl border px-2 py-2 text-[10px] font-bold disabled:opacity-35 ${selectedAction === 'visit-out' ? 'border-indigo-400 bg-indigo-500/20 text-indigo-300' : 'border-slate-700 bg-slate-800 text-slate-300'}`}>Check Out</button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-2 rounded-2xl border border-slate-700/60 bg-slate-800/60 p-3">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-300">Required mobile reason</p>
+                  {selectedAction === 'visit-in' && <input value={punchReason.clientName} onChange={e => setPunchReason(p => ({ ...p, clientName: e.target.value }))} placeholder="Client or field location name *" className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-white focus:border-indigo-500 focus:outline-none" />}
+                  {selectedAction === 'visit-out' && activeVisit && <div className="rounded-lg bg-slate-900 px-3 py-2 text-[10px] text-indigo-300">Checking out from: <strong>{activeVisit.clientName}</strong></div>}
+                  <div className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-semibold text-indigo-300">{activeMobileDuty?.dutyType}</div>
+                  <textarea value={punchReason.note} onChange={e => setPunchReason(p => ({ ...p, note: e.target.value }))} rows={2} placeholder="Business reason, instructions, client purpose or completion details *" className="w-full resize-none rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-white focus:border-indigo-500 focus:outline-none" />
+                </div>
+
+                {isWorkdayComplete && <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3 text-center text-[10px] text-emerald-300">Today’s workday is complete. No further attendance or visit actions are available.</div>}
 
                 {/* Camera preview */}
                 <div className="relative bg-slate-800 rounded-2xl overflow-hidden border border-slate-700/50 aspect-[4/3]">
@@ -450,12 +601,12 @@ export function MobileApp({
                         autoPlay
                         playsInline
                         muted
-                        className="w-full h-full object-cover -scale-x-100"
+                        className="w-full h-full object-contain bg-black -scale-x-100"
                       />
                       {/* Face guide overlay */}
                       {cameraReady && (
                         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                          <div className="w-24 h-28 rounded-full border-2 border-emerald-400/70 shadow-lg shadow-emerald-400/20">
+                          <div className="relative h-[90%] w-[56%] rounded-[50%] border-2 border-emerald-400/80 shadow-lg shadow-emerald-400/20">
                             <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-4 h-1 bg-slate-900" />
                             <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-4 h-1 bg-slate-900" />
                             <div className="absolute top-1/2 -left-1 -translate-y-1/2 w-1 h-4 bg-slate-900" />
@@ -483,13 +634,13 @@ export function MobileApp({
 
                 {/* Biometric status */}
                 {biometricStatus === 'scanning' && (
-                  <div className="flex items-center gap-2 justify-center text-amber-400 text-xs animate-pulse">
-                    <Fingerprint size={14} /> Waiting for biometric...
+                  <div className="flex items-center gap-2 justify-center text-amber-400 text-xs animate-pulse text-center">
+                    <Scan size={14} /> {faceStatus}
                   </div>
                 )}
                 {biometricStatus === 'failed' && (
-                  <div className="flex items-center gap-2 justify-center text-rose-400 text-xs">
-                    <AlertCircle size={14} /> Biometric failed. Try again or use camera.
+                  <div className="flex items-center gap-2 justify-center text-rose-400 text-xs text-center">
+                    <AlertCircle size={14} /> {faceStatus}
                   </div>
                 )}
 
@@ -499,7 +650,7 @@ export function MobileApp({
                     <button
                       type="button"
                       onClick={handleBiometricPunch}
-                      disabled={biometricStatus === 'scanning'}
+                      disabled={biometricStatus === 'scanning' || !canSubmitSelectedAction}
                       className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 active:scale-95 text-white font-bold py-3 rounded-xl transition text-sm shadow-lg shadow-indigo-900/30"
                     >
                       <Fingerprint size={16} />
@@ -511,10 +662,11 @@ export function MobileApp({
                   <button
                     type="button"
                     onClick={handleCameraPunch}
-                    className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-bold py-3 rounded-xl transition text-sm"
+                    disabled={biometricStatus === 'scanning' || !canSubmitSelectedAction}
+                    className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 active:scale-95 text-white font-bold py-3 rounded-xl transition text-sm"
                   >
                     <Camera size={16} />
-                    {isCheckedInToday ? 'Camera Punch OUT' : 'Camera Punch IN'}
+                    Verify Face &amp; {actionLabel(selectedAction)}
                   </button>
                   {!biometricSupported && (
                     <p className="text-[9px] text-slate-500 text-center">TouchID/FaceID/Windows Hello not available on this device</p>
@@ -524,7 +676,7 @@ export function MobileApp({
                 {/* GPS status */}
                 <div className="flex items-center gap-1.5 text-[10px] text-slate-500">
                   <MapPin size={10} />
-                  <span>GPS location will be captured on punch</span>
+                  <span>Fresh high-accuracy GPS (within 100 m) is required and sent with the punch</span>
                 </div>
 
                 {/* Regularization form */}
@@ -557,7 +709,7 @@ export function MobileApp({
                     <CheckCircle className="text-emerald-400" size={24} />
                   </div>
                   <h3 className="font-bold text-white text-sm">Attendance Recorded!</h3>
-                  <p className="text-[10px] text-slate-400 mt-0.5">{isCheckedInToday ? 'Punch OUT logged' : 'Punch IN logged'}</p>
+                  <p className="text-[10px] text-slate-400 mt-0.5">{completedAction ? `${actionLabel(completedAction)} logged` : 'Mobile action logged'}</p>
                 </div>
 
                 {/* Captured selfie */}
@@ -565,7 +717,7 @@ export function MobileApp({
                   <div className="rounded-2xl overflow-hidden border border-slate-700/50 bg-slate-800">
                     <img src={capturedPhoto} alt="Attendance selfie" className="w-full -scale-x-100" />
                     <div className="px-3 py-1.5 text-[9px] text-slate-400 flex justify-between">
-                      <span>Identity verified via selfie</span>
+                      <span>Identity verified by face + active liveness</span>
                       <span className="text-emerald-400">✓ Saved</span>
                     </div>
                   </div>
@@ -582,14 +734,14 @@ export function MobileApp({
                     <span className="font-mono text-white">{timeDisplay}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-400">Method</span>
-                    <span className="text-emerald-400 font-semibold">{punchMethod}</span>
+                    <span className="text-slate-400">Method/GPS</span>
+                    <span className="text-emerald-400 font-semibold">{punchMethod} / Mobile GPS</span>
                   </div>
                   {gpsCoords && (
                     <div className="flex justify-between">
                       <span className="text-slate-400">GPS</span>
-                      <span className="font-mono text-slate-300 text-[10px]">
-                        {gpsCoords.lat.toFixed(4)}°N, {gpsCoords.lon.toFixed(4)}°E
+                      <span className="max-w-[70%] text-right text-slate-300 text-[10px]">
+                        {gpsCoords.address || `${gpsCoords.lat.toFixed(4)}°, ${gpsCoords.lon.toFixed(4)}°`}
                       </span>
                     </div>
                   )}
@@ -599,9 +751,9 @@ export function MobileApp({
                   </div>
                 </div>
 
-                <button type="button" onClick={() => { setPunchStep('preview'); setBiometricStatus('idle'); setCapturedPhoto(null); }}
+                <button type="button" onClick={() => { if (nextAction) { setSelectedAction(nextAction); setPunchStep('preview'); } else setMobileTab('home'); setBiometricStatus('idle'); setCapturedPhoto(null); setPunchReason(p => ({ ...p, note: '', clientName: '' })); }}
                   className="w-full bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold py-2.5 rounded-xl transition">
-                  Back to Camera
+                  {nextAction ? 'Record Next Action' : 'Back to Home'}
                 </button>
               </motion.div>
             )}
@@ -720,7 +872,7 @@ export function MobileApp({
           { tab: 'punch', icon: Camera, label: 'Attend' },
           { tab: 'leave', icon: Calendar, label: 'Leave' },
           { tab: 'payslips', icon: FileText, label: 'Payslip' }
-        ] as const).map(({ tab, icon: Icon, label }) => (
+        ] as const).filter(item => item.tab !== 'punch' || Boolean(activeMobileDuty)).map(({ tab, icon: Icon, label }) => (
           <button type="button" key={tab} onClick={() => setMobileTab(tab)}
             className={`flex flex-col items-center gap-0.5 px-2 py-1 rounded-xl transition ${mobileTab === tab ? 'text-emerald-400' : 'text-slate-500'}`}>
             <Icon className="w-4 h-4" />

@@ -42,6 +42,7 @@ let resetTimer = null;
 let countdownRaf = null;
 let countdownStart = null;
 let fpBusy = false;
+let cameraPunchBusy = false;
 let autoCaptureTimer = null;
 let autoCaptureGoodFrames = 0;
 let autoCaptureIsPunching = false;
@@ -110,6 +111,8 @@ const el = {
   camSourceBadge: id('camSourceBadge'),
   camAutoStatus:  id('camAutoStatus'),
   camAutoLabel:   id('camAutoLabel'),
+  livenessRail:   id('livenessRail'),
+  livenessAction: id('livenessAction'),
   resultCard:     id('resultCard'),
   resultIcon:     id('resultIcon'),
   resultState:    id('resultState'),
@@ -207,7 +210,7 @@ function setMode(mode) {
   el.fpArea.classList.toggle('hidden', !isFp);
   el.fpScanBtn.classList.toggle('hidden', !isFp);
   el.fpTestBtn.classList.toggle('hidden', !isFp);
-  el.camCaptureBtn.classList.toggle('hidden', !isCam || autoCapture);
+  el.camCaptureBtn.classList.toggle('hidden', !isCam);
   el.cameraStack.classList.toggle('hidden', !isCam);
   el.centerPanel?.classList.toggle('camera-active', isCam);
 
@@ -656,16 +659,13 @@ function drawNormalizedCameraFrame(ctx, source, width, height) {
 }
 
 async function detectFaceInsideGuide(source) {
-  const Detector = window.FaceDetector;
-  if (!Detector) return null;
-
   const width = source instanceof HTMLVideoElement ? source.videoWidth : source.naturalWidth;
   const height = source instanceof HTMLVideoElement ? source.videoHeight : source.naturalHeight;
   if (!width || !height) return { ok: false, message: 'Camera is not showing a live frame yet. Wait for the preview, then try again.' };
 
   try {
-    const detector = new Detector({ fastMode: true, maxDetectedFaces: 2 });
-    const faces = await detector.detect(source);
+    if (!window.detectFaceGeometry) await window.faceLandmarkerReady;
+    const faces = await window.detectFaceGeometry(source);
     if (!Array.isArray(faces) || faces.length === 0) {
       return { ok: false, message: 'No face detected. Put your full face inside the oval marker.' };
     }
@@ -673,22 +673,18 @@ async function detectFaceInsideGuide(source) {
       return { ok: false, message: 'More than one face detected. Only one employee should be inside the camera frame.' };
     }
 
-    const box = faces[0].boundingBox;
-    const faceCenterX = (box.x + box.width / 2) / width;
-    const faceCenterY = (box.y + box.height / 2) / height;
-    const faceWidth = box.width / width;
-    const faceHeight = box.height / height;
+    const { centerX: faceCenterX, centerY: faceCenterY, width: faceWidth, height: faceHeight } = faces[0];
 
     const centerIsInGuide =
-      faceCenterX >= 0.39 &&
-      faceCenterX <= 0.61 &&
-      faceCenterY >= 0.34 &&
-      faceCenterY <= 0.64;
+      faceCenterX >= 0.32 &&
+      faceCenterX <= 0.68 &&
+      faceCenterY >= 0.22 &&
+      faceCenterY <= 0.78;
     const sizeIsValid =
-      faceWidth >= 0.22 &&
-      faceWidth <= 0.58 &&
-      faceHeight >= 0.28 &&
-      faceHeight <= 0.74;
+      faceWidth >= 0.18 &&
+      faceWidth <= 0.64 &&
+      faceHeight >= 0.24 &&
+      faceHeight <= 0.82;
 
     if (!centerIsInGuide) {
       return { ok: false, message: 'Face is not inside the oval marker. Center your full face, then try again.' };
@@ -713,6 +709,7 @@ async function assessCameraFrame() {
   if (!readiness.ok) return { ok: false, descriptor: null, message: readiness.message };
   const guideFace = await detectFaceInsideGuide(source);
   if (guideFace && !guideFace.ok) return { ok: false, descriptor: null, message: guideFace.message };
+  const landmarkFaceIsReady = guideFace?.ok === true;
   const descriptor = captureCameraDescriptor();
   const ctx = brightnessCanvas.getContext('2d', { willReadFrequently: true });
   ctx.drawImage(source, 0, 0, 48, 60);
@@ -855,7 +852,12 @@ async function assessCameraFrame() {
 
   if (brightness < 0.18) return { ok: false, descriptor, message: 'Face area is too dark. Add light and try again.' };
   if (brightness > 0.88) return { ok: false, descriptor, message: 'Face area is overexposed. Reduce glare and try again.' };
-  if (
+  // MediaPipe has already verified one complete, centered face using facial
+  // landmarks. Do not reject that result with the color/dark-pixel fallback:
+  // glasses, facial hair, skin tone, and exposure make those thresholds prone
+  // to false negatives. Retain the fallback for platforms where landmark
+  // detection is unavailable.
+  if (!landmarkFaceIsReady && (
     coreSkinPixels < 26 ||
     leftCoreSkinPixels < 9 ||
     rightCoreSkinPixels < 9 ||
@@ -864,14 +866,14 @@ async function assessCameraFrame() {
     leftEyeCoreDarkPixels < 3 ||
     rightEyeCoreDarkPixels < 3 ||
     mouthCoreDarkPixels < 3
-  ) {
+  )) {
     return { ok: false, descriptor, message: 'Bring your full face inside the oval before punching.' };
   }
   if (contrast < 0.03) return { ok: false, descriptor, message: 'No face detected in camera. Move closer and keep your face inside the oval.' };
-  if (skinRatio < 0.14 || skinRatio > 0.76) return { ok: false, descriptor, message: 'No face detected in camera. Put a full face inside the oval marker.' };
-  if (skinCenterX < 0.40 || skinCenterX > 0.60 || skinCenterY < 0.34 || skinCenterY > 0.66) return { ok: false, descriptor, message: 'Face is not inside the oval marker. Center your full face, then try again.' };
-  if (skinWidthRatio < 0.16 || skinWidthRatio > 0.88 || skinHeightRatio < 0.22 || skinHeightRatio > 0.92) return { ok: false, descriptor, message: 'Face is not fully visible. Move closer and keep the full face inside the oval.' };
-  if (centerSkinRatio < 0.18 || skinBalance < 0.35) return { ok: false, descriptor, message: 'No centered full face detected. Keep your face straight inside the oval.' };
+  if (!landmarkFaceIsReady && (skinRatio < 0.14 || skinRatio > 0.76)) return { ok: false, descriptor, message: 'No face detected in camera. Put a full face inside the oval marker.' };
+  if (!landmarkFaceIsReady && (skinCenterX < 0.40 || skinCenterX > 0.60 || skinCenterY < 0.34 || skinCenterY > 0.66)) return { ok: false, descriptor, message: 'Face is not inside the oval marker. Center your full face, then try again.' };
+  if (!landmarkFaceIsReady && (skinWidthRatio < 0.16 || skinWidthRatio > 0.88 || skinHeightRatio < 0.22 || skinHeightRatio > 0.92)) return { ok: false, descriptor, message: 'Face is not fully visible. Move closer and keep the full face inside the oval.' };
+  if (!landmarkFaceIsReady && (centerSkinRatio < 0.18 || skinBalance < 0.35)) return { ok: false, descriptor, message: 'No centered full face detected. Keep your face straight inside the oval.' };
   // Dark-pixel eye/mouth thresholds vary heavily with glasses, facial hair,
   // skin tone, camera exposure, and compression. Enrollment and descriptor
   // matching provide identity verification; readiness should only reject an
@@ -884,7 +886,9 @@ async function assessCameraFrame() {
 
 // ─── Auto-Capture (Face Recognition without Employee Code) ───────────────────
 function isAutoCaptureEnabled() {
-  return !!(kioskState?.terminal?.autoCaptureCamera);
+  return activeMode === MODE.CAM &&
+    !kioskState?.terminal?.ipCameraUrl &&
+    kioskState?.terminal?.autoCaptureCamera !== false;
 }
 
 function setAutoCaptureStatus(state, text) {
@@ -1086,13 +1090,80 @@ async function punchByCode() {
   ));
 }
 
+function setLivenessProgress(phase, message, failed = false) {
+  if (!el.livenessRail) return;
+  el.livenessRail.classList.toggle('failed', failed);
+  el.livenessAction.textContent = message;
+  el.livenessRail.querySelectorAll('.liveness-steps span').forEach((step, index) => {
+    step.classList.toggle('done', phase > index);
+    step.classList.toggle('current', phase === index && !failed);
+  });
+}
+
+async function captureLivenessObservation() {
+  const video = el.webcamEl;
+  const faces = await window.detectFaceGeometry(video);
+  if (faces.length !== 1) throw new Error('Keep exactly one face inside the oval.');
+  const face = faces[0];
+  return { at: Date.now(), yaw: face.yaw, centerX: face.centerX, centerY: face.centerY, scale: face.width };
+}
+
+async function runCameraLivenessChallenge() {
+  if (!window.detectFaceGeometry) await window.faceLandmarkerReady;
+  if (!window.detectFaceGeometry) throw new Error('The bundled face landmark model could not start.');
+  const issued = await api.beginCameraLiveness();
+  if (!issued?.ok) throw new Error(issued?.message || 'Could not start privileged liveness challenge.');
+  const targets = ['center', issued.order[0], 'center', issued.order[1], 'center'];
+  const labels = ['Center your face', `Turn ${issued.order[0].toUpperCase()}`, 'Return to center', `Turn ${issued.order[1].toUpperCase()}`, 'Return to center'];
+  const observations = [];
+  let phase = 0;
+  let consecutive = 0;
+  const matches = (target, yaw) => target === 'center' ? Math.abs(yaw) <= 0.12 : target === 'left' ? yaw <= -0.27 : yaw >= 0.27;
+  try {
+    while (Date.now() <= issued.expiresAt) {
+      setLivenessProgress(phase, labels[phase]);
+      const observation = await captureLivenessObservation();
+      observations.push(observation);
+      consecutive = matches(targets[phase], observation.yaw) ? consecutive + 1 : 0;
+      if (consecutive >= 3) {
+        if (phase === 4) { setLivenessProgress(5, 'Live person verified'); return { challengeId: issued.id, observations }; }
+        phase += 1;
+        consecutive = 0;
+      }
+      await new Promise(resolve => setTimeout(resolve, 110));
+    }
+    throw new Error('Active liveness challenge expired. Start again.');
+  } catch (error) {
+    await api.cancelCameraLiveness(issued.id).catch(() => {});
+    throw error;
+  }
+}
+
 async function punchCamera() {
+  if (cameraPunchBusy) return { ok: false, message: 'Face verification is already in progress.' };
+  cameraPunchBusy = true;
+  el.camCaptureBtn.disabled = true;
+  try {
+    return await performCameraPunch();
+  } finally {
+    cameraPunchBusy = false;
+    el.camCaptureBtn.disabled = false;
+  }
+}
+
+async function performCameraPunch() {
   const code = el.codeInput.value.trim();
+  if (kioskState?.terminal?.ipCameraUrl) {
+    showResult('err', 'IP Camera Blocked', 'IP camera still images cannot prove liveness. Use the local webcam or fingerprint.');
+    return { ok: false, message: 'IP camera attendance is blocked for security.' };
+  }
   clearCapturedPhoto();
   showResult('busy', 'Capturing Evidence…', 'Saving camera snapshot as attendance proof…');
   let evidence = null;
   let descriptor = null;
+  let livenessProof = null;
   try {
+    livenessProof = await runCameraLivenessChallenge();
     let lastReadyFrame = null;
     for (let i = 0; i < 3; i += 1) {
       const frame = await assessCameraFrame();
@@ -1106,19 +1177,25 @@ async function punchCamera() {
     descriptor = lastReadyFrame.descriptor;
     evidence = await captureEvidence();
   } catch (err) {
-    showResult('err', 'Capture Failed', 'Could not save camera image.');
-    return { ok: false, message: 'Could not save camera image.' };
+    const message = err?.message || 'Could not complete active liveness.';
+    setLivenessProgress(-1, message, true);
+    showResult('err', 'Liveness Failed', message);
+    return { ok: false, message };
   }
   const cameraPayload = {
     code,
     descriptor,
     evidence,
+    livenessProof,
     meta: { camera: kioskState?.terminal?.ipCameraUrl ? 'ip-camera' : 'webcam' },
   };
-  return runPunchAction(async () => resolveCheckoutReasonAndRetry(
-    await api.punchCamera(cameraPayload),
-    outReason => api.punchCamera({ ...cameraPayload, meta: { ...cameraPayload.meta, outReason } })
-  ));
+  return runPunchAction(async () => {
+    const firstResult = await api.punchCamera(cameraPayload);
+    return resolveCheckoutReasonAndRetry(
+      firstResult,
+      outReason => api.punchCamera({ ...cameraPayload, livenessProof: null, cameraAuthorization: firstResult.cameraAuthorization, meta: { ...cameraPayload.meta, outReason } })
+    );
+  });
 }
 
 async function punchFingerprint() {
@@ -1630,8 +1707,8 @@ function openSettings() {
   el.stIpCamUrl.value       = t.ipCameraUrl || '';
   el.stAllowCodeOnlyPunch.checked = !!t.allowCodeOnlyPunch;
   el.stReqCodeFp.checked    = !!t.requireCodeWithFingerprint;
-  el.stReqCodeCam.checked   = !!t.requireCodeWithCamera;
-  el.stAutoCaptureCamera.checked = !!t.autoCaptureCamera;
+  el.stReqCodeCam.checked   = false;
+  el.stAutoCaptureCamera.checked = t.autoCaptureCamera !== false;
   el.stAutoFullscreen.checked = !!t.autoFullscreen;
 
   const st = kioskState.syncTarget;
@@ -1700,7 +1777,7 @@ async function saveSettings() {
     ipCameraUrl: el.stIpCamUrl.value.trim(),
     allowCodeOnlyPunch: el.stAllowCodeOnlyPunch.checked,
     requireCodeWithFingerprint: el.stReqCodeFp.checked,
-    requireCodeWithCamera: el.stReqCodeCam.checked,
+    requireCodeWithCamera: false,
     autoCaptureCamera: el.stAutoCaptureCamera.checked,
     autoFullscreen: el.stAutoFullscreen.checked,
   });
@@ -1712,7 +1789,7 @@ async function saveSettings() {
   el.terminalLine.textContent = `${branchName} · ${terminal.location} · ${terminal.id}`;
   if (activeMode === MODE.CAM) {
     const autoCapture = !!terminal.autoCaptureCamera;
-    el.camCaptureBtn.classList.toggle('hidden', autoCapture);
+    el.camCaptureBtn.classList.remove('hidden');
     if (autoCapture) startAutoCapture();
     else stopAutoCapture();
     resetResultToIdle();

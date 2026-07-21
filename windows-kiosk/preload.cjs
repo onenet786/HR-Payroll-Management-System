@@ -1,5 +1,17 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
+function invokeCameraPunch(payload = {}) {
+  const observations = payload?.livenessProof?.observations;
+  if (observations !== undefined && (!Array.isArray(observations) || observations.length > 240)) {
+    return Promise.resolve({ ok: false, message: 'Liveness proof payload is invalid or too large.' });
+  }
+  const livenessProof = payload.livenessProof && {
+    challengeId: String(payload.livenessProof.challengeId || '').slice(0, 128),
+    observations: Array.isArray(observations) ? observations.map(item => ({ at: Number(item?.at), yaw: Number(item?.yaw), centerX: Number(item?.centerX), centerY: Number(item?.centerY), scale: Number(item?.scale) })) : undefined,
+  };
+  return ipcRenderer.invoke('kiosk:punch-camera', { ...payload, livenessProof });
+}
+
 contextBridge.exposeInMainWorld('kioskApi', {
   getState: () => ipcRenderer.invoke('kiosk:get-state'),
   lookupEmployee: (code) => ipcRenderer.invoke('kiosk:lookup-employee', code),
@@ -9,7 +21,9 @@ contextBridge.exposeInMainWorld('kioskApi', {
   saveSettings: settings => ipcRenderer.invoke('kiosk:save-settings', settings),
   sync: () => ipcRenderer.invoke('kiosk:sync'),
   punchByCode: payload => ipcRenderer.invoke('kiosk:punch-by-code', payload),
-  punchCamera: payload => ipcRenderer.invoke('kiosk:punch-camera', payload),
+  punchCamera: invokeCameraPunch,
+  beginCameraLiveness: () => ipcRenderer.invoke('kiosk:begin-camera-liveness'),
+  cancelCameraLiveness: challengeId => ipcRenderer.invoke('kiosk:cancel-camera-liveness', challengeId),
   punchFingerprint: payload => ipcRenderer.invoke('kiosk:punch-fingerprint', payload),
   testFingerprintScanner: () => ipcRenderer.invoke('kiosk:test-fingerprint-scanner'),
   saveEvidence: payload => ipcRenderer.invoke('kiosk:save-evidence', payload),

@@ -3,22 +3,24 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Layers, ShieldCheck, Briefcase, Info } from 'lucide-react';
 import './DeviceEmulator.css';
 import { WebPortal } from './WebPortal';
 import { KioskTerminal } from './KioskTerminal';
+import { MobileApp } from './MobileApp';
 import type { FirestoreSyncStatus } from '../App';
 import {
   Employee, AttendanceLog, LeaveRequest, StatutoryConfig, TaxSlab, PayrollRun, Payslip, Designation, Branch, Department,
   Role, UserAccount, NewUserAccount, Holiday, LoanAdvance, SalaryRevision,
-  PerformanceReview, CompanyAsset, JobPosting, JobApplication, GratuitySettlement, AppNotification, Company, CompanySetupPayload, Zone, UcTown, WageType
+  PerformanceReview, CompanyAsset, JobPosting, JobApplication, GratuitySettlement, AppNotification, Company, CompanySetupPayload, Zone, UcTown, WageType, MobileDutyAuthorization
 } from '../types';
 import { motion } from 'motion/react';
 
 interface DeviceEmulatorProps {
   employees: Employee[];
   attendances: AttendanceLog[];
+  mobileDutyAuthorizations: MobileDutyAuthorization[];
   leaves: LeaveRequest[];
   statConfig: StatutoryConfig;
   taxSlabs: TaxSlab[];
@@ -34,7 +36,7 @@ interface DeviceEmulatorProps {
   onRejectRegularization: (id: string) => void;
   onCreatePayrollRun: (title: string, month: number, year: number) => void;
   onUpdatePayrollStatus: (runId: string, status: 'Approved' | 'Disbursed') => void;
-  onSimulatePunch: (employeeId: string, punchIn: string, punchOut: string, method: string) => void;
+  onSimulatePunch: (employeeId: string, punchIn: string, punchOut: string, method: string, lat?: number, lon?: number, locationAccuracyMeters?: number, locationCapturedAt?: string, locationAddress?: string) => void | Promise<void>;
   onApplyLeave: (leave: LeaveRequest) => void;
   onAddRegularization: (employeeId: string, date: string, reason: string) => void;
   onAddAttendance: (log: AttendanceLog) => void;
@@ -53,9 +55,13 @@ interface DeviceEmulatorProps {
   accessControlLoaded: boolean;
   onSetCurrentUserAccount: (user: UserAccount) => void;
   onAddRole: (role: Role) => void;
+  onUpdateRole: (role: Role) => Promise<void>;
   onAddUser: (user: NewUserAccount) => Promise<void>;
   onDeleteUser: (userId: string) => Promise<void>;
   onUpdateUserRole: (userId: string, roleId: string) => void;
+  onUpdateUser: (user: UserAccount) => Promise<void>;
+  onSaveMobileDutyAuthorization: (authorization: MobileDutyAuthorization) => Promise<void>;
+  onCancelMobileDutyAuthorization: (id: string) => Promise<void>;
   loggedInUser: UserAccount;
   onLogout: () => void;
   onAddBranch?: (branch: Branch) => void;
@@ -97,6 +103,7 @@ interface DeviceEmulatorProps {
 export function DeviceEmulator({
   employees,
   attendances,
+  mobileDutyAuthorizations,
   leaves,
   statConfig,
   taxSlabs,
@@ -131,9 +138,13 @@ export function DeviceEmulator({
   accessControlLoaded,
   onSetCurrentUserAccount,
   onAddRole,
+  onUpdateRole,
   onAddUser,
   onDeleteUser,
   onUpdateUserRole,
+  onUpdateUser,
+  onSaveMobileDutyAuthorization,
+  onCancelMobileDutyAuthorization,
   loggedInUser,
   onLogout,
   onAddBranch,
@@ -172,13 +183,34 @@ export function DeviceEmulator({
   firestoreSyncStatus
 }: DeviceEmulatorProps) {
   const isKioskUser = loggedInUser?.username === 'kiosk' || loggedInUser?.roleId === 'role-kiosk';
+  const isNativeApp = !!(window as any).Capacitor?.isNativePlatform?.();
+  const isNativeMobileEmployee = isNativeApp && loggedInUser?.roleId === 'role-employee';
   const [showComplianceOverview, setShowComplianceOverview] = useState(false);
+
+  useEffect(() => {
+    if (!isNativeApp) return;
+    void (window as any).Capacitor?.Plugins?.OrientationPlugin?.setMode({ mode: isKioskUser ? 'landscape' : 'portrait' });
+    void (window as any).Capacitor?.Plugins?.DeviceSettingsPlugin?.setKioskFullscreen({ enabled: isKioskUser });
+  }, [isKioskUser, isNativeApp]);
+
+  useEffect(() => {
+    if (!isNativeApp || !isKioskUser) return;
+    const exitOnZero = (event: KeyboardEvent) => {
+      if (event.key !== '0' && event.code !== 'Numpad0') return;
+      event.preventDefault();
+      event.stopPropagation();
+      void (window as any).Capacitor?.Plugins?.DeviceSettingsPlugin?.setKioskFullscreen({ enabled: false });
+      onLogout();
+    };
+    document.addEventListener('keydown', exitOnZero, true);
+    return () => document.removeEventListener('keydown', exitOnZero, true);
+  }, [isKioskUser, isNativeApp, onLogout]);
 
   /* ── Kiosk locked mode ─────────────────────────────────────────── */
   if (isKioskUser) {
     return (
       <div className="h-screen overflow-hidden bg-slate-900 text-slate-100 flex flex-col font-sans select-none">
-        <div className="bg-slate-950 px-6 py-4 flex items-center justify-between border-b border-slate-800">
+        {!isNativeApp && <div className="bg-slate-950 flex items-center justify-between border-b border-slate-800 px-6 py-4">
           <div className="flex items-center space-x-3">
             <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
             <span className="text-xs font-mono font-bold uppercase tracking-wider text-slate-300">
@@ -191,15 +223,36 @@ export function DeviceEmulator({
           >
             Exit Kiosk Terminal
           </button>
-        </div>
-        <div className="flex-1 flex items-center justify-center p-2 overflow-hidden">
+        </div>}
+        <div className={`flex-1 flex items-center justify-center overflow-hidden ${isNativeApp ? 'p-0' : 'p-2'}`}>
           <KioskTerminal
             employees={employees}
             attendances={attendances}
             onSimulatePunch={onSimulatePunch}
+            nativeMobileKiosk={isNativeApp}
+            branches={branches}
+            onExitKiosk={onLogout}
           />
         </div>
       </div>
+    );
+  }
+
+  if (isNativeMobileEmployee) {
+    return (
+      <MobileApp
+        employees={employees}
+        attendances={attendances}
+        mobileDutyAuthorizations={mobileDutyAuthorizations}
+        leaves={leaves}
+        onApplyLeave={onApplyLeave}
+        onSimulatePunch={onSimulatePunch}
+        onAddRegularization={onAddRegularization}
+        hideMockPhoneFrame
+        loggedInUser={loggedInUser}
+        onLogout={onLogout}
+        payrollPayslips={payrollPayslips}
+      />
     );
   }
 
@@ -258,6 +311,7 @@ export function DeviceEmulator({
             <WebPortal
               employees={employees}
               attendances={attendances}
+              mobileDutyAuthorizations={mobileDutyAuthorizations}
               leaves={leaves}
               statConfig={statConfig}
               taxSlabs={taxSlabs}
@@ -290,9 +344,13 @@ export function DeviceEmulator({
               accessControlLoaded={accessControlLoaded}
               onSetCurrentUserAccount={onSetCurrentUserAccount}
               onAddRole={onAddRole}
+              onUpdateRole={onUpdateRole}
               onAddUser={onAddUser}
               onDeleteUser={onDeleteUser}
               onUpdateUserRole={onUpdateUserRole}
+              onUpdateUser={onUpdateUser}
+              onSaveMobileDutyAuthorization={onSaveMobileDutyAuthorization}
+              onCancelMobileDutyAuthorization={onCancelMobileDutyAuthorization}
               onLogout={onLogout}
               onAddBranch={onAddBranch}
               onAddDepartment={onAddDepartment}

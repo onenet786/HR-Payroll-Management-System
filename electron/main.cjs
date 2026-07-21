@@ -204,6 +204,7 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      enableBlinkFeatures: 'FaceDetector',
     },
   });
 

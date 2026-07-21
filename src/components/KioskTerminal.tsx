@@ -5,25 +5,37 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { 
-  Scan, User, Cpu, ShieldCheck, AlertCircle, Camera, CheckCircle, VideoOff
+  Scan, User, Cpu, ShieldCheck, AlertCircle, Camera, CheckCircle, VideoOff, Settings, X, Trash2, RefreshCw
 } from 'lucide-react';
-import { Employee, AttendanceLog } from '../types';
+import { Employee, AttendanceLog, Branch, MobilePunchDetails } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 import { captureBiometric } from '../utils/uru4500Bridge';
-import { assessFaceFrame, createFaceDescriptorFromVideo, findBestFaceMatch, hasFaceEnrollment, FACE_MATCH_THRESHOLD } from '../utils/faceRecognition';
+import { assessBrowserFaceDetection, createFaceDescriptorFromVideo, findBestFaceMatch, hasFaceEnrollment, FACE_MATCH_THRESHOLD } from '../utils/faceRecognition';
+import { performActiveLiveness, randomLivenessOrder } from '../utils/faceLiveness';
+
+const RETURNABLE_CHECKOUT_REASONS = new Set([
+  'Lunch Break', 'Tea Break', 'Official Duty', 'Client Meeting', 'Site Visit',
+  'Personal Work', 'Medical Appointment', 'Prayer',
+]);
 
 interface KioskTerminalProps {
   employees: Employee[];
   attendances: AttendanceLog[];
-  onSimulatePunch: (employeeId: string, punchIn: string, punchOut: string, method: string, lat?: number, lon?: number) => void;
+  onSimulatePunch: (employeeId: string, punchIn: string, punchOut: string, method: string, lat?: number, lon?: number, locationAccuracyMeters?: number, locationCapturedAt?: string, locationAddress?: string, mobileDetails?: MobilePunchDetails) => void | Promise<void>;
+  nativeMobileKiosk?: boolean;
+  branches?: Branch[];
+  onExitKiosk?: () => void;
 }
 
 export function KioskTerminal({
   employees,
   attendances,
-  onSimulatePunch
+  onSimulatePunch,
+  nativeMobileKiosk = false,
+  branches = [],
+  onExitKiosk,
 }: KioskTerminalProps) {
-  const [method, setMethod] = useState<'id' | 'fingerprint' | 'face'>('id');
+  const [method, setMethod] = useState<'id' | 'fingerprint' | 'face'>(nativeMobileKiosk ? 'face' : 'id');
   
   // ID state
   const [empIdInput, setEmpIdInput] = useState('');
@@ -32,9 +44,23 @@ export function KioskTerminal({
   const [status, setStatus] = useState<'idle' | 'scanning' | 'success' | 'error'>('idle');
   const [message, setMessage] = useState('');
   const [matchedEmp, setMatchedEmp] = useState<Employee | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [pendingCheckout, setPendingCheckout] = useState<{ employee: Employee; punchMethod: string; time: string } | null>(null);
+  const [checkoutReason, setCheckoutReason] = useState('');
+  const [kioskSettings, setKioskSettings] = useState(() => {
+    const defaults = { terminalId: 'KIOSK-MOB-01', location: 'Main Entrance Gate-1', branchId: '', autoCapture: true };
+    try {
+      const saved = window.localStorage.getItem('mobile_kiosk_settings');
+      return saved ? { ...defaults, ...JSON.parse(saved) } as { terminalId: string; location: string; branchId: string; autoCapture: boolean } : defaults;
+    } catch { return defaults; }
+  });
+  const faceScanBusyRef = useRef(false);
+  const autoStableFramesRef = useRef(0);
+  const autoCaptureArmedRef = useRef(true);
 
   // Camera states
   const [hasWebcam, setHasWebcam] = useState<boolean | null>(null);
+  const [cameraError, setCameraError] = useState('');
   const [streamActive, setStreamActive] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -60,18 +86,31 @@ export function KioskTerminal({
   const startCamera = async () => {
     try {
       setHasWebcam(null);
+      setCameraError('');
+      if (nativeMobileKiosk) {
+        const permission = await (window as any).Capacitor?.Plugins?.DeviceSettingsPlugin?.ensureCameraPermission();
+        if (permission && !permission.granted) {
+          await new Promise(resolve => setTimeout(resolve, 1200));
+          const checked = await (window as any).Capacitor?.Plugins?.DeviceSettingsPlugin?.ensureCameraPermission();
+          if (!checked?.granted) throw new Error('Android camera permission is not granted.');
+        }
+      }
       const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { width: 400, height: 300, facingMode: 'user' } 
+        video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' }
       });
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        videoRef.current.play();
+        await videoRef.current.play();
+      } else {
+        stream.getTracks().forEach(track => track.stop());
+        throw new Error('Camera preview is not mounted. Tap Retry Camera.');
       }
       setStreamActive(true);
       setHasWebcam(true);
     } catch (err) {
-      console.warn('Webcam permission denied or unavailable.');
+      console.warn('Webcam permission denied or unavailable.', err);
+      setCameraError(err instanceof Error ? `${err.name}: ${err.message}` : String(err));
       setHasWebcam(false);
       setStreamActive(false);
     }
@@ -83,6 +122,21 @@ export function KioskTerminal({
       streamRef.current = null;
     }
     setStreamActive(false);
+  };
+
+  const restartFaceScan = async () => {
+    faceScanBusyRef.current = false;
+    autoStableFramesRef.current = 0;
+    autoCaptureArmedRef.current = true;
+    setPendingCheckout(null);
+    setCheckoutReason('');
+    setMatchedEmp(null);
+    setMessage('Restarting face scanner...');
+    setStatus('idle');
+    stopCamera();
+    await new Promise(resolve => setTimeout(resolve, 250));
+    await startCamera();
+    setMessage('');
   };
 
   // Keyboard pad helpers
@@ -104,7 +158,7 @@ export function KioskTerminal({
   };
 
   // Run the punch process
-  const triggerPunch = (emp: Employee, punchMethod: string) => {
+  const triggerPunch = async (emp: Employee, punchMethod: string, confirmedOutReason = '') => {
     // Generate current formatted time
     const now = new Date();
     const hh = String(now.getHours()).padStart(2, '0');
@@ -113,16 +167,50 @@ export function KioskTerminal({
     const timeStr = `${hh}:${mm}:${ss}`;
 
     // Punch log check today
-    const todayStr = now.toISOString().split('T')[0];
-    const userPunchesToday = attendances.filter(a => a.employeeId === emp.id && a.date === todayStr);
-    const isClockIn = userPunchesToday.length === 0;
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const todayAttendance = attendances.find(a => a.employeeId === emp.id && a.date === todayStr);
+    const isReturningFromTemporaryExit = Boolean(todayAttendance?.punchOut && RETURNABLE_CHECKOUT_REASONS.has(todayAttendance.outReason?.trim() || ''));
+    const isClockIn = !todayAttendance?.punchIn || isReturningFromTemporaryExit;
+    if (todayAttendance?.punchOut && !isReturningFromTemporaryExit) {
+      setStatus('error');
+      setMessage(`${emp.fullName} has already completed attendance for today.`);
+      setTimeout(() => { setStatus('idle'); setMessage(''); }, 3500);
+      return;
+    }
 
-    onSimulatePunch(emp.id, isClockIn ? timeStr : '09:00:00', isClockIn ? '18:00:00' : timeStr, punchMethod);
+    const lastPunchTime = todayAttendance?.lastPunchAt || todayAttendance?.punchOut || todayAttendance?.punchIn;
+    if (lastPunchTime) {
+      const [lastHours, lastMinutes, lastSeconds] = lastPunchTime.split(':').map(Number);
+      const lastPunchSeconds = lastHours * 3600 + lastMinutes * 60 + (lastSeconds || 0);
+      const currentSeconds = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+      const secondsSinceLastPunch = currentSeconds - lastPunchSeconds;
+      if (secondsSinceLastPunch >= 0 && secondsSinceLastPunch < 60) {
+        const remaining = 60 - secondsSinceLastPunch;
+        setStatus('error');
+        setMessage(`Please wait ${remaining} second${remaining === 1 ? '' : 's'} before punching again. Minimum delay is 1 minute between punches.`);
+        setTimeout(() => { setStatus('idle'); setMessage(''); }, 3500);
+        return;
+      }
+    }
+
+    if (!isClockIn && nativeMobileKiosk && !confirmedOutReason) {
+      setPendingCheckout({ employee: emp, punchMethod, time: timeStr });
+      setCheckoutReason('');
+      setMatchedEmp(emp);
+      setStatus('scanning');
+      setMessage('Select a checkout reason to complete Punch Out.');
+      return;
+    }
+
+    const checkoutDetails: MobilePunchDetails | undefined = !isClockIn && confirmedOutReason
+      ? { action: 'workday-out', reasonCategory: 'Kiosk checkout', reasonNote: confirmedOutReason, verificationMethod: 'Camera' }
+      : undefined;
+    await onSimulatePunch(emp.id, isClockIn ? timeStr : '', isClockIn ? '' : timeStr, nativeMobileKiosk ? 'Mobile Kiosk' : punchMethod, undefined, undefined, undefined, undefined, undefined, checkoutDetails);
     
     setMatchedEmp(emp);
     setStatus('success');
     setMessage(isClockIn 
-      ? `Welcome ${emp.fullName}! Check-In registered at ${timeStr}.` 
+      ? `${isReturningFromTemporaryExit ? `Welcome back ${emp.fullName}! Return` : `Welcome ${emp.fullName}! Check-In`} registered at ${timeStr}.`
       : `Goodbye ${emp.fullName}! Check-Out registered at ${timeStr}.`
     );
 
@@ -146,12 +234,13 @@ export function KioskTerminal({
     setTimeout(() => {
       // Find employee by code (exact or suffix match)
       const emp = employees.find(
-        e => e.employeeCode.toUpperCase() === empIdInput.toUpperCase() || 
+        e => e.status === 'Active' && (e.employeeCode.toUpperCase() === empIdInput.toUpperCase() ||
              e.employeeCode.toLowerCase().endsWith(empIdInput.toLowerCase())
+        )
       );
 
       if (emp) {
-        triggerPunch(emp, 'RFID'); // Kiosk counts as RFID/card terminal check-in
+        void triggerPunch(emp, 'RFID'); // Kiosk counts as RFID/card terminal check-in
       } else {
         setStatus('error');
         setMessage('Invalid Employee Code. Please verify and try again.');
@@ -181,72 +270,169 @@ export function KioskTerminal({
 
   // 3. Submit Face Scan
   const handleFaceScan = async () => {
-    if (status === 'scanning') return;
+    if (status === 'scanning' || faceScanBusyRef.current) return;
+    faceScanBusyRef.current = true;
 
     setStatus('scanning');
     setMessage('Align your face inside the framing box. Comparing enrolled camera profile...');
 
-    setStatus('error');
-    setMessage('Browser face punching is disabled because client-side matching can be tampered with. Use the authenticated desktop kiosk.');
-    setTimeout(() => setStatus('idle'), 5000);
-    return;
+    if (!nativeMobileKiosk) {
+      setStatus('error');
+      setMessage('Browser face punching is disabled. Use the authenticated native mobile or desktop kiosk.');
+      setTimeout(() => setStatus('idle'), 5000);
+      faceScanBusyRef.current = false;
+      return;
+    }
 
     try {
       if (!videoRef.current || !streamActive) {
         throw new Error('Camera is not ready. Allow webcam access and try again.');
       }
-      const enrolledEmployees = employees.filter(hasFaceEnrollment);
+      const enrolledEmployees = employees.filter(employee => employee.status === 'Active' && (!kioskSettings.branchId || employee.branchId === kioskSettings.branchId) && hasFaceEnrollment(employee));
       if (enrolledEmployees.length === 0) {
         throw new Error('No camera face profiles are enrolled yet. Enroll employees from HR biometric setup first.');
       }
       await new Promise(resolve => setTimeout(resolve, 650));
-      const frameQuality = assessFaceFrame(videoRef.current);
-      if (!frameQuality.ok) throw new Error(frameQuality.message);
+      const frameQuality = await assessBrowserFaceDetection(videoRef.current);
+      if (!frameQuality?.ok) throw new Error(frameQuality?.message || 'Keep one complete face inside the oval.');
+      const liveness = await performActiveLiveness(videoRef.current, randomLivenessOrder(), statusMessage => setMessage(statusMessage));
+      if (!liveness.ok) throw new Error(liveness.message);
       const probe = createFaceDescriptorFromVideo(videoRef.current, 'kiosk-webcam');
-      const match = findBestFaceMatch(enrolledEmployees, probe);
+      const match = findBestFaceMatch(enrolledEmployees, probe, nativeMobileKiosk ? 0.23 : FACE_MATCH_THRESHOLD);
       if (!match) {
         throw new Error('Face not recognized. Step closer, improve lighting, or re-enroll the camera profile.');
       }
       setMessage(`Face match confidence ${(Math.max(0, 1 - match.score / FACE_MATCH_THRESHOLD) * 100).toFixed(1)}%.`);
-      triggerPunch(match.employee, 'Camera');
-    } catch {
+      await triggerPunch(match.employee, 'Camera');
+    } catch (error) {
       setStatus('error');
-      setMessage('Face verification failed. Try again or contact an administrator.');
+      setMessage(error instanceof Error ? error.message : 'Face verification failed. Try again or contact an administrator.');
       setTimeout(() => setStatus('idle'), 3500);
+    } finally {
+      faceScanBusyRef.current = false;
     }
   };
 
+  useEffect(() => {
+    if (!nativeMobileKiosk || !kioskSettings.autoCapture || method !== 'face' || !streamActive || status !== 'idle' || pendingCheckout) return;
+    const timer = window.setInterval(async () => {
+      if (faceScanBusyRef.current || !videoRef.current) return;
+      try {
+        const quality = await assessBrowserFaceDetection(videoRef.current);
+        if (!quality?.ok) {
+          autoStableFramesRef.current = 0;
+          autoCaptureArmedRef.current = true;
+          return;
+        }
+        if (!autoCaptureArmedRef.current) return;
+        autoStableFramesRef.current += 1;
+        if (autoStableFramesRef.current >= 3) {
+          autoStableFramesRef.current = 0;
+          autoCaptureArmedRef.current = false;
+          void handleFaceScan();
+        }
+      } catch {
+        autoStableFramesRef.current = 0;
+      }
+    }, 700);
+    return () => window.clearInterval(timer);
+  }, [kioskSettings.autoCapture, method, nativeMobileKiosk, pendingCheckout, status, streamActive]);
+
   return (
-    <div className="w-full max-w-4xl mx-auto bg-slate-950 border-4 border-slate-800 rounded-[36px] shadow-2xl p-6 text-slate-100 flex flex-col h-full max-h-full justify-between relative overflow-hidden font-sans select-none" id="kiosk-container">
+    <div className={`w-full max-w-5xl mx-auto bg-slate-950 border-slate-800 shadow-2xl text-slate-100 flex flex-col h-full max-h-full justify-between relative overflow-hidden font-sans select-none ${nativeMobileKiosk ? 'p-2' : 'border-4 rounded-[36px] p-6'}`} id="kiosk-container">
       
       {/* Laser grids or scanline background effects for high-end aesthetic */}
       <div className="absolute inset-0 bg-radial-gradient from-slate-900 via-slate-950 to-black pointer-events-none opacity-40"></div>
 
+      {pendingCheckout && <div className="absolute inset-0 z-[80] flex items-center justify-center bg-slate-950/90 p-4">
+        <form className="w-full max-w-md rounded-2xl border border-amber-500/40 bg-slate-900 p-5 shadow-2xl" onSubmit={async event => {
+          event.preventDefault();
+          if (!checkoutReason.trim()) return;
+          const pending = pendingCheckout;
+          try {
+            await triggerPunch(pending.employee, pending.punchMethod, checkoutReason.trim());
+            setPendingCheckout(null);
+          } catch (error) {
+            setPendingCheckout(null);
+            setMatchedEmp(null);
+            setStatus('error');
+            setMessage(error instanceof Error ? error.message : 'Attendance could not be saved to Firestore. Try again.');
+            setTimeout(() => { setStatus('idle'); setMessage(''); }, 4500);
+          }
+        }}>
+          <h3 className="text-lg font-black text-white">Punch Out Reason</h3>
+          <p className="mt-1 text-xs text-slate-400">{pendingCheckout.employee.fullName} · Face verified at {pendingCheckout.time}</p>
+          <label className="mt-4 block text-xs font-bold uppercase tracking-wider text-amber-300">Reason is required</label>
+          <select autoFocus value={checkoutReason} onChange={event => setCheckoutReason(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 p-3 text-sm text-white">
+            <option value="">Select checkout reason</option>
+            <option>End of Shift</option>
+            <option>Lunch Break</option>
+            <option>Tea Break</option>
+            <option>Official Duty</option>
+            <option>Client Meeting</option>
+            <option>Site Visit</option>
+            <option>Personal Work</option>
+            <option>Medical Appointment</option>
+            <option>Prayer</option>
+            <option>Emergency</option>
+          </select>
+          <div className="mt-4 flex gap-3">
+            <button type="button" onClick={() => { setPendingCheckout(null); setCheckoutReason(''); setMatchedEmp(null); setStatus('idle'); setMessage(''); }} className="flex-1 rounded-xl border border-slate-700 p-3 text-xs font-bold text-slate-300">CANCEL</button>
+            <button type="submit" disabled={!checkoutReason} className="flex-1 rounded-xl bg-amber-600 p-3 text-xs font-black text-white disabled:opacity-40">CONFIRM PUNCH OUT</button>
+          </div>
+        </form>
+      </div>}
+
       {/* Header bar showing Time & Kiosk mode status */}
-      <div className="flex justify-between items-center border-b border-slate-800 pb-4 z-10">
+      <div className={`flex justify-between items-center border-b border-slate-800 z-10 ${nativeMobileKiosk ? 'pb-1' : 'pb-4'}`}>
         <div className="flex items-center space-x-3">
           <div className="w-8 h-8 rounded-lg bg-emerald-600 flex items-center justify-center text-white font-extrabold text-sm shadow-md animate-pulse">
             B
           </div>
           <div>
             <h3 className="font-bold text-xs uppercase tracking-widest text-emerald-400">Terminal Kiosk Mode</h3>
-            <p className="text-[10px] text-slate-400 font-mono">Location: Main Entrance Gate-1</p>
+            <p className="text-[10px] text-slate-400 font-mono">{kioskSettings.location} · {kioskSettings.terminalId}</p>
           </div>
         </div>
 
-        <div className="text-right font-mono">
+        <div className="flex items-center gap-3 text-right font-mono">
+          {nativeMobileKiosk && <button type="button" onClick={() => setShowSettings(true)} className="rounded-lg border border-slate-700 bg-slate-900 p-2 text-slate-300" aria-label="Kiosk settings"><Settings className="h-4 w-4" /></button>}
+          <div>
           <p className="text-sm font-bold text-white tracking-wider">
             {time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
           </p>
           <p className="text-[9px] text-slate-400">{time.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</p>
+          </div>
         </div>
       </div>
 
+      {showSettings && <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/95 p-3">
+        <div className="max-h-full w-full max-w-3xl overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 p-4">
+          <div className="mb-3 flex items-center justify-between"><div><h3 className="font-bold text-white">Mobile Kiosk Settings</h3><p className="text-[10px] text-slate-400">Terminal configuration and local maintenance</p></div><button type="button" onClick={() => setShowSettings(false)} className="rounded-lg p-2 text-slate-400"><X className="h-5 w-5" /></button></div>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <label className="text-[10px] text-slate-400">Terminal ID<input value={kioskSettings.terminalId} onChange={e => setKioskSettings(p => ({ ...p, terminalId: e.target.value }))} className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 p-2 text-xs text-white" /></label>
+            <label className="text-[10px] text-slate-400">Location / Description<input value={kioskSettings.location} onChange={e => setKioskSettings(p => ({ ...p, location: e.target.value }))} className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 p-2 text-xs text-white" /></label>
+            <label className="text-[10px] text-slate-400 md:col-span-2">Assigned Branch<select value={kioskSettings.branchId} onChange={e => setKioskSettings(p => ({ ...p, branchId: e.target.value }))} className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 p-2 text-xs text-white"><option value="">Company wide — all active employees</option>{branches.map(branch => <option key={branch.id} value={branch.id}>{branch.code} · {branch.name}</option>)}</select></label>
+            <label className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950 p-2 text-[10px] text-slate-300 md:col-span-2"><input type="checkbox" checked={kioskSettings.autoCapture} onChange={e => setKioskSettings(p => ({ ...p, autoCapture: e.target.checked }))} /> Automatically verify and punch when one face is centered</label>
+          </div>
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            <button type="button" onClick={() => void startCamera()} className="rounded-lg bg-emerald-700 p-2 text-[10px] font-bold text-white">START / RETRY CAMERA</button>
+            <button type="button" onClick={() => void (window as any).Capacitor?.Plugins?.DeviceSettingsPlugin?.openAppSettings()} className="rounded-lg border border-slate-600 bg-slate-800 p-2 text-[10px] font-bold text-slate-200">ANDROID CAMERA PERMISSION</button>
+            <button type="button" onClick={async () => { if (window.confirm('Flush the kiosk WebView cache? Firestore attendance will not be deleted.')) { await (window as any).Capacitor?.Plugins?.DeviceSettingsPlugin?.clearKioskCache(); window.location.reload(); } }} className="col-span-2 flex items-center justify-center gap-2 rounded-lg border border-rose-800 bg-rose-950/40 p-2 text-[10px] font-bold text-rose-300"><Trash2 className="h-3 w-3" /> FLUSH LOCAL WEB CACHE</button>
+          </div>
+          <button type="button" onClick={() => { const saved = { terminalId: kioskSettings.terminalId.trim() || 'KIOSK-MOB-01', location: kioskSettings.location.trim() || 'Main Entrance Gate-1', branchId: kioskSettings.branchId, autoCapture: kioskSettings.autoCapture }; window.localStorage.setItem('mobile_kiosk_settings', JSON.stringify(saved)); setKioskSettings(saved); setShowSettings(false); }} className="mt-4 w-full rounded-lg bg-indigo-700 p-2 text-xs font-bold text-white">SAVE KIOSK SETTINGS</button>
+          {nativeMobileKiosk && onExitKiosk && <button type="button" onClick={() => {
+            void (window as any).Capacitor?.Plugins?.DeviceSettingsPlugin?.setKioskFullscreen({ enabled: false });
+            onExitKiosk();
+          }} className="mt-2 w-full rounded-lg border border-rose-700 bg-rose-950/60 p-2 text-xs font-bold text-rose-200">LOG OFF / EXIT KIOSK</button>}
+        </div>
+      </div>}
+
       {/* Main interactive terminal area */}
-      <div className="flex-1 flex flex-col md:flex-row gap-6 items-center justify-center py-6 z-10 overflow-hidden">
+      <div className={`flex-1 flex items-center justify-center z-10 overflow-hidden ${nativeMobileKiosk ? 'flex-row gap-2 py-2' : 'flex-col md:flex-row gap-6 py-6'}`}>
         
         {/* Left Side: Method Controller Tabs */}
-        <div className="flex md:flex-col gap-2 w-full md:w-44 flex-shrink-0">
+        {!nativeMobileKiosk && <div className="flex md:flex-col gap-2 w-full md:w-44 flex-shrink-0">
           <button 
             onClick={() => { setMethod('id'); setStatus('idle'); setMessage(''); }}
             className={`flex-1 py-3 px-3 rounded-xl border transition flex items-center space-x-2 text-left font-semibold text-xs leading-none ${
@@ -282,15 +468,15 @@ export function KioskTerminal({
             <Camera className="w-4 h-4 flex-shrink-0" />
             <span>Face ID</span>
           </button>
-        </div>
+        </div>}
 
         {/* Right Side: Interactive Scanner screen depending on method */}
-        <div className="flex-1 bg-slate-900/60 border border-slate-800/80 rounded-2xl p-4 flex flex-col items-center justify-center min-h-[220px] w-full relative h-full">
+        <div className={`flex-1 bg-slate-900/60 border border-slate-800/80 rounded-2xl flex flex-col items-center justify-center w-full relative h-full min-h-0 ${nativeMobileKiosk ? 'p-0' : 'p-4 min-h-[220px]'}`}>
           
           <AnimatePresence mode="wait">
             
             {/* STATUS MESSAGE OVERLAYS */}
-            {status === 'scanning' && (
+            {status === 'scanning' && !(nativeMobileKiosk && method === 'face') && (
               <motion.div 
                 key="scanning"
                 initial={{ opacity: 0 }} 
@@ -437,40 +623,41 @@ export function KioskTerminal({
               initial={{ opacity: 0 }} 
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="w-full flex flex-col lg:flex-row items-center justify-center gap-5 h-full relative"
+              className={`w-full items-center h-full relative ${nativeMobileKiosk ? 'flex flex-row justify-start gap-3' : 'flex flex-col lg:flex-row justify-center gap-5'}`}
             >
               {/* Webcam Frame Container */}
-              <div className="flex w-full lg:flex-1 items-center justify-center">
-              <div className="relative w-64 h-64 bg-slate-950 border-2 border-slate-800 rounded-xl overflow-hidden flex items-center justify-center shadow-lg">
+              <div className={nativeMobileKiosk ? 'flex flex-none items-center justify-start' : 'flex w-full lg:flex-1 items-center justify-center'}>
+              <div className={`relative bg-slate-950 border-2 border-slate-800 rounded-xl overflow-hidden flex items-center justify-center shadow-lg ${nativeMobileKiosk ? 'w-44 h-44' : 'w-64 h-64'}`}>
                 
-                {hasWebcam === true && streamActive ? (
+                {hasWebcam !== false && (
                   <video 
                     ref={videoRef} 
-                    className="w-full h-full object-cover scale-x-[-1]" 
+                    className={`w-full h-full object-cover scale-x-[-1] ${streamActive ? 'opacity-100' : 'opacity-0'}`}
                     playsInline 
                     muted 
                   />
-                ) : hasWebcam === false ? (
+                )}
+                {hasWebcam === false ? (
                   <div className="flex flex-col items-center text-center p-4 text-slate-500 space-y-2">
                     <VideoOff className="w-10 h-10 text-slate-700 animate-pulse" />
-                    <span className="text-[11px] leading-relaxed">
-                      Webcam access denied or not found.<br/>Camera verification unavailable.
-                    </span>
+                    <span className="text-[11px] leading-relaxed">{cameraError || 'Camera access is blocked or unavailable.'}</span>
+                    <button type="button" onClick={() => void startCamera()} className="rounded-lg bg-emerald-700 px-3 py-2 text-[10px] font-bold text-white">START / RETRY CAMERA</button>
+                    {nativeMobileKiosk && <button type="button" onClick={() => void (window as any).Capacitor?.Plugins?.DeviceSettingsPlugin?.openAppSettings()} className="rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-[10px] font-bold text-slate-200">OPEN APP SETTINGS</button>}
                   </div>
-                ) : (
-                  <div className="flex flex-col items-center text-slate-600 space-y-2 text-xs">
+                ) : !streamActive ? (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-600 space-y-2 text-xs">
                     <div className="w-6 h-6 border-2 border-slate-600 border-t-slate-400 rounded-full animate-spin"></div>
                     <span>Initializing camera...</span>
                   </div>
-                )}
+                ) : null}
 
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                  <div className="relative w-40 h-52 rounded-[50%] border-2 border-emerald-400 shadow-[0_0_0_999px_rgba(2,6,23,0.38)]">
+                {hasWebcam !== false && <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <div className={`relative rounded-[50%] border-2 border-emerald-400 shadow-[0_0_0_999px_rgba(2,6,23,0.38)] ${nativeMobileKiosk ? 'w-28 h-36' : 'w-40 h-52'}`}>
                     <div className="absolute -top-1 left-1/2 h-2 w-10 -translate-x-1/2 rounded-full bg-emerald-300"></div>
                     <div className="absolute top-16 left-1/2 h-px w-24 -translate-x-1/2 bg-emerald-300/80"></div>
                     <div className="absolute bottom-10 left-1/2 h-px w-14 -translate-x-1/2 bg-emerald-300/70"></div>
                   </div>
-                </div>
+                </div>}
 
                 <div className="absolute bottom-2 left-2 bg-slate-900/80 px-2 py-0.5 text-[8px] font-mono text-emerald-400 rounded border border-emerald-900/50">
                   CV_MODEL: v4.1 (FACE_DETECT)
@@ -478,24 +665,40 @@ export function KioskTerminal({
               </div>
               </div>
 
-              <div className="flex flex-col justify-center space-y-3 w-full lg:w-72 text-left">
-                <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4 space-y-3">
+              {nativeMobileKiosk && <div className="flex h-44 w-40 flex-none flex-col items-center justify-center rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-center">
+                <Scan className={`mb-2 h-6 w-6 text-amber-300 ${status === 'scanning' ? 'animate-pulse' : ''}`} />
+                <p className="text-[9px] font-bold uppercase tracking-widest text-amber-400">Live Face Command</p>
+                <p className="mt-2 text-sm font-black leading-snug text-white">{status === 'scanning' ? message : 'Center face inside the oval'}</p>
+                <p className="mt-2 text-[9px] text-amber-200/70">Follow each command without moving the phone.</p>
+              </div>}
+
+              <div className={`flex flex-col justify-center text-left ${nativeMobileKiosk ? 'w-52 space-y-1.5' : 'w-full lg:w-72 space-y-3'}`}>
+                <div className={`rounded-2xl border border-slate-800 bg-slate-950/70 ${nativeMobileKiosk ? 'p-2 space-y-1' : 'p-4 space-y-3'}`}>
                   <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-400">TERMINAL READY</p>
                   <h4 className="text-sm font-black text-white">Attendance Kiosk Online</h4>
                   <div className="space-y-1.5 text-[11px] leading-relaxed text-slate-400">
                     <p><span className="text-emerald-400 font-bold">1.</span> Keep face inside the oval marker.</p>
                     <p><span className="text-emerald-400 font-bold">2.</span> Look straight, hold still, avoid glare.</p>
-                    <p><span className="text-emerald-400 font-bold">3.</span> Press face match to mark attendance.</p>
+                    <p><span className="text-emerald-400 font-bold">3.</span> Hold centered; capture starts automatically.</p>
                   </div>
                 </div>
                 <button 
                   onClick={handleFaceScan}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs uppercase px-6 py-2.5 rounded-lg w-full flex items-center justify-center space-x-1.5 shadow"
+                  disabled={status === 'scanning'}
+                  className={`bg-emerald-600 hover:bg-emerald-700 text-white font-bold uppercase rounded-lg w-full flex items-center justify-center space-x-1.5 shadow ${nativeMobileKiosk ? 'px-3 py-2 text-[10px]' : 'px-6 py-2.5 text-xs'}`}
                 >
                   <Scan className="w-4 h-4" />
                   <span>FACE MATCH &amp; PUNCH</span>
                 </button>
-                <p className="text-[10px] text-slate-500 italic text-center">
+                {nativeMobileKiosk && <button
+                  type="button"
+                  onClick={() => void restartFaceScan()}
+                  className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-indigo-500/50 bg-indigo-950/60 px-3 py-1.5 text-[9px] font-bold uppercase text-indigo-200 active:scale-95"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  <span>Restart Face Scan</span>
+                </button>}
+                <p className={`text-[10px] text-slate-500 italic text-center ${nativeMobileKiosk ? 'hidden' : ''}`}>
                   * Matches enrolled camera profiles and registers attendance instantly.
                 </p>
               </div>
@@ -507,7 +710,7 @@ export function KioskTerminal({
       </div>
 
       {/* Terminal Kiosk Footer showing diagnostic node states */}
-      <div className="border-t border-slate-900 pt-3 flex justify-between items-center text-[10px] text-slate-500 font-mono z-10 leading-none">
+      <div className={`border-t border-slate-900 pt-3 justify-between items-center text-[10px] text-slate-500 font-mono z-10 leading-none ${nativeMobileKiosk ? 'hidden' : 'flex'}`}>
         <div className="flex space-x-4">
           <span className="flex items-center text-emerald-500 font-semibold uppercase">
             <ShieldCheck className="w-3.5 h-3.5 mr-1" />

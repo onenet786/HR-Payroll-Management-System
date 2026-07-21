@@ -7,15 +7,15 @@ import React, { useState, useEffect } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 import { computePayslipDetails } from './data/defaults';
 import {
-  Employee, AttendanceLog, LeaveRequest, StatutoryConfig, TaxSlab, PayrollRun, Payslip,
+  Employee, AttendanceLog, LeaveRequest, StatutoryConfig, TaxSlab, PayrollRun, Payslip, MobilePunchDetails,
   Role, UserAccount, Branch, Department, Designation, Holiday, LoanAdvance, SalaryRevision,
-  PerformanceReview, CompanyAsset, JobPosting, JobApplication, GratuitySettlement, AppNotification, Company, CompanySetupPayload, Zone, UcTown, WageType, NewUserAccount
+  PerformanceReview, CompanyAsset, JobPosting, JobApplication, GratuitySettlement, AppNotification, Company, CompanySetupPayload, Zone, UcTown, WageType, NewUserAccount, MobileDutyAuthorization
 } from './types';
 import { DeviceEmulator } from './components/DeviceEmulator';
 import { auth, db, isFirebaseConfigured, provisionFirebaseUser } from './firebase';
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import {
-  collection, deleteDoc, doc, getDoc, setDoc, updateDoc, onSnapshot, writeBatch
+  collection, deleteDoc, deleteField, doc, getDoc, setDoc, updateDoc, onSnapshot, writeBatch, query, where
 } from 'firebase/firestore';
 
 // HR and payroll records must never be persisted in browser-accessible storage.
@@ -178,12 +178,16 @@ export default function App() {
     return fallback;
   };
 
-  const todayStr = () => new Date().toISOString().split('T')[0];
+  const todayStr = () => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  };
 
   // Application Data States
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [biometricTemplates, setBiometricTemplates] = useState<BiometricTemplateRecord[]>(() => getInitialValue('hr_biometric_templates', []));
   const [attendances, setAttendances] = useState<AttendanceLog[]>([]);
+  const [mobileDutyAuthorizations, setMobileDutyAuthorizations] = useState<MobileDutyAuthorization[]>([]);
   const [leaves, setLeaves] = useState<LeaveRequest[]>([]);
   const [statConfig, setStatConfig] = useState<StatutoryConfig>(emptyStatConfig);
   const [taxSlabs, setTaxSlabs] = useState<TaxSlab[]>([]);
@@ -349,10 +353,14 @@ export default function App() {
       collectionName: string,
       stateSetter: (items: T[]) => void,
       storageKey: string,
-      onLoaded?: () => void
+      onLoaded?: () => void,
+      employeeScoped = false
     ) => {
       try {
-        const unsub = onSnapshot(collection(db, collectionName), (snapshot) => {
+        const source = employeeScoped && loggedInUser.roleId === 'role-employee' && loggedInUser.employeeId
+          ? query(collection(db, collectionName), where('employeeId', '==', loggedInUser.employeeId))
+          : collection(db, collectionName);
+        const unsub = onSnapshot(source, (snapshot) => {
           const fetched: T[] = [];
           snapshot.forEach(docSnap => {
             fetched.push({ id: docSnap.id, ...docSnap.data() } as T);
@@ -373,10 +381,40 @@ export default function App() {
       }
     };
 
-    registerCollectionListener('employees', setEmployees, 'hr_employees');
+    if (loggedInUser.roleId === 'role-employee' && loggedInUser.employeeId) {
+      const employeeId = loggedInUser.employeeId;
+      try {
+        const unsubscribeEmployee = onSnapshot(doc(db, 'employees', employeeId), employeeSnapshot => {
+          const fetched = employeeSnapshot.exists()
+            ? [{ id: employeeSnapshot.id, ...employeeSnapshot.data() } as Employee]
+            : [];
+          setEmployees(fetched);
+          privacyStorage.setItem('hr_employees', JSON.stringify(fetched));
+          markSnapshotLoaded('employees');
+        }, err => markSnapshotWarning('employees', err));
+        unsubscribes.push(unsubscribeEmployee);
+      } catch (err) {
+        markSnapshotWarning('employees', err);
+      }
+    } else {
+      registerCollectionListener('employees', setEmployees, 'hr_employees');
+    }
     registerCollectionListener('biometricTemplates', setBiometricTemplates, 'hr_biometric_templates');
-    registerCollectionListener('attendances', setAttendances, 'hr_attendances');
-    registerCollectionListener('leaves', setLeaves, 'hr_leaves');
+    registerCollectionListener('attendances', setAttendances, 'hr_attendances', undefined, true);
+    try {
+      const authorizationSource = loggedInUser.roleId === 'role-employee' && loggedInUser.employeeId
+        ? query(collection(db, 'mobileDutyAuthorizations'), where('employeeId', '==', loggedInUser.employeeId))
+        : collection(db, 'mobileDutyAuthorizations');
+      const unsubscribeAuthorizations = onSnapshot(authorizationSource, snapshot => {
+        const fetched: MobileDutyAuthorization[] = [];
+        snapshot.forEach(document => fetched.push({ id: document.id, ...document.data() } as MobileDutyAuthorization));
+        setMobileDutyAuthorizations(fetched);
+      }, err => console.warn('Mobile duty authorization sync failed:', err));
+      unsubscribes.push(unsubscribeAuthorizations);
+    } catch (err) {
+      console.warn('Mobile duty authorization subscription deferred:', err);
+    }
+    registerCollectionListener('leaves', setLeaves, 'hr_leaves', undefined, true);
     registerCollectionListener('branches', setBranches, 'hr_branches');
     registerCollectionListener('companies', setCompanies, 'hr_companies');
     registerCollectionListener('departments', setDepartments, 'hr_departments');
@@ -441,7 +479,7 @@ export default function App() {
 
     // PayrollRuns Sync
     registerCollectionListener('payrollRuns', setPayrollRuns, 'hr_payroll_runs');
-    registerCollectionListener('payrollPayslips', setPayrollPayslips, 'hr_payroll_payslips');
+    registerCollectionListener('payrollPayslips', setPayrollPayslips, 'hr_payroll_payslips', undefined, true);
 
     // StatConfig Sync (single document)
     try {
@@ -678,9 +716,66 @@ export default function App() {
     }
   };
 
-  const handleSimulatePunch = async (employeeId: string, punchIn: string, punchOut: string, method: string, lat?: number, lon?: number) => {
+  const handleSimulatePunch = async (employeeId: string, punchIn: string, punchOut: string, method: string, lat?: number, lon?: number, locationAccuracyMeters?: number, locationCapturedAt?: string, locationAddress?: string, mobileDetails?: MobilePunchDetails) => {
     const today = todayStr();
+    let mobileAuthorization: MobileDutyAuthorization | undefined;
+    if (method === 'Mobile GPS') {
+      mobileAuthorization = mobileDutyAuthorizations.find(item => item.employeeId === employeeId
+        && item.status === 'Approved' && item.validFrom <= today && item.validTo >= today);
+      if (!mobileAuthorization) throw new Error('Mobile attendance is not authorized for today. Contact your manager or HR.');
+      const authorizationAllowsVisits = mobileAuthorization.allowFieldVisits
+        || ['Client visit', 'Market / field duty', 'Out of station', 'Official travel', 'Direct reporting to worksite'].includes(mobileAuthorization.dutyType);
+      if ((mobileDetails?.action === 'visit-in' || mobileDetails?.action === 'visit-out') && !authorizationAllowsVisits) {
+        throw new Error('Client and field visits are not enabled in today’s mobile-duty assignment.');
+      }
+    }
     const existingIdx = attendances.findIndex(a => a.employeeId === employeeId && a.date === today);
+    const locationEvidence = lat !== undefined && lon !== undefined && locationAccuracyMeters !== undefined && locationCapturedAt
+      ? { latitude: lat, longitude: lon, accuracyMeters: locationAccuracyMeters, capturedAt: locationCapturedAt, source: 'device-gps' as const, ...(locationAddress && { address: locationAddress }) }
+      : undefined;
+
+    if (method === 'Mobile GPS' && !locationEvidence) throw new Error('Verified mobile location is required.');
+
+    if (mobileDetails?.action === 'visit-in' || mobileDetails?.action === 'visit-out') {
+      if (existingIdx === -1) throw new Error('Start the workday before recording a client or field visit.');
+      const existing = attendances[existingIdx];
+      if (existing.punchOut) throw new Error('The workday is already finished.');
+      const visits = [...(existing.fieldVisits || [])];
+      let activeIndex = -1;
+      for (let index = visits.length - 1; index >= 0; index -= 1) {
+        if (!visits[index].checkOut) { activeIndex = index; break; }
+      }
+      if (mobileDetails.action === 'visit-in') {
+        if (activeIndex !== -1) throw new Error('Check out from the active visit before starting another visit.');
+        visits.push({
+          id: `visit-${employeeId}-${Date.now()}`,
+          clientName: mobileDetails.clientName?.trim() || 'Field visit',
+          checkIn: punchIn,
+          checkInReasonCategory: mobileDetails.reasonCategory,
+          checkInReasonNote: mobileDetails.reasonNote,
+          checkInLocation: locationEvidence!,
+          method: 'Mobile GPS',
+          verificationMethod: mobileDetails.verificationMethod || 'Camera',
+        });
+      } else {
+        if (activeIndex === -1) throw new Error('No active client or field visit was found.');
+        visits[activeIndex] = {
+          ...visits[activeIndex],
+          checkOut: punchOut,
+          checkOutReasonCategory: mobileDetails.reasonCategory,
+          checkOutReasonNote: mobileDetails.reasonNote,
+          checkOutLocation: locationEvidence!,
+        };
+      }
+      const updatedLog: AttendanceLog = { ...existing, method: 'Mobile GPS', fieldVisits: visits, lastPunchAt: locationCapturedAt, mobileDutyAuthorizationId: mobileAuthorization!.id };
+      setAttendances(prev => {
+        const updated = prev.map(att => att.id === updatedLog.id ? updatedLog : att);
+        privacyStorage.setItem('hr_attendances', JSON.stringify(updated));
+        return updated;
+      });
+      await setDoc(doc(db, 'attendances', updatedLog.id), cleanData(updatedLog));
+      return;
+    }
 
     if (existingIdx !== -1) {
       // Punch out — compute the updated log BEFORE calling setAttendances.
@@ -688,6 +783,35 @@ export default function App() {
       // updater runs during the render phase, so any variable assigned inside it is
       // still null by the time the next line after setAttendances executes.
       const existing = attendances[existingIdx];
+      const returnableCheckoutReasons = new Set([
+        'Lunch Break', 'Tea Break', 'Official Duty', 'Client Meeting', 'Site Visit',
+        'Personal Work', 'Medical Appointment', 'Prayer',
+      ]);
+      if (method === 'Mobile Kiosk' && existing.punchOut && punchIn && returnableCheckoutReasons.has(existing.outReason?.trim() || '')) {
+        const resumedLog: AttendanceLog = {
+          ...existing,
+          punchOut: '',
+          outReason: '',
+          lastPunchAt: punchIn,
+          method: 'Mobile Kiosk',
+          breaks: [
+            ...(existing.breaks || []),
+            {
+              reason: existing.outReason!.trim(),
+              outAt: existing.punchOut,
+              returnAt: punchIn,
+              outMethod: existing.method,
+              returnMethod: 'Mobile Kiosk',
+            },
+          ],
+        };
+        await setDoc(doc(db, 'attendances', resumedLog.id), cleanData(resumedLog));
+        setAttendances(previous => previous.map(item => item.id === resumedLog.id ? resumedLog : item));
+        return;
+      }
+      if (mobileDetails?.action === 'workday-in') throw new Error('The workday has already been started.');
+      if (mobileDetails?.action === 'workday-out' && existing.punchOut) throw new Error('The workday has already been finished.');
+      if (mobileDetails?.action === 'workday-out' && existing.fieldVisits?.some(visit => !visit.checkOut)) throw new Error('Check out from the active field visit before finishing the workday.');
       let otMins = 0;
       if (existing.punchIn && punchOut) {
         const [ih, im] = existing.punchIn.split(':').map(Number);
@@ -697,11 +821,20 @@ export default function App() {
       }
       const updatedLog: AttendanceLog = {
         ...existing,
+        ...(mobileAuthorization && { method: 'Mobile GPS', mobileDutyAuthorizationId: mobileAuthorization.id }),
         punchOut,
+        lastPunchAt: punchOut,
+        ...(method === 'Mobile Kiosk' && mobileDetails?.reasonNote && { outReason: mobileDetails.reasonNote }),
         overtimeMinutes: otMins,
         ...(lat !== undefined && { latitude: lat }),
-        ...(lon !== undefined && { longitude: lon })
+        ...(lon !== undefined && { longitude: lon }),
+        ...(locationAccuracyMeters !== undefined && { locationAccuracyMeters }),
+        ...(locationCapturedAt && { locationCapturedAt, locationSource: 'device-gps' as const }),
+        ...(locationAddress && { address: locationAddress }),
+        ...(locationEvidence && { punchOutLocation: locationEvidence }),
+        ...(mobileDetails && { punchOutReasonCategory: mobileDetails.reasonCategory, punchOutReasonNote: mobileDetails.reasonNote })
       };
+      await setDoc(doc(db, 'attendances', updatedLog.id), cleanData(updatedLog));
       setAttendances(prev => {
         const updated = [...prev];
         const idx = updated.findIndex(a => a.id === updatedLog.id);
@@ -709,12 +842,8 @@ export default function App() {
         privacyStorage.setItem('hr_attendances', JSON.stringify(updated));
         return updated;
       });
-      try {
-        await setDoc(doc(db, 'attendances', updatedLog.id), cleanData(updatedLog));
-      } catch (err) {
-        console.warn('Firebase punch-out sync failed:');
-      }
     } else {
+      if (mobileDetails && mobileDetails.action !== 'workday-in') throw new Error('Start the workday before performing this action.');
       // Punch in — create new log
       let status: AttendanceLog['status'] = 'Present';
       if (punchIn) {
@@ -726,22 +855,25 @@ export default function App() {
         employeeId,
         date: today,
         punchIn,
+        lastPunchAt: punchIn,
         method: method as AttendanceLog['method'],
         status,
         overtimeMinutes: 0,
         ...(lat !== undefined && { latitude: lat }),
-        ...(lon !== undefined && { longitude: lon })
+        ...(lon !== undefined && { longitude: lon }),
+        ...(locationAccuracyMeters !== undefined && { locationAccuracyMeters }),
+        ...(locationCapturedAt && { locationCapturedAt, locationSource: 'device-gps' as const }),
+        ...(locationAddress && { address: locationAddress }),
+        ...(locationEvidence && { punchInLocation: locationEvidence }),
+        ...(mobileDetails && { punchInReasonCategory: mobileDetails.reasonCategory, punchInReasonNote: mobileDetails.reasonNote })
+        ,...(mobileAuthorization && { mobileDutyAuthorizationId: mobileAuthorization.id })
       };
+      await setDoc(doc(db, 'attendances', newLog.id), cleanData(newLog));
       setAttendances(prev => {
         const updated = [...prev, newLog];
         privacyStorage.setItem('hr_attendances', JSON.stringify(updated));
         return updated;
       });
-      try {
-        await setDoc(doc(db, 'attendances', newLog.id), cleanData(newLog));
-      } catch (err) {
-        console.warn('Firebase punch-in sync failed:');
-      }
     }
   };
 
@@ -898,6 +1030,24 @@ export default function App() {
     }
   };
 
+  const handleUpdateRole = async (updatedRole: Role) => {
+    setRoles(prev => prev.map(role => role.id === updatedRole.id ? updatedRole : role));
+    await setDoc(doc(db, 'roles', updatedRole.id), cleanData(updatedRole));
+  };
+
+  const handleSaveMobileDutyAuthorization = async (authorization: MobileDutyAuthorization) => {
+    setMobileDutyAuthorizations(prev => [...prev.filter(item => item.id !== authorization.id), authorization]);
+    await setDoc(doc(db, 'mobileDutyAuthorizations', authorization.id), cleanData(authorization));
+  };
+
+  const handleCancelMobileDutyAuthorization = async (id: string) => {
+    const existing = mobileDutyAuthorizations.find(item => item.id === id);
+    if (!existing) return;
+    const cancelled: MobileDutyAuthorization = { ...existing, status: 'Cancelled', updatedAt: new Date().toISOString() };
+    setMobileDutyAuthorizations(prev => prev.map(item => item.id === id ? cancelled : item));
+    await setDoc(doc(db, 'mobileDutyAuthorizations', id), cleanData(cancelled));
+  };
+
   const handleAddUser = async (newUser: NewUserAccount) => {
     const { password, id: _temporaryId, ...profile } = newUser;
     if (password.length < 12) throw new Error('Password must be at least 12 characters.');
@@ -946,6 +1096,45 @@ export default function App() {
         console.warn('Firebase user role update delayed:');
       }
     }
+  };
+
+  const handleUpdateUser = async (user: UserAccount) => {
+    const existing = users.find(item => item.id === user.id);
+    if (!existing) throw new Error('User account no longer exists.');
+    const username = user.username.trim();
+    if (!username) throw new Error('Username is required.');
+    if (!roles.some(role => role.id === user.roleId)) throw new Error('Select a valid role.');
+    if (user.roleId === 'role-employee' && !user.employeeId) throw new Error('Employee mobile accounts must be linked to an employee.');
+    if (user.employeeId && users.some(item => item.id !== user.id && item.employeeId === user.employeeId)) {
+      throw new Error('This employee is already linked to another login account.');
+    }
+
+    const isAdminRole = (roleId: string) => {
+      const role = roles.find(item => item.id === roleId);
+      return roleId === 'role-admin' || role?.name === 'Super Admin';
+    };
+    const activeAdmins = users.filter(item => item.status === 'Active' && isAdminRole(item.roleId));
+    if (existing.status === 'Active' && isAdminRole(existing.roleId) && activeAdmins.length <= 1 && (user.status !== 'Active' || !isAdminRole(user.roleId))) {
+      throw new Error('The last active Super Admin cannot be disabled or assigned another role.');
+    }
+
+    const updated: UserAccount = {
+      ...existing,
+      username,
+      roleId: user.roleId,
+      status: user.status,
+      employeeId: user.employeeId || undefined,
+      email: existing.email,
+    };
+    await updateDoc(doc(db, 'users', updated.id), {
+      username: updated.username,
+      roleId: updated.roleId,
+      status: updated.status,
+      employeeId: updated.employeeId || deleteField(),
+    });
+    setUsers(previous => previous.map(item => item.id === updated.id ? updated : item));
+    if (currentUserAccount.id === updated.id) setCurrentUserAccount(publicUser(updated));
+    if (loggedInUser?.id === updated.id) setLoggedInUser(publicUser(updated));
   };
 
   const handleDeleteUser = async (userId: string) => {
@@ -1386,6 +1575,7 @@ export default function App() {
     <DeviceEmulator
       employees={employeesWithFingerprints}
       attendances={attendances}
+      mobileDutyAuthorizations={mobileDutyAuthorizations}
       leaves={leaves}
       statConfig={statConfig}
       taxSlabs={taxSlabs}
@@ -1423,9 +1613,13 @@ export default function App() {
       accessControlLoaded={accessControlLoaded}
       onSetCurrentUserAccount={handleSetCurrentUserAccount}
       onAddRole={handleAddRole}
+      onUpdateRole={handleUpdateRole}
       onAddUser={handleAddUser}
       onDeleteUser={handleDeleteUser}
       onUpdateUserRole={handleUpdateUserRole}
+      onUpdateUser={handleUpdateUser}
+      onSaveMobileDutyAuthorization={handleSaveMobileDutyAuthorization}
+      onCancelMobileDutyAuthorization={handleCancelMobileDutyAuthorization}
       loggedInUser={loggedInUser}
       onLogout={handleLogout}
       holidays={holidays}

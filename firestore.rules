@@ -13,11 +13,18 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
-    function hasPermission(permission) {
+    function isSuperAdmin() {
       return hasProfile()
         && profile().status == 'Active'
-        && exists(/databases/$(database)/documents/roles/$(profile().roleId))
-        && permission in get(/databases/$(database)/documents/roles/$(profile().roleId)).data.permissions;
+        && profile().roleId == 'role-admin';
+    }
+
+    function hasPermission(permission) {
+      return isSuperAdmin()
+        || (hasProfile()
+          && profile().status == 'Active'
+          && exists(/databases/$(database)/documents/roles/$(profile().roleId))
+          && permission in get(/databases/$(database)/documents/roles/$(profile().roleId)).data.permissions);
     }
 
     function isSelfEmployee(employeeId) {
@@ -32,6 +39,16 @@ service cloud.firestore {
     function ownsExistingEmployeeRecord() {
       return resource.data.employeeId is string
         && isSelfEmployee(resource.data.employeeId);
+    }
+
+    function hasValidMobileDutyAuthorization() {
+      return request.resource.data.method == 'Mobile GPS'
+        && request.resource.data.mobileDutyAuthorizationId is string
+        && exists(/databases/$(database)/documents/mobileDutyAuthorizations/$(request.resource.data.mobileDutyAuthorizationId))
+        && get(/databases/$(database)/documents/mobileDutyAuthorizations/$(request.resource.data.mobileDutyAuthorizationId)).data.employeeId == request.resource.data.employeeId
+        && get(/databases/$(database)/documents/mobileDutyAuthorizations/$(request.resource.data.mobileDutyAuthorizationId)).data.status == 'Approved'
+        && get(/databases/$(database)/documents/mobileDutyAuthorizations/$(request.resource.data.mobileDutyAuthorizationId)).data.validFrom <= request.resource.data.date
+        && get(/databases/$(database)/documents/mobileDutyAuthorizations/$(request.resource.data.mobileDutyAuthorizationId)).data.validTo >= request.resource.data.date;
     }
 
     function validEmployeePayload() {
@@ -56,7 +73,7 @@ service cloud.firestore {
     }
 
     match /employees/{employeeId} {
-      allow read: if isSelfEmployee(employeeId) || hasPermission('manage_employees') || hasPermission('manage_payroll');
+      allow read: if isSelfEmployee(employeeId) || hasPermission('manage_employees') || hasPermission('manage_payroll') || hasPermission('use_kiosk');
       allow write: if hasPermission('manage_employees') && validEmployeePayload();
     }
 
@@ -65,11 +82,17 @@ service cloud.firestore {
     }
 
     match /attendances/{documentId} {
-      allow read: if ownsExistingEmployeeRecord() || hasPermission('manage_attendance') || hasPermission('manage_payroll');
-      allow create: if ownsNewEmployeeRecord() || hasPermission('manage_attendance');
-      allow update: if (ownsExistingEmployeeRecord() && request.resource.data.employeeId == resource.data.employeeId)
-        || hasPermission('manage_attendance');
+      allow read: if ownsExistingEmployeeRecord() || hasPermission('manage_attendance') || hasPermission('manage_payroll') || hasPermission('use_kiosk');
+      allow create: if (ownsNewEmployeeRecord() && (hasValidMobileDutyAuthorization() || request.resource.data.regularizationRequested == true)) || hasPermission('manage_attendance') || hasPermission('use_kiosk');
+      allow update: if (ownsExistingEmployeeRecord() && request.resource.data.employeeId == resource.data.employeeId && hasValidMobileDutyAuthorization())
+        || hasPermission('manage_attendance') || hasPermission('use_kiosk');
       allow delete: if hasPermission('manage_attendance');
+    }
+
+    match /mobileDutyAuthorizations/{documentId} {
+      allow read: if (resource.data.employeeId is string && isSelfEmployee(resource.data.employeeId))
+        || hasPermission('manage_mobile_duty');
+      allow create, update, delete: if hasPermission('manage_mobile_duty');
     }
 
     match /leaves/{documentId} {

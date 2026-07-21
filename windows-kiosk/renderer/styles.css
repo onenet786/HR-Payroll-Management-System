@@ -582,6 +582,14 @@ body {
   justify-content: center;
   gap: 8px;
 }
+.liveness-rail { width:min(100%,640px); margin:10px auto 0; border:1px solid #334155; background:#071525; padding:10px 12px; color:#dbeafe; }
+.liveness-kicker { color:#fbbf24; font-size:10px; font-weight:900; letter-spacing:.13em; }
+.liveness-action { margin:5px 0 8px; font-size:18px; line-height:1.2; font-weight:900; }
+.liveness-steps { display:grid; grid-template-columns:repeat(5,1fr); gap:5px; }
+.liveness-steps span { padding:5px 2px; border:1px solid #334155; text-align:center; font-size:9px; font-weight:800; color:#64748b; }
+.liveness-steps span.current { border-color:#f59e0b; background:#78350f; color:#fef3c7; }
+.liveness-steps span.done { border-color:#10b981; background:#064e3b; color:#d1fae5; }
+.liveness-rail.failed { border-color:#e11d48; background:#3f0a18; }
 
 .camera-view {
   flex: 0 0 auto;
@@ -1540,4 +1548,51 @@ select.form-input option { background: #071426; color: var(--t1); }
     min-height: 0;
     aspect-ratio: 4 / 3;
   }
+}
+
+@media (max-width: 900px) {
+  body { overflow-x: hidden; overflow-y: auto; }
+  .shell { width: 100%; height: auto; min-height: 100vh; padding: 8px; }
+  .topbar { height: auto; min-height: 64px; flex-wrap: wrap; gap: 9px; padding: 9px 10px; }
+  .brand { min-width: 0; flex: 1 1 180px; }
+  .brand-text { min-width: 0; }
+  .brand-name, .brand-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .brand-logo { width: 38px; height: 38px; }
+  .topbar-right { gap: 7px; margin-left: auto; }
+  .status-indicators { display: none; }
+  .clock-time { font-size: 20px; }
+  .mode-nav { order: 3; width: 100%; margin: 0; }
+  .mode-btn { min-height: 44px; flex: 1; justify-content: center; padding: 8px; }
+  .stats-bar { height: auto; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; padding: 11px 12px; }
+  .stat-chip { min-width: 0; }
+  .stat-label { font-size: 9px; }
+  .stats-divider { display: none; }
+  .sync-row { grid-column: 1 / -1; justify-content: space-between; min-width: 0; }
+  .sync-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .workspace { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; }
+  .input-panel, .center-panel { width: 100%; min-width: 0; overflow: visible; }
+  .center-panel.camera-active { display: flex; flex-direction: column; min-height: 0; }
+  .center-panel.camera-active .camera-stack { width: 100%; min-width: 0; }
+  .center-panel.camera-active .camera-view, .liveness-rail { width: 100%; max-width: 640px; }
+  .liveness-steps span { min-height: 34px; display: grid; place-items: center; }
+}
+
+@media (max-width: 480px) {
+  .shell { padding: 5px; gap: 6px; }
+  .topbar { border-radius: var(--r); }
+  .brand { flex-basis: 120px; gap: 7px; }
+  .brand-sub, .clock-block, .exit-btn svg { display: none; }
+  .brand-name { font-size: 13px; }
+  .topbar-right { gap: 5px; }
+  .icon-btn, .exit-btn { min-width: 42px; min-height: 42px; }
+  .exit-btn { padding: 8px 10px; }
+  .mode-btn { font-size: 11px; gap: 5px; }
+  .stats-bar { padding: 9px; }
+  .stat-val { font-size: 18px; }
+  .input-panel { padding: 11px; }
+  .liveness-rail { margin-top: 5px; padding: 9px; }
+  .liveness-action { font-size: 15px; }
+  .liveness-kicker { font-size: 8px; letter-spacing: .08em; }
+  .liveness-steps { gap: 3px; }
+  .liveness-steps span { min-height: 38px; padding: 4px 1px; font-size: 8px; overflow-wrap: anywhere; }
 }

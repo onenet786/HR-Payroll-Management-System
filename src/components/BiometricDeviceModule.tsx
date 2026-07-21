@@ -23,6 +23,7 @@ import {
   getFaceDescriptors,
   hasFaceEnrollment,
 } from '../utils/faceRecognition';
+import { performActiveLiveness, randomLivenessOrder } from '../utils/faceLiveness';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -152,6 +153,8 @@ export function BiometricDeviceModule({
   const [faceCameraReady, setFaceCameraReady] = useState(false);
   const [faceMsg, setFaceMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const [recognizedFaceMatch, setRecognizedFaceMatch] = useState<{ employee: Employee; score: number; margin: number } | null>(null);
+  const [livenessPhase, setLivenessPhase] = useState(-1);
+  const [livenessBusy, setLivenessBusy] = useState(false);
 
   // ── Attendance state ─────────────────────────────────────────────────────────
   const [attEmpId, setAttEmpId] = useState(employees[0]?.id || '');
@@ -697,6 +700,17 @@ export function BiometricDeviceModule({
       return;
     }
     try {
+      setLivenessBusy(true);
+      setLivenessPhase(0);
+      const order = randomLivenessOrder();
+      const live = await performActiveLiveness(faceVideoRef.current, order, (message, phase) => {
+        setLivenessPhase(phase);
+        setFaceMsg({ type: 'ok', text: message });
+      });
+      if (!live.ok || !live.summary) {
+        setFaceMsg({ type: 'err', text: live.message });
+        return;
+      }
       const samples: FaceDescriptor[] = [];
       setFaceMsg({ type: 'ok', text: `Capturing 3 camera face samples for ${emp.fullName}. Keep the face steady inside the oval.` });
 
@@ -715,21 +729,40 @@ export function BiometricDeviceModule({
           }
         }
 
-        samples.push(createFaceDescriptorFromVideo(faceVideoRef.current, `admin-webcam-${i + 1}`));
+        const descriptor = createFaceDescriptorFromVideo(faceVideoRef.current, `admin-webcam-${i + 1}`);
+        samples.push({
+          ...descriptor,
+          version: 3,
+          liveness: {
+            method: 'active-turn-v1',
+            verifiedAt: new Date().toISOString(),
+            summary: {
+              order: live.summary.order,
+              durationMs: live.summary.durationMs,
+              frameCounts: live.summary.frameCounts,
+              maxLeftYaw: live.summary.maxLeftYaw,
+              maxRightYaw: live.summary.maxRightYaw,
+              maxCenterDrift: live.summary.maxCenterDrift,
+              maxScaleChange: live.summary.maxScaleChange,
+            },
+          },
+        });
         if (i < 2) await wait(350);
       }
 
       const updated: Employee = {
         ...emp,
-        faceDescriptors: [...samples, ...(emp.faceDescriptors || [])].slice(0, 5),
+        faceDescriptors: samples,
       };
       await onUpdateEmployee(updated);
       setRecognizedFaceMatch(null);
       setFaceMsg({ type: 'ok', text: `3 camera face samples saved for ${emp.fullName}. Click Verify Face to test this enrollment.` });
       log('Camera face enrollment saved: [REDACTED] (3 samples)');
-    } catch {
-      setFaceMsg({ type: 'err', text: 'Camera enrollment failed.' });
+    } catch (error) {
+      setFaceMsg({ type: 'err', text: error instanceof Error ? error.message : 'Camera enrollment failed.' });
       log('Camera enrollment failed [REDACTED]');
+    } finally {
+      setLivenessBusy(false);
     }
   };
 
@@ -747,6 +780,12 @@ export function BiometricDeviceModule({
     }
 
     try {
+      setLivenessBusy(true);
+      const live = await performActiveLiveness(faceVideoRef.current, randomLivenessOrder(), (message, phase) => {
+        setLivenessPhase(phase);
+        setFaceMsg({ type: 'ok', text: message });
+      });
+      if (!live.ok) { setFaceMsg({ type: 'err', text: live.message }); return; }
       const browserFace = await assessBrowserFaceDetection(faceVideoRef.current);
       if (browserFace !== null) {
         if (!browserFace.ok) {
@@ -805,9 +844,11 @@ export function BiometricDeviceModule({
         setFaceMsg({ type: 'err', text: `Not verified. Score ${bestScore.toFixed(3)} is too high. Re-save with full face centered and even light.` });
         log(`Camera face recognition failed: identity [REDACTED], score=${bestScore.toFixed(3)}`);
       }
-    } catch {
-      setFaceMsg({ type: 'err', text: 'Camera verification failed.' });
+    } catch (error) {
+      setFaceMsg({ type: 'err', text: error instanceof Error ? error.message : 'Camera verification failed.' });
       log('Camera verification failed [REDACTED]');
+    } finally {
+      setLivenessBusy(false);
     }
   };
 
@@ -1200,7 +1241,7 @@ export function BiometricDeviceModule({
                 {(() => {
                   const emp = employees.find(e => e.id === enrollEmpId);
                   const fingerprintCount = emp?.fingerprintTemplates?.length || 0;
-                  const faceCount = emp?.faceDescriptors?.length || 0;
+                  const faceCount = emp ? getFaceDescriptors(emp).length : 0;
                   const hasAnySaved = fingerprintCount > 0 || faceCount > 0 || enrollSamples.length > 0;
                   return (
                     <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2">
@@ -1348,7 +1389,7 @@ export function BiometricDeviceModule({
                       const emp = employees.find(e => e.id === enrollEmpId);
                       return (
                         <span className={`text-[10px] font-bold rounded-full px-2 py-0.5 ${emp && hasFaceEnrollment(emp) ? 'bg-blue-100 text-blue-700' : 'bg-slate-200 text-slate-500'}`}>
-                          {emp && hasFaceEnrollment(emp) ? 'Face enrolled' : 'No face'}
+                          {emp && hasFaceEnrollment(emp) ? 'Secure face enrolled' : emp?.faceDescriptors?.length ? 'Re-enrollment required' : 'No face'}
                         </span>
                       );
                     })()}
@@ -1373,6 +1414,15 @@ export function BiometricDeviceModule({
                   </div>
 
                   <div className="space-y-2">
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-3" aria-live="polite">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-amber-700">Active liveness · photo replay protection</p>
+                    <div className="mt-2 grid grid-cols-5 gap-1">
+                      {['Center', 'Turn', 'Center', 'Opposite', 'Verified'].map((label, index) => (
+                        <div key={`${label}-${index}`} className={`rounded-md px-1 py-2 text-center text-[9px] font-bold ${livenessPhase > index ? 'bg-emerald-600 text-white' : livenessPhase === index ? 'bg-amber-400 text-slate-950' : 'bg-white text-slate-400'}`}>{label}</div>
+                      ))}
+                    </div>
+                    <p className="mt-2 text-[10px] text-amber-900">Blocks static photos. Recorded-video/deepfake resistance requires certified PAD or depth/IR hardware.</p>
+                  </div>
                   {faceMsg && (
                     <div className={`text-xs rounded-xl px-3 py-2 border ${
                       faceMsg.type === 'ok'
@@ -1447,7 +1497,7 @@ export function BiometricDeviceModule({
                     <button
                       type="button"
                       onClick={handleSaveFaceEnrollment}
-                      disabled={!faceCameraReady}
+                      disabled={!faceCameraReady || livenessBusy}
                       className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm font-bold py-2.5 rounded-xl transition"
                     >
                       <Database className="w-4 h-4" />
@@ -1456,7 +1506,7 @@ export function BiometricDeviceModule({
                     <button
                       type="button"
                       onClick={handleVerifyFaceEnrollment}
-                      disabled={!faceCameraReady}
+                      disabled={!faceCameraReady || livenessBusy}
                       className="flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white text-sm font-bold py-2.5 rounded-xl transition"
                     >
                       <CheckCircle className="w-4 h-4" />

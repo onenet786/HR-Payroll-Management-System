@@ -14,7 +14,7 @@ import {
 import {
   Employee, AttendanceLog, LeaveRequest, StatutoryConfig, TaxSlab, PayrollRun, Payslip,
   Role, UserAccount, NewUserAccount, Branch, Department, Designation, Holiday, LoanAdvance, SalaryRevision,
-  PerformanceReview, CompanyAsset, JobPosting, JobApplication, GratuitySettlement, AppNotification, Company, CompanySetupPayload, Zone, UcTown, WageType
+  PerformanceReview, CompanyAsset, JobPosting, JobApplication, GratuitySettlement, AppNotification, Company, CompanySetupPayload, Zone, UcTown, WageType, MobileDutyAuthorization, MobileDutyType
 } from '../types';
 import { computePayslipDetails } from '../data/defaults';
 import { deriveEmployeeCompanyId, getEmployeeEditDepartmentOptions, getEmployeeEditOptions, resolveEmployeeCompanyId, resolveRecordId, resolveUcTownName, resolveWageBasis, resolveWageTypeName, resolveZoneName, synchronizeDepartmentSelection, validateEmployeeMasterSelection } from '../data/masterData';
@@ -90,6 +90,7 @@ const getExceptionalCurrentSuffix = (
 interface WebPortalProps {
   employees: Employee[];
   attendances: AttendanceLog[];
+  mobileDutyAuthorizations: MobileDutyAuthorization[];
   leaves: LeaveRequest[];
   statConfig: StatutoryConfig;
   taxSlabs: TaxSlab[];
@@ -122,9 +123,13 @@ interface WebPortalProps {
   accessControlLoaded: boolean;
   onSetCurrentUserAccount: (user: UserAccount) => void;
   onAddRole: (role: Role) => void;
+  onUpdateRole: (role: Role) => Promise<void>;
   onAddUser: (user: NewUserAccount) => Promise<void>;
   onDeleteUser: (userId: string) => Promise<void>;
   onUpdateUserRole: (userId: string, roleId: string) => void;
+  onUpdateUser: (user: UserAccount) => Promise<void>;
+  onSaveMobileDutyAuthorization: (authorization: MobileDutyAuthorization) => Promise<void>;
+  onCancelMobileDutyAuthorization: (id: string) => Promise<void>;
   onLogout: () => void;
   onAddBranch?: (branch: Branch) => void;
   onAddDepartment?: (dept: Department) => void;
@@ -160,7 +165,7 @@ interface WebPortalProps {
   onMarkNotificationRead: (id: string) => void;
   onMarkAllNotificationsRead: () => void;
   onDeleteNotification: (id: string) => void;
-  onSimulatePunch: (employeeId: string, punchIn: string, punchOut: string, method: string, lat?: number, lon?: number) => void;
+  onSimulatePunch: (employeeId: string, punchIn: string, punchOut: string, method: string, lat?: number, lon?: number, locationAccuracyMeters?: number, locationCapturedAt?: string, locationAddress?: string) => void | Promise<void>;
   firestoreSyncStatus: FirestoreSyncStatus;
 }
 
@@ -170,6 +175,7 @@ type NavGroupKey = 'people' | 'time' | 'payroll' | 'system';
 export function WebPortal({
   employees,
   attendances,
+  mobileDutyAuthorizations,
   leaves,
   statConfig,
   taxSlabs,
@@ -202,9 +208,13 @@ export function WebPortal({
   accessControlLoaded,
   onSetCurrentUserAccount: _onSetCurrentUserAccount,
   onAddRole,
+  onUpdateRole,
   onAddUser,
   onDeleteUser,
   onUpdateUserRole,
+  onUpdateUser,
+  onSaveMobileDutyAuthorization,
+  onCancelMobileDutyAuthorization,
   onLogout,
   onAddBranch,
   onAddDepartment,
@@ -245,7 +255,7 @@ export function WebPortal({
 }: WebPortalProps) {
   const [activeTab, setActiveTab] = useState<PortalTab>('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [expandedNavGroup, setExpandedNavGroup] = useState<NavGroupKey | null>(null);
+  const [expandedNavGroup, setExpandedNavGroup] = useState<NavGroupKey | null>('system');
   const closeSidebar = () => setSidebarOpen(false);
   const updateTaxSlab = (id: string, field: keyof Pick<TaxSlab, 'minIncome' | 'maxIncome' | 'baseTax' | 'percentage'>, value: number) =>
     onUpdateTaxSlabs(taxSlabs.map(slab => slab.id === id ? { ...slab, [field]: value } : slab));
@@ -264,7 +274,15 @@ export function WebPortal({
   ].filter(Boolean).join(' • ');
 
   const currentUserRole = roles.find(r => r.id === currentUserAccount.roleId);
-  const userPermissions = currentUserRole ? currentUserRole.permissions : [];
+  const isCanonicalSuperAdmin = currentUserAccount.roleId === 'role-admin' || currentUserRole?.name === 'Super Admin';
+  // Older Firestore Super Admin role documents may predate manage_access.
+  // Preserve the canonical administrator's recovery path to User Management;
+  // all other roles remain governed strictly by their saved permissions.
+  const userPermissions = currentUserRole
+    ? [...new Set([...currentUserRole.permissions, ...(isCanonicalSuperAdmin ? ['manage_access'] : [])])]
+    : isCanonicalSuperAdmin
+      ? ['manage_access']
+      : [];
   const isRoleResolving = !accessControlLoaded || Boolean(currentUserAccount.roleId && !currentUserRole && roles.length === 0);
   const syncBadgeClass =
     firestoreSyncStatus.state === 'synced'
@@ -316,6 +334,9 @@ export function WebPortal({
   const [showBankFileModal, setShowBankFileModal] = useState<PayrollRun | null>(null);
   const [showPayslipModal, setShowPayslipModal] = useState<Payslip | null>(null);
   const [showOffboardModal, setShowOffboardModal] = useState<Employee | null>(null);
+  const [editingUser, setEditingUser] = useState<UserAccount | null>(null);
+  const [userEditSaving, setUserEditSaving] = useState(false);
+  const [userEditError, setUserEditError] = useState('');
   
   // Forms local state
   const [newEmpForm, setNewEmpForm] = useState({
@@ -677,6 +698,11 @@ export function WebPortal({
   // Sub-tabs state
   const [empSubTab, setEmpSubTab] = useState<'list' | 'reports'>('list');
   const [attSubTab, setAttSubTab] = useState<'stream' | 'reports'>('stream');
+  const [mobileDutyForm, setMobileDutyForm] = useState(() => {
+    const now = new Date();
+    const localDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    return { employeeId: '', dutyType: 'Work from home' as MobileDutyType, validFrom: localDate, validTo: localDate, instructions: '', assignedLocation: '', allowFieldVisits: false };
+  });
   const [leaveSubTab, setLeaveSubTab] = useState<'list' | 'reports'>('list');
 
   // Reports state
@@ -1160,7 +1186,7 @@ export function WebPortal({
       items: [
         { tab: 'company-setup', label: 'Company Setup', icon: Building },
         { tab: 'master-data', label: 'Master Data', icon: ListTree },
-        { tab: 'access', label: 'Access Control', icon: ShieldCheck },
+        { tab: 'access', label: 'User Management', icon: Users, badge: users.length || undefined },
         { tab: 'maintenance', label: 'Data Backup', icon: Database },
         { tab: 'notifications', label: 'Notifications', icon: Bell, badge: notifications.filter(n => !n.readBy.includes(loggedInUser?.employeeId || loggedInUser?.username || '')).length || undefined },
         { tab: 'help', label: 'User Guide', icon: BookOpen, badge: 'NEW' }
@@ -1820,6 +1846,53 @@ export function WebPortal({
 
                   {attSubTab === 'stream' ? (
                     <>
+                      {(userPermissions.includes('manage_mobile_duty') || isCanonicalSuperAdmin) && (
+                        <div className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-5 space-y-4">
+                          <div>
+                            <h3 className="font-bold text-sm text-indigo-900">Mobile Duty Authorizations</h3>
+                            <p className="text-[10px] text-indigo-700">Mobile attendance remains hidden unless an approved assignment is valid for the employee and date.</p>
+                          </div>
+                          <form className="grid grid-cols-1 gap-2 md:grid-cols-4" onSubmit={async event => {
+                            event.preventDefault();
+                            if (!mobileDutyForm.employeeId || !mobileDutyForm.instructions.trim()) { alert('Select an employee and enter assignment instructions.'); return; }
+                            if (mobileDutyForm.validTo < mobileDutyForm.validFrom) { alert('Valid To cannot be before Valid From.'); return; }
+                            if (mobileDutyAuthorizations.some(item => item.employeeId === mobileDutyForm.employeeId && item.status === 'Approved' && item.validFrom <= mobileDutyForm.validTo && item.validTo >= mobileDutyForm.validFrom)) { alert('This employee already has an overlapping approved mobile-duty assignment.'); return; }
+                            const now = new Date().toISOString();
+                            await onSaveMobileDutyAuthorization({
+                              id: `mobile-duty-${Date.now()}`,
+                              ...mobileDutyForm,
+                              instructions: mobileDutyForm.instructions.trim(),
+                              assignedLocation: mobileDutyForm.assignedLocation.trim() || undefined,
+                              status: 'Approved',
+                              assignedByUserId: currentUserAccount.id,
+                              assignedByName: currentUserAccount.username,
+                              createdAt: now,
+                              updatedAt: now,
+                            });
+                            setMobileDutyForm(previous => ({ ...previous, employeeId: '', instructions: '', assignedLocation: '' }));
+                          }}>
+                            <select required value={mobileDutyForm.employeeId} onChange={e => setMobileDutyForm(p => ({ ...p, employeeId: e.target.value }))} className="rounded-lg border border-indigo-200 bg-white p-2 text-xs"><option value="">Select employee *</option>{employees.filter(employee => employee.status === 'Active').map(employee => <option key={employee.id} value={employee.id}>{employee.fullName} ({employee.employeeCode})</option>)}</select>
+                            <select value={mobileDutyForm.dutyType} onChange={e => setMobileDutyForm(p => ({ ...p, dutyType: e.target.value as MobileDutyType }))} className="rounded-lg border border-indigo-200 bg-white p-2 text-xs">{(['Work from home', 'Out of station', 'Client visit', 'Market / field duty', 'Official travel', 'Direct reporting to worksite', 'Emergency duty'] as MobileDutyType[]).map(type => <option key={type}>{type}</option>)}</select>
+                            <input type="date" required value={mobileDutyForm.validFrom} onChange={e => setMobileDutyForm(p => ({ ...p, validFrom: e.target.value }))} className="rounded-lg border border-indigo-200 bg-white p-2 text-xs" aria-label="Mobile duty valid from" />
+                            <input type="date" required value={mobileDutyForm.validTo} onChange={e => setMobileDutyForm(p => ({ ...p, validTo: e.target.value }))} className="rounded-lg border border-indigo-200 bg-white p-2 text-xs" aria-label="Mobile duty valid to" />
+                            <input value={mobileDutyForm.assignedLocation} onChange={e => setMobileDutyForm(p => ({ ...p, assignedLocation: e.target.value }))} placeholder="Assigned client/location (optional)" className="rounded-lg border border-indigo-200 bg-white p-2 text-xs" />
+                            <input required value={mobileDutyForm.instructions} onChange={e => setMobileDutyForm(p => ({ ...p, instructions: e.target.value }))} placeholder="Instructions / approval reason *" className="rounded-lg border border-indigo-200 bg-white p-2 text-xs md:col-span-2" />
+                            <label className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 text-[10px] text-slate-700"><input type="checkbox" checked={mobileDutyForm.allowFieldVisits} onChange={e => setMobileDutyForm(p => ({ ...p, allowFieldVisits: e.target.checked }))} /> Allow multiple field visits</label>
+                            <button type="submit" className="rounded-lg bg-indigo-700 px-4 py-2 text-xs font-bold text-white md:col-span-4">Assign Mobile Duty</button>
+                          </form>
+                          <div className="grid gap-2 md:grid-cols-2">
+                            {mobileDutyAuthorizations.slice().reverse().map(item => {
+                              const employee = employees.find(candidate => candidate.id === item.employeeId);
+                              return <div key={item.id} className="rounded-lg border border-indigo-100 bg-white p-3 text-[10px]">
+                                <div className="flex justify-between gap-2"><strong className="text-slate-800">{employee?.fullName || item.employeeId} — {item.dutyType}</strong><span className={item.status === 'Approved' ? 'text-emerald-700' : 'text-rose-600'}>{item.status}</span></div>
+                                <div className="mt-1 text-slate-500">{item.validFrom} to {item.validTo} · Assigned by {item.assignedByName}</div>
+                                <div className="mt-1 text-slate-600">{item.instructions}</div>
+                                {item.status === 'Approved' && <button type="button" onClick={() => onCancelMobileDutyAuthorization(item.id)} className="mt-2 font-semibold text-rose-600 underline">Cancel authorization</button>}
+                              </div>;
+                            })}
+                          </div>
+                        </div>
+                      )}
                       {/* Regularizations queue if active */}
                       {attendances.filter(a => a.regularizationRequested && a.regularizationApproved === undefined).length > 0 && (
                         <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 space-y-3">
@@ -1879,7 +1952,8 @@ export function WebPortal({
                                 <th className="px-6 py-3">Log Date</th>
                                 <th className="px-6 py-3">In Punch</th>
                                 <th className="px-6 py-3">Out Punch</th>
-                                <th className="px-6 py-3">Method</th>
+                                <th className="px-6 py-3">Method/GPS</th>
+                                <th className="px-6 py-3">Location Evidence</th>
                                 <th className="px-6 py-3">Overtime</th>
                                 <th className="px-6 py-3">Status</th>
                               </tr>
@@ -1887,6 +1961,19 @@ export function WebPortal({
                             <tbody className="divide-y divide-slate-100 text-slate-700 font-sans">
                               {attendances.slice().reverse().map(att => {
                                 const emp = employees.find(e => e.id === att.employeeId);
+                                const legacyLocation = Number.isFinite(att.latitude) && Number.isFinite(att.longitude)
+                                  ? {
+                                      latitude: Number(att.latitude), longitude: Number(att.longitude),
+                                      accuracyMeters: Number(att.locationAccuracyMeters || 0),
+                                      capturedAt: att.locationCapturedAt || '', source: 'device-gps' as const,
+                                      address: att.address || '',
+                                    }
+                                  : undefined;
+                                const locationEntries = [
+                                  att.punchInLocation ? { label: 'IN', value: att.punchInLocation } : null,
+                                  att.punchOutLocation ? { label: 'OUT', value: att.punchOutLocation } : null,
+                                  !att.punchInLocation && !att.punchOutLocation && legacyLocation ? { label: 'GPS', value: legacyLocation } : null,
+                                ].filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
                                 return (
                                   <tr key={att.id} className="hover:bg-slate-50/50">
                                     <td className="px-6 py-3 whitespace-nowrap">
@@ -1909,6 +1996,54 @@ export function WebPortal({
                                     </td>
                                     <td className="px-6 py-3 whitespace-nowrap text-[11px] text-slate-500">
                                       {att.method}
+                                    </td>
+                                    <td className="px-6 py-3 min-w-56 text-[10px] text-slate-600">
+                                      {locationEntries.length ? (
+                                        <div className="space-y-1">
+                                          {locationEntries.map(({ label, value }) => {
+                                            const validCoordinates = value.latitude >= -90 && value.latitude <= 90 && value.longitude >= -180 && value.longitude <= 180;
+                                            const mapUrl = validCoordinates ? `https://www.google.com/maps?q=${value.latitude},${value.longitude}` : '';
+                                            return (
+                                              <div key={label} className="flex items-start gap-1.5">
+                                                <span className="rounded bg-slate-100 px-1 py-0.5 font-bold text-slate-500">{label}</span>
+                                                <div>
+                                                  {validCoordinates ? (
+                                                    <a href={mapUrl} target="_blank" rel="noreferrer" className="font-semibold text-emerald-700 underline hover:text-emerald-900">
+                                                      {value.address || `${value.latitude.toFixed(5)}, ${value.longitude.toFixed(5)}`}
+                                                    </a>
+                                                  ) : <span className="text-rose-600">Invalid coordinates</span>}
+                                                  <div className="text-[9px] text-slate-400">
+                                                    {value.accuracyMeters > 0 ? `±${Math.round(value.accuracyMeters)} m` : 'Accuracy unavailable'}
+                                                    {value.capturedAt ? ` · ${new Date(value.capturedAt).toLocaleString('en-PK')}` : ''}
+                                                  </div>
+                                                  {label === 'IN' && att.punchInReasonCategory && <div className="mt-0.5 text-[9px] text-slate-600"><strong>{att.punchInReasonCategory}:</strong> {att.punchInReasonNote}</div>}
+                                                  {label === 'OUT' && att.punchOutReasonCategory && <div className="mt-0.5 text-[9px] text-slate-600"><strong>{att.punchOutReasonCategory}:</strong> {att.punchOutReasonNote}</div>}
+                                                </div>
+                                              </div>
+                                            );
+                                          })}
+                                          {att.fieldVisits?.map((visit, index) => (
+                                            <div key={visit.id} className="mt-2 rounded border border-indigo-100 bg-indigo-50/60 p-1.5">
+                                              <div className="font-bold text-indigo-800">Visit {index + 1}: {visit.clientName}</div>
+                                              <div className="mt-1 space-y-1">
+                                                {([
+                                                  { label: 'CHECK IN', time: visit.checkIn, location: visit.checkInLocation, category: visit.checkInReasonCategory, note: visit.checkInReasonNote },
+                                                  visit.checkOutLocation ? { label: 'CHECK OUT', time: visit.checkOut, location: visit.checkOutLocation, category: visit.checkOutReasonCategory, note: visit.checkOutReasonNote } : null,
+                                                ] as const).filter(Boolean).map(entry => {
+                                                  if (!entry) return null;
+                                                  const mapUrl = `https://www.google.com/maps?q=${entry.location.latitude},${entry.location.longitude}`;
+                                                  return <div key={entry.label}>
+                                                    <span className="font-bold text-slate-500">{entry.label} {entry.time}</span>{' — '}
+                                                    <a href={mapUrl} target="_blank" rel="noreferrer" className="font-semibold text-emerald-700 underline">{entry.location.address || `${entry.location.latitude.toFixed(5)}, ${entry.location.longitude.toFixed(5)}`}</a>
+                                                    <div className="text-[9px] text-slate-600"><strong>{entry.category}:</strong> {entry.note}</div>
+                                                  </div>;
+                                                })}
+                                                {!visit.checkOut && <div className="font-semibold text-amber-700">Visit currently active</div>}
+                                              </div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      ) : <span className="text-slate-400">No location</span>}
                                     </td>
                                     <td className="px-6 py-3 whitespace-nowrap text-xs font-mono font-medium">
                                       {att.overtimeMinutes > 0 ? `${att.overtimeMinutes} mins` : 'None'}
@@ -2884,8 +3019,8 @@ export function WebPortal({
                   
                   <div className="flex justify-between items-center">
                     <div>
-                      <h2 className="text-xl font-bold text-slate-900">User Access Control &amp; Roles (RBAC)</h2>
-                      <p className="text-xs text-slate-500">Create roles, define permissions, onboard user accounts, and assign roles dynamically.</p>
+                      <h2 className="text-xl font-bold text-slate-900">User Management &amp; Access</h2>
+                      <p className="text-xs text-slate-500">Create mobile login accounts, link each employee, and assign roles and permissions.</p>
                     </div>
                   </div>
 
@@ -2894,6 +3029,23 @@ export function WebPortal({
                     {/* Users List & Role Assignment */}
                     <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm lg:col-span-2 space-y-4">
                       <h3 className="font-bold text-slate-800 text-xs uppercase tracking-wide font-mono">System Users</h3>
+
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                        <h4 className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-500">Role permission updates</h4>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          {roles.map(role => {
+                            const enabled = role.permissions.includes('manage_mobile_duty');
+                            return <label key={role.id} className="flex items-center justify-between rounded-lg border border-slate-200 bg-white p-2 text-[11px]">
+                              <span><strong>{role.name}</strong><span className="ml-1 text-slate-400">Assign Mobile Duty</span></span>
+                              <input type="checkbox" checked={enabled} disabled={role.id === 'role-employee' || role.id === 'role-kiosk'} onChange={async event => {
+                                const permissions = event.target.checked ? [...new Set([...role.permissions, 'manage_mobile_duty'])] : role.permissions.filter(permission => permission !== 'manage_mobile_duty');
+                                await onUpdateRole({ ...role, permissions });
+                              }} />
+                            </label>;
+                          })}
+                        </div>
+                        <p className="mt-2 text-[9px] text-slate-400">Employee and Kiosk roles cannot assign mobile duty.</p>
+                      </div>
                       
                       <div className="overflow-x-auto">
                         <table className="min-w-full divide-y divide-slate-200 text-left text-xs">
@@ -2919,16 +3071,7 @@ export function WebPortal({
                                     {linkedEmp ? `${linkedEmp.fullName} (${linkedEmp.employeeCode})` : 'Not Linked'}
                                   </td>
                                   <td className="px-4 py-3">
-                                    <select
-                                      aria-label={`Assigned Role for ${u.username}`}
-                                      value={u.roleId}
-                                      onChange={(e) => onUpdateUserRole(u.id, e.target.value)}
-                                      className="p-1 bg-white border border-slate-300 rounded text-xs text-slate-805"
-                                    >
-                                      {roles.map(r => (
-                                        <option key={r.id} value={r.id}>{r.name}</option>
-                                      ))}
-                                    </select>
+                                    {roles.find(role => role.id === u.roleId)?.name || 'Unknown role'}
                                   </td>
                                   <td className="px-4 py-3">
                                     <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${
@@ -2938,6 +3081,11 @@ export function WebPortal({
                                     </span>
                                   </td>
                                   <td className="px-4 py-3 text-right">
+                                    <button
+                                      type="button"
+                                      onClick={() => { setEditingUser({ ...u }); setUserEditError(''); }}
+                                      className="mr-3 text-xs font-semibold text-emerald-700 hover:text-emerald-900 underline"
+                                    >Edit</button>
                                     <button
                                       disabled={u.id === loggedInUser.id}
                                       onClick={async () => {
@@ -2972,10 +3120,19 @@ export function WebPortal({
                           const employeeId = form.elements.employeeId.value;
                           const password = form.elements.password.value;
                           
-                          if (!username || !email || !password) {
+                           if (!username || !email || !password) {
                             alert('Please enter username, email, and password.');
                             return;
-                          }
+                           }
+
+                           if (roleId === 'role-employee' && !employeeId) {
+                             alert('Link an employee before creating an Employee mobile account.');
+                             return;
+                           }
+                           if (employeeId && users.some(user => user.employeeId === employeeId)) {
+                             alert('This employee is already linked to another login account.');
+                             return;
+                           }
 
                           if (password.length < 12) {
                             alert('Password must be at least 12 characters.');
@@ -3027,7 +3184,7 @@ export function WebPortal({
                             </select>
                           </div>
                           <div>
-                            <label htmlFor="employeeId" className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Link Employee (Optional):</label>
+                            <label htmlFor="employeeId" className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Link Employee (Required for Mobile):</label>
                             <select id="employeeId" name="employeeId" className="w-full text-xs p-2 bg-white border border-slate-300 rounded focus:ring-1">
                               <option value="">-- No Link --</option>
                               {employees.map(e => (
@@ -3055,6 +3212,7 @@ export function WebPortal({
                           const selectedPerms: string[] = ['view_dashboard'];
                           if (form.elements.perm_emp.checked) selectedPerms.push('manage_employees');
                           if (form.elements.perm_att.checked) selectedPerms.push('manage_attendance');
+                          if (form.elements.perm_mobile_duty.checked) selectedPerms.push('manage_mobile_duty');
                           if (form.elements.perm_leave.checked) selectedPerms.push('manage_leaves');
                           if (form.elements.perm_payroll.checked) selectedPerms.push('manage_payroll');
                           if (form.elements.perm_settings.checked) selectedPerms.push('manage_settings');
@@ -3093,6 +3251,9 @@ export function WebPortal({
                                 <input type="checkbox" name="perm_att" /> <span>Manage Attendance</span>
                               </label>
                               <label className="flex items-center space-x-2 text-[11px] text-slate-650">
+                                <input type="checkbox" name="perm_mobile_duty" /> <span>Assign Mobile Duty</span>
+                              </label>
+                              <label className="flex items-center space-x-2 text-[11px] text-slate-650">
                                 <input type="checkbox" name="perm_leave" /> <span>Manage Leaves</span>
                               </label>
                               <label className="flex items-center space-x-2 text-[11px] text-slate-650">
@@ -3115,6 +3276,72 @@ export function WebPortal({
                     </div>
 
                   </div>
+
+                  {editingUser && (
+                    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/60 p-4" role="dialog" aria-modal="true" aria-labelledby="edit-user-title">
+                      <form
+                        onSubmit={async event => {
+                          event.preventDefault();
+                          setUserEditSaving(true);
+                          setUserEditError('');
+                          try {
+                            await onUpdateUser(editingUser);
+                            setEditingUser(null);
+                          } catch (error) {
+                            setUserEditError(error instanceof Error ? error.message : 'Unable to update this user.');
+                          } finally {
+                            setUserEditSaving(false);
+                          }
+                        }}
+                        className="w-full max-w-lg space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl"
+                      >
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <h3 id="edit-user-title" className="text-lg font-bold text-slate-900">Edit User Account</h3>
+                            <p className="mt-1 text-xs text-slate-500">Link this login to an employee for mobile attendance, leave, and payslips.</p>
+                          </div>
+                          <button type="button" onClick={() => setEditingUser(null)} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Close edit user"><X size={18} /></button>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                          <label className="text-xs font-semibold text-slate-700">Username
+                            <input value={editingUser.username} onChange={event => setEditingUser({ ...editingUser, username: event.target.value })} required className="mt-1 w-full rounded-lg border border-slate-300 p-2.5 text-sm" />
+                          </label>
+                          <label className="text-xs font-semibold text-slate-700">Authentication Email
+                            <input value={editingUser.email} readOnly className="mt-1 w-full cursor-not-allowed rounded-lg border border-slate-200 bg-slate-100 p-2.5 text-sm text-slate-500" />
+                            <span className="mt-1 block text-[10px] font-normal text-slate-400">Email changes require a separate Firebase Auth workflow.</span>
+                          </label>
+                          <label className="text-xs font-semibold text-slate-700">Role
+                            <select value={editingUser.roleId} onChange={event => setEditingUser({ ...editingUser, roleId: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 bg-white p-2.5 text-sm">
+                              {roles.map(role => <option key={role.id} value={role.id}>{role.name}</option>)}
+                            </select>
+                          </label>
+                          <label className="text-xs font-semibold text-slate-700">Account Status
+                            <select value={editingUser.status} onChange={event => setEditingUser({ ...editingUser, status: event.target.value as UserAccount['status'] })} className="mt-1 w-full rounded-lg border border-slate-300 bg-white p-2.5 text-sm">
+                              <option value="Active">Active</option>
+                              <option value="Inactive">Inactive</option>
+                            </select>
+                          </label>
+                        </div>
+
+                        <label className="block text-xs font-semibold text-slate-700">Linked Employee — required for mobile
+                          <select value={editingUser.employeeId || ''} onChange={event => setEditingUser({ ...editingUser, employeeId: event.target.value || undefined })} className="mt-1 w-full rounded-lg border border-slate-300 bg-white p-2.5 text-sm">
+                            <option value="">Not linked</option>
+                            {employees.map(employee => {
+                              const linkedElsewhere = users.some(user => user.id !== editingUser.id && user.employeeId === employee.id);
+                              return <option key={employee.id} value={employee.id} disabled={linkedElsewhere}>{employee.fullName} ({employee.employeeCode}){linkedElsewhere ? ' — already linked' : ''}</option>;
+                            })}
+                          </select>
+                        </label>
+
+                        {userEditError && <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">{userEditError}</div>}
+                        <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
+                          <button type="button" onClick={() => setEditingUser(null)} disabled={userEditSaving} className="rounded-lg border border-slate-300 px-4 py-2 text-xs font-bold text-slate-700">Cancel</button>
+                          <button type="submit" disabled={userEditSaving} className="rounded-lg bg-emerald-600 px-4 py-2 text-xs font-bold text-white disabled:opacity-50">{userEditSaving ? 'Saving…' : 'Save User'}</button>
+                        </div>
+                      </form>
+                    </div>
+                  )}
 
                 </motion.div>
               )}

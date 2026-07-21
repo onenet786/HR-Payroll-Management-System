@@ -1,10 +1,17 @@
 import { Employee } from '../types';
+import { isValidLivenessAttestation } from './faceLiveness';
+import { detectFaceGeometry } from './faceLandmarker';
 
 export interface FaceDescriptor {
-  version: 1 | 2;
+  version: 1 | 2 | 3;
   vector: number[];
   capturedAt: string;
   source?: string;
+  liveness?: {
+    method: 'active-turn-v1';
+    verifiedAt: string;
+    summary: { order: ['left' | 'right', 'left' | 'right']; durationMs: number; frameCounts: [number, number, number, number, number]; maxLeftYaw: number; maxRightYaw: number; maxCenterDrift: number; maxScaleChange: number };
+  };
 }
 
 export interface FaceMatch {
@@ -54,9 +61,10 @@ function drawNormalizedFaceFrame(
 export function getFaceDescriptors(employee: Employee): FaceDescriptor[] {
   const values = employee.faceDescriptors || [];
   return values.filter(item =>
-    item.version === 2 &&
+    item.version === 3 &&
     Array.isArray(item.vector) &&
-    item.vector.length === V2_LENGTH
+    item.vector.length === V2_LENGTH &&
+    isValidLivenessAttestation(item.liveness)
   );
 }
 
@@ -115,13 +123,9 @@ export function createFaceDescriptorFromVideo(video: HTMLVideoElement, source = 
 }
 
 export async function assessBrowserFaceDetection(video: HTMLVideoElement): Promise<FaceFrameQuality | null> {
-  const Detector = typeof window !== 'undefined' ? (window as any).FaceDetector : null;
-  if (!Detector || !video.videoWidth || !video.videoHeight) return null;
-
   try {
-    const detector = new Detector({ fastMode: true, maxDetectedFaces: 2 });
-    const faces = await detector.detect(video);
-    if (!Array.isArray(faces) || faces.length === 0) {
+    const faces = await detectFaceGeometry(video);
+    if (faces.length === 0) {
       return { ok: false, brightness: 0, contrast: 0, message: 'No face detected in camera. Put your face inside the oval and try again.' };
     }
 
@@ -129,25 +133,17 @@ export async function assessBrowserFaceDetection(video: HTMLVideoElement): Promi
       return { ok: false, brightness: 0, contrast: 0, message: 'More than one face detected. Keep only one employee inside the camera frame.' };
     }
 
-    const box = faces[0]?.boundingBox;
-    if (!box) {
-      return { ok: false, brightness: 0, contrast: 0, message: 'No full face detected. Move closer and keep your face inside the oval.' };
-    }
-
-    const faceCenterX = (Number(box.x || 0) + Number(box.width || 0) / 2) / video.videoWidth;
-    const faceCenterY = (Number(box.y || 0) + Number(box.height || 0) / 2) / video.videoHeight;
-    const faceWidth = Number(box.width || 0) / video.videoWidth;
-    const faceHeight = Number(box.height || 0) / video.videoHeight;
+    const { centerX: faceCenterX, centerY: faceCenterY, width: faceWidth, height: faceHeight } = faces[0];
     const centerIsInGuide =
-      faceCenterX >= 0.39 &&
-      faceCenterX <= 0.61 &&
-      faceCenterY >= 0.34 &&
-      faceCenterY <= 0.64;
+      faceCenterX >= 0.32 &&
+      faceCenterX <= 0.68 &&
+      faceCenterY >= 0.22 &&
+      faceCenterY <= 0.78;
     const sizeIsValid =
-      faceWidth >= 0.22 &&
-      faceWidth <= 0.58 &&
-      faceHeight >= 0.28 &&
-      faceHeight <= 0.74;
+      faceWidth >= 0.18 &&
+      faceWidth <= 0.64 &&
+      faceHeight >= 0.24 &&
+      faceHeight <= 0.82;
 
     if (!centerIsInGuide) {
       return { ok: false, brightness: 0, contrast: 0, message: 'Face is not inside the oval marker. Center your full face, then try again.' };
@@ -158,8 +154,8 @@ export async function assessBrowserFaceDetection(video: HTMLVideoElement): Promi
     }
 
     return { ok: true, brightness: 0, contrast: 0, message: 'Face is centered inside the oval.' };
-  } catch {
-    return null;
+  } catch (error) {
+    return { ok: false, brightness: 0, contrast: 0, message: error instanceof Error ? error.message : 'Face landmark model could not start.' };
   }
 }
 
@@ -287,7 +283,7 @@ export function assessFaceFrame(video: HTMLVideoElement): FaceFrameQuality {
 }
 
 export function compareFaceDescriptors(a: FaceDescriptor, b: FaceDescriptor): number {
-  if (a.version !== 2 || b.version !== 2 || a.vector.length !== b.vector.length) {
+  if (![2, 3].includes(a.version) || ![2, 3].includes(b.version) || a.vector.length !== b.vector.length) {
     return Number.POSITIVE_INFINITY;
   }
 

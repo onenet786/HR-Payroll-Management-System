@@ -643,13 +643,13 @@ export const DEFAULT_ROLES: Role[] = [
     id: 'role-admin',
     name: 'Super Admin',
     description: 'Full administrative control of the system, including access permissions and roles.',
-    permissions: ['view_dashboard', 'manage_employees', 'manage_attendance', 'manage_leaves', 'manage_payroll', 'manage_settings', 'manage_access']
+    permissions: ['view_dashboard', 'manage_employees', 'manage_attendance', 'manage_mobile_duty', 'manage_leaves', 'manage_payroll', 'manage_settings', 'manage_access']
   },
   {
     id: 'role-hr',
     name: 'HR Manager',
     description: 'Manages employee directories, leaves, and attendance records.',
-    permissions: ['view_dashboard', 'manage_employees', 'manage_attendance', 'manage_leaves']
+    permissions: ['view_dashboard', 'manage_employees', 'manage_attendance', 'manage_mobile_duty', 'manage_leaves']
   },
   {
     id: 'role-payroll',

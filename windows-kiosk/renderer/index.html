@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob: http: https:; connect-src 'self' ws://127.0.0.1:* ws://localhost:*; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data: blob: http: https:; connect-src 'self' ws://127.0.0.1:* ws://localhost:*; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'" />
   <title>Bin Ishaq Attendance Kiosk</title>
   <link rel="stylesheet" href="./styles.css" />
 </head>
@@ -115,7 +115,7 @@
         <div class="code-input-wrap" id="codeInputWrap">
           <label class="field-label">EMPLOYEE CODE / ID</label>
           <div class="code-field">
-            <input id="codeInput" type="text" placeholder="IND-KHI-001 or suffix 001"
+            <input id="codeInput" type="text" placeholder="Optional: enter code to narrow face search"
               autocomplete="off" spellcheck="false" autofocus />
             <button class="code-clear-btn" id="codeClearBtn" type="button" title="Clear">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -214,6 +214,13 @@
               <span class="auto-scan-dot"></span>
               <span id="camAutoLabel">Scanning for face…</span>
             </div>
+          </div>
+        </div>
+        <div class="liveness-rail" id="livenessRail" aria-live="assertive">
+          <div class="liveness-kicker">ACTIVE LIVENESS · PHOTO REPLAY PROTECTION</div>
+          <div class="liveness-action" id="livenessAction">Look at the camera, then start the live face check</div>
+          <div class="liveness-steps">
+            <span>Center</span><span>Turn</span><span>Center</span><span>Opposite</span><span>Verified</span>
           </div>
         </div>
         </div>
@@ -435,19 +442,19 @@
               </div>
             </label>
             <label class="toggle-row">
-              <input type="checkbox" id="stReqCodeCam" class="toggle-input" />
+              <input type="checkbox" id="stReqCodeCam" class="toggle-input" disabled />
               <div class="toggle-switch"></div>
               <div class="toggle-text">
-                <span>Require employee code for camera punch</span>
-                <small>Camera capture is saved as photo evidence linked to typed employee code</small>
+                <span>Employee code is optional for camera punch</span>
+                <small>The secured face gallery identifies the employee; a code can optionally narrow the search.</small>
               </div>
             </label>
             <label class="toggle-row">
               <input type="checkbox" id="stAutoCaptureCamera" class="toggle-input" />
               <div class="toggle-switch"></div>
               <div class="toggle-text">
-                <span>Auto-capture face check</span>
-                <small>Camera continuously scans and punches automatically — no button tap needed. Employee ID not required.</small>
+                <span>Automatically verify and punch by face</span>
+                <small>Starts the live face challenge automatically after one centered face remains stable. Identity matching and duplicate-punch protection remain required.</small>
               </div>
             </label>
             <label class="toggle-row">
@@ -493,6 +500,7 @@
     </div>
   </div>
 
+  <script type="module" src="./mediapipe-loader.mjs"></script>
   <script src="./app.js"></script>
 </body>
 </html>

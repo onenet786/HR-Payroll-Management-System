@@ -163,10 +163,23 @@ export interface Employee {
   ntn?: string;
   fingerprintTemplates?: string[]; // base64 FMD templates from Digital Persona URU 4500
   faceDescriptors?: {
-    version: 1 | 2;
+    version: 1 | 2 | 3;
     vector: number[];
     capturedAt: string;
     source?: string;
+    liveness?: {
+      method: 'active-turn-v1';
+      verifiedAt: string;
+      summary: {
+        order: ['left' | 'right', 'left' | 'right'];
+        durationMs: number;
+        frameCounts: [number, number, number, number, number];
+        maxLeftYaw: number;
+        maxRightYaw: number;
+        maxCenterDrift: number;
+        maxScaleChange: number;
+      };
+    };
   }[]; // compact camera descriptors for kiosk face recognition
 }
 
@@ -181,6 +194,58 @@ export interface AttendanceBreak {
   terminalLocation?: string;
 }
 
+export interface AttendanceLocation {
+  latitude: number;
+  longitude: number;
+  accuracyMeters: number;
+  capturedAt: string;
+  source: 'device-gps';
+  address?: string;
+}
+
+export type MobileAttendanceAction = 'workday-in' | 'workday-out' | 'visit-in' | 'visit-out';
+
+export interface MobilePunchDetails {
+  action: MobileAttendanceAction;
+  reasonCategory: string;
+  reasonNote: string;
+  clientName?: string;
+  verificationMethod?: 'Biometric' | 'Camera';
+}
+
+export type MobileDutyType = 'Work from home' | 'Out of station' | 'Client visit' | 'Market / field duty' | 'Official travel' | 'Direct reporting to worksite' | 'Emergency duty';
+
+export interface MobileDutyAuthorization {
+  id: string;
+  employeeId: string;
+  dutyType: MobileDutyType;
+  validFrom: string;
+  validTo: string;
+  instructions: string;
+  assignedLocation?: string;
+  allowFieldVisits: boolean;
+  status: 'Approved' | 'Cancelled';
+  assignedByUserId: string;
+  assignedByName: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AttendanceFieldVisit {
+  id: string;
+  clientName: string;
+  checkIn: string;
+  checkOut?: string;
+  checkInReasonCategory: string;
+  checkInReasonNote: string;
+  checkOutReasonCategory?: string;
+  checkOutReasonNote?: string;
+  checkInLocation: AttendanceLocation;
+  checkOutLocation?: AttendanceLocation;
+  method: 'Mobile GPS';
+  verificationMethod: 'Biometric' | 'Camera';
+}
+
 export interface AttendanceLog {
   id: string;
   employeeId: string;
@@ -193,11 +258,22 @@ export interface AttendanceLog {
   employeeBranchId?: string;
   terminalBranchId?: string;
   crossBranch?: boolean;
-  method: 'Biometric' | 'Camera' | 'Mobile GPS' | 'RFID' | 'Manual' | 'Web Punch';
+  method: 'Biometric' | 'Camera' | 'Mobile GPS' | 'Mobile Kiosk' | 'RFID' | 'Manual' | 'Web Punch';
   status: 'Present' | 'Late' | 'Half Day' | 'Absent' | 'On Leave' | 'Holiday';
   overtimeMinutes: number;
   latitude?: number;
   longitude?: number;
+  locationAccuracyMeters?: number;
+  locationCapturedAt?: string;
+  locationSource?: 'device-gps';
+  punchInLocation?: AttendanceLocation;
+  punchOutLocation?: AttendanceLocation;
+  punchInReasonCategory?: string;
+  punchInReasonNote?: string;
+  punchOutReasonCategory?: string;
+  punchOutReasonNote?: string;
+  fieldVisits?: AttendanceFieldVisit[];
+  mobileDutyAuthorizationId?: string;
   address?: string;
   regularizationRequested?: boolean;
   regularizationReason?: string;
@@ -364,7 +440,7 @@ export interface Role {
   id: string;
   name: string;
   description: string;
-  permissions: string[]; // e.g. ['view_dashboard', 'manage_employees', 'manage_attendance', 'manage_leaves', 'manage_payroll', 'manage_settings', 'manage_access']
+  permissions: string[]; // includes manage_mobile_duty for mobile attendance authorization
 }
 
 export interface UserAccount {
