@@ -497,6 +497,8 @@ export interface SalaryRevision {
   approvedBy: string;
   approvedOn: string;
   type: 'Annual Increment' | 'Promotion' | 'Adjustment' | 'Market Correction';
+  status?: 'Draft' | 'Approved';
+  sourcePerformanceReviewId?: string;
 }
 
 // ─── Performance Appraisal ────────────────────────────────────────────────────
@@ -521,9 +523,17 @@ export interface PerformanceReview {
   strengths: string;
   areasOfImprovement: string;
   managerComments: string;
-  status: 'Draft' | 'Submitted' | 'Reviewed' | 'Acknowledged';
+  status: 'Draft' | 'Submitted' | 'Reviewed' | 'Acknowledged' | 'Approved' | 'Rejected';
   incrementRecommended: boolean;
   incrementPercent?: number;
+  promotionRecommended?: boolean;
+  trainingRecommended?: boolean;
+  improvementPlanRequired?: boolean;
+  developmentPlan?: string;
+  hrDecisionComments?: string;
+  approvedBy?: string;
+  approvedOn?: string;
+  salaryRevisionId?: string;
 }
 
 // ─── Asset Management ─────────────────────────────────────────────────────────

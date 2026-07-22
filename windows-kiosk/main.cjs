@@ -195,9 +195,6 @@ if (Object.values(firebaseConfig).some(value => !value)) {
 
 let firebaseSdkPromise = null;
 
-const seedBranches = { b1: 'Karachi HQ Office', b2: 'Lahore Distribution Hub' };
-const seedDepartments = { d1: 'Information Technology', d2: 'Human Resources', d3: 'Warehouse & Logistics', d4: 'Finance & Accounts' };
-const seedDesignations = { ds1: 'Senior Developer', ds2: 'HR Manager', ds3: 'Logistics Coordinator', ds4: 'Warehouse Supervisor', ds5: 'Warehouse Staff' };
 const checkoutReasons = [
   'End of Shift',
   'Lunch Break',
@@ -708,19 +705,19 @@ function nowTime() { return new Date().toTimeString().slice(0, 8); }
 function getDepartmentName(employee) {
   const store = readStore();
   const dept = (store.departments || []).find(item => item.id === employee.departmentId);
-  return dept?.name || dept?.departmentName || seedDepartments[employee.departmentId] || employee.departmentId || '';
+  return dept?.name || dept?.departmentName || employee.departmentId || '';
 }
 
 function getDesignationName(employee) {
   const store = readStore();
   const desig = (store.designations || []).find(item => item.id === employee.designationId);
-  return desig?.name || desig?.designationName || seedDesignations[employee.designationId] || employee.designationId || '';
+  return desig?.name || desig?.designationName || employee.designationId || '';
 }
 
 function getBranchName(employee) {
   const store = readStore();
   const branch = (store.branches || []).find(item => item.id === employee.branchId);
-  return branch?.name || branch?.branchName || seedBranches[employee.branchId] || employee.branchId || '';
+  return branch?.name || branch?.branchName || employee.branchId || '';
 }
 
 function kioskEmployee(employee) {

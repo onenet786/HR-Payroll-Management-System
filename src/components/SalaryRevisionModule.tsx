@@ -52,7 +52,8 @@ export function SalaryRevisionModule({ salaryRevisions, employees, currentUserAc
       reason: form.reason.trim(),
       approvedBy: currentUserAccount.username,
       approvedOn: new Date().toISOString().split('T')[0],
-      type: form.type
+      type: form.type,
+      status: 'Approved'
     };
     onAddSalaryRevision(revision);
     setShowForm(false);
@@ -65,11 +66,12 @@ export function SalaryRevisionModule({ salaryRevisions, employees, currentUserAc
     .filter(r => filterEmpId === 'All' || r.employeeId === filterEmpId)
     .sort((a, b) => b.effectiveDate.localeCompare(a.effectiveDate));
 
-  const totalRevisionsThisYear = salaryRevisions.filter(r => r.effectiveDate.startsWith('2026')).length;
-  const avgIncrement = salaryRevisions.length > 0
-    ? salaryRevisions.reduce((sum, r) => sum + r.incrementPercentage, 0) / salaryRevisions.length
+  const approvedRevisions = salaryRevisions.filter(r => r.status !== 'Draft');
+  const totalRevisionsThisYear = approvedRevisions.filter(r => r.effectiveDate.startsWith('2026')).length;
+  const avgIncrement = approvedRevisions.length > 0
+    ? approvedRevisions.reduce((sum, r) => sum + r.incrementPercentage, 0) / approvedRevisions.length
     : 0;
-  const highestIncrement = salaryRevisions.reduce((max, r) => r.incrementPercentage > max ? r.incrementPercentage : max, 0);
+  const highestIncrement = approvedRevisions.reduce((max, r) => r.incrementPercentage > max ? r.incrementPercentage : max, 0);
 
   return (
     <div className="space-y-5">
@@ -121,7 +123,7 @@ export function SalaryRevisionModule({ salaryRevisions, employees, currentUserAc
             <tbody className="divide-y divide-slate-700/30">
               {employees.filter(e => e.status === 'Active').map(emp => {
                 const lastRevision = salaryRevisions
-                  .filter(r => r.employeeId === emp.id)
+                  .filter(r => r.employeeId === emp.id && r.status !== 'Draft')
                   .sort((a, b) => b.effectiveDate.localeCompare(a.effectiveDate))[0];
                 return (
                   <tr key={emp.id} className="hover:bg-slate-700/20 transition">
@@ -180,6 +182,7 @@ export function SalaryRevisionModule({ salaryRevisions, employees, currentUserAc
                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded-lg border ${revisionTypeColors[revision.type]}`}>
                         {revision.type}
                       </span>
+                      {revision.status === 'Draft' && <span className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-300">DRAFT — NOT APPLIED</span>}
                     </div>
                     <p className="text-xs text-slate-400 mt-0.5">{revision.reason}</p>
                   </div>
@@ -204,6 +207,10 @@ export function SalaryRevisionModule({ salaryRevisions, employees, currentUserAc
                   <span className="text-xs text-slate-500 ml-2">(+PKR {revision.incrementAmount.toLocaleString()})</span>
                 </div>
               </div>
+              {revision.status === 'Draft' && <div className="mt-3 flex items-center justify-between rounded-xl border border-amber-500/30 bg-amber-500/10 p-3">
+                <p className="text-xs text-amber-200">Performance recommendation only. Approving will update the employee salary and future payroll.</p>
+                <button type="button" onClick={() => onAddSalaryRevision({ ...revision, status: 'Approved', approvedBy: currentUserAccount.username, approvedOn: new Date().toISOString().split('T')[0] })} className="ml-4 shrink-0 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white">Approve &amp; Apply</button>
+              </div>}
             </div>
           ))
         )}

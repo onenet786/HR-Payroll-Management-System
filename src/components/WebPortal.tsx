@@ -3414,6 +3414,7 @@ export function WebPortal({
                     canManage={userPermissions.includes('manage_employees')}
                     onAddReview={onAddPerformanceReview}
                     onUpdateReview={onUpdatePerformanceReview}
+                    onCreateSalaryRevision={onAddSalaryRevision}
                   />
                 </motion.div>
               )}

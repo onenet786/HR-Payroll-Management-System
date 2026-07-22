@@ -383,7 +383,7 @@ export const DEFAULT_ATTENDANCES: AttendanceLog[] = [
 ];
 
 // Helper to calculate realistic Pakistan income tax (FBR annualised salaried individuals)
-export function calculateAnnualTax(annualTaxableIncome: number, slabs: TaxSlab[] = DEFAULT_TAX_SLABS): number {
+export function calculateAnnualTax(annualTaxableIncome: number, slabs: TaxSlab[]): number {
   if (annualTaxableIncome <= 600000) return 0;
   
   // Find matching slab
@@ -409,11 +409,11 @@ export function computePayslipDetails(
   year: number,
   attendances: AttendanceLog[],
   leaves: LeaveRequest[],
-  statConfigs: StatutoryConfig = DEFAULT_STATUTORY_CONFIG,
-  taxSlabs: TaxSlab[] = DEFAULT_TAX_SLABS,
-  departments: Department[] = DEFAULT_DEPARTMENTS,
-  designations: Designation[] = DEFAULT_DESIGNATIONS,
-  branches: Branch[] = DEFAULT_BRANCHES,
+  statConfigs: StatutoryConfig,
+  taxSlabs: TaxSlab[],
+  departments: Department[],
+  designations: Designation[],
+  branches: Branch[],
   loanAdvances: LoanAdvance[] = [],
   wageTypes: WageType[] = []
 ): Payslip {

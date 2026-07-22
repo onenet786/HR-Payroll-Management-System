@@ -5,7 +5,7 @@
 
 import React, { useState } from 'react';
 import { Plus, ChevronDown, ChevronUp } from 'lucide-react';
-import { PerformanceReview, KpiScore, Employee } from '../types';
+import { PerformanceReview, KpiScore, Employee, SalaryRevision } from '../types';
 import { empAvatarUrl } from '../utils/avatar';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -16,6 +16,7 @@ interface PerformanceModuleProps {
   canManage: boolean;
   onAddReview: (review: PerformanceReview) => void;
   onUpdateReview: (review: PerformanceReview) => void;
+  onCreateSalaryRevision: (revision: SalaryRevision) => void;
 }
 
 const ratingLabels: Record<number, string> = { 1: 'Poor', 2: 'Below Average', 3: 'Average', 4: 'Good', 5: 'Excellent' };
@@ -40,7 +41,7 @@ function StarRating({ value, onChange, readOnly }: { value: number; onChange?: (
   );
 }
 
-export function PerformanceModule({ reviews, employees, currentUserAccount, canManage, onAddReview }: PerformanceModuleProps) {
+export function PerformanceModule({ reviews, employees, currentUserAccount, canManage, onAddReview, onUpdateReview, onCreateSalaryRevision }: PerformanceModuleProps) {
   const [showForm, setShowForm] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [filterEmpId, setFilterEmpId] = useState('All');
@@ -55,7 +56,11 @@ export function PerformanceModule({ reviews, employees, currentUserAccount, canM
     areasOfImprovement: '',
     managerComments: '',
     incrementRecommended: false,
-    incrementPercent: 0
+    incrementPercent: 0,
+    promotionRecommended: false,
+    trainingRecommended: false,
+    improvementPlanRequired: false,
+    developmentPlan: ''
   });
 
   const getEmpName = (id: string) => employees.find(e => e.id === id)?.fullName || 'Unknown';
@@ -81,9 +86,13 @@ export function PerformanceModule({ reviews, employees, currentUserAccount, canM
       strengths: form.strengths,
       areasOfImprovement: form.areasOfImprovement,
       managerComments: form.managerComments,
-      status: 'Reviewed',
+      status: 'Submitted',
       incrementRecommended: form.incrementRecommended,
-      incrementPercent: form.incrementRecommended ? form.incrementPercent : undefined
+      incrementPercent: form.incrementRecommended ? form.incrementPercent : undefined,
+      promotionRecommended: form.promotionRecommended,
+      trainingRecommended: form.trainingRecommended,
+      improvementPlanRequired: form.improvementPlanRequired,
+      developmentPlan: form.developmentPlan.trim()
     };
     onAddReview(review);
     setShowForm(false);
@@ -105,13 +114,40 @@ export function PerformanceModule({ reviews, employees, currentUserAccount, canM
     setForm(p => ({ ...p, kpis: p.kpis.filter((_, i) => i !== idx) }));
   };
 
-  const filtered = reviews.filter(r => filterEmpId === 'All' || r.employeeId === filterEmpId)
+  const visibleReviews = canManage ? reviews : reviews.filter(r => r.employeeId === currentUserAccount.employeeId && ['Approved', 'Acknowledged'].includes(r.status));
+  const filtered = visibleReviews.filter(r => filterEmpId === 'All' || r.employeeId === filterEmpId)
     .sort((a, b) => b.reviewDate.localeCompare(a.reviewDate));
 
   const avgRating = reviews.length > 0
     ? reviews.reduce((s, r) => s + r.overallManagerRating, 0) / reviews.length : 0;
   const excellentCount = reviews.filter(r => r.overallManagerRating >= 4.5).length;
-  const pendingCount = reviews.filter(r => r.status === 'Submitted').length;
+  const pendingCount = reviews.filter(r => r.status === 'Submitted' || r.status === 'Reviewed').length;
+
+  const decideReview = (review: PerformanceReview, approved: boolean) => {
+    const employee = employees.find(item => item.id === review.employeeId);
+    const approvedOn = new Date().toISOString().split('T')[0];
+    let salaryRevisionId = review.salaryRevisionId;
+    if (approved && review.incrementRecommended && review.incrementPercent && employee && !salaryRevisionId) {
+      salaryRevisionId = `rev-perf-${review.id}`;
+      const newSalary = Math.round(employee.basicSalary * (1 + review.incrementPercent / 100));
+      onCreateSalaryRevision({
+        id: salaryRevisionId,
+        employeeId: employee.id,
+        previousSalary: employee.basicSalary,
+        newSalary,
+        incrementAmount: newSalary - employee.basicSalary,
+        incrementPercentage: review.incrementPercent,
+        effectiveDate: approvedOn,
+        reason: `Draft from approved performance review ${review.period}. Payroll/HR approval required.`,
+        approvedBy: '',
+        approvedOn: '',
+        type: 'Annual Increment',
+        status: 'Draft',
+        sourcePerformanceReviewId: review.id,
+      });
+    }
+    onUpdateReview({ ...review, status: approved ? 'Approved' : 'Rejected', approvedBy: currentUserAccount.username, approvedOn, salaryRevisionId });
+  };
 
   return (
     <div className="space-y-5">
@@ -159,6 +195,7 @@ export function PerformanceModule({ reviews, employees, currentUserAccount, canM
         ) : filtered.map(review => {
           const isExpanded = expandedId === review.id;
           const emp = employees.find(e => e.id === review.employeeId);
+          const awaitingHrDecision = review.status === 'Submitted' || review.status === 'Reviewed';
           return (
             <div key={review.id} className="bg-slate-800/40 border border-slate-700/50 rounded-2xl overflow-hidden">
               <div className="flex items-center justify-between p-4 cursor-pointer hover:bg-slate-700/20 transition"
@@ -170,9 +207,9 @@ export function PerformanceModule({ reviews, employees, currentUserAccount, canM
                       <span className="text-sm font-bold text-white">{getEmpName(review.employeeId)}</span>
                       <span className="text-[10px] font-bold px-2 py-0.5 rounded-lg bg-blue-500/20 text-blue-300 border border-blue-500/30">{review.period}</span>
                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded-lg border ${
-                        review.status === 'Acknowledged' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' :
-                        review.status === 'Reviewed' ? 'bg-blue-500/20 text-blue-300 border-blue-500/30' :
-                        'bg-amber-500/20 text-amber-300 border-amber-500/30'}`}>{review.status}</span>
+                        review.status === 'Approved' || review.status === 'Acknowledged' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' :
+                        review.status === 'Rejected' ? 'bg-rose-500/20 text-rose-300 border-rose-500/30' :
+                        'bg-amber-500/20 text-amber-300 border-amber-500/30'}`}>{awaitingHrDecision ? 'Pending HR Approval' : review.status}</span>
                     </div>
                     <p className="text-xs text-slate-400 mt-0.5">Reviewed by {review.reviewerId} on {review.reviewDate}</p>
                   </div>
@@ -193,6 +230,34 @@ export function PerformanceModule({ reviews, employees, currentUserAccount, canM
                   {isExpanded ? <ChevronUp size={16} className="text-slate-400" /> : <ChevronDown size={16} className="text-slate-400" />}
                 </div>
               </div>
+
+              {canManage && awaitingHrDecision && <div className="flex items-center gap-3 border-t border-amber-500/20 bg-amber-500/10 px-4 py-3">
+                <div className="mr-auto">
+                  <p className="text-xs font-bold text-amber-200">HR decision required</p>
+                  <p className="text-[10px] text-amber-200/70">Review the rating and recommendations, then approve or reject the outcomes.</p>
+                </div>
+                <button type="button" onClick={() => decideReview(review, false)} className="rounded-xl border border-rose-500/40 bg-rose-700 px-4 py-2 text-xs font-bold text-white">Reject Outcomes</button>
+                <button type="button" onClick={() => decideReview(review, true)} className="rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white">Approve Outcomes</button>
+              </div>}
+              {review.status === 'Approved' && <div className="border-t border-emerald-500/20 bg-emerald-500/10 px-4 py-3">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-bold text-emerald-200">Approved Outcome</p>
+                    <p className="mt-0.5 text-[10px] text-emerald-200/70">Approved by {review.approvedBy || 'HR'}{review.approvedOn ? ` on ${review.approvedOn}` : ''}</p>
+                  </div>
+                  <div className="flex flex-wrap justify-end gap-1.5 text-[10px] font-bold">
+                    {review.incrementRecommended && <span className="rounded-lg border border-emerald-500/30 bg-emerald-950/50 px-2 py-1 text-emerald-200">Increment {review.incrementPercent || 0}%</span>}
+                    {review.promotionRecommended && <span className="rounded-lg border border-blue-500/30 bg-blue-950/50 px-2 py-1 text-blue-200">Promotion recommended</span>}
+                    {review.trainingRecommended && <span className="rounded-lg border border-violet-500/30 bg-violet-950/50 px-2 py-1 text-violet-200">Training required</span>}
+                    {review.improvementPlanRequired && <span className="rounded-lg border border-amber-500/30 bg-amber-950/50 px-2 py-1 text-amber-200">Improvement plan required</span>}
+                  </div>
+                </div>
+                {!review.incrementRecommended && !review.promotionRecommended && !review.trainingRecommended && !review.improvementPlanRequired
+                  ? <p className="mt-2 rounded-lg border border-slate-700/60 bg-slate-900/40 p-2 text-[10px] text-slate-300">No salary, promotion, training, or improvement-plan action was recommended. Approval finalizes the rating and appraisal record only.</p>
+                  : review.incrementRecommended
+                    ? <p className="mt-2 text-[10px] text-emerald-200">Salary impact: {review.salaryRevisionId ? 'a draft revision was created in Salary Revisions and still requires Approve & Apply.' : 'no draft revision is linked to this legacy approved review.'}</p>
+                    : <p className="mt-2 text-[10px] text-emerald-200">The approved non-payroll recommendations are recorded above for HR follow-up.</p>}
+              </div>}
 
               <AnimatePresence>
                 {isExpanded && (
@@ -263,6 +328,13 @@ export function PerformanceModule({ reviews, employees, currentUserAccount, canM
                           <strong>Increment Recommended:</strong> +{review.incrementPercent}% salary increase recommended for next revision cycle.
                         </div>
                       )}
+                      <div className="grid grid-cols-3 gap-2 text-xs">
+                        <div className={`rounded-xl border p-3 ${review.promotionRecommended ? 'border-blue-500/30 bg-blue-500/10 text-blue-300' : 'border-slate-700 text-slate-500'}`}><strong>Promotion:</strong> {review.promotionRecommended ? 'Recommended' : 'Not recommended'}</div>
+                        <div className={`rounded-xl border p-3 ${review.trainingRecommended ? 'border-violet-500/30 bg-violet-500/10 text-violet-300' : 'border-slate-700 text-slate-500'}`}><strong>Training:</strong> {review.trainingRecommended ? 'Required' : 'Not required'}</div>
+                        <div className={`rounded-xl border p-3 ${review.improvementPlanRequired ? 'border-amber-500/30 bg-amber-500/10 text-amber-300' : 'border-slate-700 text-slate-500'}`}><strong>Improvement plan:</strong> {review.improvementPlanRequired ? 'Required' : 'Not required'}</div>
+                      </div>
+                      {review.developmentPlan && <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-3 text-xs text-slate-300"><strong>Development / action plan:</strong> {review.developmentPlan}</div>}
+                      {review.salaryRevisionId && <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-300">Draft salary revision created. It will not affect payroll until separately approved.</div>}
                     </div>
                   </motion.div>
                 )}
@@ -379,6 +451,13 @@ export function PerformanceModule({ reviews, employees, currentUserAccount, canM
                     <span className="text-slate-400 text-sm">%</span>
                   </div>
                 )}
+              </div>
+
+              <div className="grid grid-cols-3 gap-3 rounded-xl bg-slate-800/60 p-3 text-xs text-slate-200">
+                <label className="flex items-center gap-2"><input type="checkbox" checked={form.promotionRecommended} onChange={e => setForm(p => ({ ...p, promotionRecommended: e.target.checked }))} /> Promotion recommendation</label>
+                <label className="flex items-center gap-2"><input type="checkbox" checked={form.trainingRecommended} onChange={e => setForm(p => ({ ...p, trainingRecommended: e.target.checked }))} /> Training required</label>
+                <label className="flex items-center gap-2"><input type="checkbox" checked={form.improvementPlanRequired} onChange={e => setForm(p => ({ ...p, improvementPlanRequired: e.target.checked }))} /> Improvement plan</label>
+                <textarea value={form.developmentPlan} onChange={e => setForm(p => ({ ...p, developmentPlan: e.target.value }))} rows={2} placeholder="Development, training, promotion, or improvement actions..." className="col-span-3 rounded-xl border border-slate-700 bg-slate-900 p-2 text-white" />
               </div>
 
               <div className="flex gap-3">

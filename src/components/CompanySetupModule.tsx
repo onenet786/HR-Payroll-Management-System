@@ -43,21 +43,11 @@ export function CompanySetupModule({ companies, branches, departments, designati
     fiscalYearStartMonth: existing?.fiscalYearStartMonth || 7, payrollFrequency: existing?.payrollFrequency || 'Monthly', defaultCurrency: 'PKR', timezone: 'Asia/Karachi', status: 'Active'
   }));
   const [branch, setBranch] = useState<Branch>(() => ({ id: existingBranch?.id || uid('branch'), companyId: existing?.id || '', code: existingBranch?.code || 'HQ', name: existingBranch?.name || 'Head Office', city: existingBranch?.city || '', province: existingBranch?.province || 'Punjab', address: existingBranch?.address || '' }));
-  const [deptRows, setDeptRows] = useState<Department[]>(() => departments.length ? departments : [
-    { id: uid('dept'), branchId: existingBranch?.id || '', name: 'Human Resources', code: 'HR' },
-    { id: uid('dept'), branchId: existingBranch?.id || '', name: 'Finance & Payroll', code: 'FIN' }
-  ]);
+  const [deptRows, setDeptRows] = useState<Department[]>(() => departments);
   const [desgRows, setDesgRows] = useState<Designation[]>(() => designations.length ? designations : []);
   const [config, setConfig] = useState({ ...statutoryConfig });
   const [registrations, setRegistrations] = useState({ eobi: Boolean(existing?.eobiRegistration || existing?.eobiRegistrationNumber), social: Boolean(existing?.socialSecurityRegistration) });
   const [registrationStatus, setRegistrationStatus] = useState<{eobi:'Registered'|'Pending'|'Not applicable';social:'Registered'|'Pending'|'Not applicable'}>({ eobi: existing?.eobiRegistration || existing?.eobiRegistrationNumber ? 'Registered' : 'Pending', social: existing?.socialSecurityRegistration ? 'Registered' : 'Pending' });
-
-  React.useEffect(() => {
-    if (!designations.length && deptRows.length >= 2 && !desgRows.length) setDesgRows([
-      { id: uid('desg'), departmentId: deptRows[0].id, title: 'HR Manager', grade: 'M1' },
-      { id: uid('desg'), departmentId: deptRows[1].id, title: 'Payroll Officer', grade: 'O1' }
-    ]);
-  }, []); // initialize only; user edits must be preserved
 
   const hydrateSavedSetup = React.useCallback((force = false) => {
     const savedCompany = companies[0];

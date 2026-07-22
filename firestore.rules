@@ -110,6 +110,16 @@ service cloud.firestore {
       allow read, write: if hasPermission('manage_payroll');
     }
 
+    match /performanceReviews/{documentId} {
+      allow read: if ownsExistingEmployeeRecord() || hasPermission('manage_employees');
+      allow create, update, delete: if hasPermission('manage_employees');
+    }
+
+    match /salaryRevisions/{documentId} {
+      allow read: if ownsExistingEmployeeRecord() || hasPermission('manage_payroll') || hasPermission('manage_employees');
+      allow create, update, delete: if hasPermission('manage_payroll') || hasPermission('manage_employees');
+    }
+
     match /loanAdvances/{documentId} {
       allow read: if ownsExistingEmployeeRecord() || hasPermission('manage_payroll') || hasPermission('manage_employees');
       allow create: if ownsNewEmployeeRecord();

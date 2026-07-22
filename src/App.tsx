@@ -426,8 +426,8 @@ export default function App() {
     registerCollectionListener('roles', setRoles, 'hr_roles', () => setRolesLoaded(true));
     registerCollectionListener('holidays', setHolidays, 'hr_holidays');
     registerCollectionListener('loanAdvances', setLoanAdvances, 'hr_loans');
-    registerCollectionListener('salaryRevisions', setSalaryRevisions, 'hr_salary_revisions');
-    registerCollectionListener('performanceReviews', setPerformanceReviews, 'hr_perf_reviews');
+    registerCollectionListener('salaryRevisions', setSalaryRevisions, 'hr_salary_revisions', undefined, true);
+    registerCollectionListener('performanceReviews', setPerformanceReviews, 'hr_perf_reviews', undefined, true);
     registerCollectionListener('companyAssets', setCompanyAssets, 'hr_assets');
     registerCollectionListener('jobPostings', setJobPostings, 'hr_job_postings');
     registerCollectionListener('jobApplications', setJobApplications, 'hr_job_apps');
@@ -1360,14 +1360,17 @@ export default function App() {
 
   // ─── Salary Revision Handlers ─────────────────────────────────────────────
   const handleAddSalaryRevision = async (revision: SalaryRevision) => {
-    // Apply the new salary to the employee record
+    // Draft recommendations never change payroll. Salary changes occur only
+    // after an authorized user explicitly approves the revision.
     const employee = employees.find(e => e.id === revision.employeeId);
-    if (employee) {
+    if (employee && revision.status !== 'Draft') {
       await handleUpdateEmployee({ ...employee, basicSalary: revision.newSalary });
     }
 
     setSalaryRevisions(prev => {
-      const updated = [...prev, revision];
+      const updated = prev.some(item => item.id === revision.id)
+        ? prev.map(item => item.id === revision.id ? revision : item)
+        : [...prev, revision];
       privacyStorage.setItem('hr_salary_revisions', JSON.stringify(updated));
       return updated;
     });
