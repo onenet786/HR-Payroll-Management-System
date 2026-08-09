@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { collection, doc, getDocs, setDoc, writeBatch } from 'firebase/firestore';
+import { collection, doc, getDocs, setDoc, writeBatch } from '../data/postgresStore';
 import { AlertTriangle, CheckCircle, Database, Download, RefreshCw, RotateCcw, Trash2, Upload } from 'lucide-react';
 import { db } from '../firebase';
+
 
 type CollectionKey =
   | 'companies'
@@ -174,8 +175,9 @@ async function deleteCollection(collectionName: CollectionKey): Promise<number> 
   let deleted = 0;
 
   for (const document of snapshot.docs) {
-    batch.delete(document.ref);
+    batch.delete(doc(db, collectionName, document.id));
     batchCount += 1;
+
     deleted += 1;
 
     if (batchCount === 450) {

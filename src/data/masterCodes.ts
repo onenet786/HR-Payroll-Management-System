@@ -19,7 +19,7 @@ const recordToken = (record?: { code?: string; name?: string }, max = 8) =>
 export const companyCodeToken = (company?: Pick<Company, 'code' | 'name'>) =>
   compactToken(company?.code, 8) || readableToken(company?.name, 6);
 
-export const normalizeManualMasterCode = (value: string) => value.trim().toUpperCase();
+export const normalizeManualMasterCode = (value = '') => (value || '').trim().toUpperCase();
 
 export const isSafeMasterCode = (value: string) => /^[A-Z0-9]+(?:-[A-Z0-9]+)*$/.test(value);
 

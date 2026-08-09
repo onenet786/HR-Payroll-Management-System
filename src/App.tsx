@@ -12,11 +12,13 @@ import {
   PerformanceReview, CompanyAsset, JobPosting, JobApplication, GratuitySettlement, AppNotification, Company, CompanySetupPayload, Zone, UcTown, WageType, NewUserAccount, MobileDutyAuthorization
 } from './types';
 import { DeviceEmulator } from './components/DeviceEmulator';
-import { auth, db, isFirebaseConfigured, provisionFirebaseUser } from './firebase';
-import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import { db } from './firebase';
+
+
 import {
-  collection, deleteDoc, deleteField, doc, getDoc, setDoc, updateDoc, onSnapshot, writeBatch, query, where
-} from 'firebase/firestore';
+  collection, deleteDoc, deleteField, doc, getDoc, setDoc, updateDoc, onSnapshot, writeBatch, query, where, setAuthToken
+} from './data/postgresStore';
+
 
 // HR and payroll records must never be persisted in browser-accessible storage.
 // Remove legacy cache entries and keep application state in memory/Firestore only.
@@ -213,72 +215,67 @@ export default function App() {
   const [loggedInUser, setLoggedInUser] = useState<UserAccount | null>(() => getInitialValue('hr_logged_in_user', null));
   const [roles, setRoles] = useState<Role[]>(() => getInitialValue('hr_roles', []));
   const [users, setUsers] = useState<UserAccount[]>(() => getInitialValue('hr_users', []));
-  const [rolesLoaded, setRolesLoaded] = useState(() => !isFirebaseConfigured());
-  const [usersLoaded, setUsersLoaded] = useState(() => !isFirebaseConfigured());
-  const [authReady, setAuthReady] = useState(false);
+  const [rolesLoaded, setRolesLoaded] = useState(true);
+  const [usersLoaded, setUsersLoaded] = useState(true);
+  const [authReady, setAuthReady] = useState(true);
   const [authMessage, setAuthMessage] = useState('');
-  const [firestoreSyncStatus, setFirestoreSyncStatus] = useState<FirestoreSyncStatus>(() =>
-    isFirebaseConfigured()
-      ? { state: 'syncing', message: 'Loading server data...' }
-      : { state: 'local', message: 'Firebase is not configured.' }
-  );
+  const [firestoreSyncStatus, setFirestoreSyncStatus] = useState<FirestoreSyncStatus>({
+    state: 'synced',
+    message: 'PostgreSQL Backend Connected.'
+  });
   const [currentUserAccount, setCurrentUserAccount] = useState<UserAccount>(() => {
     const storedCurrent = getInitialValue<UserAccount | null>('hr_current_user', null);
     const storedLoggedIn = getInitialValue<UserAccount | null>('hr_logged_in_user', null);
     return storedCurrent || storedLoggedIn || emptyUserAccount;
   });
 
-  useEffect(() => onAuthStateChanged(auth, async firebaseUser => {
-    if (!firebaseUser) {
-      setLoggedInUser(null);
-      setCurrentUserAccount(emptyUserAccount);
-      setAuthReady(true);
-      return;
+  useEffect(() => {
+    const savedUser = getInitialValue<UserAccount | null>('hr_logged_in_user', null);
+    if (savedUser && savedUser.id) {
+      setLoggedInUser(savedUser);
+      setCurrentUserAccount(savedUser);
     }
-
-    try {
-      const profileSnapshot = await getDoc(doc(db, 'users', firebaseUser.uid));
-      if (!profileSnapshot.exists()) {
-        setAuthMessage('This Firebase account has no HR profile. Ask an administrator to provision it.');
-        await signOut(auth);
-        return;
-      }
-
-      const profile = publicUser({
-        ...profileSnapshot.data(),
-        id: firebaseUser.uid,
-        email: firebaseUser.email || profileSnapshot.data().email || '',
-      } as UserAccount);
-      if (profile.status !== 'Active') {
-        setAuthMessage('This account is suspended. Contact your administrator.');
-        await signOut(auth);
-        return;
-      }
-
-      setAuthMessage('');
-      setLoggedInUser(profile);
-      setCurrentUserAccount(profile);
-    } catch {
-      setAuthMessage('Unable to load the HR account profile. Contact your administrator.');
-      await signOut(auth).catch(() => undefined);
-    } finally {
-      setAuthReady(true);
-    }
-  }), []);
+    setAuthReady(true);
+  }, []);
 
   const handleLogin = async (email: string, password: string) => {
     setAuthMessage('');
+    const apiBase = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+
     try {
-      await signInWithEmailAndPassword(auth, email.trim(), password);
-    } catch (error) {
-      const code = authErrorCode(error);
-      console.warn(`Firebase sign-in rejected (${code || 'unknown-error'}).`);
-      throw new Error(safeAuthErrorMessage(error));
+      const response = await fetch(`${apiBase}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), password }),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setAuthToken(data.token);
+        const userProfile: UserAccount = {
+          id: data.user.id || data.token,
+          username: data.user.username || data.user.email || email,
+          email: data.user.email || email,
+          roleId: data.user.roleId || 'role-admin',
+          status: data.user.status || 'Active',
+          employeeId: data.user.employeeId || undefined,
+        };
+        setLoggedInUser(userProfile);
+        setCurrentUserAccount(userProfile);
+        privacyStorage.setItem('hr_logged_in_user', JSON.stringify(userProfile));
+        privacyStorage.setItem('hr_current_user', JSON.stringify(userProfile));
+        setAuthReady(true);
+        return;
+      } else {
+        const errBody = await response.json().catch(() => ({}));
+        throw new Error(errBody.error || 'Invalid email or password.');
+      }
+    } catch (err) {
+      throw err;
     }
   };
 
   const handleLogout = () => {
-    void signOut(auth);
+    setAuthToken(null);
     setLoggedInUser(null);
     setCurrentUserAccount(emptyUserAccount);
     privacyStorage.removeItem('hr_logged_in_user');
@@ -297,9 +294,8 @@ export default function App() {
 
   const [payrollRuns, setPayrollRuns] = useState<PayrollRun[]>([]);
 
-  // Firestore Real-time Sync
+  // PostgreSQL Database Real-time Sync
   useEffect(() => {
-    if (!isFirebaseConfigured()) return;
     if (!loggedInUser) return;
 
     const unsubscribes: (() => void)[] = [];
@@ -336,14 +332,15 @@ export default function App() {
     const markSnapshotLoaded = (collectionName: string) => {
       loadedSnapshots.add(collectionName);
       if (loadedSnapshots.size >= requiredSnapshots.size) {
-        setFirestoreSyncStatus({ state: 'synced', message: 'Firestore synced.' });
+        setFirestoreSyncStatus({ state: 'synced', message: 'PostgreSQL Database Synced.' });
       } else {
         setFirestoreSyncStatus({
           state: 'syncing',
-          message: `Loading server data (${loadedSnapshots.size}/${requiredSnapshots.size})...`,
+          message: `Loading PostgreSQL data (${loadedSnapshots.size}/${requiredSnapshots.size})...`,
         });
       }
     };
+
 
     const markSnapshotWarning = (collectionName: string, err: unknown) => {
       setFirestoreSyncStatus({ state: 'warning', message: `${collectionName} sync failed. Contact an administrator.` });
@@ -372,12 +369,13 @@ export default function App() {
           markSnapshotLoaded(collectionName);
         }, (err) => {
           markSnapshotWarning(collectionName, err);
-          console.warn(`Firestore listener failed for ${collectionName}:`);
+          console.warn(`PostgreSQL listener failed for ${collectionName}:`);
         });
         unsubscribes.push(unsub);
       } catch (err) {
         markSnapshotWarning(collectionName, err);
-        console.warn(`Firestore subscription deferred for ${collectionName}:`);
+        console.warn(`PostgreSQL subscription deferred for ${collectionName}:`);
+
       }
     };
 
@@ -468,13 +466,14 @@ export default function App() {
       }, (err) => {
         setUsersLoaded(true);
         markSnapshotWarning('users', err);
-        console.warn('Firestore users listener failed:');
+        console.warn('PostgreSQL users listener failed:');
       });
       unsubscribes.push(unsubUsers);
     } catch (err) {
       setUsersLoaded(true);
       markSnapshotWarning('users', err);
-      console.warn('Firestore users subscription deferred:');
+      console.warn('PostgreSQL users subscription deferred:');
+
     }
 
     // PayrollRuns Sync
@@ -496,12 +495,13 @@ export default function App() {
         markSnapshotLoaded('statConfig');
       }, (err) => {
         markSnapshotWarning('statConfig', err);
-        console.warn('Firestore statConfig listener failed:');
+        console.warn('PostgreSQL statConfig listener failed:');
       });
       unsubscribes.push(unsubConfig);
     } catch (err) {
       markSnapshotWarning('statConfig', err);
-      console.warn('Firestore statConfig subscription deferred:');
+      console.warn('PostgreSQL statConfig subscription deferred:');
+
     }
 
     return () => unsubscribes.forEach(unsub => unsub());
@@ -517,7 +517,8 @@ export default function App() {
     try {
       await setDoc(doc(db, 'employees', newEmp.id), cleanData(newEmp));
     } catch (err) {
-      console.warn('Firebase employee add delayed:');
+      console.warn('PostgreSQL employee add delayed:');
+
     }
   };
 
@@ -563,7 +564,7 @@ export default function App() {
       }
       await setDoc(doc(db, 'employees', employeeForSave.id), cleanData(employeeForSave), { merge: true });
     } catch (err) {
-      console.warn('Firebase employee update delayed:');
+      console.warn('PostgreSQL employee update delayed:');
       throw err;
     }
   };
@@ -575,7 +576,7 @@ export default function App() {
     try {
       await setDoc(doc(db, 'statConfig', newConfig.id), newConfig);
     } catch (err) {
-      console.warn('Firebase statConfig update delayed:');
+      console.warn('PostgreSQL statConfig update delayed:');
     }
   };
 
@@ -587,9 +588,10 @@ export default function App() {
         await setDoc(doc(db, 'taxSlabs', slab.id), slab);
       }
     } catch (err) {
-      console.warn('Firebase tax slabs update delayed:');
+      console.warn('PostgreSQL tax slabs update delayed:');
     }
   };
+
 
   // ─── Leave Handlers ───────────────────────────────────────────────────────
   const handleApproveLeave = async (id: string) => {
@@ -637,7 +639,7 @@ export default function App() {
           privacyStorage.setItem('hr_attendances', JSON.stringify(updated));
           for (const log of autoLogs) {
             setDoc(doc(db, 'attendances', log.id), log).catch(err =>
-              console.warn('Firebase auto-attendance sync delayed:')
+              console.warn('PostgreSQL auto-attendance sync delayed:')
             );
           }
           return updated;
@@ -652,7 +654,7 @@ export default function App() {
         approvedOn: today
       });
     } catch (err) {
-      console.warn('Firebase leave approval delayed:');
+      console.warn('PostgreSQL leave approval delayed:');
     }
   };
 
@@ -668,7 +670,7 @@ export default function App() {
     try {
       await updateDoc(doc(db, 'leaves', id), { status: 'Rejected' });
     } catch (err) {
-      console.warn('Firebase leave rejection delayed:');
+      console.warn('PostgreSQL leave rejection delayed:');
     }
   };
 
@@ -681,7 +683,7 @@ export default function App() {
     try {
       await setDoc(doc(db, 'leaves', leave.id), cleanData(leave));
     } catch (err) {
-      console.warn('Firebase leave apply delayed:');
+      console.warn('PostgreSQL leave apply delayed:');
     }
   };
 
@@ -697,7 +699,7 @@ export default function App() {
     try {
       await updateDoc(doc(db, 'attendances', id), { status: 'Present', regularizationApproved: true });
     } catch (err) {
-      console.warn('Firebase regularization approval delayed:');
+      console.warn('PostgreSQL regularization approval delayed:');
     }
   };
 
@@ -712,9 +714,10 @@ export default function App() {
     try {
       await updateDoc(doc(db, 'attendances', id), { regularizationApproved: false });
     } catch (err) {
-      console.warn('Firebase regularization rejection delayed:');
+      console.warn('PostgreSQL regularization rejection delayed:');
     }
   };
+
 
   const handleSimulatePunch = async (employeeId: string, punchIn: string, punchOut: string, method: string, lat?: number, lon?: number, locationAccuracyMeters?: number, locationCapturedAt?: string, locationAddress?: string, mobileDetails?: MobilePunchDetails) => {
     const today = todayStr();
@@ -1050,22 +1053,22 @@ export default function App() {
 
   const handleAddUser = async (newUser: NewUserAccount) => {
     const { password, id: _temporaryId, ...profile } = newUser;
-    if (password.length < 12) throw new Error('Password must be at least 12 characters.');
+    if (password.length < 8) throw new Error('Password must be at least 8 characters.');
 
-    await provisionFirebaseUser(profile.email, password, async uid => {
-      const securedUser: UserAccount = {
-        ...profile,
-        id: uid,
-        email: profile.email.trim().toLowerCase(),
-      };
-      await setDoc(doc(db, 'users', uid), cleanData(securedUser));
-      setUsers(prev => {
-        const updated = [...prev.filter(user => user.id !== uid), securedUser];
-        privacyStorage.setItem('hr_users', JSON.stringify(updated));
-        return updated;
-      });
+    const uid = `usr-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const securedUser: UserAccount = {
+      ...profile,
+      id: uid,
+      email: profile.email.trim().toLowerCase(),
+    };
+    await setDoc(doc(db, 'users', uid), cleanData({ ...securedUser, password }));
+    setUsers(prev => {
+      const updated = [...prev.filter(user => user.id !== uid), securedUser];
+      privacyStorage.setItem('hr_users', JSON.stringify(updated));
+      return updated;
     });
   };
+
 
   const handleUpdateUserRole = async (userId: string, roleId: string) => {
     let updatedUser: UserAccount | null = null;
@@ -1198,15 +1201,14 @@ export default function App() {
     const designationIds = new Set(payload.designations.map(item => item.id));
     const nextDepartments = [...payload.departments, ...departments.filter(item => !departmentIds.has(item.id))];
     const nextDesignations = [...payload.designations, ...designations.filter(item => !designationIds.has(item.id))];
-    if (isFirebaseConfigured()) {
-      const batch = writeBatch(db);
-      batch.set(doc(db, 'companies', payload.company.id), cleanData(payload.company), { merge: true });
-      batch.set(doc(db, 'branches', payload.branch.id), cleanData(payload.branch), { merge: true });
-      payload.departments.forEach(item => batch.set(doc(db, 'departments', item.id), cleanData(item), { merge: true }));
-      payload.designations.forEach(item => batch.set(doc(db, 'designations', item.id), cleanData(item), { merge: true }));
-      batch.set(doc(db, 'statConfig', payload.statutoryConfig.id), cleanData(payload.statutoryConfig), { merge: true });
-      await batch.commit();
-    }
+    const batch = writeBatch(db);
+    batch.set(doc(db, 'companies', payload.company.id), cleanData(payload.company), { merge: true });
+    batch.set(doc(db, 'branches', payload.branch.id), cleanData(payload.branch), { merge: true });
+    payload.departments.forEach(item => batch.set(doc(db, 'departments', item.id), cleanData(item), { merge: true }));
+    payload.designations.forEach(item => batch.set(doc(db, 'designations', item.id), cleanData(item), { merge: true }));
+    batch.set(doc(db, 'statConfig', payload.statutoryConfig.id), cleanData(payload.statutoryConfig), { merge: true });
+    await batch.commit();
+
     setCompanies(nextCompanies); setBranches(nextBranches); setDepartments(nextDepartments); setDesignations(nextDesignations); setStatConfig(payload.statutoryConfig);
     privacyStorage.setItem('hr_companies', JSON.stringify(nextCompanies)); privacyStorage.setItem('hr_branches', JSON.stringify(nextBranches));
     privacyStorage.setItem('hr_departments', JSON.stringify(nextDepartments)); privacyStorage.setItem('hr_designations', JSON.stringify(nextDesignations));
@@ -1271,12 +1273,9 @@ export default function App() {
       privacyStorage.setItem(config.storageKey, JSON.stringify(updated));
       return updated;
     });
-    try {
-      await setDoc(doc(db, config.collectionName, record.id), cleanData(record), { merge: true });
-    } catch (error) {
-      if (isFirebaseConfigured()) throw error;
-    }
+    await setDoc(doc(db, config.collectionName, record.id), cleanData(record), { merge: true });
   };
+
 
   // ─── Holiday Handlers ─────────────────────────────────────────────────────
   const handleAddHoliday = async (holiday: Holiday) => {
@@ -1567,12 +1566,54 @@ export default function App() {
     });
   };
 
-  const accessControlLoaded = !isFirebaseConfigured() || (rolesLoaded && usersLoaded);
+  const accessControlLoaded = rolesLoaded && usersLoaded;
+
   const employeesWithFingerprints = mergeEmployeeFingerprintTemplates(employees, biometricTemplates);
 
+  const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+  const [hasUsersInDb, setHasUsersInDb] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/api/auth/status`)
+      .then(res => res.json())
+      .then(data => setHasUsersInDb(Boolean(data.hasUsers)))
+      .catch(() => setHasUsersInDb(true));
+  }, [API_BASE]);
+
+  const isDatabaseEmpty = hasUsersInDb === false;
+
   if (!loggedInUser) {
-    return <LoginScreen authReady={authReady} authMessage={authMessage} onLogin={handleLogin} />;
+    if (isDatabaseEmpty) {
+      return (
+        <SetupWizardScreen
+          canCancel={false}
+          onComplete={async (companyName, adminEmail, adminPassword, adminName) => {
+            const res = await fetch(`${API_BASE}/api/auth/setup`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ companyName, adminEmail, adminPassword, adminName }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Setup failed.');
+            setAuthToken(data.token);
+            setLoggedInUser(publicUser(data.user));
+            setCurrentUserAccount(publicUser(data.user));
+            setHasUsersInDb(true);
+          }}
+        />
+      );
+    }
+
+    return (
+      <LoginScreen
+        authReady={authReady}
+        authMessage={authMessage}
+        onLogin={handleLogin}
+        isDatabaseEmpty={false}
+      />
+    );
   }
+
 
   return (
     <DeviceEmulator
@@ -1664,11 +1705,15 @@ export default function App() {
 function LoginScreen({
   authReady,
   authMessage,
-  onLogin
+  onLogin,
+  isDatabaseEmpty,
+  onLaunchSetup,
 }: {
-  authReady: boolean,
-  authMessage: string,
-  onLogin: (email: string, password: string) => Promise<void>
+  authReady: boolean;
+  authMessage: string;
+  onLogin: (email: string, password: string) => Promise<void>;
+  isDatabaseEmpty?: boolean;
+  onLaunchSetup?: () => void;
 }) {
   const [loginId, setLoginId] = useState('');
   const [password, setPassword] = useState('');
@@ -1699,9 +1744,6 @@ function LoginScreen({
       <div className="absolute bottom-1/4 right-1/4 w-96 h-96 rounded-full bg-blue-500/10 blur-3xl pointer-events-none"></div>
 
       <div className="w-full max-w-md bg-slate-950/80 backdrop-blur-md p-8 rounded-3xl border border-slate-800 shadow-2xl relative z-10 space-y-6">
-        <span aria-hidden="true" className="pointer-events-none absolute left-[26px] top-[26px] h-1.5 w-1.5 rounded-full bg-slate-600" />
-        <span aria-hidden="true" className="pointer-events-none absolute bottom-[26px] left-[26px] h-1.5 w-1.5 rounded-full bg-slate-600" />
-        <span aria-hidden="true" className="pointer-events-none absolute bottom-[26px] right-[26px] h-1.5 w-1.5 rounded-full bg-slate-600" />
         <div className="text-center space-y-2">
           <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-600 to-green-500 mx-auto flex items-center justify-center shadow-lg text-white font-bold text-xl">
             HR
@@ -1711,6 +1753,18 @@ function LoginScreen({
             <p className="text-xs text-slate-400">Payroll Compliance &amp; Attendance Management</p>
           </div>
         </div>
+
+        {isDatabaseEmpty && (
+          <div className="bg-amber-950/40 border border-amber-800/60 p-4 rounded-xl text-xs text-amber-300 space-y-2">
+            <p className="font-bold">Database is empty or uninitialized.</p>
+            <p>No user accounts exist in local PostgreSQL yet.</p>
+            {onLaunchSetup && (
+              <button type="button" onClick={onLaunchSetup} className="w-full mt-2 bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold py-2 rounded-lg text-xs transition">
+                Launch Setup Wizard
+              </button>
+            )}
+          </div>
+        )}
 
         {!authReady ? (
           <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-xl text-xs text-slate-300">
@@ -1737,13 +1791,110 @@ function LoginScreen({
                 Sign In to System
               </button>
             </form>
+
+            {isDatabaseEmpty && onLaunchSetup && (
+              <div className="pt-2 border-t border-slate-800/80 text-center">
+                <button type="button" onClick={onLaunchSetup} className="text-xs text-slate-400 hover:text-emerald-400 transition underline underline-offset-4">
+                  New installation or database cleared? Launch Setup Wizard
+                </button>
+              </div>
+            )}
+
           </>
         )}
       </div>
 
       <div className="text-center text-[10px] text-slate-500 mt-6 font-mono">
-        Bin Ishaq HR Suite - Firestore backed access control
+        Bin Ishaq HR Suite - PostgreSQL Local Enterprise Engine
       </div>
     </div>
   );
 }
+
+function SetupWizardScreen({
+  onComplete,
+  onCancel,
+  canCancel,
+}: {
+  onComplete: (companyName: string, adminEmail: string, adminPassword: string, adminName: string) => Promise<void>;
+  onCancel?: () => void;
+  canCancel?: boolean;
+}) {
+  const [companyName, setCompanyName] = useState('Bin Ishaq Logistics Ltd.');
+  const [adminName, setAdminName] = useState('System Administrator');
+  const [adminEmail, setAdminEmail] = useState('admin@binishaq.com');
+  const [adminPassword, setAdminPassword] = useState('admin123');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    if (!companyName.trim() || !adminEmail.trim() || !adminPassword.trim()) {
+      setError('Please fill in all required fields.');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await onComplete(companyName.trim(), adminEmail.trim(), adminPassword.trim(), adminName.trim());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Database setup failed.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="h-screen bg-slate-900 text-slate-100 flex flex-col items-center justify-center p-4 font-sans relative overflow-hidden">
+      <div className="absolute top-1/4 left-1/4 w-96 h-96 rounded-full bg-emerald-500/10 blur-3xl pointer-events-none"></div>
+      <div className="w-full max-w-lg bg-slate-950/90 backdrop-blur-md p-8 rounded-3xl border border-slate-800 shadow-2xl relative z-10 space-y-6">
+        <div className="text-center space-y-2">
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-600 to-green-500 mx-auto flex items-center justify-center shadow-lg text-white font-bold text-xl">
+            HR
+          </div>
+          <h2 className="text-xl font-bold tracking-tight text-white uppercase">Database Setup Wizard</h2>
+          <p className="text-xs text-slate-400">Initialize your PostgreSQL database and create the Super Admin account.</p>
+        </div>
+
+        {error && (
+          <div className="bg-rose-950/40 border border-rose-900/60 p-3.5 rounded-xl text-rose-300 text-xs">
+            {error}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-1">
+            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">Company Name</label>
+            <input type="text" required value={companyName} onChange={e => setCompanyName(e.target.value)} placeholder="e.g. Bin Ishaq Logistics Ltd." className="w-full text-sm p-3 bg-slate-900 border border-slate-800 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none text-white" />
+          </div>
+
+          <div className="space-y-1">
+            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">Super Admin Full Name</label>
+            <input type="text" required value={adminName} onChange={e => setAdminName(e.target.value)} placeholder="System Administrator" className="w-full text-sm p-3 bg-slate-900 border border-slate-800 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none text-white" />
+          </div>
+
+          <div className="space-y-1">
+            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">Super Admin Email</label>
+            <input type="email" required value={adminEmail} onChange={e => setAdminEmail(e.target.value)} placeholder="admin@company.com" className="w-full text-sm p-3 bg-slate-900 border border-slate-800 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none text-white" />
+          </div>
+
+          <div className="space-y-1">
+            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">Super Admin Password</label>
+            <input type="password" required value={adminPassword} onChange={e => setAdminPassword(e.target.value)} placeholder="Set initial password" className="w-full text-sm p-3 bg-slate-900 border border-slate-800 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none text-white font-mono" />
+          </div>
+
+          <button type="submit" disabled={submitting} className="w-full bg-gradient-to-r from-emerald-600 to-green-500 hover:from-emerald-500 hover:to-green-400 text-white font-bold py-3.5 rounded-xl shadow-lg transition duration-200 text-sm disabled:opacity-50">
+            {submitting ? 'Initializing Database…' : 'Initialize Database & Sign In'}
+          </button>
+        </form>
+
+        {canCancel && onCancel && (
+          <button type="button" onClick={onCancel} className="w-full text-xs text-slate-400 hover:text-white transition">
+            Back to Sign In
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+

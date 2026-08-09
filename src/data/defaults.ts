@@ -385,21 +385,22 @@ export const DEFAULT_ATTENDANCES: AttendanceLog[] = [
 // Helper to calculate realistic Pakistan income tax (FBR annualised salaried individuals)
 export function calculateAnnualTax(annualTaxableIncome: number, slabs: TaxSlab[]): number {
   if (annualTaxableIncome <= 600000) return 0;
+  const effectiveSlabs = Array.isArray(slabs) && slabs.length > 0 ? slabs : DEFAULT_TAX_SLABS;
   
   // Find matching slab
-  const matchingSlab = slabs.find(
-    s => annualTaxableIncome >= s.minIncome && annualTaxableIncome < s.maxIncome
+  const matchingSlab = effectiveSlabs.find(
+    s => s && typeof s.minIncome === 'number' && annualTaxableIncome >= s.minIncome && annualTaxableIncome < (s.maxIncome ?? Infinity)
   );
   
   if (!matchingSlab) {
     // If somehow not found, go to highest
-    const highest = slabs[slabs.length - 1];
-    const excess = annualTaxableIncome - highest.minIncome;
-    return highest.baseTax + (excess * highest.percentage) / 100;
+    const highest = effectiveSlabs[effectiveSlabs.length - 1] || DEFAULT_TAX_SLABS[DEFAULT_TAX_SLABS.length - 1];
+    const excess = annualTaxableIncome - (highest?.minIncome ?? 600000);
+    return (highest?.baseTax ?? 0) + (excess * (highest?.percentage ?? 0)) / 100;
   }
   
-  const excess = annualTaxableIncome - matchingSlab.minIncome;
-  return matchingSlab.baseTax + (excess * matchingSlab.percentage) / 100;
+  const excess = annualTaxableIncome - (matchingSlab.minIncome ?? 0);
+  return (matchingSlab.baseTax ?? 0) + (excess * (matchingSlab.percentage ?? 0)) / 100;
 }
 
 // Function to calculate exact Pakistan Statutory & gross-to-net payslip details

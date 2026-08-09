@@ -133,7 +133,7 @@ export function SalaryRevisionModule({ salaryRevisions, employees, currentUserAc
                     </td>
                     <td className="py-2 pr-4 text-slate-300">{emp.wageType}</td>
                     <td className="py-2 pr-4 text-right font-bold text-white">
-                      PKR {emp.basicSalary.toLocaleString()}
+                      PKR {(emp.basicSalary || 0).toLocaleString()}
                     </td>
                     <td className="py-2 pr-4 text-right text-slate-400">
                       {lastRevision ? lastRevision.effectiveDate : '—'}

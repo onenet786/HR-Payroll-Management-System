@@ -218,7 +218,7 @@ export function WindowsApp({
                         <p>Default BanK: <strong className="text-slate-900 font-serif">{emp.bankName}</strong></p>
                         <p>IBAN: <strong className="text-slate-900 font-mono">{emp.iban}</strong></p>
                         <p>Provincial Region: <strong className="text-slate-900 font-sans">Sindh (Social Sec: {emp.socialSecurityNumber || 'No'})</strong></p>
-                        <p>Base Wage Constant: <strong className="text-emerald-700 font-mono">PKR {emp.basicSalary.toLocaleString()}</strong></p>
+                        <p>Base Wage Constant: <strong className="text-emerald-700 font-mono">PKR {(emp.basicSalary || 0).toLocaleString()}</strong></p>
                       </div>
 
                       {/* Quick action button for biometric on this employee */}

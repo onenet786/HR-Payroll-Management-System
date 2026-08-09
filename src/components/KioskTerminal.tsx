@@ -232,10 +232,14 @@ export function KioskTerminal({
 
     setStatus('scanning');
     setTimeout(() => {
-      // Find employee by code (exact or suffix match)
+      const cleanInput = empIdInput.trim();
+      const cleanDigits = cleanInput.replace(/\D/g, '');
       const emp = employees.find(
-        e => e.status === 'Active' && (e.employeeCode.toUpperCase() === empIdInput.toUpperCase() ||
-             e.employeeCode.toLowerCase().endsWith(empIdInput.toLowerCase())
+        e => (e.status ?? 'Active') === 'Active' && (
+          e.employeeCode.toUpperCase() === cleanInput.toUpperCase() ||
+          e.employeeCode.toLowerCase().endsWith(cleanInput.toLowerCase()) ||
+          (cleanDigits.length >= 5 && e.cnic && e.cnic.replace(/\D/g, '') === cleanDigits) ||
+          (e.email && e.email.toLowerCase() === cleanInput.toLowerCase())
         )
       );
 
@@ -356,7 +360,7 @@ export function KioskTerminal({
             setPendingCheckout(null);
             setMatchedEmp(null);
             setStatus('error');
-            setMessage(error instanceof Error ? error.message : 'Attendance could not be saved to Firestore. Try again.');
+            setMessage(error instanceof Error ? error.message : 'Attendance could not be saved to Database. Try again.');
             setTimeout(() => { setStatus('idle'); setMessage(''); }, 4500);
           }
         }}>
@@ -418,7 +422,7 @@ export function KioskTerminal({
           <div className="mt-4 grid grid-cols-2 gap-2">
             <button type="button" onClick={() => void startCamera()} className="rounded-lg bg-emerald-700 p-2 text-[10px] font-bold text-white">START / RETRY CAMERA</button>
             <button type="button" onClick={() => void (window as any).Capacitor?.Plugins?.DeviceSettingsPlugin?.openAppSettings()} className="rounded-lg border border-slate-600 bg-slate-800 p-2 text-[10px] font-bold text-slate-200">ANDROID CAMERA PERMISSION</button>
-            <button type="button" onClick={async () => { if (window.confirm('Flush the kiosk WebView cache? Firestore attendance will not be deleted.')) { await (window as any).Capacitor?.Plugins?.DeviceSettingsPlugin?.clearKioskCache(); window.location.reload(); } }} className="col-span-2 flex items-center justify-center gap-2 rounded-lg border border-rose-800 bg-rose-950/40 p-2 text-[10px] font-bold text-rose-300"><Trash2 className="h-3 w-3" /> FLUSH LOCAL WEB CACHE</button>
+            <button type="button" onClick={async () => { if (window.confirm('Flush the kiosk WebView cache? Saved attendance records will not be deleted.')) { await (window as any).Capacitor?.Plugins?.DeviceSettingsPlugin?.clearKioskCache(); window.location.reload(); } }} className="col-span-2 flex items-center justify-center gap-2 rounded-lg border border-rose-800 bg-rose-950/40 p-2 text-[10px] font-bold text-rose-300"><Trash2 className="h-3 w-3" /> FLUSH LOCAL WEB CACHE</button>
           </div>
           <button type="button" onClick={() => { const saved = { terminalId: kioskSettings.terminalId.trim() || 'KIOSK-MOB-01', location: kioskSettings.location.trim() || 'Main Entrance Gate-1', branchId: kioskSettings.branchId, autoCapture: kioskSettings.autoCapture }; window.localStorage.setItem('mobile_kiosk_settings', JSON.stringify(saved)); setKioskSettings(saved); setShowSettings(false); }} className="mt-4 w-full rounded-lg bg-indigo-700 p-2 text-xs font-bold text-white">SAVE KIOSK SETTINGS</button>
           {nativeMobileKiosk && onExitKiosk && <button type="button" onClick={() => {

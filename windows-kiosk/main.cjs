@@ -4,6 +4,7 @@ const fs = require('fs');
 const net = require('net');
 const path = require('path');
 const https = require('https');
+const http = require('http');
 const { pathToFileURL } = require('url');
 const dotenv = require('dotenv');
 const {
@@ -34,7 +35,8 @@ const localFirebaseKeys = [
 for (const key of localFirebaseKeys) {
   if (!process.env[key] && process.env[`VITE_${key}`]) process.env[key] = process.env[`VITE_${key}`];
 }
-if (!process.env.PORTAL_URL) process.env.PORTAL_URL = 'http://localhost:3000';
+if (!process.env.PORTAL_URL) process.env.PORTAL_URL = process.env.VITE_API_BASE_URL || process.env.APP_URL || 'https://mcs.binishaqsoft.com';
+
 
 const bridgePort = 15896;
 let mainWindow;
@@ -179,19 +181,9 @@ function closeSplashWindow() {
 }
 
 const firebaseConfig = {
-  apiKey: process.env.FIREBASE_API_KEY,
-  authDomain: process.env.FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.FIREBASE_PROJECT_ID,
-  databaseId: process.env.FIRESTORE_DATABASE_ID,
-  storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.FIREBASE_APP_ID,
-  portalUrl: process.env.PORTAL_URL,
+  portalUrl: process.env.PORTAL_URL || process.env.VITE_API_BASE_URL || process.env.APP_URL || 'https://mcs.binishaqsoft.com',
 };
 
-if (Object.values(firebaseConfig).some(value => !value)) {
-  throw new Error('Missing required kiosk environment configuration. See .env.example.');
-}
 
 let firebaseSdkPromise = null;
 
@@ -453,8 +445,10 @@ function toFirestoreDocument(obj) {
 
 function requestJson(method, url, body) {
   return new Promise((resolve, reject) => {
+    const targetUrl = new URL(url);
+    const transport = targetUrl.protocol === 'http:' ? http : https;
     const payload = body ? Buffer.from(JSON.stringify(body), 'utf8') : null;
-    const req = https.request(url, {
+    const req = transport.request(targetUrl, {
       method,
       headers: payload
         ? { 'Content-Type': 'application/json', 'Content-Length': payload.length }
@@ -464,12 +458,18 @@ function requestJson(method, url, body) {
       res.setEncoding('utf8');
       res.on('data', chunk => { data += chunk; });
       res.on('end', () => {
-        const parsed = data ? JSON.parse(data) : null;
-        if (res.statusCode >= 200 && res.statusCode < 300) resolve(parsed);
-        else {
-          const error = new Error(parsed?.error?.message || `HTTP ${res.statusCode}`);
+        let parsed = null;
+        try {
+          parsed = data ? JSON.parse(data) : null;
+        } catch (e) {
+          parsed = null;
+        }
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          resolve(parsed || {});
+        } else {
+          const error = new Error(parsed?.error?.message || parsed?.error || `HTTP ${res.statusCode}`);
           error.statusCode = res.statusCode;
-          error.url = url.replace(/([?&]key=)[^&]+/, '$1***');
+          error.url = url;
           reject(error);
         }
       });
@@ -479,6 +479,7 @@ function requestJson(method, url, body) {
     req.end();
   });
 }
+
 
 async function getFirebaseSdkDb() {
   if (!firebaseSdkPromise) {
@@ -539,41 +540,62 @@ async function putFirestoreDocumentViaSdk(collectionName, docId, data) {
 }
 
 async function fetchFirestoreCollection(collectionName) {
+  const baseUrl = (process.env.PORTAL_URL || process.env.VITE_API_BASE_URL || process.env.APP_URL || 'https://mcs.binishaqsoft.com').replace(/\/$/, '');
+  const url = `${baseUrl}/api/kiosk/sync/${encodeURIComponent(collectionName)}`;
   try {
-    const result = await requestJson('GET', firestoreUrl(collectionName), null);
-    return (result.documents || []).map(doc => {
-      const id = String(doc.name || '').split('/').pop();
-      return { id, ...fromFirestoreFields(doc.fields || {}) };
-    });
-  } catch (restError) {
-    try {
-      const records = await fetchFirestoreCollectionViaSdk(collectionName);
-      addEvent('sync', `Firestore REST failed for ${collectionName}; Firebase SDK fallback succeeded`, { count: records.length });
-      return records;
-    } catch (sdkError) {
-      const error = new Error(`${restError.message}; SDK fallback: ${sdkError.message}`);
-      error.statusCode = restError.statusCode || null;
-      error.url = restError.url || null;
-      throw error;
-    }
+    const result = await requestJson('GET', url, null);
+    return (result?.documents || []).map(doc => ({ id: doc.id || doc.document_id, ...doc }));
+  } catch (error) {
+    console.warn(`[Kiosk Sync] PostgreSQL fetch failed for ${collectionName}:`, error.message);
+    throw error;
   }
 }
 
+async function fetchFirestoreCollectionByField(collectionName, fieldName, value) {
+  const all = await fetchFirestoreCollection(collectionName);
+  return all.filter(item => item[fieldName] === value);
+}
+
+async function fetchFirestoreCollectionByIds(collectionName, fieldName, values) {
+  const set = new Set((values || []).map(String).filter(Boolean));
+  const all = await fetchFirestoreCollection(collectionName);
+  return all.filter(item => set.has(String(item[fieldName])));
+}
+
 async function putFirestoreDocument(collectionName, docId, data) {
+  const baseUrl = (process.env.PORTAL_URL || process.env.VITE_API_BASE_URL || process.env.APP_URL || 'https://mcs.binishaqsoft.com').replace(/\/$/, '');
+  const url = `${baseUrl}/api/kiosk/punch`;
+  return await requestJson('POST', url, { collection: collectionName, documentId: docId, data });
+}
+
+async function findEmployeeForCrossBranchCamera(code, _currentBranchId) {
+  const allEmployees = await fetchFirestoreCollection('employees');
+  const employee = findEmployeeByCode(allEmployees.map(kioskStoredEmployee), code);
+  if (!employee) return null;
+
   try {
-    return await requestJson('PATCH', firestoreUrl(collectionName, docId), toFirestoreDocument(data));
-  } catch (restError) {
-    try {
-      await putFirestoreDocumentViaSdk(collectionName, docId, data);
-      addEvent('sync', `Firestore REST write failed for ${collectionName}; Firebase SDK fallback succeeded`);
-    } catch (sdkError) {
-      const error = new Error(`${restError.message}; SDK fallback: ${sdkError.message}`);
-      error.statusCode = restError.statusCode || null;
-      error.url = restError.url || null;
-      throw error;
-    }
+    const templates = await fetchFirestoreCollection('biometricTemplates');
+    const matchedTemplates = templates.filter(t => String(t.employeeId) === String(employee.id));
+    return mergeEmployeeBiometricTemplates([employee], matchedTemplates)[0] || employee;
+  } catch {
+    return employee;
   }
 }
+
+async function loadCrossBranchAttendanceContext(store, employeeId) {
+  try {
+    const attendances = await fetchFirestoreCollection('attendances');
+    const employeeLogs = attendances.filter(a => String(a.employeeId) === String(employeeId));
+    const localById = new Map((store.attendances || []).map(item => [item.id, item]));
+    for (const log of employeeLogs) {
+      localById.set(log.id, { ...localById.get(log.id), ...log });
+    }
+    store.attendances = Array.from(localById.values());
+  } catch (error) {
+    console.warn('[Cross-Branch Context] Failed to fetch attendance context:', error.message);
+  }
+}
+
 
 // ─── Core Sync Logic ────────────────────────────────────────────────────────
 
@@ -1629,5 +1651,14 @@ app.on('window-all-closed', () => {
 process.on('uncaughtException', error => {
   const correlationId = require('crypto').randomUUID();
   console.error(`[${correlationId}] Kiosk process failure`, error);
-  dialog.showErrorBox('Attendance Kiosk Error', `An unexpected error occurred. Reference: ${correlationId}`);
+  try {
+    const logPath = path.join(app.getPath('userData'), 'kiosk-error.log');
+    fs.appendFileSync(logPath, `[${new Date().toISOString()}][${correlationId}] ${error?.stack || error}\n`);
+  } catch {}
+  dialog.showErrorBox('Attendance Kiosk Error', `An unexpected error occurred.\n\nError: ${error?.message || error}\nReference: ${correlationId}`);
 });
+
+process.on('unhandledRejection', (reason) => {
+  console.warn('[Kiosk Unhandled Rejection]', reason);
+});
+

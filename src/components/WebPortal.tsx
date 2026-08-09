@@ -1627,7 +1627,7 @@ export function WebPortal({
                                   </td>
                                   <td className="px-6 py-4 whitespace-nowrap">
                                     <span className="font-bold text-slate-900">
-                                      PKR {emp.basicSalary.toLocaleString()}
+                                      PKR {(emp.basicSalary || 0).toLocaleString()}
                                     </span>
                                     <span className="text-[10px] text-slate-400 block font-sans">
                                       {resolveWageTypeName(emp, wageTypes)} {emp.providentFundOptIn ? '+ 5% PF' : ''}
@@ -1787,7 +1787,7 @@ export function WebPortal({
                                       {localDesignations.find(ds => ds.id === emp.designationId)?.title || 'Specialist'}
                                     </td>
                                     <td className="px-3 py-2.5 font-bold font-mono text-slate-800">
-                                      {emp.basicSalary.toLocaleString()}
+                                      {(emp.basicSalary || 0).toLocaleString()}
                                     </td>
                                     <td className="px-3 py-2.5">
                                       <span className={`inline-flex px-1.5 py-0.5 rounded text-[9px] uppercase font-bold ${emp.status === 'Active' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-500'}`}>
@@ -3510,51 +3510,57 @@ export function WebPortal({
       {/* MODAL 1: ADD EMPLOYEE ONBOARDING */}
       <AnimatePresence>
         {showAddEmpModal && (
-          <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-3 md:p-6 overflow-y-auto">
             <motion.div 
-              initial={{ scale: 0.95, opacity: 0 }} 
+              initial={{ scale: 0.96, opacity: 0 }} 
               animate={{ scale: 1, opacity: 1 }} 
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-2xl w-full max-w-5xl shadow-xl border border-slate-200 overflow-hidden max-h-[95vh] flex flex-col"
+              exit={{ scale: 0.96, opacity: 0 }}
+              className="bg-white rounded-2xl w-full max-w-6xl xl:max-w-[1220px] shadow-2xl border border-slate-200 overflow-hidden max-h-[92vh] flex flex-col my-auto"
             >
-              <div className="px-6 py-4 bg-slate-900 text-white flex justify-between items-center flex-shrink-0">
+              <div className="px-6 py-4 bg-slate-900 text-white flex justify-between items-center flex-shrink-0 shadow-xs">
                 <span className="font-bold text-sm tracking-wider uppercase flex items-center">
-                  <UserPlus className="w-4 h-4 mr-1.5 text-emerald-400" /> Onboard New Employee Workspace
+                  <UserPlus className="w-4 h-4 mr-2 text-emerald-400" /> Onboard New Employee Workspace
                 </span>
-                <button onClick={() => setShowAddEmpModal(false)} className="text-white hover:text-slate-200 font-bold text-lg">×</button>
+                <button onClick={() => setShowAddEmpModal(false)} className="text-slate-400 hover:text-white font-bold text-xl leading-none px-2 py-1 rounded-lg transition-colors">×</button>
               </div>
 
-              <form onSubmit={handleCreateEmployeeSubmit} className="p-5 overflow-y-auto space-y-3.5 text-xs select-none">
+              <form onSubmit={handleCreateEmployeeSubmit} className="p-5 md:p-6 overflow-y-auto space-y-4 text-xs select-none flex-1 bg-slate-50/50">
                 {/* SECTION 1: PERSONAL & CORE DETAILS */}
-                <div className="border-b border-slate-100 pb-3">
-                  <h3 className="font-bold text-slate-800 text-[10px] uppercase tracking-wider mb-2.5 text-emerald-600">Personal &amp; Core Details</h3>
+                <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-2xs space-y-3.5">
+                  <h3 className="font-bold text-slate-800 text-xs uppercase tracking-wider flex items-center text-emerald-600 border-b border-slate-100 pb-2">Personal &amp; Core Details</h3>
                   
-                  <div className="grid grid-cols-4 gap-3 mb-2.5">
+                  <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4 items-start">
                     <div>
-                      <label className="block font-bold mb-1 text-slate-600 font-sans">Full Name <span className="text-slate-400 font-normal">(e.g. Ali Ahmed)</span>:</label>
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
+                        <span>Full Name:</span>
+                      </label>
                       <input
                         type="text" required
                         aria-label="Full Name"
                         placeholder="e.g. Ali Ahmed"
                         value={newEmpForm.fullName}
                         onChange={(e) => setNewEmpForm({ ...newEmpForm, fullName: e.target.value })}
-                        className="w-full p-1.5 border border-slate-300 rounded focus:ring-1 focus:ring-emerald-500 focus:outline-none"
+                        className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-sans text-slate-900 bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all focus:outline-none placeholder:text-slate-400"
                       />
                     </div>
                     <div>
-                      <label className="block font-bold mb-1 text-slate-600 font-sans">Official Email ID <span className="text-slate-400 font-normal">(e.g. ahmed@binishaqsoft.com)</span>:</label>
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
+                        <span>Official Email ID:</span>
+                      </label>
                       <input
                         type="email" required
                         aria-label="Official Email ID"
-                        placeholder="e.g. ahmed@binishaqsoft.com"
+                        placeholder="e.g. ahmed@binishaq.com"
                         value={newEmpForm.email}
                         onChange={(e) => setNewEmpForm({ ...newEmpForm, email: e.target.value })}
-                        className="w-full p-1.5 border border-slate-300 rounded focus:ring-1 focus:ring-emerald-500 focus:outline-none"
+                        className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-sans text-slate-900 bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all focus:outline-none placeholder:text-slate-400"
                       />
                     </div>
                     <div>
-                      <label className="block font-bold mb-1 text-slate-600 font-sans">Employee Code:</label>
-                      <div className="flex space-x-1 items-center">
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
+                        <span>Employee Code:</span>
+                      </label>
+                      <div className="flex space-x-1.5 items-center h-9">
                         <input
                           type="text"
                           aria-label="Employee Code"
@@ -3562,52 +3568,58 @@ export function WebPortal({
                           disabled={autoGenNewCode}
                           value={newEmpForm.employeeCode}
                           onChange={(e) => setNewEmpForm({ ...newEmpForm, employeeCode: e.target.value })}
-                          className="flex-1 p-1.5 border border-slate-300 rounded font-mono focus:ring-1 focus:ring-emerald-500 focus:outline-none disabled:bg-slate-100 disabled:text-slate-500"
+                          className="flex-1 h-9 px-3 border border-slate-300 rounded-lg font-mono text-xs text-slate-900 bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none disabled:bg-slate-100 disabled:text-slate-500 transition-all placeholder:text-slate-400"
                         />
-                        <label className="flex items-center space-x-1 whitespace-nowrap bg-slate-55 border border-slate-300 rounded p-1.5 hover:bg-slate-100 cursor-pointer select-none">
+                        <label className="h-9 px-2.5 flex items-center space-x-1 whitespace-nowrap bg-slate-100 border border-slate-300 rounded-lg hover:bg-slate-200 cursor-pointer select-none transition-colors">
                           <input
                             type="checkbox"
                             aria-label="Auto-generate Employee Code"
                             checked={autoGenNewCode}
                             onChange={(e) => setAutoGenNewCode(e.target.checked)}
-                            className="rounded text-emerald-600"
+                            className="rounded text-emerald-600 focus:ring-emerald-500"
                           />
-                          <span className="text-[10px] font-bold text-slate-700">Auto</span>
+                          <span className="text-xs font-bold text-slate-700">Auto</span>
                         </label>
                       </div>
                     </div>
                     <div>
-                      <label className="block font-bold mb-1 text-slate-600 font-sans">Pakistan CNIC <span className="text-slate-400 font-normal">(e.g. 42101-1234567-3)</span>:</label>
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
+                        <span>Pakistan CNIC:</span>
+                      </label>
                       <input
                         type="text" required
                         aria-label="Pakistan CNIC"
                         placeholder="e.g. 42101-1234567-3"
                         value={newEmpForm.cnic}
                         onChange={(e) => setNewEmpForm({ ...newEmpForm, cnic: formatCNIC(e.target.value) })}
-                        className="w-full p-1.5 border border-slate-300 rounded font-mono focus:ring-1 focus:ring-emerald-500 focus:outline-none"
+                        className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg font-mono text-xs text-slate-900 bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all focus:outline-none placeholder:text-slate-400"
                       />
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-4 gap-3">
+                  <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4 items-start">
                     <div>
-                      <label className="block font-bold mb-1 text-slate-600 font-sans">Mobile Contact <span className="text-slate-400 font-normal">(e.g. 0300-1234567)</span>:</label>
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
+                        <span>Mobile Contact:</span>
+                      </label>
                       <input
                         type="text" required
                         aria-label="Mobile Contact Number"
                         placeholder="e.g. 0300-1234567"
                         value={newEmpForm.contactNumber}
                         onChange={(e) => setNewEmpForm({ ...newEmpForm, contactNumber: e.target.value })}
-                        className="w-full p-1.5 border border-slate-300 rounded font-mono focus:ring-1 focus:ring-emerald-500 focus:outline-none"
+                        className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg font-mono text-xs text-slate-900 bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all focus:outline-none placeholder:text-slate-400"
                       />
                     </div>
                     <div>
-                      <label className="block font-bold mb-1 text-slate-600 font-sans">Gender:</label>
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
+                        <span>Gender:</span>
+                      </label>
                       <select
                         aria-label="Gender"
                         value={newEmpForm.gender}
                         onChange={(e) => setNewEmpForm({ ...newEmpForm, gender: e.target.value })}
-                        className="w-full p-1.5 bg-white border border-slate-300 rounded focus:ring-1"
+                        className="w-full h-9 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all focus:outline-none"
                       >
                         <option value="Male">Male</option>
                         <option value="Female">Female</option>
@@ -3615,12 +3627,14 @@ export function WebPortal({
                       </select>
                     </div>
                     <div>
-                      <label className="block font-bold mb-1 text-slate-600 font-sans">Marital Status:</label>
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
+                        <span>Marital Status:</span>
+                      </label>
                       <select
                         aria-label="Marital Status"
                         value={newEmpForm.maritalStatus}
                         onChange={(e) => setNewEmpForm({ ...newEmpForm, maritalStatus: e.target.value })}
-                        className="w-full p-1.5 bg-white border border-slate-300 rounded focus:ring-1"
+                        className="w-full h-9 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all focus:outline-none"
                       >
                         <option value="Single">Single</option>
                         <option value="Married">Married</option>
@@ -3629,25 +3643,32 @@ export function WebPortal({
                       </select>
                     </div>
                     <div>
-                      <label className="block font-bold mb-1 text-slate-600 font-sans">Date of Birth:</label>
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
+                        <span>Date of Birth:</span>
+                      </label>
                       <input
                         type="date" required
                         aria-label="Date of Birth"
                         value={newEmpForm.dateOfBirth}
                         onChange={(e) => setNewEmpForm({ ...newEmpForm, dateOfBirth: e.target.value })}
-                        className="w-full p-1.5 border border-slate-300 rounded focus:ring-1 focus:outline-none"
+                        className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg text-xs text-slate-900 bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all focus:outline-none"
                       />
                     </div>
-                    <div className="col-span-2">
-                      <label className="block font-bold mb-1 text-slate-600 font-sans">Picture URL / Upload:</label>
-                      <div className="flex space-x-1 items-center">
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4 items-start">
+                    <div className="sm:col-span-2 lg:col-span-4">
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
+                        <span>Picture URL / Upload:</span>
+                      </label>
+                      <div className="flex space-x-2 items-center h-9">
                         <input
                           type="text"
                           aria-label="Picture URL"
                           placeholder="e.g. https://domain.com/pic.jpg"
                           value={newEmpForm.pictureUrl}
                           onChange={(e) => setNewEmpForm({ ...newEmpForm, pictureUrl: e.target.value })}
-                          className="flex-1 p-1.5 border border-slate-300 rounded focus:ring-1 focus:outline-none font-mono text-[9px]"
+                          className="flex-1 h-9 px-3 py-1.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none font-mono text-xs text-slate-900 bg-white transition-all placeholder:text-slate-400"
                         />
                         <input
                           type="file"
@@ -3659,7 +3680,7 @@ export function WebPortal({
                         />
                         <label 
                           htmlFor="add-emp-pic-file"
-                          className="cursor-pointer bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded px-2.5 py-1.5 font-bold text-slate-700 text-center whitespace-nowrap"
+                          className="h-9 px-4 flex items-center justify-center cursor-pointer bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-lg font-bold text-slate-700 text-xs whitespace-nowrap transition-colors shadow-2xs"
                         >
                           Browse...
                         </label>
@@ -3669,100 +3690,100 @@ export function WebPortal({
                 </div>
 
                 {/* SECTION 2: ASSIGNMENT & REGIONAL GEOGRAPHY */}
-                <div className="border-b border-slate-100 pb-3">
-                  <h3 className="font-bold text-slate-800 text-[10px] uppercase tracking-wider mb-2.5 text-emerald-600">Organization &amp; Regional Assignment</h3>
+                <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-2xs space-y-3.5">
+                  <h3 className="font-bold text-slate-800 text-xs uppercase tracking-wider flex items-center text-emerald-600 border-b border-slate-100 pb-2">Organization &amp; Regional Assignment</h3>
                   
-                  <div className="grid grid-cols-4 gap-3 mb-2.5">
-                    <div>
-                      <label className="block font-bold mb-1 text-slate-600 font-sans">Assigned Branch:</label>
-                      <div className="flex space-x-1 items-center">
-                        <select
-                          aria-label="Assigned Branch"
-                          value={newEmpForm.branchId}
-                          onChange={(e) => handleAddBranchChange(e.target.value)}
-                          className="flex-1 p-1.5 bg-white border border-slate-300 rounded focus:ring-1"
-                        >
-                          <option value="">{companyBranches.length ? 'Select Branch' : 'No branches configured in Master Data'}</option>
-                          {companyBranches.map(b => (
-                            <option key={b.id} value={b.id}>{b.name}</option>
-                          ))}
-                        </select>
-                      </div>
+                  <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3 items-start">
+                    <div className="min-w-0">
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
+                        <span>Assigned Branch:</span>
+                      </label>
+                      <select
+                        aria-label="Assigned Branch"
+                        value={newEmpForm.branchId}
+                        onChange={(e) => handleAddBranchChange(e.target.value)}
+                        className="w-full h-9 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all focus:outline-none"
+                      >
+                        <option value="">{companyBranches.length ? 'Select Branch' : 'No branches configured in Master Data'}</option>
+                        {companyBranches.map(b => (
+                          <option key={b.id} value={b.id}>{b.name}</option>
+                        ))}
+                      </select>
                     </div>
-                    <div>
-                      <label className="block font-bold mb-1 text-slate-600 font-sans">Department:</label>
-                      <div className="flex space-x-1 items-center">
-                        <select
-                          aria-label="Department"
-                          value={newEmpForm.departmentId}
-                          onChange={(e) => handleAddDeptChange(e.target.value)}
-                          className="flex-1 p-1.5 bg-white border border-slate-300 rounded focus:ring-1"
-                        >
-                          <option value="">{!newEmpForm.branchId ? 'Select a branch first' : localDepartments.some(d => d.branchId === newEmpForm.branchId) ? 'Select Department' : 'No departments configured in Master Data'}</option>
-                          {localDepartments.filter(d => d.branchId === newEmpForm.branchId).map(d => (
-                            <option key={d.id} value={d.id}>{d.name}</option>
-                          ))}
-                        </select>
-                      </div>
+                    <div className="min-w-0">
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
+                        <span>Department:</span>
+                      </label>
+                      <select
+                        aria-label="Department"
+                        value={newEmpForm.departmentId}
+                        onChange={(e) => handleAddDeptChange(e.target.value)}
+                        className="w-full h-9 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all focus:outline-none"
+                      >
+                        <option value="">{!newEmpForm.branchId ? 'Select a branch first' : localDepartments.some(d => d.branchId === newEmpForm.branchId) ? 'Select Department' : 'No departments configured in Master Data'}</option>
+                        {localDepartments.filter(d => d.branchId === newEmpForm.branchId).map(d => (
+                          <option key={d.id} value={d.id}>{d.name}</option>
+                        ))}
+                      </select>
                     </div>
-                    <div className="col-span-2">
-                      <label className="block font-bold mb-1 text-slate-600 font-sans">Designation:</label>
-                      <div className="flex space-x-1 items-center">
-                        <select
-                          aria-label="Designation"
-                          value={newEmpForm.designationId}
-                          onChange={(e) => setNewEmpForm({ ...newEmpForm, designationId: e.target.value })}
-                          className="flex-1 p-1.5 bg-white border border-slate-300 rounded focus:ring-1"
-                        >
-                          <option value="">{!newEmpForm.departmentId ? 'Select a department first' : localDesignations.some(ds => ds.departmentId === newEmpForm.departmentId) ? 'Select Designation' : 'No designations configured in Master Data'}</option>
-                          {localDesignations.filter(ds => ds.departmentId === newEmpForm.departmentId).map(ds => (
-                            <option key={ds.id} value={ds.id}>{ds.title} (Grade {ds.grade})</option>
-                          ))}
-                        </select>
-                      </div>
+                    <div className="min-w-0 sm:col-span-2 lg:col-span-1">
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
+                        <span>Designation:</span>
+                      </label>
+                      <select
+                        aria-label="Designation"
+                        value={newEmpForm.designationId}
+                        onChange={(e) => setNewEmpForm({ ...newEmpForm, designationId: e.target.value })}
+                        className="w-full h-9 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all focus:outline-none"
+                      >
+                        <option value="">{!newEmpForm.departmentId ? 'Select a department first' : localDesignations.some(ds => ds.departmentId === newEmpForm.departmentId) ? 'Select Designation' : 'No designations configured in Master Data'}</option>
+                        {localDesignations.filter(ds => ds.departmentId === newEmpForm.departmentId).map(ds => (
+                          <option key={ds.id} value={ds.id}>{ds.title} (Grade {ds.grade})</option>
+                        ))}
+                      </select>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-4 gap-3">
-                    <div>
-                      <label className="block font-bold mb-1 text-slate-600 font-sans">UC / Town Information:</label>
-                      <div className="flex space-x-1 items-center">
-                        <select
-                          aria-label="UC / Town"
-                          value={newEmpForm.ucTownId}
-                          onChange={(e) => setNewEmpForm({ ...newEmpForm, ucTownId: e.target.value })}
-                          disabled={!newEmpForm.zoneId}
-                          className="flex-1 p-1.5 bg-white border border-slate-300 rounded focus:ring-1 focus:outline-none"
-                        >
-                          <option value="">{!newEmpForm.zoneId ? 'Select a zone first' : ucTowns.filter(item => item.zoneId === newEmpForm.zoneId && item.status === 'Active').length ? 'Select UC / Town' : 'No UC/Towns configured in Master Data'}</option>
-                          {ucTowns.filter(item => item.zoneId === newEmpForm.zoneId && item.status === 'Active').map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
-                        </select>
-                      </div>
+                  <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4 items-start">
+                    <div className="min-w-0">
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
+                        <span>Zone:</span>
+                      </label>
+                      <select
+                        aria-label="Zone"
+                        value={newEmpForm.zoneId}
+                        onChange={(e) => setNewEmpForm({ ...newEmpForm, zoneId: e.target.value, ucTownId: '' })}
+                        className="w-full h-9 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all focus:outline-none"
+                      >
+                        <option value="">{activeZones.length ? 'Select Zone' : 'No zones configured in Master Data'}</option>
+                        {activeZones.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+                      </select>
                     </div>
-                    <div>
-                      <label className="block font-bold mb-1 text-slate-600 font-sans">Zone:</label>
-                      <div className="flex space-x-1 items-center">
-                        <select
-                          aria-label="Zone"
-                          value={newEmpForm.zoneId}
-                          onChange={(e) => setNewEmpForm({ ...newEmpForm, zoneId: e.target.value, ucTownId: '' })}
-                          className="flex-1 p-1.5 bg-white border border-slate-300 rounded focus:ring-1 focus:outline-none"
-                        >
-                          <option value="">{activeZones.length ? 'Select Zone' : 'No zones configured in Master Data'}</option>
-                          {activeZones.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
-                        </select>
-                      </div>
+                    <div className="min-w-0">
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
+                        <span>UC / Town Information:</span>
+                      </label>
+                      <select
+                        aria-label="UC / Town"
+                        value={newEmpForm.ucTownId}
+                        onChange={(e) => setNewEmpForm({ ...newEmpForm, ucTownId: e.target.value })}
+                        disabled={!newEmpForm.zoneId}
+                        className="w-full h-9 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all focus:outline-none disabled:bg-slate-100 disabled:text-slate-500"
+                      >
+                        <option value="">{!newEmpForm.zoneId ? 'Select a zone first' : ucTowns.filter(item => item.zoneId === newEmpForm.zoneId && item.status === 'Active').length ? 'Select UC / Town' : 'No UC/Towns configured in Master Data'}</option>
+                        {ucTowns.filter(item => item.zoneId === newEmpForm.zoneId && item.status === 'Active').map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+                      </select>
                     </div>
-                    <div className="col-span-2 flex items-center space-x-3 pt-3">
-                      <label className="flex items-center space-x-1.5 font-medium select-none">
+                    <div className="sm:col-span-2 flex items-center space-x-3 pt-6">
+                      <label className="flex items-center space-x-2 font-medium select-none cursor-pointer">
                         <input
                           type="checkbox"
                           aria-label="Is Zone In Charge?"
                           checked={newEmpForm.isZoneInCharge}
                           onChange={(e) => setNewEmpForm({ ...newEmpForm, isZoneInCharge: e.target.checked })}
-                          className="rounded text-emerald-600 text-xs"
+                          className="rounded text-emerald-600 focus:ring-emerald-500 w-4 h-4"
                         />
-                        <span className="whitespace-nowrap font-bold text-slate-600">Is Zone In Charge?</span>
+                        <span className="whitespace-nowrap font-bold text-slate-700 text-xs">Is Zone In Charge?</span>
                       </label>
                       {!newEmpForm.isZoneInCharge && (
                         <div className="flex-1">
@@ -3772,7 +3793,7 @@ export function WebPortal({
                             placeholder="Zone In Charge Name"
                             value={newEmpForm.zoneInChargeName}
                             onChange={(e) => setNewEmpForm({ ...newEmpForm, zoneInChargeName: e.target.value })}
-                            className="w-full p-1.5 border border-slate-300 rounded focus:ring-1 focus:outline-none font-sans"
+                            className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-sans text-slate-900 bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all focus:outline-none placeholder:text-slate-400"
                           />
                         </div>
                       )}
@@ -3781,43 +3802,47 @@ export function WebPortal({
                 </div>
 
                 {/* SECTION 3: WAGES, ALLOWANCES & BANK */}
-                <div className="border-b border-slate-100 pb-3">
-                  <h3 className="font-bold text-slate-800 text-[10px] uppercase tracking-wider mb-2.5 text-emerald-600">Wage &amp; Custom Allowance configuration</h3>
+                <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-2xs space-y-3.5">
+                  <h3 className="font-bold text-slate-800 text-xs uppercase tracking-wider flex items-center text-emerald-600 border-b border-slate-100 pb-2">Wage &amp; Custom Allowance Configuration</h3>
                   
-                  <div className="grid grid-cols-4 gap-3 mb-2.5">
-                    <div>
-                      <label className="block font-bold mb-1 text-slate-600 font-sans">Wage Type:</label>
-                      <div className="flex space-x-1 items-center">
-                        <select
-                          aria-label="Wage Type"
-                          value={newEmpForm.wageTypeId}
-                          onChange={(e) => setNewEmpForm({ ...newEmpForm, wageTypeId: e.target.value })}
-                          className="flex-1 p-1.5 bg-white border border-slate-300 rounded focus:ring-1"
-                        >
-                          <option value="">{activeWageTypes.length ? 'Select Wage Type' : 'No wage types configured in Master Data'}</option>
-                          {activeWageTypes.map(item => <option key={item.id} value={item.id}>{item.name} ({item.calculationBasis})</option>)}
-                        </select>
-                      </div>
+                  <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4 items-start">
+                    <div className="min-w-0">
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
+                        <span>Wage Type:</span>
+                      </label>
+                      <select
+                        aria-label="Wage Type"
+                        value={newEmpForm.wageTypeId}
+                        onChange={(e) => setNewEmpForm({ ...newEmpForm, wageTypeId: e.target.value })}
+                        className="w-full h-9 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all focus:outline-none"
+                      >
+                        <option value="">{activeWageTypes.length ? 'Select Wage Type' : 'No wage types configured in Master Data'}</option>
+                        {activeWageTypes.map(item => <option key={item.id} value={item.id}>{item.name} ({item.calculationBasis})</option>)}
+                      </select>
                     </div>
                     <div>
-                      <label className="block font-bold mb-1 text-slate-600 font-sans">Basic Monthly Wage / Daily Rate (PKR) <span className="text-slate-400 font-normal">(e.g. 85000)</span>:</label>
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
+                        <span>Basic Monthly Wage / Daily Rate (PKR):</span>
+                      </label>
                       <input
                         type="number" required
                         aria-label="Basic Monthly Wage / Daily Rate (PKR)"
                         placeholder="e.g. 85000"
                         value={newEmpForm.basicSalary}
                         onChange={(e) => setNewEmpForm({ ...newEmpForm, basicSalary: Number(e.target.value) })}
-                        className="w-full p-1.5 border border-slate-300 rounded font-mono focus:ring-1 focus:outline-none"
+                        className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg font-mono text-xs text-slate-900 bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all focus:outline-none placeholder:text-slate-400"
                       />
                     </div>
                     <div>
-                      <label className="block font-bold mb-1 text-slate-600 font-sans">Disbursal Bank:</label>
-                      <div className="flex space-x-1 items-center">
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
+                        <span>Disbursal Bank:</span>
+                      </label>
+                      <div className="flex space-x-1.5 items-center h-9">
                         <select
                           aria-label="Disbursal Bank"
                           value={newEmpForm.bankName}
                           onChange={(e) => handleBankChange(e.target.value, false)}
-                          className="flex-1 p-1.5 bg-white border border-slate-300 rounded focus:ring-1 focus:outline-none text-[11px]"
+                          className="flex-1 h-9 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all focus:outline-none"
                         >
                           <option value="">-- Select Bank --</option>
                           {(selectedCountry === 'Pakistan' || !selectedCountry) ? (
@@ -3836,7 +3861,7 @@ export function WebPortal({
                               handleBankChange(val, false);
                             }
                           }}
-                          className="bg-slate-50 hover:bg-slate-100 border border-slate-300 text-slate-700 px-2 py-1.5 rounded font-bold text-xs"
+                          className="h-9 w-9 flex items-center justify-center bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 rounded-lg font-bold text-sm transition-colors shadow-2xs"
                           title="Add Custom Bank"
                         >
                           +
@@ -3844,77 +3869,81 @@ export function WebPortal({
                       </div>
                     </div>
                     <div>
-                      <label className="block font-bold mb-1 text-slate-600 font-sans">Account Number <span className="text-slate-400 font-normal">(e.g. 12345678901234)</span>:</label>
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
+                        <span>Account Number:</span>
+                      </label>
                       <input
                         type="text" required
                         aria-label="Bank Account Number"
                         placeholder="e.g. 12345678901234"
                         value={newEmpForm.bankAccountNumber}
                         onChange={(e) => handleAccountNumberChange(e.target.value, false)}
-                        className="w-full p-1.5 border border-slate-300 rounded font-mono focus:ring-1"
+                        className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg font-mono text-xs text-slate-900 bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all focus:outline-none placeholder:text-slate-400"
                       />
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-4 gap-3 mb-2.5">
-                    <div className="col-span-2">
-                      <label className="block font-bold mb-1 text-slate-600 font-sans">PKR IBAN Number <span className="text-slate-400 font-normal">(e.g. PK42HABB0012345678901234)</span>:</label>
+                  <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4 items-start">
+                    <div className="sm:col-span-2">
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
+                        <span>PKR IBAN Number:</span>
+                      </label>
                       <input
                         type="text" required
                         aria-label="PKR IBAN Number"
                         placeholder="e.g. PK42HABB0012345678901234"
                         value={newEmpForm.iban}
                         onChange={(e) => setNewEmpForm({ ...newEmpForm, iban: e.target.value })}
-                        className="w-full p-1.5 border border-slate-300 rounded font-mono focus:ring-1"
+                        className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg font-mono text-xs text-slate-900 bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all focus:outline-none placeholder:text-slate-400"
                       />
                     </div>
-                    <div className="col-span-2">
+                    <div className="sm:col-span-2">
                       {wageTypes.find(item => item.id === newEmpForm.wageTypeId)?.calculationBasis === 'Monthly' && (
-                        <div className="bg-slate-50 p-2 rounded-lg border border-slate-200">
-                          <h4 className="font-bold text-slate-700 text-[9px] uppercase tracking-wider mb-1">Allowance Overrides (0 to default split)</h4>
-                          <div className="grid grid-cols-4 gap-1.5">
+                        <div className="bg-slate-50/80 p-2.5 rounded-xl border border-slate-200/90 shadow-2xs">
+                          <h4 className="font-bold text-slate-700 text-[10px] uppercase tracking-wider mb-1.5">Allowance Overrides (0 to default split)</h4>
+                          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                             <div>
-                              <label className="block text-[8px] font-semibold text-slate-500 font-sans">Rent:</label>
+                              <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">Rent:</label>
                               <input
                                 type="number"
                                 aria-label="House Rent Allowance"
                                 placeholder="Rent"
                                 value={newEmpForm.houseRentAllowance}
                                 onChange={(e) => setNewEmpForm({ ...newEmpForm, houseRentAllowance: Number(e.target.value) })}
-                                className="w-full p-1 border border-slate-300 rounded font-mono text-[9px]"
+                                className="w-full h-8 px-2 border border-slate-300 rounded-lg font-mono text-xs bg-white focus:ring-1 focus:ring-emerald-500"
                               />
                             </div>
                             <div>
-                              <label className="block text-[8px] font-semibold text-slate-500 font-sans">Conveyance:</label>
+                              <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">Conveyance:</label>
                               <input
                                 type="number"
                                 aria-label="Conveyance Allowance"
                                 placeholder="Conv"
                                 value={newEmpForm.conveyanceAllowance}
                                 onChange={(e) => setNewEmpForm({ ...newEmpForm, conveyanceAllowance: Number(e.target.value) })}
-                                className="w-full p-1 border border-slate-300 rounded font-mono text-[9px]"
+                                className="w-full h-8 px-2 border border-slate-300 rounded-lg font-mono text-xs bg-white focus:ring-1 focus:ring-emerald-500"
                               />
                             </div>
                             <div>
-                              <label className="block text-[8px] font-semibold text-slate-500 font-sans">Medical:</label>
+                              <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">Medical:</label>
                               <input
                                 type="number"
                                 aria-label="Medical Allowance"
                                 placeholder="Med"
                                 value={newEmpForm.medicalAllowance}
                                 onChange={(e) => setNewEmpForm({ ...newEmpForm, medicalAllowance: Number(e.target.value) })}
-                                className="w-full p-1 border border-slate-300 rounded font-mono text-[9px]"
+                                className="w-full h-8 px-2 border border-slate-300 rounded-lg font-mono text-xs bg-white focus:ring-1 focus:ring-emerald-500"
                               />
                             </div>
                             <div>
-                              <label className="block text-[8px] font-semibold text-slate-500 font-sans">Other:</label>
+                              <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">Other:</label>
                               <input
                                 type="number"
                                 aria-label="Other Allowances"
                                 placeholder="Other"
                                 value={newEmpForm.otherAllowances}
                                 onChange={(e) => setNewEmpForm({ ...newEmpForm, otherAllowances: Number(e.target.value) })}
-                                className="w-full p-1 border border-slate-300 rounded font-mono text-[9px]"
+                                className="w-full h-8 px-2 border border-slate-300 rounded-lg font-mono text-xs bg-white focus:ring-1 focus:ring-emerald-500"
                               />
                             </div>
                           </div>
@@ -3925,43 +3954,45 @@ export function WebPortal({
                 </div>
 
                 {/* SECTION 4: STATUTORY & TRUST FUNDS COMPLIANCE */}
-                <div className="space-y-2 pb-2">
-                  <h3 className="font-bold text-slate-800 text-[10px] uppercase tracking-wider text-emerald-600">Statutory &amp; Trust Compliance</h3>
+                <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-2xs space-y-3">
+                  <h3 className="font-bold text-slate-800 text-xs uppercase tracking-wider flex items-center text-emerald-600 border-b border-slate-100 pb-2">Statutory &amp; Trust Compliance</h3>
                   
-                  <div className="grid grid-cols-4 gap-3 bg-slate-50 p-2.5 rounded-lg border border-slate-200 items-start">
-                    <div className="flex flex-col space-y-1">
-                      <label className="flex items-center space-x-1.5 font-medium select-none">
+                  <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4 items-stretch">
+                    <div className="bg-slate-50/80 p-3 rounded-xl border border-slate-200 flex flex-col justify-between space-y-2 h-full">
+                      <label className="flex items-center space-x-2 font-medium select-none cursor-pointer">
                         <input
                           type="checkbox"
                           aria-label="Enable EOBI"
                           checked={newEmpForm.eobiEnabled}
                           onChange={(e) => setNewEmpForm({ ...newEmpForm, eobiEnabled: e.target.checked })}
-                          className="rounded text-emerald-600 text-xs"
+                          className="rounded text-emerald-600 focus:ring-emerald-500 w-4 h-4"
                         />
-                        <span className="font-semibold text-slate-650">Enable EOBI</span>
+                        <span className="font-bold text-slate-700 text-xs">Enable EOBI</span>
                       </label>
-                      {newEmpForm.eobiEnabled && (
+                      {newEmpForm.eobiEnabled ? (
                         <input
                           type="text"
                           aria-label="EOBI Registration Number"
                           placeholder="EOBI No (e.g. 1090123000)"
                           value={newEmpForm.eobiNumber}
                           onChange={(e) => setNewEmpForm({ ...newEmpForm, eobiNumber: e.target.value })}
-                          className="w-full p-1 border border-slate-300 rounded font-mono text-[10px]"
+                          className="w-full h-8 px-2.5 border border-slate-300 rounded-lg font-mono text-xs bg-white focus:ring-1 focus:ring-emerald-500"
                         />
+                      ) : (
+                        <div className="h-8 text-[11px] text-slate-400 italic flex items-center">EOBI Disabled</div>
                       )}
                     </div>
 
-                    <div className="flex flex-col space-y-1">
-                      <label className="flex items-center space-x-1.5 font-medium select-none">
+                    <div className="bg-slate-50/80 p-3 rounded-xl border border-slate-200 flex flex-col justify-between space-y-2 h-full">
+                      <label className="flex items-center space-x-2 font-medium select-none cursor-pointer">
                         <input
                           type="checkbox"
                           aria-label="Enable FBR Tax"
                           checked={newEmpForm.fbrEnabled}
                           onChange={(e) => setNewEmpForm({ ...newEmpForm, fbrEnabled: e.target.checked })}
-                          className="rounded text-emerald-600 text-xs"
+                          className="rounded text-emerald-600 focus:ring-emerald-500 w-4 h-4"
                         />
-                        <span className="font-semibold text-slate-650">Enable FBR Tax</span>
+                        <span className="font-bold text-slate-700 text-xs">Enable FBR Tax</span>
                       </label>
                       <input
                         type="text"
@@ -3969,49 +4000,49 @@ export function WebPortal({
                         placeholder="PESSI SSN (e.g. SS-42-000)"
                         value={newEmpForm.socialSecurityNumber}
                         onChange={(e) => setNewEmpForm({ ...newEmpForm, socialSecurityNumber: e.target.value })}
-                        className="w-full p-1 border border-slate-300 rounded font-mono text-[10px]"
+                        className="w-full h-8 px-2.5 border border-slate-300 rounded-lg font-mono text-xs bg-white focus:ring-1 focus:ring-emerald-500"
                       />
                     </div>
 
-                    <div className="pt-1 select-none">
-                      <label className="flex items-center space-x-1.5 font-medium">
+                    <div className="bg-slate-50/80 p-3 rounded-xl border border-slate-200 flex flex-col justify-center space-y-2 h-full">
+                      <label className="flex items-center space-x-2 font-medium select-none cursor-pointer">
                         <input
                           type="checkbox"
                           aria-label="Opt In Provident Fund"
                           checked={newEmpForm.providentFundOptIn}
                           onChange={(e) => setNewEmpForm({ ...newEmpForm, providentFundOptIn: e.target.checked })}
-                          className="rounded text-emerald-600 text-xs"
+                          className="rounded text-emerald-600 focus:ring-emerald-500 w-4 h-4"
                         />
-                        <span className="font-semibold text-slate-650">Opt In PF Fund</span>
+                        <span className="font-bold text-slate-700 text-xs">Opt In PF Fund</span>
                       </label>
                     </div>
 
-                    <div className="pt-1 select-none">
-                      <label className="flex items-center space-x-1.5 font-medium">
+                    <div className="bg-slate-50/80 p-3 rounded-xl border border-slate-200 flex flex-col justify-center space-y-2 h-full">
+                      <label className="flex items-center space-x-2 font-medium select-none cursor-pointer">
                         <input
                           type="checkbox"
                           aria-label="Opt In Gratuity"
                           checked={newEmpForm.gratuityOptIn}
                           onChange={(e) => setNewEmpForm({ ...newEmpForm, gratuityOptIn: e.target.checked })}
-                          className="rounded text-emerald-600 text-xs"
+                          className="rounded text-emerald-600 focus:ring-emerald-500 w-4 h-4"
                         />
-                        <span className="font-semibold text-slate-650">Opt In Gratuity</span>
+                        <span className="font-bold text-slate-700 text-xs">Opt In Gratuity</span>
                       </label>
                     </div>
                   </div>
                 </div>
 
-                <div className="flex justify-end space-x-2.5 pt-3 border-t border-slate-200 flex-shrink-0">
+                <div className="flex justify-end space-x-3 pt-3 border-t border-slate-200 flex-shrink-0">
                   <button
                     type="button"
                     onClick={() => setShowAddEmpModal(false)}
-                    className="px-4 py-2 border border-slate-300 text-slate-700 hover:bg-slate-50 rounded-lg font-medium"
+                    className="px-5 py-2 border border-slate-300 text-slate-700 hover:bg-slate-100 rounded-xl font-semibold text-xs transition-colors"
                   >
                     Cancel
                   </button>
                   <button 
                     type="submit"
-                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold shadow-xs"
+                    className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs shadow-md transition-all active:scale-[0.98]"
                   >
                     Complete Onboarding
                   </button>
@@ -4025,51 +4056,57 @@ export function WebPortal({
       {/* MODAL 1B: EDIT EMPLOYEE */}
       <AnimatePresence>
         {showEditEmpModal && (
-          <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-3 md:p-6 overflow-y-auto">
             <motion.div 
-              initial={{ scale: 0.95, opacity: 0 }} 
+              initial={{ scale: 0.96, opacity: 0 }} 
               animate={{ scale: 1, opacity: 1 }} 
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-2xl w-full max-w-5xl shadow-xl border border-slate-200 overflow-hidden max-h-[95vh] flex flex-col"
+              exit={{ scale: 0.96, opacity: 0 }}
+              className="bg-white rounded-2xl w-full max-w-6xl xl:max-w-[1220px] shadow-2xl border border-slate-200 overflow-hidden max-h-[92vh] flex flex-col my-auto"
             >
-              <div className="px-6 py-4 bg-indigo-900 text-white flex justify-between items-center flex-shrink-0">
+              <div className="px-6 py-4 bg-indigo-900 text-white flex justify-between items-center flex-shrink-0 shadow-xs">
                 <span className="font-bold text-sm tracking-wider uppercase flex items-center">
-                  <Users className="w-4 h-4 mr-1.5 text-indigo-400" /> Edit Employee Record
+                  <Users className="w-4 h-4 mr-2 text-indigo-300" /> Edit Employee Record
                 </span>
-                <button onClick={() => { setShowEditEmpModal(false); setEditingEmployee(null); }} className="text-white hover:text-slate-200 font-bold text-lg">×</button>
+                <button onClick={() => { setShowEditEmpModal(false); setEditingEmployee(null); }} className="text-indigo-200 hover:text-white font-bold text-xl leading-none px-2 py-1 rounded-lg transition-colors">×</button>
               </div>
 
-              <form onSubmit={handleEditEmployeeSubmit} className="p-5 overflow-y-auto space-y-3.5 text-xs select-none">
+              <form onSubmit={handleEditEmployeeSubmit} className="p-5 md:p-6 overflow-y-auto space-y-4 text-xs select-none flex-1 bg-slate-50/50">
                 {/* SECTION 1: PERSONAL & CORE DETAILS */}
-                <div className="border-b border-slate-100 pb-3">
-                  <h3 className="font-bold text-slate-800 text-[10px] uppercase tracking-wider mb-2.5 text-indigo-600">Personal &amp; Core Details</h3>
+                <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-2xs space-y-3.5">
+                  <h3 className="font-bold text-slate-800 text-xs uppercase tracking-wider flex items-center text-indigo-600 border-b border-slate-100 pb-2">Personal &amp; Core Details</h3>
                   
-                  <div className="grid grid-cols-1 gap-3 mb-2.5 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4 items-start">
                     <div>
-                      <label className="block font-bold mb-1 text-slate-600 font-sans">Full Name <span className="text-slate-400 font-normal">(e.g. Ali Ahmed)</span>:</label>
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
+                        <span>Full Name:</span>
+                      </label>
                       <input
                         type="text" required
                         aria-label="Full Name"
                         placeholder="e.g. Ali Ahmed"
                         value={editEmpForm.fullName}
                         onChange={(e) => setEditEmpForm({ ...editEmpForm, fullName: e.target.value })}
-                        className="w-full p-1.5 border border-slate-300 rounded focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                        className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-sans text-slate-900 bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all focus:outline-none placeholder:text-slate-400"
                       />
                     </div>
                     <div>
-                      <label className="block font-bold mb-1 text-slate-600 font-sans">Official Email ID <span className="text-slate-400 font-normal">(e.g. ahmed@binishaqsoft.com)</span>:</label>
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
+                        <span>Official Email ID:</span>
+                      </label>
                       <input
                         type="email" required
                         aria-label="Official Email ID"
-                        placeholder="e.g. ahmed@binishaqsoft.com"
+                        placeholder="e.g. ahmed@binishaq.com"
                         value={editEmpForm.email}
                         onChange={(e) => setEditEmpForm({ ...editEmpForm, email: e.target.value })}
-                        className="w-full p-1.5 border border-slate-300 rounded focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                        className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-sans text-slate-900 bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all focus:outline-none placeholder:text-slate-400"
                       />
                     </div>
                     <div>
-                      <label className="block font-bold mb-1 text-slate-600 font-sans">Employee Code:</label>
-                      <div className="flex space-x-1 items-center">
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
+                        <span>Employee Code:</span>
+                      </label>
+                      <div className="flex space-x-1.5 items-center h-9">
                         <input
                           type="text"
                           aria-label="Employee Code"
@@ -4077,52 +4114,58 @@ export function WebPortal({
                           disabled={autoGenEditCode}
                           value={editEmpForm.employeeCode}
                           onChange={(e) => setEditEmpForm({ ...editEmpForm, employeeCode: e.target.value })}
-                          className="flex-1 p-1.5 border border-slate-300 rounded font-mono focus:ring-1 focus:ring-indigo-500 focus:outline-none disabled:bg-slate-100 disabled:text-slate-500"
+                          className="flex-1 h-9 px-3 border border-slate-300 rounded-lg font-mono text-xs text-slate-900 bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none disabled:bg-slate-100 disabled:text-slate-500 transition-all placeholder:text-slate-400"
                         />
-                        <label className="flex items-center space-x-1 whitespace-nowrap bg-slate-55 border border-slate-300 rounded p-1.5 hover:bg-slate-100 cursor-pointer select-none">
+                        <label className="h-9 px-2.5 flex items-center space-x-1 whitespace-nowrap bg-slate-100 border border-slate-300 rounded-lg hover:bg-slate-200 cursor-pointer select-none transition-colors">
                           <input
                             type="checkbox"
                             aria-label="Auto-generate Employee Code"
                             checked={autoGenEditCode}
                             onChange={(e) => setAutoGenEditCode(e.target.checked)}
-                            className="rounded text-indigo-600"
+                            className="rounded text-indigo-600 focus:ring-indigo-500"
                           />
-                          <span className="text-[10px] font-bold text-slate-700">Auto</span>
+                          <span className="text-xs font-bold text-slate-700">Auto</span>
                         </label>
                       </div>
                     </div>
                     <div>
-                      <label className="block font-bold mb-1 text-slate-600 font-sans">Pakistan CNIC <span className="text-slate-400 font-normal">(e.g. 42101-1234567-3)</span>:</label>
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
+                        <span>Pakistan CNIC:</span>
+                      </label>
                       <input
                         type="text" required
                         aria-label="Pakistan CNIC"
                         placeholder="e.g. 42101-1234567-3"
                         value={editEmpForm.cnic}
                         onChange={(e) => setEditEmpForm({ ...editEmpForm, cnic: formatCNIC(e.target.value) })}
-                        className="w-full p-1.5 border border-slate-300 rounded font-mono focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                        className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg font-mono text-xs text-slate-900 bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all focus:outline-none placeholder:text-slate-400"
                       />
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4 items-start">
                     <div>
-                      <label className="block font-bold mb-1 text-slate-600 font-sans">Mobile Contact <span className="text-slate-400 font-normal">(e.g. 0300-1234567)</span>:</label>
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
+                        <span>Mobile Contact:</span>
+                      </label>
                       <input
                         type="text" required
                         aria-label="Mobile Contact Number"
                         placeholder="e.g. 0300-1234567"
                         value={editEmpForm.contactNumber}
                         onChange={(e) => setEditEmpForm({ ...editEmpForm, contactNumber: e.target.value })}
-                        className="w-full p-1.5 border border-slate-300 rounded font-mono focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                        className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg font-mono text-xs text-slate-900 bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all focus:outline-none placeholder:text-slate-400"
                       />
                     </div>
                     <div>
-                      <label className="block font-bold mb-1 text-slate-600 font-sans">Gender:</label>
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
+                        <span>Gender:</span>
+                      </label>
                       <select
                         aria-label="Gender"
                         value={editEmpForm.gender}
                         onChange={(e) => setEditEmpForm({ ...editEmpForm, gender: e.target.value })}
-                        className="w-full p-1.5 bg-white border border-slate-300 rounded focus:ring-1"
+                        className="w-full h-9 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all focus:outline-none"
                       >
                         <option value="Male">Male</option>
                         <option value="Female">Female</option>
@@ -4130,12 +4173,14 @@ export function WebPortal({
                       </select>
                     </div>
                     <div>
-                      <label className="block font-bold mb-1 text-slate-600 font-sans">Marital Status:</label>
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
+                        <span>Marital Status:</span>
+                      </label>
                       <select
                         aria-label="Marital Status"
                         value={editEmpForm.maritalStatus}
                         onChange={(e) => setEditEmpForm({ ...editEmpForm, maritalStatus: e.target.value })}
-                        className="w-full p-1.5 bg-white border border-slate-300 rounded focus:ring-1"
+                        className="w-full h-9 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all focus:outline-none"
                       >
                         <option value="Single">Single</option>
                         <option value="Married">Married</option>
@@ -4144,25 +4189,32 @@ export function WebPortal({
                       </select>
                     </div>
                     <div>
-                      <label className="block font-bold mb-1 text-slate-600 font-sans">Date of Birth:</label>
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
+                        <span>Date of Birth:</span>
+                      </label>
                       <input
                         type="date" required
                         aria-label="Date of Birth"
                         value={editEmpForm.dateOfBirth}
                         onChange={(e) => setEditEmpForm({ ...editEmpForm, dateOfBirth: e.target.value })}
-                        className="w-full p-1.5 border border-slate-300 rounded focus:ring-1 focus:outline-none"
+                        className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg text-xs text-slate-900 bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all focus:outline-none"
                       />
                     </div>
-                    <div className="sm:col-span-2">
-                      <label className="block font-bold mb-1 text-slate-600 font-sans">Picture URL / Upload:</label>
-                      <div className="flex space-x-1 items-center">
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4 items-start">
+                    <div className="sm:col-span-2 lg:col-span-4">
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
+                        <span>Picture URL / Upload:</span>
+                      </label>
+                      <div className="flex space-x-2 items-center h-9">
                         <input
                           type="text"
                           aria-label="Picture URL"
                           placeholder="e.g. https://domain.com/pic.jpg"
                           value={editEmpForm.pictureUrl}
                           onChange={(e) => setEditEmpForm({ ...editEmpForm, pictureUrl: e.target.value })}
-                          className="flex-1 p-1.5 border border-slate-300 rounded focus:ring-1 focus:outline-none font-mono text-[9px]"
+                          className="flex-1 h-9 px-3 py-1.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none font-mono text-xs text-slate-900 bg-white transition-all placeholder:text-slate-400"
                         />
                         <input
                           type="file"
@@ -4174,7 +4226,7 @@ export function WebPortal({
                         />
                         <label 
                           htmlFor="edit-emp-pic-file"
-                          className="cursor-pointer bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded px-2.5 py-1.5 font-bold text-slate-700 text-center whitespace-nowrap"
+                          className="h-9 px-4 flex items-center justify-center cursor-pointer bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-lg font-bold text-slate-700 text-xs whitespace-nowrap transition-colors shadow-2xs"
                         >
                           Browse...
                         </label>
@@ -4184,41 +4236,41 @@ export function WebPortal({
                 </div>
 
                 {/* SECTION 2: ASSIGNMENT & REGIONAL GEOGRAPHY */}
-                <div className="border-b border-slate-100 pb-3">
-                  <h3 className="font-bold text-slate-800 text-[10px] uppercase tracking-wider mb-2.5 text-indigo-600">Organization &amp; Regional Assignment</h3>
+                <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-2xs space-y-3.5">
+                  <h3 className="font-bold text-slate-800 text-xs uppercase tracking-wider flex items-center text-indigo-600 border-b border-slate-100 pb-2">Organization &amp; Regional Assignment</h3>
                   
-                  <div className="grid grid-cols-1 gap-3 mb-2.5 sm:grid-cols-2 lg:grid-cols-3">
+                  <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3 items-start">
                     <div className="min-w-0">
-                      <label className="block font-bold mb-1 text-slate-600 font-sans">Assigned Branch:</label>
-                      <div className="flex min-w-0 items-center space-x-1">
-                        <select
-                          aria-label="Assigned Branch"
-                          value={editEmpForm.branchId}
-                          onChange={(e) => handleEditBranchChange(e.target.value)}
-                          className="min-w-0 w-full p-1.5 bg-white border border-slate-300 rounded focus:ring-1"
-                        >
-                          <option value="">{editBranchOptions.length ? 'Select Branch' : 'No branches configured for this company'}</option>
-                          {editBranchOptions.map(b => (
-                            <option key={b.id} value={b.id}>{b.name}{getExceptionalCurrentSuffix(b, editEmpForm.branchId, editingCompanyId)}</option>
-                          ))}
-                        </select>
-                      </div>
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
+                        <span>Assigned Branch:</span>
+                      </label>
+                      <select
+                        aria-label="Assigned Branch"
+                        value={editEmpForm.branchId}
+                        onChange={(e) => handleEditBranchChange(e.target.value)}
+                        className="w-full h-9 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all focus:outline-none"
+                      >
+                        <option value="">{editBranchOptions.length ? 'Select Branch' : 'No branches configured for this company'}</option>
+                        {editBranchOptions.map(b => (
+                          <option key={b.id} value={b.id}>{b.name}{getExceptionalCurrentSuffix(b, editEmpForm.branchId, editingCompanyId)}</option>
+                        ))}
+                      </select>
                     </div>
                     <div className="min-w-0">
-                      <label className="block font-bold mb-1 text-slate-600 font-sans">Department:</label>
-                      <div className="flex min-w-0 items-center space-x-1">
-                        <select
-                          aria-label="Department"
-                          value={editEmpForm.departmentId}
-                          onChange={(e) => handleEditDeptChange(e.target.value)}
-                          className="min-w-0 w-full p-1.5 bg-white border border-slate-300 rounded focus:ring-1"
-                        >
-                          <option value="">{savedDepartmentLabel && !editEmpForm.departmentId ? `Choose department (saved: ${savedDepartmentLabel})` : editDepartmentOptions.length ? 'Choose Department' : 'No departments configured for this company'}</option>
-                          {editDepartmentOptions.map(d => (
-                            <option key={d.id} value={d.id}>{d.name} — {localBranches.find(branch => branch.id === d.branchId)?.name || 'Unknown Branch'}{(d as Department & { status?: 'Active' | 'Inactive' }).status === 'Inactive' ? ' (Inactive — current)' : ''}</option>
-                          ))}
-                        </select>
-                      </div>
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
+                        <span>Department:</span>
+                      </label>
+                      <select
+                        aria-label="Department"
+                        value={editEmpForm.departmentId}
+                        onChange={(e) => handleEditDeptChange(e.target.value)}
+                        className="w-full h-9 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all focus:outline-none"
+                      >
+                        <option value="">{savedDepartmentLabel && !editEmpForm.departmentId ? `Choose department (saved: ${savedDepartmentLabel})` : editDepartmentOptions.length ? 'Choose Department' : 'No departments configured for this company'}</option>
+                        {editDepartmentOptions.map(d => (
+                          <option key={d.id} value={d.id}>{d.name} — {localBranches.find(branch => branch.id === d.branchId)?.name || 'Unknown Branch'}{(d as Department & { status?: 'Active' | 'Inactive' }).status === 'Inactive' ? ' (Inactive — current)' : ''}</option>
+                        ))}
+                      </select>
                       {!editEmpForm.departmentId && savedDepartmentLabel && (
                         <p className="mt-1 text-[10px] leading-tight text-amber-700">
                           Saved: {savedDepartmentLabel}{savedEditingDepartmentBranch ? ` — ${savedEditingDepartmentBranch.name}` : ''}. Choose a Department to confirm; its Branch will be applied automatically.
@@ -4227,68 +4279,68 @@ export function WebPortal({
                       {editDepartmentMoveNotice && <p className="mt-1 text-[10px] leading-tight text-amber-700">{editDepartmentMoveNotice}</p>}
                     </div>
                     <div className="min-w-0 sm:col-span-2 lg:col-span-1">
-                      <label className="block font-bold mb-1 text-slate-600 font-sans">Designation:</label>
-                      <div className="flex min-w-0 items-center space-x-1">
-                        <select
-                          aria-label="Designation"
-                          value={editEmpForm.designationId}
-                          onChange={(e) => setEditEmpForm({ ...editEmpForm, designationId: e.target.value })}
-                          className="min-w-0 w-full p-1.5 bg-white border border-slate-300 rounded focus:ring-1"
-                        >
-                          <option value="">{!editEmpForm.departmentId ? 'Choose a Department first' : savedDesignationLabel && !editEmpForm.designationId ? `Choose designation (saved: ${savedDesignationLabel})` : editDesignationOptions.length ? 'Choose Designation' : 'No designations configured for this Department'}</option>
-                          {editDesignationOptions.map(ds => (
-                            <option key={ds.id} value={ds.id}>{ds.title} (Grade {ds.grade}){(ds as Designation & { status?: 'Active' | 'Inactive' }).status === 'Inactive' ? ' (Inactive — current)' : ''}</option>
-                          ))}
-                        </select>
-                      </div>
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
+                        <span>Designation:</span>
+                      </label>
+                      <select
+                        aria-label="Designation"
+                        value={editEmpForm.designationId}
+                        onChange={(e) => setEditEmpForm({ ...editEmpForm, designationId: e.target.value })}
+                        className="w-full h-9 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all focus:outline-none"
+                      >
+                        <option value="">{!editEmpForm.departmentId ? 'Choose a Department first' : savedDesignationLabel && !editEmpForm.designationId ? `Choose designation (saved: ${savedDesignationLabel})` : editDesignationOptions.length ? 'Choose Designation' : 'No designations configured for this Department'}</option>
+                        {editDesignationOptions.map(ds => (
+                          <option key={ds.id} value={ds.id}>{ds.title} (Grade {ds.grade}){(ds as Designation & { status?: 'Active' | 'Inactive' }).status === 'Inactive' ? ' (Inactive — current)' : ''}</option>
+                        ))}
+                      </select>
                       {editEmpForm.departmentId && !editEmpForm.designationId && savedDesignationLabel && <p className="mt-1 text-[10px] leading-tight text-amber-700">Saved designation: {savedDesignationLabel}. Choose a valid Designation for this Department.</p>}
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4 items-start">
                     <div className="min-w-0">
-                      <label className="block font-bold mb-1 text-slate-600 font-sans">Zone:</label>
-                      <div className="flex min-w-0 items-center space-x-1">
-                        <select
-                          aria-label="Zone"
-                          value={editEmpForm.zoneId}
-                          onChange={(e) => setEditEmpForm({ ...editEmpForm, zoneId: e.target.value, ucTownId: '' })}
-                          className="min-w-0 w-full p-1.5 bg-white border border-slate-300 rounded focus:ring-1 focus:outline-none"
-                        >
-                          <option value="">{!editEmpForm.zoneId && editEmpForm.zone ? `Choose master zone (saved: ${editEmpForm.zone})` : editZoneOptions.length ? 'Choose master Zone' : 'No zones configured for this company'}</option>
-                          {editZoneOptions.map(item => <option key={item.id} value={item.id}>{item.name}{getExceptionalCurrentSuffix(item, editEmpForm.zoneId, editingCompanyId)}</option>)}
-                        </select>
-                      </div>
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
+                        <span>Zone:</span>
+                      </label>
+                      <select
+                        aria-label="Zone"
+                        value={editEmpForm.zoneId}
+                        onChange={(e) => setEditEmpForm({ ...editEmpForm, zoneId: e.target.value, ucTownId: '' })}
+                        className="w-full h-9 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all focus:outline-none"
+                      >
+                        <option value="">{!editEmpForm.zoneId && editEmpForm.zone ? `Choose master zone (saved: ${editEmpForm.zone})` : editZoneOptions.length ? 'Choose master Zone' : 'No zones configured for this company'}</option>
+                        {editZoneOptions.map(item => <option key={item.id} value={item.id}>{item.name}{getExceptionalCurrentSuffix(item, editEmpForm.zoneId, editingCompanyId)}</option>)}
+                      </select>
                       {!editEmpForm.zoneId && editEmpForm.zone && <p className="mt-1 text-[10px] leading-tight text-amber-700">Saved zone “{editEmpForm.zone}” is not linked to current Master Data. Choose its replacement.</p>}
                     </div>
                     <div className="min-w-0">
-                      <label className="block font-bold mb-1 text-slate-600 font-sans">UC / Town Information:</label>
-                      <div className="flex min-w-0 items-center space-x-1">
-                        <select
-                          aria-label="UC / Town"
-                          value={editEmpForm.ucTownId}
-                          onChange={(e) => setEditEmpForm({ ...editEmpForm, ucTownId: e.target.value })}
-                          disabled={!editEmpForm.zoneId}
-                          className="min-w-0 w-full p-1.5 bg-white border border-slate-300 rounded focus:ring-1 focus:outline-none disabled:bg-slate-100 disabled:text-slate-500"
-                        >
-                          <option value="">{!editEmpForm.zoneId ? 'Choose a master Zone first' : !editEmpForm.ucTownId && editEmpForm.ucTown ? `Choose UC / Town (saved: ${editEmpForm.ucTown})` : editUcTownOptions.length ? 'Choose UC / Town' : 'No UC/Towns configured for this Zone'}</option>
-                          {editUcTownOptions.map(item => <option key={item.id} value={item.id}>{item.name}{item.status === 'Inactive' ? ' (Inactive — current)' : ''}</option>)}
-                        </select>
-                      </div>
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
+                        <span>UC / Town Information:</span>
+                      </label>
+                      <select
+                        aria-label="UC / Town"
+                        value={editEmpForm.ucTownId}
+                        onChange={(e) => setEditEmpForm({ ...editEmpForm, ucTownId: e.target.value })}
+                        disabled={!editEmpForm.zoneId}
+                        className="w-full h-9 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all focus:outline-none disabled:bg-slate-100 disabled:text-slate-500"
+                      >
+                        <option value="">{!editEmpForm.zoneId ? 'Choose a master Zone first' : !editEmpForm.ucTownId && editEmpForm.ucTown ? `Choose UC / Town (saved: ${editEmpForm.ucTown})` : editUcTownOptions.length ? 'Choose UC / Town' : 'No UC/Towns configured for this Zone'}</option>
+                        {editUcTownOptions.map(item => <option key={item.id} value={item.id}>{item.name}{item.status === 'Inactive' ? ' (Inactive — current)' : ''}</option>)}
+                      </select>
                       {!editEmpForm.zoneId && <p className="mt-1 text-[10px] leading-tight text-amber-700">Select a Zone to enable UC / Town.</p>}
                       {editEmpForm.zoneId && !editEmpForm.ucTownId && editEmpForm.ucTown && <p className="mt-1 text-[10px] leading-tight text-amber-700">Saved UC / Town “{editEmpForm.ucTown}” is not linked to this Zone. Choose its replacement.</p>}
                       {editEmpForm.zoneId && editUcTownOptions.length === 0 && <p className="mt-1 text-[10px] leading-tight text-amber-700">No UC / Town records are configured for this Zone.</p>}
                     </div>
-                    <div className="flex items-center space-x-3 pt-3 sm:col-span-2">
-                      <label className="flex items-center space-x-1.5 font-medium select-none">
+                    <div className="sm:col-span-2 flex items-center space-x-3 pt-6">
+                      <label className="flex items-center space-x-2 font-medium select-none cursor-pointer">
                         <input
                           type="checkbox"
                           aria-label="Is Zone In Charge?"
                           checked={editEmpForm.isZoneInCharge}
                           onChange={(e) => setEditEmpForm({ ...editEmpForm, isZoneInCharge: e.target.checked })}
-                          className="rounded text-indigo-600 text-xs"
+                          className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4"
                         />
-                        <span className="whitespace-nowrap font-bold text-slate-600">Is Zone In Charge?</span>
+                        <span className="whitespace-nowrap font-bold text-slate-700 text-xs">Is Zone In Charge?</span>
                       </label>
                       {!editEmpForm.isZoneInCharge && (
                         <div className="flex-1">
@@ -4298,7 +4350,7 @@ export function WebPortal({
                             placeholder="Zone In Charge Name"
                             value={editEmpForm.zoneInChargeName || ''}
                             onChange={(e) => setEditEmpForm({ ...editEmpForm, zoneInChargeName: e.target.value })}
-                            className="w-full p-1.5 border border-slate-300 rounded focus:ring-1 focus:outline-none font-sans"
+                            className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-sans text-slate-900 bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all focus:outline-none placeholder:text-slate-400"
                           />
                         </div>
                       )}
@@ -4307,44 +4359,48 @@ export function WebPortal({
                 </div>
 
                 {/* SECTION 3: WAGES, ALLOWANCES & BANK */}
-                <div className="border-b border-slate-100 pb-3">
-                  <h3 className="font-bold text-slate-800 text-[10px] uppercase tracking-wider mb-2.5 text-indigo-600">Wage &amp; Custom Allowance configuration</h3>
+                <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-2xs space-y-3.5">
+                  <h3 className="font-bold text-slate-800 text-xs uppercase tracking-wider flex items-center text-indigo-600 border-b border-slate-100 pb-2">Wage &amp; Custom Allowance Configuration</h3>
                   
-                  <div className="grid grid-cols-1 gap-3 mb-2.5 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4 items-start">
                     <div className="min-w-0">
-                      <label className="block font-bold mb-1 text-slate-600 font-sans">Wage Type:</label>
-                      <div className="flex min-w-0 items-center space-x-1">
-                        <select
-                          aria-label="Wage Type"
-                          value={editEmpForm.wageTypeId}
-                          onChange={(e) => setEditEmpForm({ ...editEmpForm, wageTypeId: e.target.value })}
-                          className="min-w-0 w-full p-1.5 bg-white border border-slate-300 rounded focus:ring-1"
-                        >
-                          <option value="">{!editEmpForm.wageTypeId && editEmpForm.wageType ? `Choose wage type (saved: ${editEmpForm.wageType})` : editWageTypeOptions.length ? 'Choose Wage Type' : 'No wage types configured for this company'}</option>
-                          {editWageTypeOptions.map(item => <option key={item.id} value={item.id}>{item.name} ({item.calculationBasis}){getExceptionalCurrentSuffix(item, editEmpForm.wageTypeId, editingCompanyId)}</option>)}
-                        </select>
-                      </div>
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
+                        <span>Wage Type:</span>
+                      </label>
+                      <select
+                        aria-label="Wage Type"
+                        value={editEmpForm.wageTypeId}
+                        onChange={(e) => setEditEmpForm({ ...editEmpForm, wageTypeId: e.target.value })}
+                        className="w-full h-9 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all focus:outline-none"
+                      >
+                        <option value="">{!editEmpForm.wageTypeId && editEmpForm.wageType ? `Choose wage type (saved: ${editEmpForm.wageType})` : editWageTypeOptions.length ? 'Choose Wage Type' : 'No wage types configured for this company'}</option>
+                        {editWageTypeOptions.map(item => <option key={item.id} value={item.id}>{item.name} ({item.calculationBasis}){getExceptionalCurrentSuffix(item, editEmpForm.wageTypeId, editingCompanyId)}</option>)}
+                      </select>
                       {!editEmpForm.wageTypeId && editEmpForm.wageType && <p className="mt-1 text-[10px] leading-tight text-amber-700">Saved wage type “{editEmpForm.wageType}” is not linked to current Master Data. Choose its replacement.</p>}
                     </div>
                     <div>
-                      <label className="block font-bold mb-1 text-slate-600 font-sans">Basic Monthly Wage / Daily Rate (PKR) <span className="text-slate-400 font-normal">(e.g. 85000)</span>:</label>
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
+                        <span>Basic Monthly Wage / Daily Rate (PKR):</span>
+                      </label>
                       <input
                         type="number" required
                         aria-label="Basic Monthly Wage / Daily Rate (PKR)"
                         placeholder="e.g. 85000"
                         value={editEmpForm.basicSalary}
                         onChange={(e) => setEditEmpForm({ ...editEmpForm, basicSalary: Number(e.target.value) })}
-                        className="w-full p-1.5 border border-slate-300 rounded font-mono focus:ring-1 focus:outline-none"
+                        className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg font-mono text-xs text-slate-900 bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all focus:outline-none placeholder:text-slate-400"
                       />
                     </div>
                     <div>
-                      <label className="block font-bold mb-1 text-slate-600 font-sans">Disbursal Bank:</label>
-                      <div className="flex space-x-1 items-center">
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
+                        <span>Disbursal Bank:</span>
+                      </label>
+                      <div className="flex space-x-1.5 items-center h-9">
                         <select
                           aria-label="Disbursal Bank"
                           value={editEmpForm.bankName}
                           onChange={(e) => handleBankChange(e.target.value, true)}
-                          className="flex-1 p-1.5 bg-white border border-slate-300 rounded focus:ring-1 focus:outline-none text-[11px]"
+                          className="flex-1 h-9 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all focus:outline-none"
                         >
                           <option value="">-- Select Bank --</option>
                           {(selectedCountry === 'Pakistan' || !selectedCountry) ? (
@@ -4363,7 +4419,7 @@ export function WebPortal({
                               handleBankChange(val, true);
                             }
                           }}
-                          className="bg-slate-50 hover:bg-slate-100 border border-slate-300 text-slate-700 px-2 py-1.5 rounded font-bold text-xs"
+                          className="h-9 w-9 flex items-center justify-center bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 rounded-lg font-bold text-sm transition-colors shadow-2xs"
                           title="Add Custom Bank"
                         >
                           +
@@ -4371,77 +4427,81 @@ export function WebPortal({
                       </div>
                     </div>
                     <div>
-                      <label className="block font-bold mb-1 text-slate-600 font-sans">Account Number <span className="text-slate-400 font-normal">(e.g. 12345678901234)</span>:</label>
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
+                        <span>Account Number:</span>
+                      </label>
                       <input
                         type="text" required
                         aria-label="Bank Account Number"
                         placeholder="e.g. 12345678901234"
                         value={editEmpForm.bankAccountNumber}
                         onChange={(e) => handleAccountNumberChange(e.target.value, true)}
-                        className="w-full p-1.5 border border-slate-300 rounded font-mono focus:ring-1"
+                        className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg font-mono text-xs text-slate-900 bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all focus:outline-none placeholder:text-slate-400"
                       />
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 gap-3 mb-2.5 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4 items-start">
                     <div className="sm:col-span-2">
-                      <label className="block font-bold mb-1 text-slate-600 font-sans">PKR IBAN Number <span className="text-slate-400 font-normal">(e.g. PK42HABB0012345678901234)</span>:</label>
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
+                        <span>PKR IBAN Number:</span>
+                      </label>
                       <input
                         type="text" required
                         aria-label="PKR IBAN Number"
                         placeholder="e.g. PK42HABB0012345678901234"
                         value={editEmpForm.iban}
                         onChange={(e) => setEditEmpForm({ ...editEmpForm, iban: e.target.value })}
-                        className="w-full p-1.5 border border-slate-300 rounded font-mono focus:ring-1"
+                        className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg font-mono text-xs text-slate-900 bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all focus:outline-none placeholder:text-slate-400"
                       />
                     </div>
                     <div className="sm:col-span-2">
                       {(wageTypes.find(item => item.id === editEmpForm.wageTypeId)?.calculationBasis ?? (editEmpForm.wageType === 'Daily Wager' ? 'Daily' : 'Monthly')) === 'Monthly' && (
-                        <div className="bg-slate-50 p-2 rounded-lg border border-slate-200">
-                          <h4 className="font-bold text-slate-700 text-[9px] uppercase tracking-wider mb-1">Allowance Overrides (0 to default split)</h4>
-                          <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+                        <div className="bg-slate-50/80 p-2.5 rounded-xl border border-slate-200/90 shadow-2xs">
+                          <h4 className="font-bold text-slate-700 text-[10px] uppercase tracking-wider mb-1.5">Allowance Overrides (0 to default split)</h4>
+                          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                             <div>
-                              <label className="block text-[8px] font-semibold text-slate-500 font-sans">Rent:</label>
+                              <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">Rent:</label>
                               <input
                                 type="number"
                                 aria-label="House Rent Allowance"
                                 placeholder="Rent"
                                 value={editEmpForm.houseRentAllowance}
                                 onChange={(e) => setEditEmpForm({ ...editEmpForm, houseRentAllowance: Number(e.target.value) })}
-                                className="w-full p-1 border border-slate-300 rounded font-mono text-[9px]"
+                                className="w-full h-8 px-2 border border-slate-300 rounded-lg font-mono text-xs bg-white focus:ring-1 focus:ring-indigo-500"
                               />
                             </div>
                             <div>
-                              <label className="block text-[8px] font-semibold text-slate-500 font-sans">Conveyance:</label>
+                              <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">Conveyance:</label>
                               <input
                                 type="number"
                                 aria-label="Conveyance Allowance"
                                 placeholder="Conv"
                                 value={editEmpForm.conveyanceAllowance}
                                 onChange={(e) => setEditEmpForm({ ...editEmpForm, conveyanceAllowance: Number(e.target.value) })}
-                                className="w-full p-1 border border-slate-300 rounded font-mono text-[9px]"
+                                className="w-full h-8 px-2 border border-slate-300 rounded-lg font-mono text-xs bg-white focus:ring-1 focus:ring-indigo-500"
                               />
                             </div>
                             <div>
-                              <label className="block text-[8px] font-semibold text-slate-500 font-sans">Medical:</label>
+                              <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">Medical:</label>
                               <input
                                 type="number"
                                 aria-label="Medical Allowance"
                                 placeholder="Med"
                                 value={editEmpForm.medicalAllowance}
                                 onChange={(e) => setEditEmpForm({ ...editEmpForm, medicalAllowance: Number(e.target.value) })}
-                                className="w-full p-1 border border-slate-300 rounded font-mono text-[9px]"
+                                className="w-full h-8 px-2 border border-slate-300 rounded-lg font-mono text-xs bg-white focus:ring-1 focus:ring-indigo-500"
                               />
                             </div>
                             <div>
-                              <label className="block text-[8px] font-semibold text-slate-500 font-sans">Other:</label>
+                              <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">Other:</label>
                               <input
                                 type="number"
                                 aria-label="Other Allowances"
                                 placeholder="Other"
                                 value={editEmpForm.otherAllowances}
                                 onChange={(e) => setEditEmpForm({ ...editEmpForm, otherAllowances: Number(e.target.value) })}
-                                className="w-full p-1 border border-slate-300 rounded font-mono text-[9px]"
+                                className="w-full h-8 px-2 border border-slate-300 rounded-lg font-mono text-xs bg-white focus:ring-1 focus:ring-indigo-500"
                               />
                             </div>
                           </div>
@@ -4452,43 +4512,45 @@ export function WebPortal({
                 </div>
 
                 {/* SECTION 4: STATUTORY & TRUST FUNDS COMPLIANCE */}
-                <div className="space-y-2 pb-2">
-                  <h3 className="font-bold text-slate-800 text-[10px] uppercase tracking-wider text-indigo-600">Statutory &amp; Trust Compliance</h3>
+                <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-2xs space-y-3">
+                  <h3 className="font-bold text-slate-800 text-xs uppercase tracking-wider flex items-center text-indigo-600 border-b border-slate-100 pb-2">Statutory &amp; Trust Compliance</h3>
                   
-                  <div className="grid grid-cols-1 gap-3 bg-slate-50 p-2.5 rounded-lg border border-slate-200 items-start sm:grid-cols-2 lg:grid-cols-4">
-                    <div className="flex flex-col space-y-1">
-                      <label className="flex items-center space-x-1.5 font-medium select-none">
+                  <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4 items-stretch">
+                    <div className="bg-slate-50/80 p-3 rounded-xl border border-slate-200 flex flex-col justify-between space-y-2 h-full">
+                      <label className="flex items-center space-x-2 font-medium select-none cursor-pointer">
                         <input
                           type="checkbox"
                           aria-label="Enable EOBI"
                           checked={editEmpForm.eobiEnabled}
                           onChange={(e) => setEditEmpForm({ ...editEmpForm, eobiEnabled: e.target.checked })}
-                          className="rounded text-indigo-600 text-xs"
+                          className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4"
                         />
-                        <span className="font-semibold text-slate-650">Enable EOBI</span>
+                        <span className="font-bold text-slate-700 text-xs">Enable EOBI</span>
                       </label>
-                      {editEmpForm.eobiEnabled && (
+                      {editEmpForm.eobiEnabled ? (
                         <input
                           type="text"
                           aria-label="EOBI Registration Number"
                           placeholder="EOBI No (e.g. 1090123000)"
                           value={editEmpForm.eobiNumber}
                           onChange={(e) => setEditEmpForm({ ...editEmpForm, eobiNumber: e.target.value })}
-                          className="w-full p-1 border border-slate-300 rounded font-mono text-[10px]"
+                          className="w-full h-8 px-2.5 border border-slate-300 rounded-lg font-mono text-xs bg-white focus:ring-1 focus:ring-indigo-500"
                         />
+                      ) : (
+                        <div className="h-8 text-[11px] text-slate-400 italic flex items-center">EOBI Disabled</div>
                       )}
                     </div>
 
-                    <div className="flex flex-col space-y-1">
-                      <label className="flex items-center space-x-1.5 font-medium select-none">
+                    <div className="bg-slate-50/80 p-3 rounded-xl border border-slate-200 flex flex-col justify-between space-y-2 h-full">
+                      <label className="flex items-center space-x-2 font-medium select-none cursor-pointer">
                         <input
                           type="checkbox"
                           aria-label="Enable FBR Tax"
                           checked={editEmpForm.fbrEnabled}
                           onChange={(e) => setEditEmpForm({ ...editEmpForm, fbrEnabled: e.target.checked })}
-                          className="rounded text-indigo-600 text-xs"
+                          className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4"
                         />
-                        <span className="font-semibold text-slate-650">Enable FBR Tax</span>
+                        <span className="font-bold text-slate-700 text-xs">Enable FBR Tax</span>
                       </label>
                       <input
                         type="text"
@@ -4496,49 +4558,49 @@ export function WebPortal({
                         placeholder="PESSI SSN (e.g. SS-42-000)"
                         value={editEmpForm.socialSecurityNumber}
                         onChange={(e) => setEditEmpForm({ ...editEmpForm, socialSecurityNumber: e.target.value })}
-                        className="w-full p-1 border border-slate-300 rounded font-mono text-[10px]"
+                        className="w-full h-8 px-2.5 border border-slate-300 rounded-lg font-mono text-xs bg-white focus:ring-1 focus:ring-indigo-500"
                       />
                     </div>
 
-                    <div className="pt-1 select-none">
-                      <label className="flex items-center space-x-1.5 font-medium">
+                    <div className="bg-slate-50/80 p-3 rounded-xl border border-slate-200 flex flex-col justify-center space-y-2 h-full">
+                      <label className="flex items-center space-x-2 font-medium select-none cursor-pointer">
                         <input
                           type="checkbox"
                           aria-label="Opt In Provident Fund"
                           checked={editEmpForm.providentFundOptIn}
                           onChange={(e) => setEditEmpForm({ ...editEmpForm, providentFundOptIn: e.target.checked })}
-                          className="rounded text-indigo-600 text-xs"
+                          className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4"
                         />
-                        <span className="font-semibold text-slate-650">Opt In PF Fund</span>
+                        <span className="font-bold text-slate-700 text-xs">Opt In PF Fund</span>
                       </label>
                     </div>
 
-                    <div className="pt-1 select-none">
-                      <label className="flex items-center space-x-1.5 font-medium">
+                    <div className="bg-slate-50/80 p-3 rounded-xl border border-slate-200 flex flex-col justify-center space-y-2 h-full">
+                      <label className="flex items-center space-x-2 font-medium select-none cursor-pointer">
                         <input
                           type="checkbox"
                           aria-label="Opt In Gratuity"
                           checked={editEmpForm.gratuityOptIn}
                           onChange={(e) => setEditEmpForm({ ...editEmpForm, gratuityOptIn: e.target.checked })}
-                          className="rounded text-indigo-600 text-xs"
+                          className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4"
                         />
-                        <span className="font-semibold text-slate-650">Opt In Gratuity</span>
+                        <span className="font-bold text-slate-700 text-xs">Opt In Gratuity</span>
                       </label>
                     </div>
                   </div>
                 </div>
 
-                <div className="flex justify-end space-x-2.5 pt-3 border-t border-slate-200 flex-shrink-0">
+                <div className="flex justify-end space-x-3 pt-3 border-t border-slate-200 flex-shrink-0">
                   <button 
                     type="button"
                     onClick={() => { setShowEditEmpModal(false); setEditingEmployee(null); }}
-                    className="px-4 py-2 border border-slate-300 text-slate-700 hover:bg-slate-50 rounded-lg font-medium"
+                    className="px-5 py-2 border border-slate-300 text-slate-700 hover:bg-slate-100 rounded-xl font-semibold text-xs transition-colors"
                   >
                     Cancel
                   </button>
                   <button 
                     type="submit"
-                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold shadow-xs"
+                    className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-xs shadow-md transition-all active:scale-[0.98]"
                   >
                     Save Changes
                   </button>
@@ -4585,7 +4647,7 @@ export function WebPortal({
                       <span className="font-bold">Wage Type:</span> {resolveWageTypeName(showOffboardModal, wageTypes)}
                     </div>
                     <div>
-                      <span className="font-bold">Basic Rate:</span> PKR {showOffboardModal.basicSalary.toLocaleString()}
+                      <span className="font-bold">Basic Rate:</span> PKR {(showOffboardModal.basicSalary || 0).toLocaleString()}
                     </div>
                     <div>
                       <span className="font-bold">Gratuity Status:</span> {showOffboardModal.gratuityOptIn ? 'Opted In' : 'Not Opted In'}
