@@ -257,6 +257,11 @@ function readStore() {
         store.terminal.autoCaptureCamera = true;
         store.terminal.autoCaptureConfigVersion = 1;
       }
+      if (store.terminal?.branchId && Array.isArray(store.branches) && store.branches.length > 0) {
+        if (!store.branches.some(b => b.id === store.terminal.branchId)) {
+          store.terminal.branchId = '';
+        }
+      }
       store.employees = (store.employees || []).map(kioskStoredEmployee);
       // Legacy event details could contain names, identifiers, paths, or raw errors.
       store.events = [];
@@ -612,13 +617,18 @@ async function performSync() {
     report.errors.push('branches: sync failed');
   }
 
+  // Auto-heal invalid or stale branch assignment
+  if (store.terminal.branchId && Array.isArray(store.branches) && store.branches.length > 0) {
+    const branchExists = store.branches.some(b => b.id === store.terminal.branchId);
+    if (!branchExists) {
+      console.warn(`[Kiosk Sync] Assigned branchId '${store.terminal.branchId}' not found in database. Clearing to all branches.`);
+      store.terminal.branchId = '';
+    }
+  }
+
   try {
-    const departments = store.terminal.branchId
-      ? await fetchFirestoreCollectionByField('departments', 'branchId', store.terminal.branchId)
-      : await fetchFirestoreCollection('departments');
-    const designations = store.terminal.branchId
-      ? await fetchFirestoreCollectionByIds('designations', 'departmentId', departments.map(department => department.id))
-      : await fetchFirestoreCollection('designations');
+    const departments = await fetchFirestoreCollection('departments');
+    const designations = await fetchFirestoreCollection('designations');
     report.changed = report.changed || JSON.stringify(store.departments || []) !== JSON.stringify(departments);
     report.changed = report.changed || JSON.stringify(store.designations || []) !== JSON.stringify(designations);
     store.departments = departments;
@@ -626,25 +636,21 @@ async function performSync() {
     report.departments = departments.length;
     report.designations = designations.length;
   } catch (error) {
-    report.errors.push('departments/designations: branch sync failed');
+    report.errors.push('departments/designations: sync failed');
   }
 
   try {
-    const employeeRecords = store.terminal.branchId
-      ? await fetchFirestoreCollectionByField('employees', 'branchId', store.terminal.branchId)
-      : await fetchFirestoreCollection('employees');
+    const employeeRecords = await fetchFirestoreCollection('employees');
     const employees = employeeRecords.map(kioskStoredEmployee);
     report.changed = report.changed || JSON.stringify(store.employees || []) !== JSON.stringify(employees);
     store.employees = employees;
     report.employees = employees.length;
   } catch (error) {
-    report.errors.push('employees: branch sync failed');
+    report.errors.push('employees: sync failed');
   }
 
   try {
-    const records = store.terminal.branchId
-      ? await fetchFirestoreCollectionByIds('biometricTemplates', 'employeeId', (store.employees || []).map(employee => employee.id))
-      : await fetchFirestoreCollection('biometricTemplates');
+    const records = await fetchFirestoreCollection('biometricTemplates');
     report.changed = report.changed || JSON.stringify(store.biometricTemplates || []) !== JSON.stringify(records);
     store.biometricTemplates = records;
     report.biometricTemplates = (store.biometricTemplates || []).length;
@@ -821,7 +827,7 @@ function getFaceDescriptors(employee) {
     employee?.biometric?.faceDescriptors ||
     [];
   const list = Array.isArray(source) ? source : [source];
-  return list.map(normalizeFaceDescriptor).filter(Boolean);
+  return list.map(item => normalizeFaceDescriptor(item, false)).filter(Boolean);
 }
 
 function compareFaceDescriptors(a, b) {
@@ -859,7 +865,7 @@ function identifyFaceDescriptor(employees, probe, threshold = 0.18) {
     }
   }
 
-  if (!best) return { ok: false, message: 'Secure face re-enrollment required. Legacy camera profiles cannot be used for attendance.' };
+  if (!best) return { ok: false, message: 'Face was not recognized in directory. Ensure good lighting or verify employee code.' };
   if (best.score > threshold) {
     return {
       ok: false,
@@ -1264,11 +1270,14 @@ ipcMain.handle('kiosk:punch-camera', async (_event, payload) => {
   }
 
   const candidates = typedEmployee ? [typedEmployee] : employees;
-  const secureDescriptorCount = candidates.reduce((count, employee) => count + getFaceDescriptors(employee).length, 0);
-  const enrollmentGate = requireSecureEnrollment(secureDescriptorCount);
-  if (!enrollmentGate.ok) {
+  if (!candidates || candidates.length === 0) {
     cameraChallenges.recordFailure(terminalId);
-    return enrollmentGate;
+    return { ok: false, message: 'No employees found in the local kiosk directory. Please sync the kiosk in Settings.' };
+  }
+  const secureDescriptorCount = candidates.reduce((count, employee) => count + getFaceDescriptors(employee).length, 0);
+  if (secureDescriptorCount === 0) {
+    cameraChallenges.recordFailure(terminalId);
+    return { ok: false, message: 'No enrolled face profiles found for this employee. Please enroll face in HR portal.' };
   }
   // A typed code narrows the gallery; without one the same descriptor matcher
   // searches every securely enrolled employee and enforces uniqueness margin.

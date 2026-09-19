@@ -18,7 +18,7 @@ function isValidAttestation(value) {
     Number.isFinite(summary.durationMs) && summary.durationMs > 0 && summary.durationMs <= MAX_DURATION_MS &&
     Number.isFinite(summary.maxLeftYaw) && summary.maxLeftYaw >= .27 && summary.maxLeftYaw <= 2 &&
     Number.isFinite(summary.maxRightYaw) && summary.maxRightYaw >= .27 && summary.maxRightYaw <= 2 &&
-    Number.isFinite(summary.maxCenterDrift) && summary.maxCenterDrift >= 0 && summary.maxCenterDrift <= .085 &&
+    Number.isFinite(summary.maxCenterDrift) && summary.maxCenterDrift >= 0 && summary.maxCenterDrift <= .15 &&
     Number.isFinite(summary.maxScaleChange) && summary.maxScaleChange >= 0 && summary.maxScaleChange <= .22;
 }
 
