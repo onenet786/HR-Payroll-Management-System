@@ -36,21 +36,30 @@ async function authenticate(req, res, next) {
       return res.status(401).json({ error: 'Authentication service not initialized.', correlationId: req.correlationId });
     }
 
-
-    let result = await pool.query(
-      `SELECT data FROM hr_documents WHERE collection_name = 'users' AND document_id = $1`,
-      [token.uid],
-    );
+    let result;
+    try {
+      result = await pool.query(`SELECT data FROM users WHERE id = $1`, [token.uid]);
+    } catch {
+      result = await pool.query(
+        `SELECT data FROM hr_documents WHERE collection_name = 'users' AND document_id = $1`,
+        [token.uid],
+      );
+    }
     let profile = result.rows[0]?.data;
 
     if (!profile || profile.status !== 'Active') {
       return res.status(403).json({ error: 'Active user profile required.', correlationId: req.correlationId });
     }
 
-    const roleResult = await pool.query(
-      `SELECT data FROM hr_documents WHERE collection_name = 'roles' AND document_id = $1`,
-      [profile.roleId],
-    );
+    let roleResult;
+    try {
+      roleResult = await pool.query(`SELECT data FROM roles WHERE id = $1`, [profile.roleId]);
+    } catch {
+      roleResult = await pool.query(
+        `SELECT data FROM hr_documents WHERE collection_name = 'roles' AND document_id = $1`,
+        [profile.roleId],
+      );
+    }
 
     req.identity = {
       uid: token.uid,

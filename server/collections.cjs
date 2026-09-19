@@ -21,7 +21,73 @@ const COLLECTION_POLICY = Object.freeze({
   notifications: { read: 'selfEmployeeOr:manage_employees', write: 'manage_employeesOr:manage_payroll' },
 });
 
-const policyFor = name => COLLECTION_POLICY[name] || null;
+const COLLECTION_TO_TABLE = Object.freeze({
+  companies: 'companies',
+  branches: 'branches',
+  departments: 'departments',
+  designations: 'designations',
+  zones: 'zones',
+  ucTowns: 'uc_towns',
+  uc_towns: 'uc_towns',
+  wageTypes: 'wage_types',
+  wage_types: 'wage_types',
+  holidays: 'holidays',
+  taxSlabs: 'tax_slabs',
+  tax_slabs: 'tax_slabs',
+  statConfig: 'stat_config',
+  stat_config: 'stat_config',
+  roles: 'roles',
+  users: 'users',
+  employees: 'employees',
+  biometricTemplates: 'biometric_templates',
+  biometric_templates: 'biometric_templates',
+  attendances: 'attendances',
+  mobileDutyAuthorizations: 'mobile_duty_authorizations',
+  mobile_duty_authorizations: 'mobile_duty_authorizations',
+  leaves: 'leaves',
+  payrollRuns: 'payroll_runs',
+  payroll_runs: 'payroll_runs',
+  payrollPayslips: 'payroll_payslips',
+  payroll_payslips: 'payroll_payslips',
+  loanAdvances: 'loan_advances',
+  loan_advances: 'loan_advances',
+  salaryRevisions: 'salary_revisions',
+  salary_revisions: 'salary_revisions',
+  performanceReviews: 'performance_reviews',
+  performance_reviews: 'performance_reviews',
+  companyAssets: 'company_assets',
+  company_assets: 'company_assets',
+  jobPostings: 'job_postings',
+  job_postings: 'job_postings',
+  jobApplications: 'job_applications',
+  job_applications: 'job_applications',
+  gratuitySettlements: 'gratuity_settlements',
+  gratuity_settlements: 'gratuity_settlements',
+  notifications: 'notifications',
+});
+
+const VALID_TABLES = new Set(Object.values(COLLECTION_TO_TABLE));
+
+function getTableName(name) {
+  if (!name || typeof name !== 'string') return null;
+  const mapped = COLLECTION_TO_TABLE[name];
+  if (mapped && VALID_TABLES.has(mapped)) return mapped;
+  if (VALID_TABLES.has(name)) return name;
+  return null;
+}
+
+const policyFor = name => {
+  if (!name) return null;
+  if (COLLECTION_POLICY[name]) return COLLECTION_POLICY[name];
+  // Check if snake_case table name was passed, map back to camelCase policy
+  for (const [key, table] of Object.entries(COLLECTION_TO_TABLE)) {
+    if (table === name && COLLECTION_POLICY[key]) {
+      return COLLECTION_POLICY[key];
+    }
+  }
+  return null;
+};
+
 const hasAny = (identity, csv) => csv.split(',').some(permission => identity.permissions.has(permission));
 
 function allowed(rule, identity, documentId, employeeId) {
@@ -35,4 +101,11 @@ function allowed(rule, identity, documentId, employeeId) {
   return identity.permissions.has(rule);
 }
 
-module.exports = { COLLECTION_POLICY, policyFor, allowed };
+module.exports = {
+  COLLECTION_POLICY,
+  COLLECTION_TO_TABLE,
+  VALID_TABLES,
+  getTableName,
+  policyFor,
+  allowed
+};

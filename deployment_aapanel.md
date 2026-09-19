@@ -38,11 +38,12 @@ This guide provides step-by-step instructions to deploy the **Bin Ishaq HR & Pay
    # On CentOS / AlmaLinux / Rocky Linux:
    sudo dnf install -y postgresql-contrib
    ```
-4. Open aaPanel Terminal or SSH into your VPS and run the database migration script:
+4. Open aaPanel Terminal or SSH into your VPS and run the database migration scripts:
    ```bash
    sudo -u postgres psql -d hr_payroll -f /www/wwwroot/hr-payroll/postgres/migrations/001_initial.sql
+   sudo -u postgres psql -d hr_payroll -f /www/wwwroot/hr-payroll/postgres/migrations/002_relational_tables.sql
    ```
-   *Note: `001_initial.sql` is designed with safe exception handlers for `pgcrypto` and native `gen_random_uuid()` support.*
+   *Alternatively, run the automated migration runner: `node scripts/postgres-migrate.cjs`*
 
 ---
 
@@ -244,19 +245,22 @@ If a user account like `kiosk@gmail.com` returns "Invalid email or password" on 
 
 ### 1. View all active user accounts in PostgreSQL:
 ```bash
-sudo -u postgres psql -d hr_payroll -c "SELECT document_id, data->>'email' AS email, data->>'status' AS status, data->>'roleId' AS role FROM hr_documents WHERE collection_name = 'users';"
+sudo -u postgres psql -d hr_payroll -c "SELECT id, username, email, status, role_id FROM users;"
 ```
 
 ### 2. Reset or Create `kiosk@gmail.com` with a plain password (e.g. `kiosk123456`):
 ```bash
 sudo -u postgres psql -d hr_payroll -c "
-INSERT INTO hr_documents (collection_name, document_id, data)
+INSERT INTO users (id, username, email, role_id, status, data)
 VALUES (
-  'users',
   'usr-kiosk',
+  'kiosk@gmail.com',
+  'kiosk@gmail.com',
+  'role-admin',
+  'Active',
   '{\"id\":\"usr-kiosk\",\"username\":\"kiosk@gmail.com\",\"email\":\"kiosk@gmail.com\",\"fullName\":\"Kiosk Terminal\",\"password\":\"kiosk123456\",\"roleId\":\"role-admin\",\"status\":\"Active\"}'::jsonb
 )
-ON CONFLICT (collection_name, document_id) 
-DO UPDATE SET data = EXCLUDED.data;
+ON CONFLICT (id) 
+DO UPDATE SET data = EXCLUDED.data, status = EXCLUDED.status;
 "
 ```

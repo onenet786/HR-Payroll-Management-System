@@ -108,6 +108,7 @@ if (!process.env.DATA_BACKEND || (process.env.DATA_BACKEND || '').trim().toLower
   const bcrypt = require('bcryptjs');
   const { authenticate } = require('./server/auth.cjs');
   const documentRoutes = require('./server/documents.cjs');
+  const { getTableName } = require('./server/collections.cjs');
   app.use('/api/documents', authenticate, documentRoutes);
 
   app.post('/api/auth/login', async (req, res, next) => {
@@ -119,10 +120,18 @@ if (!process.env.DATA_BACKEND || (process.env.DATA_BACKEND || '').trim().toLower
       const cleanEmail = String(email).trim().toLowerCase();
 
       const { pool } = require('./server/db.cjs');
-      const result = await pool.query(
-        `SELECT document_id, data FROM hr_documents WHERE collection_name = 'users' AND (LOWER(data->>'email') = $1 OR LOWER(data->>'username') = $1)`,
-        [cleanEmail],
-      );
+      let result;
+      try {
+        result = await pool.query(
+          `SELECT id AS document_id, data FROM users WHERE (LOWER(email) = $1 OR LOWER(username) = $1 OR LOWER(data->>'email') = $1 OR LOWER(data->>'username') = $1)`,
+          [cleanEmail],
+        );
+      } catch {
+        result = await pool.query(
+          `SELECT document_id, data FROM hr_documents WHERE collection_name = 'users' AND (LOWER(data->>'email') = $1 OR LOWER(data->>'username') = $1)`,
+          [cleanEmail],
+        );
+      }
 
       const userDoc = result.rows[0];
       if (!userDoc) {
@@ -145,7 +154,6 @@ if (!process.env.DATA_BACKEND || (process.env.DATA_BACKEND || '').trim().toLower
         return res.status(401).json({ error: 'Invalid email or password.' });
       }
 
-
       const token = userDoc.document_id;
       const { passwordHash: _, ...safeUser } = user;
       return res.json({ token, user: safeUser });
@@ -157,9 +165,14 @@ if (!process.env.DATA_BACKEND || (process.env.DATA_BACKEND || '').trim().toLower
   app.get('/api/auth/status', async (_req, res, next) => {
     try {
       const { pool } = require('./server/db.cjs');
-      const result = await pool.query(
-        `SELECT COUNT(*) FROM hr_documents WHERE collection_name = 'users'`,
-      );
+      let result;
+      try {
+        result = await pool.query(`SELECT COUNT(*) FROM users`);
+      } catch {
+        result = await pool.query(
+          `SELECT COUNT(*) FROM hr_documents WHERE collection_name = 'users'`,
+        );
+      }
       const userCount = Number(result.rows[0]?.count || 0);
       return res.json({ hasUsers: userCount > 0, userCount });
     } catch (err) {
@@ -170,15 +183,22 @@ if (!process.env.DATA_BACKEND || (process.env.DATA_BACKEND || '').trim().toLower
   app.get('/api/kiosk/sync/:collection', async (req, res, next) => {
     try {
       const name = req.params.collection;
-      const allowedCollections = ['branches', 'departments', 'designations', 'employees', 'biometricTemplates', 'attendances', 'companies'];
-      if (!allowedCollections.includes(name)) {
+      const table = getTableName(name);
+      if (!table) {
         return res.status(404).json({ error: 'Unknown collection.' });
       }
       const { pool } = require('./server/db.cjs');
-      const result = await pool.query(
-        `SELECT document_id, data FROM hr_documents WHERE collection_name = $1 ORDER BY document_id LIMIT 10000`,
-        [name]
-      );
+      let result;
+      try {
+        result = await pool.query(
+          `SELECT id AS document_id, data FROM ${table} ORDER BY id LIMIT 10000`
+        );
+      } catch {
+        result = await pool.query(
+          `SELECT document_id, data FROM hr_documents WHERE collection_name = $1 ORDER BY document_id LIMIT 10000`,
+          [name]
+        );
+      }
       const items = result.rows.map(row => ({ id: row.document_id, ...row.data }));
       return res.json({ documents: items });
     } catch (err) {
@@ -192,7 +212,26 @@ if (!process.env.DATA_BACKEND || (process.env.DATA_BACKEND || '').trim().toLower
       if (!collection || !documentId || !data) {
         return res.status(400).json({ error: 'collection, documentId, and data are required.' });
       }
+      const table = getTableName(collection);
       const { pool } = require('./server/db.cjs');
+      const employeeId = data.employeeId || null;
+      const status = typeof data.status === 'string' ? data.status : null;
+
+      if (table) {
+        try {
+          await pool.query(
+            `INSERT INTO ${table} (id, employee_id, status, data, version, updated_at)
+             VALUES ($1, $2, $3, $4::jsonb, 1, NOW())
+             ON CONFLICT (id)
+             DO UPDATE SET data = EXCLUDED.data, employee_id = COALESCE(EXCLUDED.employee_id, ${table}.employee_id), status = COALESCE(EXCLUDED.status, ${table}.status), version = ${table}.version + 1, updated_at = NOW()`,
+            [documentId, employeeId, status, JSON.stringify(data)]
+          );
+          return res.json({ ok: true, id: documentId });
+        } catch {
+          // fall through to fallback
+        }
+      }
+
       await pool.query(
         `INSERT INTO hr_documents (collection_name, document_id, data)
          VALUES ($1, $2, $3)
@@ -205,8 +244,6 @@ if (!process.env.DATA_BACKEND || (process.env.DATA_BACKEND || '').trim().toLower
       next(err);
     }
   });
-
-
 
   app.post('/api/auth/setup', async (req, res, next) => {
     try {
@@ -224,7 +261,6 @@ if (!process.env.DATA_BACKEND || (process.env.DATA_BACKEND || '').trim().toLower
         name: 'Super Admin',
         permissions: ['view_dashboard', 'manage_settings', 'manage_access', 'manage_employees', 'manage_attendance', 'manage_leaves', 'manage_payroll', 'manage_mobile_duty', 'use_kiosk'],
       };
-
 
       const adminUser = {
         id: 'usr-admin',
@@ -254,22 +290,42 @@ if (!process.env.DATA_BACKEND || (process.env.DATA_BACKEND || '').trim().toLower
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
-        await client.query(
-          `INSERT INTO hr_documents(collection_name, document_id, data) VALUES('roles', 'role-admin', $1::jsonb) ON CONFLICT DO NOTHING`,
-          [JSON.stringify(adminRole)],
-        );
-        await client.query(
-          `INSERT INTO hr_documents(collection_name, document_id, data) VALUES('users', 'usr-admin', $1::jsonb) ON CONFLICT (collection_name, document_id) DO UPDATE SET data = EXCLUDED.data`,
-          [JSON.stringify(adminUser)],
-        );
-        await client.query(
-          `INSERT INTO hr_documents(collection_name, document_id, data) VALUES('companies', 'c1', $1::jsonb) ON CONFLICT DO NOTHING`,
-          [JSON.stringify(company)],
-        );
-        await client.query(
-          `INSERT INTO hr_documents(collection_name, document_id, data) VALUES('branches', 'b1', $1::jsonb) ON CONFLICT DO NOTHING`,
-          [JSON.stringify(branch)],
-        );
+        try {
+          await client.query(
+            `INSERT INTO roles(id, name, status, data) VALUES('role-admin', 'Super Admin', 'Active', $1::jsonb) ON CONFLICT DO NOTHING`,
+            [JSON.stringify(adminRole)],
+          );
+          await client.query(
+            `INSERT INTO users(id, username, email, role_id, status, data) VALUES('usr-admin', $1, $1, 'role-admin', 'Active', $2::jsonb) ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, email = EXCLUDED.email`,
+            [cleanEmail, JSON.stringify(adminUser)],
+          );
+          await client.query(
+            `INSERT INTO companies(id, name, status, data) VALUES('c1', $1, 'Active', $2::jsonb) ON CONFLICT DO NOTHING`,
+            [company.name, JSON.stringify(company)],
+          );
+          await client.query(
+            `INSERT INTO branches(id, company_id, name, city, province, status, data) VALUES('b1', 'c1', 'Head Office', 'Karachi', 'Sindh', 'Active', $1::jsonb) ON CONFLICT DO NOTHING`,
+            [JSON.stringify(branch)],
+          );
+        } catch {
+          // fallback if individual tables are not created yet
+          await client.query(
+            `INSERT INTO hr_documents(collection_name, document_id, data) VALUES('roles', 'role-admin', $1::jsonb) ON CONFLICT DO NOTHING`,
+            [JSON.stringify(adminRole)],
+          );
+          await client.query(
+            `INSERT INTO hr_documents(collection_name, document_id, data) VALUES('users', 'usr-admin', $1::jsonb) ON CONFLICT (collection_name, document_id) DO UPDATE SET data = EXCLUDED.data`,
+            [JSON.stringify(adminUser)],
+          );
+          await client.query(
+            `INSERT INTO hr_documents(collection_name, document_id, data) VALUES('companies', 'c1', $1::jsonb) ON CONFLICT DO NOTHING`,
+            [JSON.stringify(company)],
+          );
+          await client.query(
+            `INSERT INTO hr_documents(collection_name, document_id, data) VALUES('branches', 'b1', $1::jsonb) ON CONFLICT DO NOTHING`,
+            [JSON.stringify(branch)],
+          );
+        }
         await client.query('COMMIT');
       } catch (err) {
         await client.query('ROLLBACK');
