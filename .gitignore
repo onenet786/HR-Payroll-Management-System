@@ -1,8 +1,8 @@
 node_modules/
 build/
 dist/
-dist-kiosk/
-dist-windows/
+dist-kiosk*/
+dist-windows*/
 coverage/
 backups/
 .history/
