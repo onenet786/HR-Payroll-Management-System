@@ -91,17 +91,33 @@ router.put('/:collection/:id', async (req, res, next) => {
       }
       const version = existing ? Number(existing.version) + 1 : 1;
       const status = typeof req.body.status === 'string' ? req.body.status : (table === 'users' || table === 'companies' ? 'Active' : null);
-      await client.query(
-        `INSERT INTO ${table}(id, employee_id, status, data, version, updated_at)
-         VALUES($1, $2, $3, $4::jsonb, $5, now())
-         ON CONFLICT(id) DO UPDATE SET
-           employee_id = EXCLUDED.employee_id,
-           status = COALESCE(EXCLUDED.status, ${table}.status),
-           data = EXCLUDED.data,
-           version = EXCLUDED.version,
-           updated_at = now()`,
-        [id, employeeId, status, JSON.stringify({ ...req.body, id }), version],
-      );
+      if (table === 'attendances') {
+        const recordDate = req.body.date || (typeof req.body.punchIn === 'string' && req.body.punchIn.length >= 10 ? req.body.punchIn.slice(0, 10) : null);
+        await client.query(
+          `INSERT INTO attendances(id, employee_id, date, status, data, version, updated_at)
+           VALUES($1, $2, $3, $4, $5::jsonb, $6, now())
+           ON CONFLICT(id) DO UPDATE SET
+             employee_id = EXCLUDED.employee_id,
+             date = COALESCE(EXCLUDED.date, attendances.date),
+             status = COALESCE(EXCLUDED.status, attendances.status),
+             data = EXCLUDED.data,
+             version = EXCLUDED.version,
+             updated_at = now()`,
+          [id, employeeId, recordDate, status, JSON.stringify({ ...req.body, id }), version],
+        );
+      } else {
+        await client.query(
+          `INSERT INTO ${table}(id, employee_id, status, data, version, updated_at)
+           VALUES($1, $2, $3, $4::jsonb, $5, now())
+           ON CONFLICT(id) DO UPDATE SET
+             employee_id = EXCLUDED.employee_id,
+             status = COALESCE(EXCLUDED.status, ${table}.status),
+             data = EXCLUDED.data,
+             version = EXCLUDED.version,
+             updated_at = now()`,
+          [id, employeeId, status, JSON.stringify({ ...req.body, id }), version],
+        );
+      }
       await client.query(
         `INSERT INTO hr_audit_log(actor_uid,actor_role_id,action,collection_name,document_id,previous_version,new_version,previous_data,new_data,correlation_id,source_ip)
          VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10,$11)`,

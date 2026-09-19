@@ -217,7 +217,26 @@ if (!process.env.DATA_BACKEND || (process.env.DATA_BACKEND || '').trim().toLower
       const employeeId = data.employeeId || null;
       const status = typeof data.status === 'string' ? data.status : null;
 
-      if (table) {
+      if (table === 'attendances') {
+        const punchDate = data.date || (typeof data.punchIn === 'string' && data.punchIn.length >= 10 ? data.punchIn.slice(0, 10) : null);
+        try {
+          await pool.query(
+            `INSERT INTO attendances (id, employee_id, date, status, data, version, updated_at)
+             VALUES ($1, $2, $3, $4, $5::jsonb, 1, NOW())
+             ON CONFLICT (id)
+             DO UPDATE SET data = EXCLUDED.data,
+                           employee_id = COALESCE(EXCLUDED.employee_id, attendances.employee_id),
+                           date = COALESCE(EXCLUDED.date, attendances.date),
+                           status = COALESCE(EXCLUDED.status, attendances.status),
+                           version = attendances.version + 1,
+                           updated_at = NOW()`,
+            [documentId, employeeId, punchDate, status, JSON.stringify(data)]
+          );
+          return res.json({ ok: true, id: documentId });
+        } catch {
+          // fall through to fallback
+        }
+      } else if (table) {
         try {
           await pool.query(
             `INSERT INTO ${table} (id, employee_id, status, data, version, updated_at)
