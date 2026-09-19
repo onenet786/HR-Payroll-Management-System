@@ -1559,22 +1559,24 @@ export function WebPortal({
                   </div>
 
                   {/* Sub-tabs Selection */}
-                  <div className="flex border-b border-slate-200 space-x-4 mb-4 select-none">
-                    <button 
-                      onClick={() => setEmpSubTab('list')}
-                      className={`pb-2 text-xs font-bold border-b-2 transition uppercase tracking-wider ${empSubTab === 'list' ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-slate-500 hover:text-slate-900'}`}
-                    >
-                      Employee Records List
-                    </button>
-                    <button 
-                      onClick={() => setEmpSubTab('reports')}
-                      className={`pb-2 text-xs font-bold border-b-2 transition uppercase tracking-wider ${empSubTab === 'reports' ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-slate-500 hover:text-slate-900'}`}
-                    >
-                      UC / Zone / Supervisor Analytics Reports
-                    </button>
-                  </div>
+                  {activeZones.length > 0 && (
+                    <div className="flex border-b border-slate-200 space-x-4 mb-4 select-none">
+                      <button 
+                        onClick={() => setEmpSubTab('list')}
+                        className={`pb-2 text-xs font-bold border-b-2 transition uppercase tracking-wider ${empSubTab === 'list' ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-slate-500 hover:text-slate-900'}`}
+                      >
+                        Employee Records List
+                      </button>
+                      <button 
+                        onClick={() => setEmpSubTab('reports')}
+                        className={`pb-2 text-xs font-bold border-b-2 transition uppercase tracking-wider ${empSubTab === 'reports' ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-slate-500 hover:text-slate-900'}`}
+                      >
+                        UC / Zone / Supervisor Analytics Reports
+                      </button>
+                    </div>
+                  )}
 
-                  {empSubTab === 'list' ? (
+                  {empSubTab === 'list' || activeZones.length === 0 ? (
                     /* Grid or Table listing of employees */
                     <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                       <div className="overflow-x-auto">
@@ -3744,61 +3746,63 @@ export function WebPortal({
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4 items-start">
-                    <div className="min-w-0">
-                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
-                        <span>Zone:</span>
-                      </label>
-                      <select
-                        aria-label="Zone"
-                        value={newEmpForm.zoneId}
-                        onChange={(e) => setNewEmpForm({ ...newEmpForm, zoneId: e.target.value, ucTownId: '' })}
-                        className="w-full h-9 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all focus:outline-none"
-                      >
-                        <option value="">{activeZones.length ? 'Select Zone' : 'No zones configured in Master Data'}</option>
-                        {activeZones.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
-                      </select>
-                    </div>
-                    <div className="min-w-0">
-                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
-                        <span>UC / Town Information:</span>
-                      </label>
-                      <select
-                        aria-label="UC / Town"
-                        value={newEmpForm.ucTownId}
-                        onChange={(e) => setNewEmpForm({ ...newEmpForm, ucTownId: e.target.value })}
-                        disabled={!newEmpForm.zoneId}
-                        className="w-full h-9 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all focus:outline-none disabled:bg-slate-100 disabled:text-slate-500"
-                      >
-                        <option value="">{!newEmpForm.zoneId ? 'Select a zone first' : ucTowns.filter(item => item.zoneId === newEmpForm.zoneId && item.status === 'Active').length ? 'Select UC / Town' : 'No UC/Towns configured in Master Data'}</option>
-                        {ucTowns.filter(item => item.zoneId === newEmpForm.zoneId && item.status === 'Active').map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
-                      </select>
-                    </div>
-                    <div className="sm:col-span-2 flex items-center space-x-3 pt-6">
-                      <label className="flex items-center space-x-2 font-medium select-none cursor-pointer">
-                        <input
-                          type="checkbox"
-                          aria-label="Is Zone In Charge?"
-                          checked={newEmpForm.isZoneInCharge}
-                          onChange={(e) => setNewEmpForm({ ...newEmpForm, isZoneInCharge: e.target.checked })}
-                          className="rounded text-emerald-600 focus:ring-emerald-500 w-4 h-4"
-                        />
-                        <span className="whitespace-nowrap font-bold text-slate-700 text-xs">Is Zone In Charge?</span>
-                      </label>
-                      {!newEmpForm.isZoneInCharge && (
-                        <div className="flex-1">
+                  {activeZones.length > 0 && (
+                    <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4 items-start">
+                      <div className="min-w-0">
+                        <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
+                          <span>Zone:</span>
+                        </label>
+                        <select
+                          aria-label="Zone"
+                          value={newEmpForm.zoneId}
+                          onChange={(e) => setNewEmpForm({ ...newEmpForm, zoneId: e.target.value, ucTownId: '' })}
+                          className="w-full h-9 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all focus:outline-none"
+                        >
+                          <option value="">{activeZones.length ? 'Select Zone' : 'No zones configured in Master Data'}</option>
+                          {activeZones.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+                        </select>
+                      </div>
+                      <div className="min-w-0">
+                        <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
+                          <span>UC / Town Information:</span>
+                        </label>
+                        <select
+                          aria-label="UC / Town"
+                          value={newEmpForm.ucTownId}
+                          onChange={(e) => setNewEmpForm({ ...newEmpForm, ucTownId: e.target.value })}
+                          disabled={!newEmpForm.zoneId}
+                          className="w-full h-9 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all focus:outline-none disabled:bg-slate-100 disabled:text-slate-500"
+                        >
+                          <option value="">{!newEmpForm.zoneId ? 'Select a zone first' : ucTowns.filter(item => item.zoneId === newEmpForm.zoneId && item.status === 'Active').length ? 'Select UC / Town' : 'No UC/Towns configured in Master Data'}</option>
+                          {ucTowns.filter(item => item.zoneId === newEmpForm.zoneId && item.status === 'Active').map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+                        </select>
+                      </div>
+                      <div className="sm:col-span-2 flex items-center space-x-3 pt-6">
+                        <label className="flex items-center space-x-2 font-medium select-none cursor-pointer">
                           <input
-                            type="text"
-                            aria-label="Zone In Charge Name"
-                            placeholder="Zone In Charge Name"
-                            value={newEmpForm.zoneInChargeName}
-                            onChange={(e) => setNewEmpForm({ ...newEmpForm, zoneInChargeName: e.target.value })}
-                            className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-sans text-slate-900 bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all focus:outline-none placeholder:text-slate-400"
+                            type="checkbox"
+                            aria-label="Is Zone In Charge?"
+                            checked={newEmpForm.isZoneInCharge}
+                            onChange={(e) => setNewEmpForm({ ...newEmpForm, isZoneInCharge: e.target.checked })}
+                            className="rounded text-emerald-600 focus:ring-emerald-500 w-4 h-4"
                           />
-                        </div>
-                      )}
+                          <span className="whitespace-nowrap font-bold text-slate-700 text-xs">Is Zone In Charge?</span>
+                        </label>
+                        {!newEmpForm.isZoneInCharge && (
+                          <div className="flex-1">
+                            <input
+                              type="text"
+                              aria-label="Zone In Charge Name"
+                              placeholder="Zone In Charge Name"
+                              value={newEmpForm.zoneInChargeName}
+                              onChange={(e) => setNewEmpForm({ ...newEmpForm, zoneInChargeName: e.target.value })}
+                              className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-sans text-slate-900 bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all focus:outline-none placeholder:text-slate-400"
+                            />
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
 
                 {/* SECTION 3: WAGES, ALLOWANCES & BANK */}
@@ -4297,65 +4301,67 @@ export function WebPortal({
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4 items-start">
-                    <div className="min-w-0">
-                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
-                        <span>Zone:</span>
-                      </label>
-                      <select
-                        aria-label="Zone"
-                        value={editEmpForm.zoneId}
-                        onChange={(e) => setEditEmpForm({ ...editEmpForm, zoneId: e.target.value, ucTownId: '' })}
-                        className="w-full h-9 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all focus:outline-none"
-                      >
-                        <option value="">{!editEmpForm.zoneId && editEmpForm.zone ? `Choose master zone (saved: ${editEmpForm.zone})` : editZoneOptions.length ? 'Choose master Zone' : 'No zones configured for this company'}</option>
-                        {editZoneOptions.map(item => <option key={item.id} value={item.id}>{item.name}{getExceptionalCurrentSuffix(item, editEmpForm.zoneId, editingCompanyId)}</option>)}
-                      </select>
-                      {!editEmpForm.zoneId && editEmpForm.zone && <p className="mt-1 text-[10px] leading-tight text-amber-700">Saved zone “{editEmpForm.zone}” is not linked to current Master Data. Choose its replacement.</p>}
-                    </div>
-                    <div className="min-w-0">
-                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
-                        <span>UC / Town Information:</span>
-                      </label>
-                      <select
-                        aria-label="UC / Town"
-                        value={editEmpForm.ucTownId}
-                        onChange={(e) => setEditEmpForm({ ...editEmpForm, ucTownId: e.target.value })}
-                        disabled={!editEmpForm.zoneId}
-                        className="w-full h-9 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all focus:outline-none disabled:bg-slate-100 disabled:text-slate-500"
-                      >
-                        <option value="">{!editEmpForm.zoneId ? 'Choose a master Zone first' : !editEmpForm.ucTownId && editEmpForm.ucTown ? `Choose UC / Town (saved: ${editEmpForm.ucTown})` : editUcTownOptions.length ? 'Choose UC / Town' : 'No UC/Towns configured for this Zone'}</option>
-                        {editUcTownOptions.map(item => <option key={item.id} value={item.id}>{item.name}{item.status === 'Inactive' ? ' (Inactive — current)' : ''}</option>)}
-                      </select>
-                      {!editEmpForm.zoneId && <p className="mt-1 text-[10px] leading-tight text-amber-700">Select a Zone to enable UC / Town.</p>}
-                      {editEmpForm.zoneId && !editEmpForm.ucTownId && editEmpForm.ucTown && <p className="mt-1 text-[10px] leading-tight text-amber-700">Saved UC / Town “{editEmpForm.ucTown}” is not linked to this Zone. Choose its replacement.</p>}
-                      {editEmpForm.zoneId && editUcTownOptions.length === 0 && <p className="mt-1 text-[10px] leading-tight text-amber-700">No UC / Town records are configured for this Zone.</p>}
-                    </div>
-                    <div className="sm:col-span-2 flex items-center space-x-3 pt-6">
-                      <label className="flex items-center space-x-2 font-medium select-none cursor-pointer">
-                        <input
-                          type="checkbox"
-                          aria-label="Is Zone In Charge?"
-                          checked={editEmpForm.isZoneInCharge}
-                          onChange={(e) => setEditEmpForm({ ...editEmpForm, isZoneInCharge: e.target.checked })}
-                          className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4"
-                        />
-                        <span className="whitespace-nowrap font-bold text-slate-700 text-xs">Is Zone In Charge?</span>
-                      </label>
-                      {!editEmpForm.isZoneInCharge && (
-                        <div className="flex-1">
+                  {(editZoneOptions.length > 0 || Boolean(editEmpForm.zoneId) || Boolean(editEmpForm.zone)) && (
+                    <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4 items-start">
+                      <div className="min-w-0">
+                        <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
+                          <span>Zone:</span>
+                        </label>
+                        <select
+                          aria-label="Zone"
+                          value={editEmpForm.zoneId}
+                          onChange={(e) => setEditEmpForm({ ...editEmpForm, zoneId: e.target.value, ucTownId: '' })}
+                          className="w-full h-9 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all focus:outline-none"
+                        >
+                          <option value="">{!editEmpForm.zoneId && editEmpForm.zone ? `Choose master zone (saved: ${editEmpForm.zone})` : editZoneOptions.length ? 'Choose master Zone' : 'No zones configured for this company'}</option>
+                          {editZoneOptions.map(item => <option key={item.id} value={item.id}>{item.name}{getExceptionalCurrentSuffix(item, editEmpForm.zoneId, editingCompanyId)}</option>)}
+                        </select>
+                        {!editEmpForm.zoneId && editEmpForm.zone && <p className="mt-1 text-[10px] leading-tight text-amber-700">Saved zone “{editEmpForm.zone}” is not linked to current Master Data. Choose its replacement.</p>}
+                      </div>
+                      <div className="min-w-0">
+                        <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
+                          <span>UC / Town Information:</span>
+                        </label>
+                        <select
+                          aria-label="UC / Town"
+                          value={editEmpForm.ucTownId}
+                          onChange={(e) => setEditEmpForm({ ...editEmpForm, ucTownId: e.target.value })}
+                          disabled={!editEmpForm.zoneId}
+                          className="w-full h-9 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all focus:outline-none disabled:bg-slate-100 disabled:text-slate-500"
+                        >
+                          <option value="">{!editEmpForm.zoneId ? 'Choose a master Zone first' : !editEmpForm.ucTownId && editEmpForm.ucTown ? `Choose UC / Town (saved: ${editEmpForm.ucTown})` : editUcTownOptions.length ? 'Choose UC / Town' : 'No UC/Towns configured for this Zone'}</option>
+                          {editUcTownOptions.map(item => <option key={item.id} value={item.id}>{item.name}{item.status === 'Inactive' ? ' (Inactive — current)' : ''}</option>)}
+                        </select>
+                        {!editEmpForm.zoneId && <p className="mt-1 text-[10px] leading-tight text-amber-700">Select a Zone to enable UC / Town.</p>}
+                        {editEmpForm.zoneId && !editEmpForm.ucTownId && editEmpForm.ucTown && <p className="mt-1 text-[10px] leading-tight text-amber-700">Saved UC / Town “{editEmpForm.ucTown}” is not linked to this Zone. Choose its replacement.</p>}
+                        {editEmpForm.zoneId && editUcTownOptions.length === 0 && <p className="mt-1 text-[10px] leading-tight text-amber-700">No UC / Town records are configured for this Zone.</p>}
+                      </div>
+                      <div className="sm:col-span-2 flex items-center space-x-3 pt-6">
+                        <label className="flex items-center space-x-2 font-medium select-none cursor-pointer">
                           <input
-                            type="text"
-                            aria-label="Zone In Charge Name"
-                            placeholder="Zone In Charge Name"
-                            value={editEmpForm.zoneInChargeName || ''}
-                            onChange={(e) => setEditEmpForm({ ...editEmpForm, zoneInChargeName: e.target.value })}
-                            className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-sans text-slate-900 bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all focus:outline-none placeholder:text-slate-400"
+                            type="checkbox"
+                            aria-label="Is Zone In Charge?"
+                            checked={editEmpForm.isZoneInCharge}
+                            onChange={(e) => setEditEmpForm({ ...editEmpForm, isZoneInCharge: e.target.checked })}
+                            className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4"
                           />
-                        </div>
-                      )}
+                          <span className="whitespace-nowrap font-bold text-slate-700 text-xs">Is Zone In Charge?</span>
+                        </label>
+                        {!editEmpForm.isZoneInCharge && (
+                          <div className="flex-1">
+                            <input
+                              type="text"
+                              aria-label="Zone In Charge Name"
+                              placeholder="Zone In Charge Name"
+                              value={editEmpForm.zoneInChargeName || ''}
+                              onChange={(e) => setEditEmpForm({ ...editEmpForm, zoneInChargeName: e.target.value })}
+                              className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-sans text-slate-900 bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all focus:outline-none placeholder:text-slate-400"
+                            />
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
 
                 {/* SECTION 3: WAGES, ALLOWANCES & BANK */}
