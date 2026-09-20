@@ -1104,21 +1104,6 @@ ipcMain.handle('kiosk:get-events', async () => {
   return store.events || [];
 });
 
-ipcMain.handle('kiosk:save-evidence', async (_event, payload) => {
-  const store = readStore();
-  const id = `ev-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-  const record = {
-    id,
-    dataUrl: payload.dataUrl,
-    type: payload.type || 'camera',
-    source: payload.source || 'webcam',
-    savedAt: new Date().toISOString(),
-  };
-  store.evidence = [record, ...(store.evidence || [])].slice(0, 100);
-  writeStore(store);
-  return { id };
-});
-
 ipcMain.handle('kiosk:lookup-employee', async (_event, code) => {
   const store = readStore();
   const employees = mergeEmployeeBiometricTemplates(store.employees || [], store.biometricTemplates || []);
