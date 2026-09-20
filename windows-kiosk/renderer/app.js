@@ -1248,7 +1248,7 @@ async function runMultiFaceStep() {
                 }
               } else {
                 tracker.status = 'unknown';
-                tracker.statusText = finalResult?.message?.slice(0, 30) || 'Unknown Person';
+                tracker.statusText = finalResult?.ambiguous ? 'Ambiguous · Enter Code' : (finalResult?.message?.slice(0, 30) || 'Unknown Person');
                 tracker.matchedEmployeeCode = null;
               }
             } catch {

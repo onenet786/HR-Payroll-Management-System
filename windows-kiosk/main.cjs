@@ -877,7 +877,14 @@ function identifyFaceDescriptor(employees, probe, threshold = 0.255) {
 
   const margin = second ? second.score - best.score : Number.POSITIVE_INFINITY;
   if (second && Number.isFinite(second.score) && second.score <= threshold && margin < 0.035) {
-    console.log(`[Kiosk Face] Multiple profiles matched face: ${best.employee.fullName} (score ${best.score.toFixed(3)}) and ${second.employee.fullName} (score ${second.score.toFixed(3)}). Selecting closest match.`);
+    console.warn(`[Kiosk Face] Ambiguous match rejected: ${best.employee.fullName} (${best.score.toFixed(3)}) vs ${second.employee.fullName} (${second.score.toFixed(3)}), margin=${margin.toFixed(3)}`);
+    return {
+      ok: false,
+      ambiguous: true,
+      message: `Ambiguous face match between ${best.employee.fullName} and ${second.employee.fullName}. Enter your employee code to punch.`,
+      score: best.score,
+      margin,
+    };
   }
 
   return { ok: true, employee: best.employee, score: best.score, margin };
@@ -1096,7 +1103,22 @@ ipcMain.handle('kiosk:get-state', async () => {
 
 ipcMain.handle('kiosk:get-stats', async () => {
   const store = readStore();
-  return computeDailyStats(store);
+  const employees = mergeEmployeeBiometricTemplates(store.employees || [], store.biometricTemplates || []);
+  const date = todayDate();
+  const todayLogs = (store.attendances || []).filter(log => log.date === date);
+  const punchedIn = todayLogs.filter(log => log.punchIn && !log.punchOut);
+  const punchedOut = todayLogs.filter(log => log.punchIn && log.punchOut);
+  const activeEmployees = employees.filter(e => e.status === 'Active');
+  return {
+    totalActive: activeEmployees.length,
+    totalWithFingerprint: activeEmployees.filter(e => getFingerprintTemplates(e).length > 0).length,
+    inCount: punchedIn.length,
+    outCount: punchedOut.length,
+    pendingSync: (store.pendingSync || []).length,
+    lastSync: store.lastSync || null,
+    lastSyncReport: store.lastSyncReport || null,
+    bridgeRunning: await isBridgePortOpen(),
+  };
 });
 
 ipcMain.handle('kiosk:get-events', async () => {
@@ -1177,7 +1199,30 @@ ipcMain.handle('kiosk:save-settings', async (_event, settings) => {
 });
 
 ipcMain.handle('kiosk:sync', async () => {
-  return syncWithPortal();
+  try {
+    const result = await performSync();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('kiosk:sync-complete', {
+        report: result.report,
+        timestamp: result.store.lastSync,
+      });
+    }
+    return { report: result.report, lastSync: result.store.lastSync };
+  } catch (error) {
+    return {
+      report: {
+        errors: ['Kiosk sync failed: ' + (error?.message || error)],
+        employees: 0,
+        attendances: 0,
+        branches: 0,
+        departments: 0,
+        designations: 0,
+        pushed: 0,
+        changed: false,
+      },
+      lastSync: null,
+    };
+  }
 });
 
 ipcMain.handle('kiosk:punch-by-code', async (_event, payload) => {
@@ -1246,7 +1291,7 @@ ipcMain.handle('kiosk:punch-camera', async (_event, payload) => {
   }
   // A typed code narrows the gallery; without one the same descriptor matcher
   // searches every securely enrolled employee and enforces uniqueness margin.
-  const matchThreshold = typedEmployee ? 0.280 : 0.255;
+  const matchThreshold = typedEmployee ? 0.280 : 0.230;
   const match = identifyFaceDescriptor(candidates, payload.descriptor, matchThreshold);
   if (!match.ok) {
     if (payload.mode !== 'multi-face') {

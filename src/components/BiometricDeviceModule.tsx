@@ -752,6 +752,22 @@ export function BiometricDeviceModule({
         if (i < 2) await wait(350);
       }
 
+      // Prevent duplicate enrollment: ensure this face does not match another enrolled employee
+      const otherEnrolled = employees.filter(e => e.id !== emp.id && hasFaceEnrollment(e));
+      for (const other of otherEnrolled) {
+        for (const desc of getFaceDescriptors(other)) {
+          const score = compareFaceDescriptors(samples[0], desc);
+          if (Number.isFinite(score) && score <= FACE_MATCH_THRESHOLD) {
+            setFaceMsg({
+              type: 'err',
+              text: `This face matches already enrolled employee ${other.fullName} (${other.employeeCode}) [distance ${score.toFixed(3)}]. To prevent identity confusion, duplicate face enrollments are prohibited.`,
+            });
+            log(`Duplicate face enrollment blocked: matches ${other.fullName} score=${score.toFixed(3)}`);
+            return;
+          }
+        }
+      }
+
       const updated: Employee = {
         ...emp,
         faceDescriptors: samples,
