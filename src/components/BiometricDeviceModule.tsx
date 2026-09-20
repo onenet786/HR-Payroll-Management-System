@@ -670,6 +670,8 @@ export function BiometricDeviceModule({
     }
     if (faceVideoRef.current) faceVideoRef.current.srcObject = null;
     setFaceCameraReady(false);
+    setLivenessPhase(-1);
+    setLivenessBusy(false);
   }, []);
 
   const startFaceCamera = useCallback(async () => {
@@ -1439,13 +1441,20 @@ export function BiometricDeviceModule({
 
                   <div className="space-y-2">
                   <div className="rounded-xl border border-amber-200 bg-amber-50 p-3" aria-live="polite">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-amber-700">Active liveness · photo replay protection</p>
+                    <div className="flex items-center justify-between">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-amber-700">Active liveness · photo replay protection</p>
+                      {livenessBusy && (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-200 text-amber-900 animate-pulse">
+                          {livenessPhase === 0 ? 'Center Face' : livenessPhase === 1 ? `Turn ${livenessOrder[0].toUpperCase()}` : livenessPhase === 2 ? 'Center Face' : livenessPhase === 3 ? `Turn ${livenessOrder[1].toUpperCase()}` : livenessPhase === 4 ? 'Return Center' : 'Verified'}
+                        </span>
+                      )}
+                    </div>
                     <div className="mt-2 grid grid-cols-5 gap-1">
                       {['Center', livenessOrder[0] === 'left' ? 'Left' : 'Right', 'Center', livenessOrder[1] === 'left' ? 'Left' : 'Right', 'Verified'].map((label, index) => (
-                        <div key={`${label}-${index}`} className={`rounded-md px-1 py-2 text-center text-[9px] font-bold ${livenessPhase > index ? 'bg-emerald-600 text-white' : livenessPhase === index ? 'bg-amber-400 text-slate-950' : 'bg-white text-slate-400'}`}>{label}</div>
+                        <div key={`${label}-${index}`} className={`rounded-md px-1 py-2 text-center text-[9px] font-bold transition-all ${livenessPhase > index ? 'bg-emerald-600 text-white' : livenessPhase === index ? 'bg-amber-400 text-slate-950 ring-2 ring-amber-500' : 'bg-white text-slate-400'}`}>{label}</div>
                       ))}
                     </div>
-                    <p className="mt-2 text-[10px] text-amber-900">Blocks static photos. Recorded-video/deepfake resistance requires certified PAD or depth/IR hardware.</p>
+                    <p className="mt-2 text-[10px] text-amber-900">Follow the prompts to turn head Left and Right. Blocks static photos and replay attempts.</p>
                   </div>
                   {faceMsg && (
                     <div className={`text-xs rounded-xl px-3 py-2 border ${

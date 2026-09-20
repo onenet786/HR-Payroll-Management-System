@@ -132,7 +132,13 @@ export async function performActiveLiveness(
   order: [LivenessDirection, LivenessDirection],
   onStatus?: (message: string, phase: number) => void,
 ): Promise<LivenessResult> {
-  const labels = ['Center face', `Turn ${order[0]}`, 'Return center', `Turn ${order[1]}`, 'Return center'];
+  const labels = [
+    'Center your face inside the oval',
+    order[0] === 'left' ? 'Turn your head LEFT' : 'Turn your head RIGHT',
+    'Return to center',
+    order[1] === 'left' ? 'Turn your head LEFT' : 'Turn your head RIGHT',
+    'Return to center',
+  ];
   const observations: LivenessObservation[] = [];
   const start = Date.now();
   let phase = 0;
@@ -149,7 +155,7 @@ export async function performActiveLiveness(
     if (consecutive >= LIVENESS_MIN_FRAMES) {
       if (phase === 4) {
         const result = validateLivenessSequence(observations, order);
-        if (result.ok) { onStatus?.('Verified', 5); return result; }
+        if (result.ok) { onStatus?.('Live person verified', 5); return result; }
         return result;
       }
       phase += 1;
