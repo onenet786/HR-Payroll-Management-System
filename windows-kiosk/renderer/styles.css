@@ -1596,3 +1596,61 @@ select.form-input option { background: #071426; color: var(--t1); }
   .liveness-steps { gap: 3px; }
   .liveness-steps span { min-height: 38px; padding: 4px 1px; font-size: 8px; overflow-wrap: anywhere; }
 }
+
+.multi-face-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 12;
+}
+
+.kiosk-cam-mode-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  width: 100%;
+  max-width: 640px;
+}
+
+.kiosk-cam-mode-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.kiosk-cam-mode-btn:hover {
+  background: #1e293b;
+  color: #f1f5f9;
+}
+
+.kiosk-cam-mode-btn.active {
+  background: #065f46;
+  border-color: #10b981;
+  color: #ecfdf5;
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.35);
+}
+
+.camera-view.mode-multi-face .cam-face-guide {
+  display: none !important;
+}
+
+.camera-view.mode-multi-face ~ .liveness-rail {
+  display: none !important;
+}
+
+.camera-view.mode-multi-face .cam-auto-status {
+  display: none !important;
+}
+

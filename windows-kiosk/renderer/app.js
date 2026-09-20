@@ -48,6 +48,10 @@ let autoCaptureGoodFrames = 0;
 let autoCaptureIsPunching = false;
 let autoCaptureHoldUntil = 0;
 let autoCaptureAwaitingFaceExit = false;
+let kioskCamMode = 'multi';
+let multiFaceTimer = null;
+let multiFaceTrackers = new Map();
+let nextTrackId = 1;
 let messageResolver = null;
 let messagePreviousFocus = null;
 let maintenanceConfirmResolver = null;
@@ -103,6 +107,10 @@ const el = {
   centerPanel:    id('centerPanel'),
   cameraStack:    id('cameraStack'),
   cameraView:     id('cameraView'),
+  kioskCamModeBar:id('kioskCamModeBar'),
+  btnModeMultiFace:id('btnModeMultiFace'),
+  btnModeSingleFace:id('btnModeSingleFace'),
+  multiFaceCanvas:id('multiFaceCanvas'),
   webcamEl:       id('webcamEl'),
   ipcamEl:        id('ipcamEl'),
   snapCanvas:     id('snapCanvas'),
@@ -216,11 +224,11 @@ function setMode(mode) {
 
   if (isCam) {
     startCamera();
-    if (autoCapture) startAutoCapture();
-    else stopAutoCapture();
+    setKioskCamMode(kioskCamMode || 'multi');
   } else {
     stopCamera();
     stopAutoCapture();
+    stopMultiFaceLoop();
   }
 
   if (!isFp) {
@@ -538,6 +546,7 @@ async function startCamera() {
 
 function stopCamera() {
   clearInterval(ipCamRefreshTimer);
+  stopMultiFaceLoop();
   if (cameraStream) {
     cameraStream.getTracks().forEach(t => t.stop());
     cameraStream = null;
@@ -597,7 +606,23 @@ function getCameraSourceReadiness(source) {
   return { ok: true, message: '' };
 }
 
-function captureCameraDescriptor() {
+function drawCroppedCameraFrame(ctx, source, width, height, cropBox) {
+  const sourceWidth = source instanceof HTMLVideoElement ? source.videoWidth : source.naturalWidth;
+  const sourceHeight = source instanceof HTMLVideoElement ? source.videoHeight : source.naturalHeight;
+  if (!cropBox) {
+    drawNormalizedCameraFrame(ctx, source, width, height);
+    return;
+  }
+  const padX = (cropBox.width || 0.2) * 0.15;
+  const padY = (cropBox.height || 0.2) * 0.15;
+  const sx = Math.max(0, (cropBox.x - padX) * sourceWidth);
+  const sy = Math.max(0, (cropBox.y - padY) * sourceHeight);
+  const sw = Math.min(sourceWidth - sx, (cropBox.width + padX * 2) * sourceWidth);
+  const sh = Math.min(sourceHeight - sy, (cropBox.height + padY * 2) * sourceHeight);
+  ctx.drawImage(source, sx, sy, sw, sh, 0, 0, width, height);
+}
+
+function captureCameraDescriptor(cropBox = null) {
   const width = 16;
   const height = 20;
   const source = kioskState?.terminal?.ipCameraUrl ? el.ipcamEl : el.webcamEl;
@@ -607,7 +632,11 @@ function captureCameraDescriptor() {
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  drawNormalizedCameraFrame(ctx, source, width, height);
+  if (cropBox) {
+    drawCroppedCameraFrame(ctx, source, width, height, cropBox);
+  } else {
+    drawNormalizedCameraFrame(ctx, source, width, height);
+  }
   const data = ctx.getImageData(0, 0, width, height).data;
   const luma = [];
   for (let i = 0; i < data.length; i += 4) {
@@ -899,8 +928,334 @@ function setAutoCaptureStatus(state, text) {
   if (el.camAutoLabel) el.camAutoLabel.textContent = text;
 }
 
+// ─── Multi-Face Continuous HUD & Recognition ───────────────────────────────
+function drawKioskMultiFaceHUD(canvas, faces) {
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  const width = canvas.width;
+  const height = canvas.height;
+  ctx.clearRect(0, 0, width, height);
+  if (!faces || faces.length === 0) return;
+
+  const fontSizeSmall = Math.max(10, Math.round(11 * (width / 640)));
+  const fontSizeLarge = Math.max(12, Math.round(13 * (width / 640)));
+
+  for (const face of faces) {
+    const { box, status, employeeName, employeeCode, statusText } = face;
+    const rx = box.x * width;
+    const ry = box.y * height;
+    const rw = box.width * width;
+    const rh = box.height * height;
+
+    let primaryColor = '#3b82f6';
+    let glowColor = 'rgba(59, 130, 246, 0.4)';
+    let bgPillColor = 'rgba(15, 23, 42, 0.85)';
+
+    if (status === 'matched') {
+      primaryColor = '#10b981';
+      glowColor = 'rgba(16, 185, 129, 0.5)';
+      bgPillColor = 'rgba(6, 78, 59, 0.9)';
+    } else if (status === 'cooldown') {
+      primaryColor = '#06b6d4';
+      glowColor = 'rgba(6, 182, 212, 0.35)';
+      bgPillColor = 'rgba(8, 51, 68, 0.9)';
+    } else if (status === 'unknown') {
+      primaryColor = '#94a3b8';
+      glowColor = 'rgba(148, 163, 184, 0.25)';
+      bgPillColor = 'rgba(30, 41, 59, 0.85)';
+    } else if (status === 'verifying') {
+      primaryColor = '#f59e0b';
+      glowColor = 'rgba(245, 158, 11, 0.4)';
+      bgPillColor = 'rgba(120, 53, 15, 0.9)';
+    }
+
+    ctx.save();
+    // Glowing outer box
+    ctx.strokeStyle = glowColor;
+    ctx.lineWidth = 4;
+    ctx.strokeRect(rx, ry, rw, rh);
+
+    ctx.strokeStyle = primaryColor;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(rx, ry, rw, rh);
+
+    // High-tech corner brackets
+    const cornerLen = Math.min(22, Math.min(rw, rh) * 0.25);
+    ctx.lineWidth = 3.5;
+    ctx.strokeStyle = primaryColor;
+
+    ctx.beginPath();
+    ctx.moveTo(rx, ry + cornerLen);
+    ctx.lineTo(rx, ry);
+    ctx.lineTo(rx + cornerLen, ry);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(rx + rw - cornerLen, ry);
+    ctx.lineTo(rx + rw, ry);
+    ctx.lineTo(rx + rw, ry + cornerLen);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(rx, ry + rh - cornerLen);
+    ctx.lineTo(rx, ry + rh);
+    ctx.lineTo(rx + cornerLen, ry + rh);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(rx + rw - cornerLen, ry + rh);
+    ctx.lineTo(rx + rw, ry + rh);
+    ctx.lineTo(rx + rw, ry + rh - cornerLen);
+    ctx.stroke();
+
+    // Top Label
+    const topTitle = employeeName || (status === 'unknown' ? 'Unknown' : 'neutral');
+    ctx.font = `bold ${fontSizeLarge}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+    const titleWidth = ctx.measureText(topTitle).width;
+    const topPillW = titleWidth + 20;
+    const topPillH = fontSizeLarge + 10;
+    const topPillX = rx + (rw - topPillW) / 2;
+    const topPillY = Math.max(8, ry - topPillH - 6);
+
+    ctx.fillStyle = bgPillColor;
+    ctx.beginPath();
+    ctx.roundRect(topPillX, topPillY, topPillW, topPillH, 6);
+    ctx.fill();
+    ctx.strokeStyle = primaryColor;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.fillStyle = primaryColor;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(topTitle, topPillX + topPillW / 2, topPillY + topPillH / 2);
+
+    // Bottom Pill
+    const bottomLabel = statusText || (employeeCode ? `ID: ${employeeCode}` : '');
+    if (bottomLabel) {
+      ctx.font = `600 ${fontSizeSmall}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+      const bottomW = ctx.measureText(bottomLabel).width;
+      const bottomPillW = bottomW + 16;
+      const bottomPillH = fontSizeSmall + 8;
+      const bottomPillX = rx + (rw - bottomPillW) / 2;
+      const bottomPillY = Math.min(height - bottomPillH - 8, ry + rh + 6);
+
+      ctx.fillStyle = bgPillColor;
+      ctx.beginPath();
+      ctx.roundRect(bottomPillX, bottomPillY, bottomPillW, bottomPillH, 6);
+      ctx.fill();
+      ctx.strokeStyle = primaryColor;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(bottomLabel, bottomPillX + bottomPillW / 2, bottomPillY + bottomPillH / 2);
+    }
+
+    ctx.restore();
+  }
+}
+
+function setKioskCamMode(mode) {
+  kioskCamMode = mode;
+  const isMulti = mode === 'multi';
+  el.cameraView?.classList.toggle('mode-multi-face', isMulti);
+  el.btnModeMultiFace?.classList.toggle('active', isMulti);
+  el.btnModeSingleFace?.classList.toggle('active', !isMulti);
+
+  if (isMulti) {
+    stopAutoCapture();
+    resetLivenessUI();
+    startMultiFaceLoop();
+  } else {
+    stopMultiFaceLoop();
+    if (isAutoCaptureEnabled()) {
+      startAutoCapture();
+    }
+  }
+  resetResultToIdle();
+}
+
+function startMultiFaceLoop() {
+  stopMultiFaceLoop();
+  multiFaceTrackers.clear();
+  multiFaceTimer = setInterval(runMultiFaceStep, 100);
+}
+
+function stopMultiFaceLoop() {
+  if (multiFaceTimer) {
+    clearInterval(multiFaceTimer);
+    multiFaceTimer = null;
+  }
+  multiFaceTrackers.clear();
+  if (el.multiFaceCanvas) {
+    const ctx = el.multiFaceCanvas.getContext('2d');
+    if (ctx) ctx.clearRect(0, 0, el.multiFaceCanvas.width, el.multiFaceCanvas.height);
+  }
+}
+
+async function runMultiFaceStep() {
+  if (activeMode !== MODE.CAM || kioskCamMode !== 'multi') return;
+  const video = el.webcamEl;
+  if (!video || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
+
+  const vw = video.videoWidth || 640;
+  const vh = video.videoHeight || 480;
+  if (el.multiFaceCanvas.width !== vw || el.multiFaceCanvas.height !== vh) {
+    el.multiFaceCanvas.width = vw;
+    el.multiFaceCanvas.height = vh;
+  }
+
+  let detectedFaces = [];
+  try {
+    if (!window.detectFaceGeometry) await window.faceLandmarkerReady;
+    if (window.detectFaceGeometry) {
+      detectedFaces = await window.detectFaceGeometry(video);
+    }
+  } catch {
+    return;
+  }
+
+  const now = Date.now();
+  const validFaces = (detectedFaces || []).filter(f => f && f.box && f.box.width >= 0.08 && f.box.height >= 0.08);
+
+  // Clean stale trackers
+  for (const [id, tracker] of multiFaceTrackers.entries()) {
+    if (now - tracker.lastSeen > 2000) {
+      multiFaceTrackers.delete(id);
+    }
+  }
+
+  const renderList = [];
+
+  for (const face of validFaces) {
+    const box = face.box;
+    const centerX = box.x + box.width / 2;
+    const centerY = box.y + box.height / 2;
+
+    let matchedId = null;
+    let minDist = 0.22;
+    for (const [id, tracker] of multiFaceTrackers.entries()) {
+      const tcX = tracker.box.x + tracker.box.width / 2;
+      const tcY = tracker.box.y + tracker.box.height / 2;
+      const dist = Math.hypot(centerX - tcX, centerY - tcY);
+      if (dist < minDist) {
+        minDist = dist;
+        matchedId = id;
+      }
+    }
+
+    let tracker;
+    if (matchedId !== null) {
+      tracker = multiFaceTrackers.get(matchedId);
+      tracker.box = box;
+      tracker.lastSeen = now;
+      tracker.stableFrames = (tracker.stableFrames || 0) + 1;
+    } else {
+      const id = nextTrackId++;
+      tracker = {
+        id,
+        box,
+        stableFrames: 1,
+        lastSeen: now,
+        status: 'verifying',
+        statusText: 'Aligning face…',
+        employeeName: '',
+        employeeCode: '',
+        cooldownUntil: 0,
+        isPunching: false,
+      };
+      multiFaceTrackers.set(id, tracker);
+    }
+
+    if (tracker.cooldownUntil && now < tracker.cooldownUntil) {
+      tracker.status = 'cooldown';
+      tracker.statusText = tracker.statusText || 'Already Recorded';
+    } else if (!tracker.isPunching && tracker.status !== 'matched' && tracker.status !== 'cooldown') {
+      if (tracker.stableFrames >= 3) {
+        tracker.isPunching = true;
+        tracker.status = 'verifying';
+        tracker.statusText = 'Verifying…';
+
+        (async () => {
+          try {
+            const descriptor = captureCameraDescriptor(box);
+            const evidence = await captureEvidence().catch(() => null);
+            const code = el.codeInput?.value?.trim() || '';
+            const punchPayload = {
+              mode: 'multi-face',
+              code,
+              descriptor,
+              evidence,
+              meta: { camera: 'webcam' },
+            };
+
+            const result = await api.punchCamera(punchPayload);
+            const finalResult = await resolveCheckoutReasonAndRetry(
+              result,
+              outReason => api.punchCamera({ ...punchPayload, cameraAuthorization: result.cameraAuthorization, meta: { ...punchPayload.meta, outReason } })
+            );
+
+            if (finalResult?.ok && finalResult.employee) {
+              tracker.status = 'matched';
+              tracker.employeeName = finalResult.employee.fullName || '';
+              tracker.employeeCode = finalResult.employee.employeeCode || '';
+              const timeStr = (finalResult.eventTime || '').slice(0, 5) || new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+              tracker.statusText = `${finalResult.action === 'OUT' ? 'PUNCHED OUT' : 'PUNCHED IN'} · ${timeStr}`;
+              tracker.cooldownUntil = Date.now() + (5 * 60 * 1000);
+              handlePunchResult(finalResult);
+            } else {
+              tracker.status = 'unknown';
+              tracker.statusText = finalResult?.message?.slice(0, 30) || 'Unknown Person';
+              tracker.cooldownUntil = Date.now() + 4000;
+            }
+          } catch {
+            tracker.status = 'unknown';
+            tracker.statusText = 'Scan retry';
+            tracker.cooldownUntil = Date.now() + 3000;
+          } finally {
+            tracker.isPunching = false;
+          }
+        })();
+      } else {
+        tracker.status = 'verifying';
+        tracker.statusText = `Verifying ${tracker.stableFrames}/3…`;
+      }
+    }
+
+    renderList.push({
+      id: String(tracker.id),
+      box: tracker.box,
+      status: tracker.status,
+      statusText: tracker.statusText,
+      employeeName: tracker.employeeName,
+      employeeCode: tracker.employeeCode,
+    });
+  }
+
+  drawKioskMultiFaceHUD(el.multiFaceCanvas, renderList);
+}
+
+// ─── Auto-Capture (Face Recognition without Employee Code) ───────────────────
+function isAutoCaptureEnabled() {
+  return activeMode === MODE.CAM &&
+    !kioskState?.terminal?.ipCameraUrl &&
+    kioskState?.terminal?.autoCaptureCamera !== false;
+}
+
+function setAutoCaptureStatus(state, text) {
+  if (!el.camAutoStatus) return;
+  el.camAutoStatus.classList.remove('hidden');
+  el.camAutoStatus.dataset.state = state;
+  if (el.camAutoLabel) el.camAutoLabel.textContent = text;
+}
+
 function startAutoCapture() {
   stopAutoCapture();
+  if (kioskCamMode === 'multi') return;
   autoCaptureGoodFrames = 0;
   autoCaptureIsPunching = false;
   autoCaptureHoldUntil = 0;
@@ -919,7 +1274,7 @@ function stopAutoCapture() {
 }
 
 async function runAutoCaptureStep() {
-  if (activeMode !== MODE.CAM || autoCaptureIsPunching) return;
+  if (activeMode !== MODE.CAM || kioskCamMode === 'multi' || autoCaptureIsPunching) return;
 
   if (autoCaptureAwaitingFaceExit) {
     try {
@@ -1196,6 +1551,40 @@ async function performCameraPunch() {
   let evidence = null;
   let descriptor = null;
   let livenessProof = null;
+
+  if (kioskCamMode === 'multi') {
+    try {
+      const source = el.webcamEl;
+      let targetBox = null;
+      if (window.detectFaceGeometry) {
+        const faces = await window.detectFaceGeometry(source).catch(() => []);
+        if (faces && faces.length > 0) {
+          targetBox = faces[0].box;
+        }
+      }
+      descriptor = captureCameraDescriptor(targetBox);
+      evidence = await captureEvidence();
+    } catch (err) {
+      const message = err?.message || 'Could not detect face in camera.';
+      showResult('err', 'Face Scan Failed', message);
+      return { ok: false, message };
+    }
+    const cameraPayload = {
+      mode: 'multi-face',
+      code,
+      descriptor,
+      evidence,
+      meta: { camera: 'webcam' },
+    };
+    return runPunchAction(async () => {
+      const firstResult = await api.punchCamera(cameraPayload);
+      return resolveCheckoutReasonAndRetry(
+        firstResult,
+        outReason => api.punchCamera({ ...cameraPayload, cameraAuthorization: firstResult.cameraAuthorization, meta: { ...cameraPayload.meta, outReason } })
+      );
+    });
+  }
+
   try {
     livenessProof = await runCameraLivenessChallenge();
     let lastReadyFrame = null;
@@ -1433,17 +1822,25 @@ function resetResultToIdle() {
   el.resultState.textContent = 'TERMINAL READY';
   el.resultName.textContent = 'Attendance Kiosk Online';
   if (activeMode === MODE.CAM) {
-    const auto = isAutoCaptureEnabled();
-    el.resultDetail.innerHTML = [
-      '<span class="guide-line"><b>1.</b> Keep face inside the oval marker.</span>',
-      '<span class="guide-line"><b>2.</b> Look straight and hold still.</span>',
-      auto
-        ? '<span class="guide-line"><b>3.</b> Auto-capture will punch automatically.</span>'
-        : '<span class="guide-line"><b>3.</b> Tap Capture &amp; Punch.</span>',
-      kioskState?.terminal?.branchId
-        ? '<span class="guide-line"><b>4.</b> Visiting from another branch? Enter your complete employee ID first.</span>'
-        : '',
-    ].filter(Boolean).join('');
+    if (kioskCamMode === 'multi') {
+      el.resultDetail.innerHTML = [
+        '<span class="guide-line"><b>1.</b> Look directly towards the camera.</span>',
+        '<span class="guide-line"><b>2.</b> AI recognizes faces and marks attendance instantly.</span>',
+        '<span class="guide-line"><b>3.</b> Continuous multi-person detection is active.</span>',
+      ].join('');
+    } else {
+      const auto = isAutoCaptureEnabled();
+      el.resultDetail.innerHTML = [
+        '<span class="guide-line"><b>1.</b> Keep face inside the oval marker.</span>',
+        '<span class="guide-line"><b>2.</b> Look straight and hold still.</span>',
+        auto
+          ? '<span class="guide-line"><b>3.</b> Auto-capture will punch automatically.</span>'
+          : '<span class="guide-line"><b>3.</b> Tap Capture &amp; Punch.</span>',
+        kioskState?.terminal?.branchId
+          ? '<span class="guide-line"><b>4.</b> Visiting from another branch? Enter your complete employee ID first.</span>'
+          : '',
+      ].filter(Boolean).join('');
+    }
   } else {
     el.resultDetail.textContent = 'Select a punch method, then enter employee code or scan fingerprint.';
   }
@@ -1997,6 +2394,10 @@ function bindEvents() {
   el.fpScanBtn.addEventListener('click', punchFingerprint);
   el.fpTestBtn.addEventListener('click', testFingerprintScanner);
   el.camCaptureBtn.addEventListener('click', punchCamera);
+
+  // Camera Mode Toggle (Multi-Face Stream vs 1-on-1 Challenge)
+  el.btnModeMultiFace?.addEventListener('click', () => setKioskCamMode('multi'));
+  el.btnModeSingleFace?.addEventListener('click', () => setKioskCamMode('single'));
 
   // Sync
   el.syncBtn.addEventListener('click', performSync);

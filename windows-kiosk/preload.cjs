@@ -1,14 +1,15 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 function invokeCameraPunch(payload = {}) {
+  const isMultiFace = payload?.mode === 'multi-face';
   const observations = payload?.livenessProof?.observations;
-  if (observations !== undefined && (!Array.isArray(observations) || observations.length > 240)) {
+  if (!isMultiFace && observations !== undefined && (!Array.isArray(observations) || observations.length > 240)) {
     return Promise.resolve({ ok: false, message: 'Liveness proof payload is invalid or too large.' });
   }
-  const livenessProof = payload.livenessProof && {
+  const livenessProof = isMultiFace ? undefined : (payload.livenessProof && {
     challengeId: String(payload.livenessProof.challengeId || '').slice(0, 128),
     observations: Array.isArray(observations) ? observations.map(item => ({ at: Number(item?.at), yaw: Number(item?.yaw), centerX: Number(item?.centerX), centerY: Number(item?.centerY), scale: Number(item?.scale) })) : undefined,
-  };
+  });
   return ipcRenderer.invoke('kiosk:punch-camera', { ...payload, livenessProof });
 }
 

@@ -1300,7 +1300,7 @@ ipcMain.handle('kiosk:punch-camera', async (_event, payload) => {
     score: match.score,
     recognizedBy: crossBranch ? 'cross-branch-code-face-liveness' : typedEmployee ? 'camera-code-face-liveness' : 'camera-face-liveness',
     crossBranch,
-    livenessMethod: 'active-turn-v1',
+    livenessMethod: payload.mode === 'multi-face' ? 'multi-face-walkthrough' : 'active-turn-v1',
   });
   if (result?.needsOutReason) {
     const token = require('crypto').randomBytes(24).toString('hex');

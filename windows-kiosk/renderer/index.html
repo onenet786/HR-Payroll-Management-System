@@ -200,6 +200,16 @@
 
         <!-- Camera Feed -->
         <div class="camera-stack hidden" id="cameraStack">
+          <div class="kiosk-cam-mode-bar" id="kioskCamModeBar">
+            <button type="button" class="kiosk-cam-mode-btn active" id="btnModeMultiFace">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+              <span>Multi-Face Stream (Boxes)</span>
+            </button>
+            <button type="button" class="kiosk-cam-mode-btn" id="btnModeSingleFace">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              <span>1-on-1 Challenge (Oval)</span>
+            </button>
+          </div>
           <div class="captured-photo-card hidden" id="capturedPhotoCard" aria-live="polite">
             <img id="capturedPhotoImg" alt="Captured attendance photo" />
             <span>CAPTURED</span>
@@ -207,10 +217,11 @@
         <div class="camera-view" id="cameraView">
           <video id="webcamEl" autoplay muted></video>
           <img id="ipcamEl" alt="IP Camera" />
+          <canvas id="multiFaceCanvas" class="multi-face-canvas"></canvas>
           <canvas id="snapCanvas" class="snap-canvas" width="1280" height="720"></canvas>
           <div class="cam-hud">
             <div class="cam-source-badge" id="camSourceBadge">Webcam</div>
-            <div class="cam-face-guide"></div>
+            <div class="cam-face-guide" id="camFaceGuide"></div>
             <div class="cam-auto-status hidden" id="camAutoStatus">
               <span class="auto-scan-dot"></span>
               <span id="camAutoLabel">Scanning for face…</span>

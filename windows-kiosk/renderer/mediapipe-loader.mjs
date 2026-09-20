@@ -8,7 +8,7 @@ async function detector() {
     const files = await FilesetResolver.forVisionTasks('./mediapipe/wasm');
     return FaceLandmarker.createFromOptions(files, {
       baseOptions: { modelAssetPath: './mediapipe/face_landmarker.task', delegate: 'CPU' },
-      runningMode: 'VIDEO', numFaces: 2,
+      runningMode: 'VIDEO', numFaces: 5,
       minFaceDetectionConfidence: .38, minFacePresenceConfidence: .38, minTrackingConfidence: .38,
     });
   })().catch(error => { detectorPromise = null; throw error; });
@@ -26,9 +26,18 @@ window.detectFaceGeometry = async source => {
     const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
     const leftEye = landmarks[33], rightEye = landmarks[263], nose = landmarks[1];
     const eyeDistance = leftEye && rightEye ? Math.abs(rightEye.x - leftEye.x) : 0;
-    if (!nose || !leftEye || !rightEye || eyeDistance < .01) throw new Error('Face landmarks are too small. Move closer.');
-    return { centerX: (minX + maxX) / 2, centerY: (minY + maxY) / 2, width: maxX - minX, height: maxY - minY, yaw: (nose.x - ((leftEye.x + rightEye.x) / 2)) / eyeDistance };
-  });
+    if (!nose || !leftEye || !rightEye || eyeDistance < .01) return null;
+    const width = maxX - minX;
+    const height = maxY - minY;
+    return {
+      centerX: (minX + maxX) / 2,
+      centerY: (minY + maxY) / 2,
+      width,
+      height,
+      yaw: (nose.x - ((leftEye.x + rightEye.x) / 2)) / eyeDistance,
+      box: { x: minX, y: minY, width, height }
+    };
+  }).filter(Boolean);
 };
 
 window.faceLandmarkerReady = detector();
