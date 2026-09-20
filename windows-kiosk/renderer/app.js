@@ -51,6 +51,7 @@ let autoCaptureAwaitingFaceExit = false;
 let kioskCamMode = 'multi';
 let multiFaceTimer = null;
 let multiFaceTrackers = new Map();
+const employeeSessions = new Map();
 let nextTrackId = 1;
 let messageResolver = null;
 let messagePreviousFocus = null;
@@ -1122,9 +1123,9 @@ async function runMultiFaceStep() {
   const now = Date.now();
   const validFaces = (detectedFaces || []).filter(f => f && f.box && f.box.width >= 0.08 && f.box.height >= 0.08);
 
-  // Clean stale trackers
+  // Clean stale trackers (faces not seen for 800ms)
   for (const [id, tracker] of multiFaceTrackers.entries()) {
-    if (now - tracker.lastSeen > 2000) {
+    if (now - tracker.lastSeen > 800) {
       multiFaceTrackers.delete(id);
     }
   }
@@ -1137,7 +1138,7 @@ async function runMultiFaceStep() {
     const centerY = box.y + box.height / 2;
 
     let matchedId = null;
-    let minDist = 0.22;
+    let minDist = 0.14; // Tight continuity threshold between adjacent frames
     for (const [id, tracker] of multiFaceTrackers.entries()) {
       const tcX = tracker.box.x + tracker.box.width / 2;
       const tcY = tracker.box.y + tracker.box.height / 2;
@@ -1163,66 +1164,105 @@ async function runMultiFaceStep() {
         lastSeen: now,
         status: 'verifying',
         statusText: 'Aligning face…',
+        matchedEmployeeCode: null,
         employeeName: '',
         employeeCode: '',
-        cooldownUntil: 0,
         isPunching: false,
       };
       multiFaceTrackers.set(id, tracker);
     }
 
-    if (tracker.cooldownUntil && now < tracker.cooldownUntil) {
+    // Check if THIS tracker's recognized employee has an active cooldown
+    const session = tracker.matchedEmployeeCode ? employeeSessions.get(tracker.matchedEmployeeCode) : null;
+    const isCoolingDown = session && now < session.cooldownUntil;
+
+    if (isCoolingDown) {
       tracker.status = 'cooldown';
-      tracker.statusText = tracker.statusText || 'Already Recorded';
-    } else if (!tracker.isPunching && tracker.status !== 'matched' && tracker.status !== 'cooldown') {
-      if (tracker.stableFrames >= 3) {
-        tracker.isPunching = true;
+      tracker.employeeName = session.fullName || tracker.employeeName;
+      tracker.statusText = session.statusText || 'Already Recorded';
+    } else if (!tracker.isPunching) {
+      // If previous cooldown expired, reset matchedEmployeeCode so they can punch anew
+      if (tracker.matchedEmployeeCode && session && now >= session.cooldownUntil) {
+        tracker.matchedEmployeeCode = null;
         tracker.status = 'verifying';
-        tracker.statusText = 'Verifying…';
+      }
 
-        (async () => {
-          try {
-            const descriptor = captureCameraDescriptor(box);
-            const evidence = await captureEvidence().catch(() => null);
-            const code = el.codeInput?.value?.trim() || '';
-            const punchPayload = {
-              mode: 'multi-face',
-              code,
-              descriptor,
-              evidence,
-              meta: { camera: 'webcam' },
-            };
+      if (tracker.status !== 'matched' && tracker.status !== 'cooldown') {
+        if (tracker.stableFrames >= 3) {
+          tracker.isPunching = true;
+          tracker.status = 'verifying';
+          tracker.statusText = 'Verifying…';
 
-            const result = await api.punchCamera(punchPayload);
-            const finalResult = await resolveCheckoutReasonAndRetry(
-              result,
-              outReason => api.punchCamera({ ...punchPayload, cameraAuthorization: result.cameraAuthorization, meta: { ...punchPayload.meta, outReason } })
-            );
+          (async () => {
+            try {
+              const descriptor = captureCameraDescriptor(box);
+              const evidence = await captureEvidence().catch(() => null);
+              const code = el.codeInput?.value?.trim() || '';
+              const punchPayload = {
+                mode: 'multi-face',
+                code,
+                descriptor,
+                evidence,
+                meta: { camera: 'webcam' },
+              };
 
-            if (finalResult?.ok && finalResult.employee) {
-              tracker.status = 'matched';
-              tracker.employeeName = finalResult.employee.fullName || '';
-              tracker.employeeCode = finalResult.employee.employeeCode || '';
-              const timeStr = (finalResult.eventTime || '').slice(0, 5) || new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-              tracker.statusText = `${finalResult.action === 'OUT' ? 'PUNCHED OUT' : 'PUNCHED IN'} · ${timeStr}`;
-              tracker.cooldownUntil = Date.now() + (5 * 60 * 1000);
-              handlePunchResult(finalResult);
-            } else {
+              const result = await api.punchCamera(punchPayload);
+              const finalResult = await resolveCheckoutReasonAndRetry(
+                result,
+                outReason => api.punchCamera({ ...punchPayload, cameraAuthorization: result.cameraAuthorization, meta: { ...punchPayload.meta, outReason } })
+              );
+
+              if (finalResult?.employee) {
+                const emp = finalResult.employee;
+                const empCode = emp.employeeCode || emp.id;
+                tracker.matchedEmployeeCode = empCode;
+                tracker.employeeName = emp.fullName || '';
+                tracker.employeeCode = emp.employeeCode || '';
+
+                const existingSession = employeeSessions.get(empCode);
+                const isAlreadyCooling = existingSession && Date.now() < existingSession.cooldownUntil;
+
+                if (finalResult.ok) {
+                  const timeStr = (finalResult.eventTime || '').slice(0, 5) || new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+                  employeeSessions.set(empCode, {
+                    cooldownUntil: Date.now() + (5 * 60 * 1000), // 5 min cooldown for THIS employee only
+                    statusText: `${finalResult.action === 'OUT' ? 'Punched Out' : 'Punched In'} · ${timeStr}`,
+                    fullName: emp.fullName,
+                  });
+                  tracker.status = 'matched';
+                  tracker.statusText = `${finalResult.action === 'OUT' ? 'PUNCHED OUT' : 'PUNCHED IN'} · ${timeStr}`;
+                  handlePunchResult(finalResult);
+                } else if (finalResult.alreadyRecorded || finalResult.cooldownSeconds || String(finalResult.message || '').toLowerCase().includes('before punching again') || String(finalResult.message || '').toLowerCase().includes('already completed') || isAlreadyCooling) {
+                  // This specific employee already punched today or is in their 1-minute guard
+                  employeeSessions.set(empCode, {
+                    cooldownUntil: Date.now() + (5 * 60 * 1000), // Cooldown ONLY for this employee
+                    statusText: 'Already Recorded',
+                    fullName: emp.fullName,
+                  });
+                  tracker.status = 'cooldown';
+                  tracker.statusText = 'Already Recorded';
+                } else {
+                  tracker.status = 'unknown';
+                  tracker.statusText = finalResult?.message?.slice(0, 30) || 'Unknown Person';
+                  tracker.matchedEmployeeCode = null;
+                }
+              } else {
+                tracker.status = 'unknown';
+                tracker.statusText = finalResult?.message?.slice(0, 30) || 'Unknown Person';
+                tracker.matchedEmployeeCode = null;
+              }
+            } catch {
               tracker.status = 'unknown';
-              tracker.statusText = finalResult?.message?.slice(0, 30) || 'Unknown Person';
-              tracker.cooldownUntil = Date.now() + 4000;
+              tracker.statusText = 'Scan retry';
+              tracker.matchedEmployeeCode = null;
+            } finally {
+              tracker.isPunching = false;
             }
-          } catch {
-            tracker.status = 'unknown';
-            tracker.statusText = 'Scan retry';
-            tracker.cooldownUntil = Date.now() + 3000;
-          } finally {
-            tracker.isPunching = false;
-          }
-        })();
-      } else {
-        tracker.status = 'verifying';
-        tracker.statusText = `Verifying ${tracker.stableFrames}/3…`;
+          })();
+        } else {
+          tracker.status = 'verifying';
+          tracker.statusText = `Verifying ${tracker.stableFrames}/3…`;
+        }
       }
     }
 

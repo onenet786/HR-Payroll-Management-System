@@ -952,6 +952,7 @@ function savePunch(store, employee, method, evidence, meta) {
   if (existing?.punchIn && existing?.punchOut && !isReturningFromBreak) {
     return {
       ok: false,
+      alreadyRecorded: true,
       message: `Attendance is already completed today (${existing.punchIn} to ${existing.punchOut}). Contact HR if it needs correction.`,
       employee: kioskEmployee(employee),
       attendance: {
@@ -971,6 +972,7 @@ function savePunch(store, employee, method, evidence, meta) {
       const remaining = 60 - secondsSinceLastPunch;
       return {
         ok: false,
+        alreadyRecorded: true,
         message: `Please wait ${remaining} second${remaining === 1 ? '' : 's'} before punching again. Minimum delay is 1 minute between punches.`,
         cooldownSeconds: remaining,
         employee: kioskEmployee(employee),
@@ -1092,91 +1094,85 @@ ipcMain.handle('kiosk:get-state', async () => {
   };
 });
 
+ipcMain.handle('kiosk:get-stats', async () => {
+  const store = readStore();
+  return computeDailyStats(store);
+});
+
+ipcMain.handle('kiosk:get-events', async () => {
+  const store = readStore();
+  return store.events || [];
+});
+
+ipcMain.handle('kiosk:save-evidence', async (_event, payload) => {
+  const store = readStore();
+  const id = `ev-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  const record = {
+    id,
+    dataUrl: payload.dataUrl,
+    type: payload.type || 'camera',
+    source: payload.source || 'webcam',
+    savedAt: new Date().toISOString(),
+  };
+  store.evidence = [record, ...(store.evidence || [])].slice(0, 100);
+  writeStore(store);
+  return { id };
+});
+
 ipcMain.handle('kiosk:lookup-employee', async (_event, code) => {
   const store = readStore();
   const employees = mergeEmployeeBiometricTemplates(store.employees || [], store.biometricTemplates || []);
   const employee = findEmployeeByCode(employees, code);
   if (!employee) return { found: false };
-  const date = todayDate();
-  const todayLog = (store.attendances || []).find(log => log.employeeId === employee.id && log.date === date) || null;
-  const action = todayLog?.punchIn && !todayLog?.punchOut ? 'OUT' : 'IN';
+
+  const today = todayDate();
+  const todayLog = (store.attendances || []).find(l => l.employeeId === employee.id && l.date === today);
+  const isPunchedIn = todayLog?.punchIn && !todayLog?.punchOut;
+  const canReturn = canReturnFromTemporaryExit(todayLog);
+
   return {
     found: true,
     employee: kioskEmployee(employee),
+    action: isPunchedIn ? 'OUT' : 'IN',
     todayLog: todayLog ? {
-      punchIn: todayLog.punchIn,
-      punchOut: todayLog.punchOut,
+      punchIn: todayLog.punchIn || '',
+      punchOut: todayLog.punchOut || '',
       outReason: todayLog.outReason || '',
-      breaks: Array.isArray(todayLog.breaks) ? todayLog.breaks : [],
-      lastPunchAt: todayLog.lastPunchAt || '',
-      canReturn: canReturnFromTemporaryExit(todayLog),
-      status: todayLog.status,
+      canReturn,
     } : null,
-    action,
     fingerprintCount: getFingerprintTemplates(employee).length,
+    hasCameraProfile: getFaceDescriptors(employee).length > 0,
   };
-});
-
-ipcMain.handle('kiosk:get-stats', async () => {
-  const store = readStore();
-  const employees = mergeEmployeeBiometricTemplates(store.employees || [], store.biometricTemplates || []);
-  const date = todayDate();
-  const todayLogs = (store.attendances || []).filter(log => log.date === date);
-  const punchedIn = todayLogs.filter(log => log.punchIn && !log.punchOut);
-  const punchedOut = todayLogs.filter(log => log.punchIn && log.punchOut);
-  const activeEmployees = employees.filter(e => e.status === 'Active');
-  return {
-    totalActive: activeEmployees.length,
-    totalWithFingerprint: activeEmployees.filter(e => getFingerprintTemplates(e).length > 0).length,
-    inCount: punchedIn.length,
-    outCount: punchedOut.length,
-    pendingSync: (store.pendingSync || []).length,
-    lastSync: store.lastSync || null,
-    lastSyncReport: store.lastSyncReport || null,
-    bridgeRunning: await isBridgePortOpen(),
-  };
-});
-
-ipcMain.handle('kiosk:get-events', async () => {
-  const store = readStore();
-  return (store.events || []).slice(0, 100);
 });
 
 ipcMain.handle('kiosk:clear-local-attendance-cache', async () => {
   const store = readStore();
   const clearedCount = (store.attendances || []).length;
-  const discardedPendingCount = (store.pendingSync || [])
-    .filter(item => item.collection === 'attendances').length;
+  const discardedPendingCount = (store.pendingSync || []).filter(item => item.collection === 'attendances').length;
+
   store.attendances = [];
-  store.pendingSync = (store.pendingSync || [])
-    .filter(item => item.collection !== 'attendances');
+  store.pendingSync = (store.pendingSync || []).filter(item => item.collection !== 'attendances');
   writeStore(store);
-  addEvent(
-    'settings',
-    `Local attendance cache cleared (${clearedCount} records and ${discardedPendingCount} pending uploads removed)`
-  );
-  return { ok: true, clearedCount, discardedPendingCount };
+  addEvent('system', `Local attendance cache cleared: ${clearedCount} attendance records, ${discardedPendingCount} pending uploads`);
+
+  return {
+    ok: true,
+    clearedCount,
+    discardedPendingCount,
+  };
 });
 
 ipcMain.handle('kiosk:save-settings', async (_event, settings) => {
-  if (!settings || typeof settings !== 'object') throw new Error('Invalid settings payload.');
   const store = readStore();
-  const requestedBranchId = String(settings.branchId || '');
-  const cameraUrl = String(settings.ipCameraUrl || '').trim();
-  if (cameraUrl) {
-    const parsed = new URL(cameraUrl);
-    if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || cameraUrl.length > 500) {
-      throw new Error('Invalid IP camera URL.');
-    }
-  }
+  const prevUrl = store.terminal.ipCameraUrl;
+  const prevBranchId = store.terminal.branchId;
+
   store.terminal = {
     ...store.terminal,
-    id: /^[A-Za-z0-9_-]{1,40}$/.test(String(settings.id || '')) ? String(settings.id) : store.terminal.id,
-    location: String(settings.location || '').trim().slice(0, 120),
-    branchId: (store.branches || []).some(branch => branch.id === requestedBranchId)
-      ? requestedBranchId
-      : store.terminal.branchId,
-    ipCameraUrl: cameraUrl,
+    id: settings.id || store.terminal.id,
+    location: settings.location || store.terminal.location,
+    branchId: settings.branchId ?? store.terminal.branchId,
+    ipCameraUrl: settings.ipCameraUrl || '',
     allowCodeOnlyPunch: !!settings.allowCodeOnlyPunch,
     requireCodeWithFingerprint: !!settings.requireCodeWithFingerprint,
     requireCodeWithCamera: false,
@@ -1184,36 +1180,33 @@ ipcMain.handle('kiosk:save-settings', async (_event, settings) => {
     autoFullscreen: !!settings.autoFullscreen,
   };
   writeStore(store);
-  if (mainWindow) {
-    mainWindow.setKiosk(!!store.terminal.autoFullscreen);
-    mainWindow.setFullScreen(!!store.terminal.autoFullscreen);
+
+  if (settings.branchId !== prevBranchId) {
+    addEvent('config', `Terminal branch changed to ${settings.branchId || 'unassigned'}`);
   }
-  addEvent('settings', 'Settings saved');
+  if (settings.ipCameraUrl !== prevUrl) {
+    addEvent('config', settings.ipCameraUrl ? `IP camera configured: ${settings.ipCameraUrl}` : 'IP camera removed');
+  }
+
   return store.terminal;
 });
 
 ipcMain.handle('kiosk:sync', async () => {
-  try {
-    const result = await performSync();
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('kiosk:sync-complete', { report: result.report, timestamp: result.store.lastSync });
-    }
-    return { report: result.report, lastSync: result.store.lastSync };
-  } catch (error) {
-    return {
-      report: {
-        errors: ['Kiosk sync failed'],
-        employees: 0,
-        attendances: 0,
-        branches: 0,
-        departments: 0,
-        designations: 0,
-        pushed: 0,
-        changed: false,
-      },
-      lastSync: null,
-    };
+  return syncWithPortal();
+});
+
+ipcMain.handle('kiosk:punch-by-code', async (_event, payload) => {
+  const store = readStore();
+  const allowCodeOnlyPunch = !!store.terminal.allowCodeOnlyPunch;
+  if (!allowCodeOnlyPunch) {
+    return { ok: false, message: 'Code-only attendance is disabled on this terminal for security. Scan fingerprint or face to punch.' };
   }
+  const employees = mergeEmployeeBiometricTemplates(store.employees || [], store.biometricTemplates || []);
+  const employee = findEmployeeByCode(employees, payload.code);
+  if (!employee) return { ok: false, message: `No active employee found with code "${payload.code}".` };
+  if (employee.status === 'Terminated') return { ok: false, message: 'This employee account is terminated.' };
+  if (employee.status === 'Suspended') return { ok: false, message: 'This employee account is suspended.' };
+  return savePunch(store, employee, payload.method || 'RFID', payload.evidence || null, payload.meta || {});
 });
 
 ipcMain.handle('kiosk:begin-camera-liveness', async () => {
@@ -1225,29 +1218,6 @@ ipcMain.handle('kiosk:begin-camera-liveness', async () => {
 ipcMain.handle('kiosk:cancel-camera-liveness', async (_event, challengeId) => {
   const store = readStore();
   return cameraChallenges.cancel(store.terminal.id || 'kiosk', String(challengeId || ''));
-});
-
-ipcMain.handle('kiosk:punch-by-code', async (_event, payload) => {
-  const store = readStore();
-  if (!store.terminal.allowCodeOnlyPunch) {
-    addEvent('security', 'Blocked code-only attendance attempt while the mode is disabled');
-    return {
-      ok: false,
-      message: 'Code-only attendance is disabled on this kiosk. Use fingerprint or camera verification.',
-    };
-  }
-  const employee = findEmployeeByCode(store.employees || [], payload.code);
-  if (!employee) {
-    return {
-      ok: false,
-      message: store.terminal.branchId
-        ? 'Employee is not in this kiosk branch. Cross-branch attendance requires the Camera tab, full employee ID, and face verification.'
-        : 'Employee code not found in terminal database.',
-    };
-  }
-  if (employee.status === 'Terminated') return { ok: false, message: 'This employee account is terminated.' };
-  if (employee.status === 'Suspended') return { ok: false, message: 'This employee account is suspended.' };
-  return savePunch(store, employee, payload.method || 'RFID', payload.evidence || null, payload.meta || {});
 });
 
 ipcMain.handle('kiosk:punch-camera', async (_event, payload) => {
@@ -1275,18 +1245,18 @@ ipcMain.handle('kiosk:punch-camera', async (_event, payload) => {
     }
   }
   if (payload.code && !typedEmployee) {
-    cameraChallenges.recordFailure(terminalId);
+    if (payload.mode !== 'multi-face') cameraChallenges.recordFailure(terminalId);
     return { ok: false, message: 'Employee ID was not found. Cross-branch attendance requires the complete employee ID and face verification.' };
   }
 
   const candidates = typedEmployee ? [typedEmployee] : employees;
   if (!candidates || candidates.length === 0) {
-    cameraChallenges.recordFailure(terminalId);
+    if (payload.mode !== 'multi-face') cameraChallenges.recordFailure(terminalId);
     return { ok: false, message: 'No employees found in the local kiosk directory. Please sync the kiosk in Settings.' };
   }
   const secureDescriptorCount = candidates.reduce((count, employee) => count + getFaceDescriptors(employee).length, 0);
   if (secureDescriptorCount === 0) {
-    cameraChallenges.recordFailure(terminalId);
+    if (payload.mode !== 'multi-face') cameraChallenges.recordFailure(terminalId);
     return { ok: false, message: 'No enrolled face profiles found for this employee. Please enroll face in HR portal.' };
   }
   // A typed code narrows the gallery; without one the same descriptor matcher
@@ -1294,8 +1264,11 @@ ipcMain.handle('kiosk:punch-camera', async (_event, payload) => {
   const matchThreshold = typedEmployee ? 0.280 : 0.255;
   const match = identifyFaceDescriptor(candidates, payload.descriptor, matchThreshold);
   if (!match.ok) {
-    const failure = cameraChallenges.recordFailure(terminalId);
-    return { ...match, lockedUntil: failure.lockedUntil || undefined };
+    if (payload.mode !== 'multi-face') {
+      const failure = cameraChallenges.recordFailure(terminalId);
+      return { ...match, lockedUntil: failure.lockedUntil || undefined };
+    }
+    return match;
   }
 
   const employee = match.employee;
