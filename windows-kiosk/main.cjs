@@ -876,12 +876,7 @@ function identifyFaceDescriptor(employees, probe, threshold = 0.255) {
 
   const margin = second ? second.score - best.score : Number.POSITIVE_INFINITY;
   if (second && Number.isFinite(second.score) && second.score <= threshold && margin < 0.035) {
-    return {
-      ok: false,
-      message: `Face match is ambiguous between ${best.employee.fullName} and ${second.employee.fullName}. Enter employee code with camera to confirm identity.`,
-      score: best.score,
-      margin,
-    };
+    console.log(`[Kiosk Face] Multiple profiles matched face: ${best.employee.fullName} (score ${best.score.toFixed(3)}) and ${second.employee.fullName} (score ${second.score.toFixed(3)}). Selecting closest match.`);
   }
 
   return { ok: true, employee: best.employee, score: best.score, margin };

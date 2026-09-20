@@ -322,9 +322,6 @@ export function findBestFaceMatch(
 
   const second = scoredEmployees[1] || null;
   const margin = second ? second.score - best.score : Number.POSITIVE_INFINITY;
-  if (second && Number.isFinite(second.score) && second.score <= threshold && margin < FACE_MATCH_MARGIN) {
-    return null;
-  }
 
   return { employee: best.employee, score: best.score, margin };
 }
