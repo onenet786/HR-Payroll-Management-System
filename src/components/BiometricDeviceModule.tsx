@@ -24,7 +24,7 @@ import {
   getFaceDescriptors,
   hasFaceEnrollment,
 } from '../utils/faceRecognition';
-import { performActiveLiveness, randomLivenessOrder } from '../utils/faceLiveness';
+import { performActiveLiveness, randomLivenessOrder, type LivenessDirection } from '../utils/faceLiveness';
 type WsStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 type CaptureState = 'idle' | 'scanning' | 'captured' | 'error';
 type TabId = 'test' | 'enroll' | 'attendance';
@@ -152,7 +152,7 @@ export function BiometricDeviceModule({
   const [faceMsg, setFaceMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const [recognizedFaceMatch, setRecognizedFaceMatch] = useState<{ employee: Employee; score: number; margin: number } | null>(null);
   const [livenessPhase, setLivenessPhase] = useState(-1);
-  const [livenessOrder, setLivenessOrder] = useState<['left', 'right'] | ['right', 'left']>(['left', 'right']);
+  const [livenessOrder, setLivenessOrder] = useState<[LivenessDirection, LivenessDirection]>(['left', 'right']);
   const [livenessBusy, setLivenessBusy] = useState(false);
 
   // ── Attendance state ─────────────────────────────────────────────────────────
@@ -1236,9 +1236,10 @@ export function BiometricDeviceModule({
 
           {/* ───────────── TAB 2: ENROLL ───────────── */}
           {activeTab === 'enroll' && (
-            <div className="grid md:grid-cols-2 gap-6">
-              {/* Left: Enrollment workflow */}
-              <div className="space-y-4">
+            <div className="space-y-6">
+              <div className="grid md:grid-cols-2 gap-6">
+                {/* Left: Enrollment workflow */}
+                <div className="space-y-4">
                 <div>
                   <h3 className="font-bold text-slate-800 text-sm">Enroll Employee Biometrics</h3>
                   <p className="text-xs text-slate-500 mt-1">
@@ -1399,163 +1400,6 @@ export function BiometricDeviceModule({
                     </button>
                   )}
                 </div>
-
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 space-y-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <h4 className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
-                        <Camera className="w-4 h-4 text-blue-600" />
-                        Enroll Camera Face
-                      </h4>
-                      <p className="text-xs text-slate-500 mt-1">
-                        Save 3 camera face samples for better kiosk recognition.
-                      </p>
-                    </div>
-                    {(() => {
-                      const emp = employees.find(e => e.id === enrollEmpId);
-                      return (
-                        <span className={`text-[10px] font-bold rounded-full px-2 py-0.5 ${emp && hasFaceEnrollment(emp) ? 'bg-blue-100 text-blue-700' : 'bg-slate-200 text-slate-500'}`}>
-                          {emp && hasFaceEnrollment(emp) ? 'Secure face enrolled' : emp?.faceDescriptors?.length ? 'Re-enrollment required' : 'No face'}
-                        </span>
-                      );
-                    })()}
-                  </div>
-
-                  <div className="grid grid-cols-1 lg:grid-cols-[16rem_minmax(0,1fr)] gap-3 items-start">
-                  <div className="relative w-64 h-64 mx-auto lg:mx-0 rounded-xl overflow-hidden bg-slate-950 border border-slate-300 flex items-center justify-center">
-                    <video ref={faceVideoRef} className="w-full h-full object-cover scale-x-[-1]" playsInline muted />
-                    {!faceCameraReady && (
-                      <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-500 text-xs bg-slate-950">
-                        <VideoOff className="w-8 h-8 mb-2 text-slate-600" />
-                        Camera idle
-                      </div>
-                    )}
-                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                      <div className="relative w-40 h-52 rounded-[50%] border-2 border-blue-400 shadow-[0_0_0_999px_rgba(2,6,23,0.36)]">
-                        <div className="absolute -top-1 left-1/2 h-2 w-10 -translate-x-1/2 rounded-full bg-blue-300"></div>
-                        <div className="absolute top-16 left-1/2 h-px w-24 -translate-x-1/2 bg-blue-300/80"></div>
-                        <div className="absolute bottom-10 left-1/2 h-px w-14 -translate-x-1/2 bg-blue-300/70"></div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-3" aria-live="polite">
-                    <div className="flex items-center justify-between">
-                      <p className="text-[10px] font-black uppercase tracking-widest text-amber-700">Active liveness · photo replay protection</p>
-                      {livenessBusy && (
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-200 text-amber-900 animate-pulse">
-                          {livenessPhase === 0 ? 'Center Face' : livenessPhase === 1 ? `Turn ${livenessOrder[0].toUpperCase()}` : livenessPhase === 2 ? 'Center Face' : livenessPhase === 3 ? `Turn ${livenessOrder[1].toUpperCase()}` : livenessPhase === 4 ? 'Return Center' : 'Verified'}
-                        </span>
-                      )}
-                    </div>
-                    <div className="mt-2 grid grid-cols-5 gap-1">
-                      {['Center', livenessOrder[0] === 'left' ? 'Left' : 'Right', 'Center', livenessOrder[1] === 'left' ? 'Left' : 'Right', 'Verified'].map((label, index) => (
-                        <div key={`${label}-${index}`} className={`rounded-md px-1 py-2 text-center text-[9px] font-bold transition-all ${livenessPhase > index ? 'bg-emerald-600 text-white' : livenessPhase === index ? 'bg-amber-400 text-slate-950 ring-2 ring-amber-500' : 'bg-white text-slate-400'}`}>{label}</div>
-                      ))}
-                    </div>
-                    <p className="mt-2 text-[10px] text-amber-900">Follow the prompts to turn head Left and Right. Blocks static photos and replay attempts.</p>
-                  </div>
-                  {faceMsg && (
-                    <div className={`text-xs rounded-xl px-3 py-2 border ${
-                      faceMsg.type === 'ok'
-                        ? 'bg-blue-50 border-blue-200 text-blue-800'
-                        : 'bg-rose-50 border-rose-200 text-rose-800'
-                    }`}>
-                      {faceMsg.text}
-                    </div>
-                  )}
-
-                  {recognizedFaceMatch ? (
-                    <div className="hidden rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-600">Recognized Employee</p>
-                          <p className="mt-0.5 text-sm font-black text-emerald-900">{recognizedFaceMatch.employee.fullName}</p>
-                          <p className="font-mono text-[11px] text-emerald-700">{recognizedFaceMatch.employee.employeeCode}</p>
-                        </div>
-                        <span className="rounded-full bg-emerald-600 px-2 py-1 text-[10px] font-bold text-white">
-                          {recognizedFaceMatch.employee.status}
-                        </span>
-                      </div>
-                      <div className="mt-3 grid grid-cols-2 gap-2">
-                        <div className="rounded-lg bg-white/70 px-2 py-1.5">
-                          <p className="text-[9px] font-bold uppercase text-emerald-600">Department</p>
-                          <p className="font-semibold">{recognizedFaceMatch.employee.departmentId || 'Not set'}</p>
-                        </div>
-                        <div className="rounded-lg bg-white/70 px-2 py-1.5">
-                          <p className="text-[9px] font-bold uppercase text-emerald-600">Designation</p>
-                          <p className="font-semibold">{recognizedFaceMatch.employee.designationId || 'Not set'}</p>
-                        </div>
-                        <div className="rounded-lg bg-white/70 px-2 py-1.5">
-                          <p className="text-[9px] font-bold uppercase text-emerald-600">Branch</p>
-                          <p className="font-semibold">{recognizedFaceMatch.employee.branchId || 'Not set'}</p>
-                        </div>
-                        <div className="rounded-lg bg-white/70 px-2 py-1.5">
-                          <p className="text-[9px] font-bold uppercase text-emerald-600">Match</p>
-                          <p className="font-semibold">
-                            Score {recognizedFaceMatch.score.toFixed(3)}
-                            {Number.isFinite(recognizedFaceMatch.margin) ? ` · Margin ${recognizedFaceMatch.margin.toFixed(3)}` : ''}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="mt-2 flex flex-wrap gap-1.5">
-                        <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
-                          {(recognizedFaceMatch.employee.fingerprintTemplates?.length || 0)} fingerprint sample{(recognizedFaceMatch.employee.fingerprintTemplates?.length || 0) === 1 ? '' : 's'}
-                        </span>
-                        <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-700">
-                          {getFaceDescriptors(recognizedFaceMatch.employee).length} face profile{getFaceDescriptors(recognizedFaceMatch.employee).length === 1 ? '' : 's'}
-                        </span>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="hidden rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-500">
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Recognized Employee</p>
-                      <p className="mt-1 font-semibold text-slate-700">No employee recognized yet.</p>
-                      <p className="mt-1">Keep the full face inside the oval, then click Verify Face.</p>
-                    </div>
-                  )}
-                  </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
-                    <button
-                      type="button"
-                      onClick={faceCameraReady ? stopFaceCamera : startFaceCamera}
-                      className="flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-900 text-white text-sm font-bold py-2.5 rounded-xl transition"
-                    >
-                      {faceCameraReady ? <VideoOff className="w-4 h-4" /> : <Camera className="w-4 h-4" />}
-                      {faceCameraReady ? 'Stop Camera' : 'Start Camera'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleSaveFaceEnrollment}
-                      disabled={!faceCameraReady || livenessBusy}
-                      className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm font-bold py-2.5 rounded-xl transition"
-                    >
-                      <Database className="w-4 h-4" />
-                      Save 3 Faces
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleVerifyFaceEnrollment}
-                      disabled={!faceCameraReady || livenessBusy}
-                      className="flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white text-sm font-bold py-2.5 rounded-xl transition"
-                    >
-                      <CheckCircle className="w-4 h-4" />
-                      Verify Face
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleClearFaceEnrollment}
-                      disabled={!employees.find(e => e.id === enrollEmpId)?.faceDescriptors?.length}
-                      className="flex items-center justify-center gap-2 bg-rose-600 hover:bg-rose-700 disabled:opacity-40 text-white text-sm font-bold py-2.5 rounded-xl transition"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                      Remove
-                    </button>
-                  </div>
-                </div>
               </div>
 
               {/* Right: Enrolled employees list */}
@@ -1563,55 +1407,6 @@ export function BiometricDeviceModule({
                 <h4 className="text-xs font-bold text-slate-700 uppercase tracking-widest">
                   Biometric Employees ({enrolledCount}/{employees.length})
                 </h4>
-                {recognizedFaceMatch ? (
-                  <div className="hidden rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-600">Recognized Employee</p>
-                        <p className="mt-0.5 text-sm font-black text-emerald-900">{recognizedFaceMatch.employee.fullName}</p>
-                        <p className="font-mono text-[11px] text-emerald-700">{recognizedFaceMatch.employee.employeeCode}</p>
-                      </div>
-                      <span className="rounded-full bg-emerald-600 px-2 py-1 text-[10px] font-bold text-white">
-                        {recognizedFaceMatch.employee.status}
-                      </span>
-                    </div>
-                    <div className="mt-3 grid grid-cols-2 gap-2">
-                      <div className="rounded-lg bg-white/70 px-2 py-1.5">
-                        <p className="text-[9px] font-bold uppercase text-emerald-600">Department</p>
-                        <p className="font-semibold">{recognizedFaceMatch.employee.departmentId || 'Not set'}</p>
-                      </div>
-                      <div className="rounded-lg bg-white/70 px-2 py-1.5">
-                        <p className="text-[9px] font-bold uppercase text-emerald-600">Designation</p>
-                        <p className="font-semibold">{recognizedFaceMatch.employee.designationId || 'Not set'}</p>
-                      </div>
-                      <div className="rounded-lg bg-white/70 px-2 py-1.5">
-                        <p className="text-[9px] font-bold uppercase text-emerald-600">Branch</p>
-                        <p className="font-semibold">{recognizedFaceMatch.employee.branchId || 'Not set'}</p>
-                      </div>
-                      <div className="rounded-lg bg-white/70 px-2 py-1.5">
-                        <p className="text-[9px] font-bold uppercase text-emerald-600">Match</p>
-                        <p className="font-semibold">
-                          Score {recognizedFaceMatch.score.toFixed(3)}
-                          {Number.isFinite(recognizedFaceMatch.margin) ? ` · Margin ${recognizedFaceMatch.margin.toFixed(3)}` : ''}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
-                        {(recognizedFaceMatch.employee.fingerprintTemplates?.length || 0)} fingerprint sample{(recognizedFaceMatch.employee.fingerprintTemplates?.length || 0) === 1 ? '' : 's'}
-                      </span>
-                      <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-700">
-                        {getFaceDescriptors(recognizedFaceMatch.employee).length} face profile{getFaceDescriptors(recognizedFaceMatch.employee).length === 1 ? '' : 's'}
-                      </span>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="hidden rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-500">
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Recognized Employee</p>
-                    <p className="mt-1 font-semibold text-slate-700">No employee recognized yet.</p>
-                    <p className="mt-1">Keep the full face inside the oval, then click Verify Face.</p>
-                  </div>
-                )}
                 <div className="space-y-1.5 max-h-80 overflow-y-auto pr-1">
                   {employees
                     .filter(e => e.status === 'Active')
@@ -1659,58 +1454,176 @@ export function BiometricDeviceModule({
                       );
                     })}
                 </div>
-                {recognizedFaceMatch ? (
-                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-600">Recognized Employee</p>
-                        <p className="mt-0.5 text-sm font-black text-emerald-900">{recognizedFaceMatch.employee.fullName}</p>
-                        <p className="font-mono text-[11px] text-emerald-700">{recognizedFaceMatch.employee.employeeCode}</p>
-                      </div>
-                      <span className="rounded-full bg-emerald-600 px-2 py-1 text-[10px] font-bold text-white">
-                        {recognizedFaceMatch.employee.status}
-                      </span>
-                    </div>
-                    <div className="mt-3 grid grid-cols-2 gap-2">
-                      <div className="rounded-lg bg-white/70 px-2 py-1.5">
-                        <p className="text-[9px] font-bold uppercase text-emerald-600">Department</p>
-                        <p className="font-semibold">{recognizedFaceMatch.employee.departmentId || 'Not set'}</p>
-                      </div>
-                      <div className="rounded-lg bg-white/70 px-2 py-1.5">
-                        <p className="text-[9px] font-bold uppercase text-emerald-600">Designation</p>
-                        <p className="font-semibold">{recognizedFaceMatch.employee.designationId || 'Not set'}</p>
-                      </div>
-                      <div className="rounded-lg bg-white/70 px-2 py-1.5">
-                        <p className="text-[9px] font-bold uppercase text-emerald-600">Branch</p>
-                        <p className="font-semibold">{recognizedFaceMatch.employee.branchId || 'Not set'}</p>
-                      </div>
-                      <div className="rounded-lg bg-white/70 px-2 py-1.5">
-                        <p className="text-[9px] font-bold uppercase text-emerald-600">Match</p>
-                        <p className="font-semibold">
-                          Score {recognizedFaceMatch.score.toFixed(3)}
-                          {Number.isFinite(recognizedFaceMatch.margin) ? ` · Margin ${recognizedFaceMatch.margin.toFixed(3)}` : ''}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
-                        {(recognizedFaceMatch.employee.fingerprintTemplates?.length || 0)} fingerprint sample{(recognizedFaceMatch.employee.fingerprintTemplates?.length || 0) === 1 ? '' : 's'}
-                      </span>
-                      <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-700">
-                        {getFaceDescriptors(recognizedFaceMatch.employee).length} face profile{getFaceDescriptors(recognizedFaceMatch.employee).length === 1 ? '' : 's'}
-                      </span>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-500">
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Recognized Employee</p>
-                    <p className="mt-1 font-semibold text-slate-700">No employee recognized yet.</p>
-                    <p className="mt-1">Keep the full face inside the oval, then click Verify Face.</p>
-                  </div>
-                )}
               </div>
             </div>
-          )}
+
+            {/* ── Kiosk-Matched Camera Face Enrollment Card ── */}
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:p-5 space-y-4 shadow-sm">
+              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+                <div>
+                  <h4 className="font-bold text-slate-800 text-sm sm:text-base flex items-center gap-2">
+                    <Camera className="w-4 h-4 text-blue-600" />
+                    Enroll Camera Face (Kiosk Optimized)
+                  </h4>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Save 3 camera face samples for kiosk recognition with active liveness verification.
+                  </p>
+                </div>
+                {(() => {
+                  const emp = employees.find(e => e.id === enrollEmpId);
+                  return (
+                    <div className="flex items-center gap-2">
+                      {emp && (
+                        <span className="text-xs font-semibold text-slate-600">
+                          {emp.fullName} ({emp.employeeCode})
+                        </span>
+                      )}
+                      <span className={`text-[10px] font-bold rounded-full px-2.5 py-1 ${emp && hasFaceEnrollment(emp) ? 'bg-emerald-100 text-emerald-800' : emp?.faceDescriptors?.length ? 'bg-amber-100 text-amber-800' : 'bg-slate-200 text-slate-600'}`}>
+                        {emp && hasFaceEnrollment(emp) ? 'Secure face enrolled' : emp?.faceDescriptors?.length ? 'Re-enrollment required' : 'No face'}
+                      </span>
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {/* Kiosk Camera Box (4:3 aspect ratio, max 640px) */}
+              <div className="enroll-camera-box">
+                <video ref={faceVideoRef} className="w-full h-full object-cover scale-x-[-1]" playsInline muted />
+                {!faceCameraReady && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-500 text-xs bg-slate-950/90 pointer-events-none">
+                    <VideoOff className="w-12 h-12 mb-2 text-slate-600" />
+                    <span className="font-semibold text-slate-400">Camera preview idle</span>
+                  </div>
+                )}
+                <div className="enroll-cam-hud">
+                  <div className="enroll-cam-source-badge">
+                    {faceCameraReady ? 'Webcam' : 'Camera Off'}
+                  </div>
+                  <div className="enroll-cam-face-guide"></div>
+                  <div className="enroll-cam-status">
+                    <span className={`w-2 h-2 rounded-full ${faceCameraReady ? (livenessBusy ? 'bg-amber-400 animate-ping' : 'bg-emerald-400 animate-pulse') : 'bg-slate-500'}`} />
+                    <span>
+                      {!faceCameraReady
+                        ? 'Camera is not showing a live frame yet. Click Start Camera.'
+                        : livenessBusy
+                        ? (faceMsg?.text || (livenessPhase === 0 ? 'Center face inside oval' : livenessPhase === 1 ? `Turn head ${livenessOrder[0].toUpperCase()}` : livenessPhase === 2 ? 'Return to center' : livenessPhase === 3 ? `Turn head ${livenessOrder[1].toUpperCase()}` : 'Return to center'))
+                        : 'Keep face centered inside the oval guide'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Liveness Rail (Matching Kiosk) */}
+              <div className="enroll-liveness-rail" aria-live="assertive">
+                <div className="enroll-liveness-kicker">ACTIVE LIVENESS · PHOTO REPLAY PROTECTION</div>
+                <div className="enroll-liveness-action">
+                  {livenessBusy
+                    ? (faceMsg?.text || (livenessPhase === 0 ? 'Center your face inside the oval' : livenessPhase === 1 ? `Turn your head ${livenessOrder[0].toUpperCase()}` : livenessPhase === 2 ? 'Return to center' : livenessPhase === 3 ? `Turn your head ${livenessOrder[1].toUpperCase()}` : 'Return to center'))
+                    : 'Look at the camera, then start the live face check'}
+                </div>
+                <div className="enroll-liveness-steps">
+                  {['Center', livenessOrder[0] === 'left' ? 'Left' : 'Right', 'Center', livenessOrder[1] === 'left' ? 'Left' : 'Right', 'Verified'].map((label, index) => {
+                    let stateClass = '';
+                    if (livenessPhase > index) stateClass = 'done';
+                    else if (livenessBusy && livenessPhase === index) stateClass = 'current';
+                    return (
+                      <span key={`${label}-${index}`} className={stateClass}>
+                        {label}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Message Alerts */}
+              {faceMsg && !livenessBusy && (
+                <div className={`w-full max-w-[640px] mx-auto text-xs rounded-xl px-4 py-2.5 border ${
+                  faceMsg.type === 'ok'
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                    : 'bg-rose-50 border-rose-200 text-rose-800'
+                }`}>
+                  {faceMsg.text}
+                </div>
+              )}
+
+              {/* Recognized Face Match Details */}
+              {recognizedFaceMatch && (
+                <div className="w-full max-w-[640px] mx-auto rounded-xl border border-emerald-300 bg-emerald-50 p-4 text-xs text-emerald-900 shadow-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-600">Recognized Employee</p>
+                      <p className="mt-0.5 text-base font-black text-emerald-950">{recognizedFaceMatch.employee.fullName}</p>
+                      <p className="font-mono text-[11px] text-emerald-700">{recognizedFaceMatch.employee.employeeCode}</p>
+                    </div>
+                    <span className="rounded-full bg-emerald-600 px-2.5 py-1 text-[10px] font-bold text-white shadow-sm">
+                      {recognizedFaceMatch.employee.status}
+                    </span>
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    <div className="rounded-lg bg-white/80 border border-emerald-100 px-2 py-1.5">
+                      <p className="text-[9px] font-bold uppercase text-emerald-600">Department</p>
+                      <p className="font-semibold text-slate-800 truncate">{recognizedFaceMatch.employee.departmentId || 'Not set'}</p>
+                    </div>
+                    <div className="rounded-lg bg-white/80 border border-emerald-100 px-2 py-1.5">
+                      <p className="text-[9px] font-bold uppercase text-emerald-600">Designation</p>
+                      <p className="font-semibold text-slate-800 truncate">{recognizedFaceMatch.employee.designationId || 'Not set'}</p>
+                    </div>
+                    <div className="rounded-lg bg-white/80 border border-emerald-100 px-2 py-1.5">
+                      <p className="text-[9px] font-bold uppercase text-emerald-600">Branch</p>
+                      <p className="font-semibold text-slate-800 truncate">{recognizedFaceMatch.employee.branchId || 'Not set'}</p>
+                    </div>
+                    <div className="rounded-lg bg-white/80 border border-emerald-100 px-2 py-1.5">
+                      <p className="text-[9px] font-bold uppercase text-emerald-600">Match Score</p>
+                      <p className="font-semibold text-slate-800">
+                        {recognizedFaceMatch.score.toFixed(3)}
+                        {Number.isFinite(recognizedFaceMatch.margin) ? ` (Δ${recognizedFaceMatch.margin.toFixed(2)})` : ''}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div className="w-full max-w-[640px] mx-auto grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                <button
+                  type="button"
+                  onClick={faceCameraReady ? stopFaceCamera : startFaceCamera}
+                  className="flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-900 text-white text-sm font-bold py-2.5 rounded-xl transition shadow-sm"
+                >
+                  {faceCameraReady ? <VideoOff className="w-4 h-4" /> : <Camera className="w-4 h-4" />}
+                  {faceCameraReady ? 'Stop Camera' : 'Start Camera'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveFaceEnrollment}
+                  disabled={!faceCameraReady || livenessBusy}
+                  className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm font-bold py-2.5 rounded-xl transition shadow-sm"
+                >
+                  <Database className="w-4 h-4" />
+                  Save 3 Faces
+                </button>
+                <button
+                  type="button"
+                  onClick={handleVerifyFaceEnrollment}
+                  disabled={!faceCameraReady || livenessBusy}
+                  className="flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white text-sm font-bold py-2.5 rounded-xl transition shadow-sm"
+                >
+                  <CheckCircle className="w-4 h-4" />
+                  Verify Face
+                </button>
+                <button
+                  type="button"
+                  onClick={handleClearFaceEnrollment}
+                  disabled={!employees.find(e => e.id === enrollEmpId)?.faceDescriptors?.length}
+                  className="flex items-center justify-center gap-2 bg-rose-600 hover:bg-rose-700 disabled:opacity-40 text-white text-sm font-bold py-2.5 rounded-xl transition shadow-sm"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Remove Face
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
           {/* ───────────── TAB 3: ATTENDANCE ───────────── */}
           {activeTab === 'attendance' && (
