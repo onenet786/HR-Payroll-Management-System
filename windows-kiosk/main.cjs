@@ -751,6 +751,7 @@ function getBranchName(employee) {
 function kioskEmployee(employee) {
   if (!employee) return null;
   return {
+    id: employee.id || employee.employeeCode || '',
     employeeCode: employee.employeeCode,
     fullName: employee.fullName,
     status: employee.status,
@@ -999,6 +1000,8 @@ function savePunch(store, employee, method, evidence, meta) {
   const log = {
     ...(resumed?.log || computePunch(existing, method, store.terminal, evidence?.id, outReason, at)),
     employeeId: employee.id,
+    employeeName: employee.fullName || '',
+    employeeCode: employee.employeeCode || '',
     employeeBranchId: employee.branchId || '',
     terminalBranchId: store.terminal.branchId || '',
     crossBranch: !!(store.terminal.branchId && employee.branchId && store.terminal.branchId !== employee.branchId),
@@ -1059,18 +1062,23 @@ ipcMain.handle('kiosk:get-state', async () => {
     terminal: store.terminal,
     lastSync: store.lastSync || null,
     employees: (store.employees || []).map(kioskEmployee),
-    attendances: (store.attendances || []).map(log => ({
-      id: log.id,
-      employeeId: log.employeeId,
-      date: log.date,
-      punchIn: log.punchIn || '',
-      punchOut: log.punchOut || '',
-      outReason: log.outReason || '',
-      breaks: Array.isArray(log.breaks) ? log.breaks : [],
-      lastPunchAt: log.lastPunchAt || '',
-      method: log.method,
-      status: log.status,
-    })),
+    attendances: (store.attendances || []).map(log => {
+      const emp = (store.employees || []).find(e => (e.id && e.id === log.employeeId) || (e.employeeCode && e.employeeCode === log.employeeId));
+      return {
+        id: log.id,
+        employeeId: log.employeeId,
+        employeeName: log.employeeName || emp?.fullName || '',
+        employeeCode: log.employeeCode || emp?.employeeCode || '',
+        date: log.date,
+        punchIn: log.punchIn || '',
+        punchOut: log.punchOut || '',
+        outReason: log.outReason || '',
+        breaks: Array.isArray(log.breaks) ? log.breaks : [],
+        lastPunchAt: log.lastPunchAt || '',
+        method: log.method,
+        status: log.status,
+      };
+    }),
     branches,
     assignedBranch: branches.find(branch => branch.id === store.terminal.branchId) || null,
     syncTarget: {

@@ -1917,9 +1917,9 @@ function refreshTodayOnlyFeedLegacy() {
 
   const employees = kioskState.employees || [];
   el.todayFeed.innerHTML = logs.map(log => {
-    const emp = employees.find(e => e.id === log.employeeId);
-    const name = emp?.fullName || log.employeeId;
-    const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+    const emp = employees.find(e => (e.id && e.id === log.employeeId) || (e.employeeCode && e.employeeCode === log.employeeId) || (e.employeeCode && log.employeeCode && e.employeeCode === log.employeeCode));
+    const name = emp?.fullName || log.employeeName || log.employeeCode || log.employeeId;
+    const initials = name.split(' ').filter(Boolean).map(w => w[0]).join('').slice(0, 2).toUpperCase() || 'E';
     const isOut = log.punchOut;
     const isLate = log.status === 'Late';
     const rowClass = isOut ? 'row-out' : isLate ? 'row-late' : 'row-ok';
@@ -1980,9 +1980,9 @@ function refreshTodayFeed() {
 
   el.todayFeed.innerHTML = transactions.map(item => {
     const { log, action } = item;
-    const emp = employees.find(e => e.id === log.employeeId);
-    const name = emp?.fullName || log.employeeId;
-    const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+    const emp = employees.find(e => (e.id && e.id === log.employeeId) || (e.employeeCode && e.employeeCode === log.employeeId) || (e.employeeCode && log.employeeCode && e.employeeCode === log.employeeCode));
+    const name = emp?.fullName || log.employeeName || log.employeeCode || log.employeeId;
+    const initials = name.split(' ').filter(Boolean).map(w => w[0]).join('').slice(0, 2).toUpperCase() || 'E';
     const pictureUrl = safeImageUrl(emp?.pictureUrl || emp?.photoUrl || emp?.profileImage || emp?.imageUrl || '');
     const isOut = action === 'OUT';
     const isLate = action === 'IN' && log.status === 'Late';
@@ -2029,7 +2029,7 @@ function renderDirectory(filter) {
   el.dirList.innerHTML = list.map(emp => {
     const templates = getFingerprintTemplates(emp);
     const hasFp = templates.length > 0;
-    const log = todayLogs.find(l => l.employeeId === emp.id);
+    const log = todayLogs.find(l => (l.employeeId && (l.employeeId === emp.id || l.employeeId === emp.employeeCode)));
     const punchedIn = log?.punchIn && !log?.punchOut;
     const classes = [hasFp ? 'has-fp' : '', punchedIn ? 'punched-in' : ''].filter(Boolean).join(' ');
     const lastReturnAt = Array.isArray(log?.breaks) ? log.breaks.at(-1)?.returnAt : '';
