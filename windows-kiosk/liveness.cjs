@@ -55,7 +55,7 @@ function validateSequence(observations, order, maxDurationMs = MAX_DURATION_MS) 
   if (maxScaleChange > 0.22) return { ok: false, message: 'Face scale changed excessively.' };
   const targets = ['center', order[0], 'center', order[1], 'center'];
   const counts = [0, 0, 0, 0, 0];
-  const matches = (target, yaw) => target === 'center' ? Math.abs(yaw) <= 0.12 : target === 'left' ? yaw >= 0.27 : yaw <= -0.27;
+  const matches = (target, yaw) => target === 'center' ? Math.abs(yaw) <= 0.18 : target === 'left' ? yaw >= 0.27 : yaw <= -0.27;
   let phase = 0;
   for (const item of observations) {
     if (matches(targets[phase], Number(item.yaw))) {

@@ -91,7 +91,7 @@ export function validateLivenessSequence(
   }
 
   const matches = (target: LivenessDirection | 'center', yaw: number) =>
-    target === 'center' ? Math.abs(yaw) <= 0.12 : target === 'left' ? yaw >= 0.27 : yaw <= -0.27;
+    target === 'center' ? Math.abs(yaw) <= 0.18 : target === 'left' ? yaw >= 0.27 : yaw <= -0.27;
   const frameCounts: [number, number, number, number, number] = [0, 0, 0, 0, 0];
   let phase = 0;
   for (const item of observations) {
@@ -145,10 +145,17 @@ export async function performActiveLiveness(
   let consecutive = 0;
   let lastPhase = -1;
   const matches = (target: LivenessDirection | 'center', yaw: number) =>
-    target === 'center' ? Math.abs(yaw) <= 0.12 : target === 'left' ? yaw >= 0.27 : yaw <= -0.27;
+    target === 'center' ? Math.abs(yaw) <= 0.18 : target === 'left' ? yaw >= 0.27 : yaw <= -0.27;
   while (Date.now() - start <= LIVENESS_MAX_DURATION_MS) {
     if (phase !== lastPhase) { onStatus?.(labels[phase], phase); lastPhase = phase; }
-    const observation = await observeFaceLiveness(video);
+    let observation: LivenessObservation | null = null;
+    try {
+      observation = await observeFaceLiveness(video);
+    } catch {
+      consecutive = 0;
+      await new Promise(resolve => setTimeout(resolve, 110));
+      continue;
+    }
     observations.push(observation);
     const target = phaseTarget(phase, order);
     consecutive = matches(target, observation.yaw) ? consecutive + 1 : 0;
