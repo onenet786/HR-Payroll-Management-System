@@ -7,6 +7,7 @@ export interface DetectedFaceGeometry {
   width: number;
   height: number;
   yaw: number;
+  box: { x: number; y: number; width: number; height: number };
 }
 
 let landmarkerPromise: Promise<FaceLandmarker> | null = null;
@@ -28,7 +29,7 @@ async function createLandmarker(): Promise<FaceLandmarker> {
     return await FaceLandmarker.createFromOptions(files, {
       baseOptions: { modelAssetPath: './mediapipe/face_landmarker.task', delegate: 'CPU' },
       runningMode: 'VIDEO',
-      numFaces: 2,
+      numFaces: 5,
       minFaceDetectionConfidence: 0.38,
       minFacePresenceConfidence: 0.38,
       minTrackingConfidence: 0.38,
@@ -38,7 +39,7 @@ async function createLandmarker(): Promise<FaceLandmarker> {
     return await FaceLandmarker.createFromOptions(files, {
       baseOptions: { modelAssetPath: CDN_MODEL, delegate: 'CPU' },
       runningMode: 'VIDEO',
-      numFaces: 2,
+      numFaces: 5,
       minFaceDetectionConfidence: 0.38,
       minFacePresenceConfidence: 0.38,
       minTrackingConfidence: 0.38,
@@ -67,10 +68,16 @@ export async function detectFaceGeometry(video: HTMLVideoElement): Promise<Detec
     const leftEye = landmarks[33], rightEye = landmarks[263], nose = landmarks[1];
     const eyeDistance = leftEye && rightEye ? Math.abs(rightEye.x - leftEye.x) : 0;
     if (!nose || !leftEye || !rightEye || eyeDistance < 0.01) throw new Error('Face landmarks are too small. Move closer.');
+    const width = maxX - minX;
+    const height = maxY - minY;
     return {
-      landmarks, centerX: (minX + maxX) / 2, centerY: (minY + maxY) / 2,
-      width: maxX - minX, height: maxY - minY,
+      landmarks,
+      centerX: (minX + maxX) / 2,
+      centerY: (minY + maxY) / 2,
+      width,
+      height,
       yaw: (nose.x - ((leftEye.x + rightEye.x) / 2)) / eyeDistance,
+      box: { x: minX, y: minY, width, height },
     };
   });
 }

@@ -59,6 +59,24 @@ function drawNormalizedFaceFrame(
   ctx.drawImage(video, sourceX, sourceY, cropWidth, cropHeight, 0, 0, width, height);
 }
 
+export function drawCroppedFaceFrame(
+  ctx: CanvasRenderingContext2D,
+  video: HTMLVideoElement,
+  box: { x: number; y: number; width: number; height: number },
+  width: number,
+  height: number,
+): void {
+  const videoW = video.videoWidth;
+  const videoH = video.videoHeight;
+  const padX = box.width * 0.15;
+  const padY = box.height * 0.15;
+  const sx = Math.max(0, (box.x - padX) * videoW);
+  const sy = Math.max(0, (box.y - padY) * videoH);
+  const sw = Math.min(videoW - sx, (box.width + padX * 2) * videoW);
+  const sh = Math.min(videoH - sy, (box.height + padY * 2) * videoH);
+  ctx.drawImage(video, sx, sy, sw, sh, 0, 0, width, height);
+}
+
 export function getFaceDescriptors(employee: Employee): FaceDescriptor[] {
   const values = employee.faceDescriptors || [];
   return values.filter(item =>
@@ -73,7 +91,11 @@ export function hasFaceEnrollment(employee: Employee): boolean {
   return getFaceDescriptors(employee).length > 0;
 }
 
-export function createFaceDescriptorFromVideo(video: HTMLVideoElement, source = 'camera'): FaceDescriptor {
+export function createFaceDescriptorFromVideo(
+  video: HTMLVideoElement,
+  source = 'camera',
+  cropBox?: { x: number; y: number; width: number; height: number }
+): FaceDescriptor {
   const canvas = document.createElement('canvas');
   canvas.width = GRID_W;
   canvas.height = GRID_H;
@@ -81,7 +103,11 @@ export function createFaceDescriptorFromVideo(video: HTMLVideoElement, source = 
   if (!ctx) throw new Error('Camera descriptor canvas is unavailable.');
   if (!video.videoWidth || !video.videoHeight) throw new Error('Camera is not ready yet.');
 
-  drawNormalizedFaceFrame(ctx, video, GRID_W, GRID_H);
+  if (cropBox && cropBox.width > 0.05 && cropBox.height > 0.05) {
+    drawCroppedFaceFrame(ctx, video, cropBox, GRID_W, GRID_H);
+  } else {
+    drawNormalizedFaceFrame(ctx, video, GRID_W, GRID_H);
+  }
   const image = ctx.getImageData(0, 0, GRID_W, GRID_H).data;
   const luma: number[] = [];
 
