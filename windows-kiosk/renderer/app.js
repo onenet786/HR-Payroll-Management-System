@@ -547,6 +547,7 @@ function stopCamera() {
   el.ipcamEl.removeAttribute('src');
   el.ipcamEl.classList.remove('active');
   clearCapturedPhoto();
+  resetLivenessUI();
 }
 
 async function captureEvidence() {
@@ -1090,11 +1091,33 @@ async function punchByCode() {
   ));
 }
 
-function setLivenessProgress(phase, message, failed = false) {
+function resetLivenessUI() {
+  if (!el.livenessRail) return;
+  el.livenessRail.classList.remove('failed');
+  if (el.livenessAction) el.livenessAction.textContent = 'Look at the camera, then start the live face check';
+  const steps = el.livenessRail.querySelectorAll('.liveness-steps span');
+  if (steps.length >= 5) {
+    steps[0].textContent = 'Center';
+    steps[1].textContent = 'Left';
+    steps[2].textContent = 'Center';
+    steps[3].textContent = 'Right';
+    steps[4].textContent = 'Verified';
+    steps.forEach(s => {
+      s.classList.remove('done', 'current');
+    });
+  }
+}
+
+function setLivenessProgress(phase, message, failed = false, order = null) {
   if (!el.livenessRail) return;
   el.livenessRail.classList.toggle('failed', failed);
   el.livenessAction.textContent = message;
-  el.livenessRail.querySelectorAll('.liveness-steps span').forEach((step, index) => {
+  const steps = el.livenessRail.querySelectorAll('.liveness-steps span');
+  if (order && steps.length >= 5) {
+    steps[1].textContent = order[0] === 'left' ? 'Left' : 'Right';
+    steps[3].textContent = order[1] === 'left' ? 'Left' : 'Right';
+  }
+  steps.forEach((step, index) => {
     step.classList.toggle('done', phase > index);
     step.classList.toggle('current', phase === index && !failed);
   });
@@ -1121,12 +1144,12 @@ async function runCameraLivenessChallenge() {
   const matches = (target, yaw) => target === 'center' ? Math.abs(yaw) <= 0.12 : target === 'left' ? yaw <= -0.27 : yaw >= 0.27;
   try {
     while (Date.now() <= issued.expiresAt) {
-      setLivenessProgress(phase, labels[phase]);
+      setLivenessProgress(phase, labels[phase], false, issued.order);
       const observation = await captureLivenessObservation();
       observations.push(observation);
       consecutive = matches(targets[phase], observation.yaw) ? consecutive + 1 : 0;
       if (consecutive >= 3) {
-        if (phase === 4) { setLivenessProgress(5, 'Live person verified'); return { challengeId: issued.id, observations }; }
+        if (phase === 4) { setLivenessProgress(5, 'Live person verified', false, issued.order); return { challengeId: issued.id, observations }; }
         phase += 1;
         consecutive = 0;
       }
@@ -1395,6 +1418,7 @@ function resetResultToIdle() {
   el.resultCard.className = 'result-card idle';
   clearCapturedPhoto();
   clearResultEmployee();
+  resetLivenessUI();
   el.resultState.textContent = 'TERMINAL READY';
   el.resultName.textContent = 'Attendance Kiosk Online';
   if (activeMode === MODE.CAM) {

@@ -152,6 +152,7 @@ export function BiometricDeviceModule({
   const [faceMsg, setFaceMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const [recognizedFaceMatch, setRecognizedFaceMatch] = useState<{ employee: Employee; score: number; margin: number } | null>(null);
   const [livenessPhase, setLivenessPhase] = useState(-1);
+  const [livenessOrder, setLivenessOrder] = useState<['left', 'right'] | ['right', 'left']>(['left', 'right']);
   const [livenessBusy, setLivenessBusy] = useState(false);
 
   // ── Attendance state ─────────────────────────────────────────────────────────
@@ -701,6 +702,7 @@ export function BiometricDeviceModule({
       setLivenessBusy(true);
       setLivenessPhase(0);
       const order = randomLivenessOrder();
+      setLivenessOrder(order);
       const live = await performActiveLiveness(faceVideoRef.current, order, (message, phase) => {
         setLivenessPhase(phase);
         setFaceMsg({ type: 'ok', text: message });
@@ -779,7 +781,9 @@ export function BiometricDeviceModule({
 
     try {
       setLivenessBusy(true);
-      const live = await performActiveLiveness(faceVideoRef.current, randomLivenessOrder(), (message, phase) => {
+      const order = randomLivenessOrder();
+      setLivenessOrder(order);
+      const live = await performActiveLiveness(faceVideoRef.current, order, (message, phase) => {
         setLivenessPhase(phase);
         setFaceMsg({ type: 'ok', text: message });
       });
@@ -1437,7 +1441,7 @@ export function BiometricDeviceModule({
                   <div className="rounded-xl border border-amber-200 bg-amber-50 p-3" aria-live="polite">
                     <p className="text-[10px] font-black uppercase tracking-widest text-amber-700">Active liveness · photo replay protection</p>
                     <div className="mt-2 grid grid-cols-5 gap-1">
-                      {['Center', 'Turn', 'Center', 'Opposite', 'Verified'].map((label, index) => (
+                      {['Center', livenessOrder[0] === 'left' ? 'Left' : 'Right', 'Center', livenessOrder[1] === 'left' ? 'Left' : 'Right', 'Verified'].map((label, index) => (
                         <div key={`${label}-${index}`} className={`rounded-md px-1 py-2 text-center text-[9px] font-bold ${livenessPhase > index ? 'bg-emerald-600 text-white' : livenessPhase === index ? 'bg-amber-400 text-slate-950' : 'bg-white text-slate-400'}`}>{label}</div>
                       ))}
                     </div>
