@@ -1,5 +1,5 @@
 import { Employee } from '../types';
-import { isValidLivenessAttestation } from './faceLiveness';
+import { isValidLivenessAttestation, selectBestFace } from './faceLiveness';
 import { detectFaceGeometry } from './faceLandmarker';
 
 export interface FaceDescriptor {
@@ -130,21 +130,18 @@ export async function assessBrowserFaceDetection(video: HTMLVideoElement): Promi
       return { ok: false, brightness: 0, contrast: 0, message: 'No face detected in camera. Put your face inside the oval and try again.' };
     }
 
-    if (faces.length > 1) {
-      return { ok: false, brightness: 0, contrast: 0, message: 'More than one face detected. Keep only one employee inside the camera frame.' };
-    }
-
-    const { centerX: faceCenterX, centerY: faceCenterY, width: faceWidth, height: faceHeight } = faces[0];
+    const face = selectBestFace(faces);
+    const { centerX: faceCenterX, centerY: faceCenterY, width: faceWidth, height: faceHeight } = face;
     const centerIsInGuide =
-      faceCenterX >= 0.32 &&
-      faceCenterX <= 0.68 &&
-      faceCenterY >= 0.22 &&
-      faceCenterY <= 0.78;
+      faceCenterX >= 0.28 &&
+      faceCenterX <= 0.72 &&
+      faceCenterY >= 0.18 &&
+      faceCenterY <= 0.82;
     const sizeIsValid =
-      faceWidth >= 0.18 &&
-      faceWidth <= 0.64 &&
-      faceHeight >= 0.24 &&
-      faceHeight <= 0.82;
+      faceWidth >= 0.14 &&
+      faceWidth <= 0.72 &&
+      faceHeight >= 0.18 &&
+      faceHeight <= 0.88;
 
     if (!centerIsInGuide) {
       return { ok: false, brightness: 0, contrast: 0, message: 'Face is not inside the oval marker. Center your full face, then try again.' };

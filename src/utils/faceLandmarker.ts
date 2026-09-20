@@ -10,14 +10,40 @@ export interface DetectedFaceGeometry {
 }
 
 let landmarkerPromise: Promise<FaceLandmarker> | null = null;
+let lastVideoTimestamp = 0;
+
+const CDN_WASM = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm';
+const CDN_MODEL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
 
 async function createLandmarker(): Promise<FaceLandmarker> {
-  const files = await FilesetResolver.forVisionTasks('./mediapipe/wasm');
-  return FaceLandmarker.createFromOptions(files, {
-    baseOptions: { modelAssetPath: './mediapipe/face_landmarker.task', delegate: 'CPU' },
-    runningMode: 'VIDEO', numFaces: 2,
-    minFaceDetectionConfidence: 0.55, minFacePresenceConfidence: 0.55, minTrackingConfidence: 0.55,
-  });
+  let files;
+  try {
+    files = await FilesetResolver.forVisionTasks('./mediapipe/wasm');
+  } catch (err) {
+    console.warn('Local mediapipe wasm failed, falling back to CDN wasm:', err);
+    files = await FilesetResolver.forVisionTasks(CDN_WASM);
+  }
+
+  try {
+    return await FaceLandmarker.createFromOptions(files, {
+      baseOptions: { modelAssetPath: './mediapipe/face_landmarker.task', delegate: 'CPU' },
+      runningMode: 'VIDEO',
+      numFaces: 2,
+      minFaceDetectionConfidence: 0.38,
+      minFacePresenceConfidence: 0.38,
+      minTrackingConfidence: 0.38,
+    });
+  } catch (err) {
+    console.warn('Local mediapipe model failed, falling back to CDN model:', err);
+    return await FaceLandmarker.createFromOptions(files, {
+      baseOptions: { modelAssetPath: CDN_MODEL, delegate: 'CPU' },
+      runningMode: 'VIDEO',
+      numFaces: 2,
+      minFaceDetectionConfidence: 0.38,
+      minFacePresenceConfidence: 0.38,
+      minTrackingConfidence: 0.38,
+    });
+  }
 }
 
 export function getFaceLandmarker(): Promise<FaceLandmarker> {
@@ -27,7 +53,13 @@ export function getFaceLandmarker(): Promise<FaceLandmarker> {
 
 export async function detectFaceGeometry(video: HTMLVideoElement): Promise<DetectedFaceGeometry[]> {
   if (!video.videoWidth || !video.videoHeight) throw new Error('Camera video is not ready.');
-  const result = (await getFaceLandmarker()).detectForVideo(video, performance.now());
+  const landmarker = await getFaceLandmarker();
+  let now = performance.now();
+  if (now <= lastVideoTimestamp) {
+    now = lastVideoTimestamp + 1;
+  }
+  lastVideoTimestamp = now;
+  const result = landmarker.detectForVideo(video, now);
   return result.faceLandmarks.map(landmarks => {
     const xs = landmarks.map(point => point.x);
     const ys = landmarks.map(point => point.y);
@@ -42,3 +74,4 @@ export async function detectFaceGeometry(video: HTMLVideoElement): Promise<Detec
     };
   });
 }
+

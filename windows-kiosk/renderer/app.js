@@ -1126,8 +1126,12 @@ function setLivenessProgress(phase, message, failed = false, order = null) {
 async function captureLivenessObservation() {
   const video = el.webcamEl;
   const faces = await window.detectFaceGeometry(video);
-  if (faces.length !== 1) throw new Error('Keep exactly one face inside the oval.');
-  const face = faces[0];
+  if (!faces || faces.length === 0) throw new Error('Keep your face inside the oval.');
+  const plausible = faces.filter(f => f.width >= 0.12);
+  const pool = plausible.length > 0 ? plausible : faces;
+  const face = pool.length === 1 ? pool[0] : [...pool].sort((a, b) => {
+    return Math.hypot(a.centerX - 0.5, a.centerY - 0.48) - Math.hypot(b.centerX - 0.5, b.centerY - 0.48);
+  })[0];
   return { at: Date.now(), yaw: face.yaw, centerX: face.centerX, centerY: face.centerY, scale: face.width };
 }
 
@@ -1141,7 +1145,7 @@ async function runCameraLivenessChallenge() {
   const observations = [];
   let phase = 0;
   let consecutive = 0;
-  const matches = (target, yaw) => target === 'center' ? Math.abs(yaw) <= 0.18 : target === 'left' ? yaw >= 0.27 : yaw <= -0.27;
+  const matches = (target, yaw) => target === 'center' ? Math.abs(yaw) <= 0.20 : target === 'left' ? yaw >= 0.27 : yaw <= -0.27;
   try {
     while (Date.now() <= issued.expiresAt) {
       setLivenessProgress(phase, labels[phase], false, issued.order);

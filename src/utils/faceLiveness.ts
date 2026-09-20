@@ -91,7 +91,7 @@ export function validateLivenessSequence(
   }
 
   const matches = (target: LivenessDirection | 'center', yaw: number) =>
-    target === 'center' ? Math.abs(yaw) <= 0.18 : target === 'left' ? yaw >= 0.27 : yaw <= -0.27;
+    target === 'center' ? Math.abs(yaw) <= 0.20 : target === 'left' ? yaw >= 0.27 : yaw <= -0.27;
   const frameCounts: [number, number, number, number, number] = [0, 0, 0, 0, 0];
   let phase = 0;
   for (const item of observations) {
@@ -118,10 +118,21 @@ export function randomLivenessOrder(random = Math.random): [LivenessDirection, L
   return random() < 0.5 ? ['left', 'right'] : ['right', 'left'];
 }
 
+export function selectBestFace(faces: import('./faceLandmarker').DetectedFaceGeometry[]): import('./faceLandmarker').DetectedFaceGeometry {
+  if (faces.length === 0) throw new Error('Keep your face inside the oval.');
+  if (faces.length === 1) return faces[0];
+  const plausible = faces.filter(f => f.width >= 0.12);
+  const pool = plausible.length > 0 ? plausible : faces;
+  return [...pool].sort((a, b) => {
+    const distA = Math.hypot(a.centerX - 0.5, a.centerY - 0.48);
+    const distB = Math.hypot(b.centerX - 0.5, b.centerY - 0.48);
+    return distA - distB;
+  })[0];
+}
+
 export async function observeFaceLiveness(video: HTMLVideoElement): Promise<LivenessObservation> {
   const faces = await detectFaceGeometry(video);
-  if (faces.length !== 1) throw new Error('Keep exactly one face inside the oval.');
-  const face = faces[0];
+  const face = selectBestFace(faces);
   return {
     at: Date.now(), yaw: face.yaw, centerX: face.centerX, centerY: face.centerY, scale: face.width,
   };
@@ -144,21 +155,49 @@ export async function performActiveLiveness(
   let phase = 0;
   let consecutive = 0;
   let lastPhase = -1;
+  let noFaceCount = 0;
+  let lastReported = '';
+
   const matches = (target: LivenessDirection | 'center', yaw: number) =>
-    target === 'center' ? Math.abs(yaw) <= 0.18 : target === 'left' ? yaw >= 0.27 : yaw <= -0.27;
+    target === 'center' ? Math.abs(yaw) <= 0.20 : target === 'left' ? yaw >= 0.27 : yaw <= -0.27;
+
   while (Date.now() - start <= LIVENESS_MAX_DURATION_MS) {
-    if (phase !== lastPhase) { onStatus?.(labels[phase], phase); lastPhase = phase; }
+    if (phase !== lastPhase) {
+      lastReported = labels[phase];
+      onStatus?.(labels[phase], phase);
+      lastPhase = phase;
+      noFaceCount = 0;
+    }
+
     let observation: LivenessObservation | null = null;
     try {
       observation = await observeFaceLiveness(video);
-    } catch {
+      noFaceCount = 0;
+    } catch (err: any) {
       consecutive = 0;
+      noFaceCount++;
+      if (noFaceCount >= 9 && noFaceCount % 8 === 1) {
+        const errorMsg = err?.message || 'Align face inside the oval';
+        if (errorMsg !== lastReported) {
+          lastReported = errorMsg;
+          onStatus?.(errorMsg, phase);
+        }
+      }
       await new Promise(resolve => setTimeout(resolve, 110));
       continue;
     }
+
     observations.push(observation);
     const target = phaseTarget(phase, order);
-    consecutive = matches(target, observation.yaw) ? consecutive + 1 : 0;
+    if (matches(target, observation.yaw)) {
+      consecutive += 1;
+      if (consecutive === 2 && consecutive < LIVENESS_MIN_FRAMES) {
+        onStatus?.(`${labels[phase]} (Hold steady...)`, phase);
+      }
+    } else {
+      consecutive = 0;
+    }
+
     if (consecutive >= LIVENESS_MIN_FRAMES) {
       if (phase === 4) {
         const result = validateLivenessSequence(observations, order);
@@ -172,3 +211,4 @@ export async function performActiveLiveness(
   }
   return { ok: false, message: 'Active liveness challenge expired. Start again.' };
 }
+

@@ -1,6 +1,7 @@
 import { FaceLandmarker, FilesetResolver } from './mediapipe/vision_bundle.mjs';
 
 let detectorPromise;
+let lastVideoTimestamp = 0;
 
 async function detector() {
   detectorPromise ||= (async () => {
@@ -8,7 +9,7 @@ async function detector() {
     return FaceLandmarker.createFromOptions(files, {
       baseOptions: { modelAssetPath: './mediapipe/face_landmarker.task', delegate: 'CPU' },
       runningMode: 'VIDEO', numFaces: 2,
-      minFaceDetectionConfidence: .55, minFacePresenceConfidence: .55, minTrackingConfidence: .55,
+      minFaceDetectionConfidence: .38, minFacePresenceConfidence: .38, minTrackingConfidence: .38,
     });
   })().catch(error => { detectorPromise = null; throw error; });
   return detectorPromise;
@@ -16,7 +17,10 @@ async function detector() {
 
 window.detectFaceGeometry = async source => {
   if (!(source instanceof HTMLVideoElement) || !source.videoWidth || !source.videoHeight) throw new Error('Camera video is not ready.');
-  const result = (await detector()).detectForVideo(source, performance.now());
+  let now = performance.now();
+  if (now <= lastVideoTimestamp) now = lastVideoTimestamp + 1;
+  lastVideoTimestamp = now;
+  const result = (await detector()).detectForVideo(source, now);
   return result.faceLandmarks.map(landmarks => {
     const xs = landmarks.map(point => point.x), ys = landmarks.map(point => point.y);
     const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
