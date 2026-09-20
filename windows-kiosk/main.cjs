@@ -841,31 +841,31 @@ function compareFaceDescriptors(a, b) {
   return Math.sqrt(sum / length);
 }
 
-function identifyFaceDescriptor(employees, probe, threshold = 0.18) {
+function identifyFaceDescriptor(employees, probe, threshold = 0.255) {
   const normalizedProbe = normalizeFaceDescriptor(probe, false);
   if (!normalizedProbe) return { ok: false, message: 'Camera face descriptor was invalid. Try another capture.' };
 
-  let best = null;
-  let secondScore = Number.POSITIVE_INFINITY;
-  let secondEmployeeId = '';
-  for (const employee of employees || []) {
-    for (const descriptor of getFaceDescriptors(employee)) {
-      const score = compareFaceDescriptors(normalizedProbe, descriptor);
-      if (!Number.isFinite(score)) continue;
-      if (!best || score < best.score) {
-        if (best && best.employee.id !== employee.id) {
-          secondScore = best.score;
-          secondEmployeeId = best.employee.id;
+  const scoredEmployees = (employees || [])
+    .map(employee => {
+      let minScore = Number.POSITIVE_INFINITY;
+      for (const descriptor of getFaceDescriptors(employee)) {
+        const score = compareFaceDescriptors(normalizedProbe, descriptor);
+        if (Number.isFinite(score) && score < minScore) {
+          minScore = score;
         }
-        best = { employee, score };
-      } else if (employee.id !== best.employee.id && score < secondScore) {
-        secondScore = score;
-        secondEmployeeId = employee.id;
       }
-    }
+      return { employee, score: minScore };
+    })
+    .filter(item => Number.isFinite(item.score))
+    .sort((a, b) => a.score - b.score);
+
+  if (scoredEmployees.length === 0) {
+    return { ok: false, message: 'Face was not recognized in directory. Ensure good lighting or verify employee code.' };
   }
 
-  if (!best) return { ok: false, message: 'Face was not recognized in directory. Ensure good lighting or verify employee code.' };
+  const best = scoredEmployees[0];
+  const second = scoredEmployees[1] || null;
+
   if (best.score > threshold) {
     return {
       ok: false,
@@ -873,10 +873,17 @@ function identifyFaceDescriptor(employees, probe, threshold = 0.18) {
       score: best.score,
     };
   }
-  const margin = secondScore - best.score;
-  if (secondEmployeeId && Number.isFinite(secondScore) && secondScore < threshold && margin < 0.04) {
-    return { ok: false, message: 'Face match is not unique enough. Use full face, better light, or enter employee code with camera.', score: best.score, margin };
+
+  const margin = second ? second.score - best.score : Number.POSITIVE_INFINITY;
+  if (second && Number.isFinite(second.score) && second.score <= threshold && margin < 0.035) {
+    return {
+      ok: false,
+      message: `Face match is ambiguous between ${best.employee.fullName} and ${second.employee.fullName}. Enter employee code with camera to confirm identity.`,
+      score: best.score,
+      margin,
+    };
   }
+
   return { ok: true, employee: best.employee, score: best.score, margin };
 }
 
@@ -1281,7 +1288,7 @@ ipcMain.handle('kiosk:punch-camera', async (_event, payload) => {
   }
   // A typed code narrows the gallery; without one the same descriptor matcher
   // searches every securely enrolled employee and enforces uniqueness margin.
-  const matchThreshold = typedEmployee ? 0.24 : 0.23;
+  const matchThreshold = typedEmployee ? 0.280 : 0.255;
   const match = identifyFaceDescriptor(candidates, payload.descriptor, matchThreshold);
   if (!match.ok) {
     const failure = cameraChallenges.recordFailure(terminalId);

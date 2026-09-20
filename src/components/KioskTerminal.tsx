@@ -302,7 +302,7 @@ export function KioskTerminal({
       const liveness = await performActiveLiveness(videoRef.current, randomLivenessOrder(), statusMessage => setMessage(statusMessage));
       if (!liveness.ok) throw new Error(liveness.message);
       const probe = createFaceDescriptorFromVideo(videoRef.current, 'kiosk-webcam');
-      const match = findBestFaceMatch(enrolledEmployees, probe, nativeMobileKiosk ? 0.23 : FACE_MATCH_THRESHOLD);
+      const match = findBestFaceMatch(enrolledEmployees, probe, FACE_MATCH_THRESHOLD);
       if (!match) {
         throw new Error('Face not recognized. Step closer, improve lighting, or re-enroll the camera profile.');
       }

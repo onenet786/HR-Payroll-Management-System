@@ -31,8 +31,9 @@ const GRID_W = 16;
 const GRID_H = 20;
 const V2_LENGTH = GRID_W * GRID_H * 4;
 const FACE_FRAME_ASPECT = 4 / 3;
-export const FACE_MATCH_THRESHOLD = 0.18;
-export const FACE_MATCH_MARGIN = 0.04;
+export const FACE_MATCH_THRESHOLD = 0.255;
+export const FACE_VERIFY_THRESHOLD = 0.280;
+export const FACE_MATCH_MARGIN = 0.035;
 
 function drawNormalizedFaceFrame(
   ctx: CanvasRenderingContext2D,
@@ -300,29 +301,30 @@ export function findBestFaceMatch(
   probe: FaceDescriptor,
   threshold = FACE_MATCH_THRESHOLD
 ): FaceMatch | null {
-  let best: FaceMatch | null = null;
-  let secondScore = Number.POSITIVE_INFINITY;
-  let secondEmployeeId = '';
-
-  for (const employee of employees) {
-    for (const descriptor of getFaceDescriptors(employee)) {
-      const score = compareFaceDescriptors(probe, descriptor);
-      if (!Number.isFinite(score)) continue;
-      if (!best || score < best.score) {
-        if (best && best.employee.id !== employee.id) {
-          secondScore = best.score;
-          secondEmployeeId = best.employee.id;
+  const scoredEmployees = (employees || [])
+    .map(employee => {
+      let minScore = Number.POSITIVE_INFINITY;
+      for (const descriptor of getFaceDescriptors(employee)) {
+        const score = compareFaceDescriptors(probe, descriptor);
+        if (Number.isFinite(score) && score < minScore) {
+          minScore = score;
         }
-        best = { employee, score, margin: Number.POSITIVE_INFINITY };
-      } else if (employee.id !== best.employee.id && score < secondScore) {
-        secondScore = score;
-        secondEmployeeId = employee.id;
       }
-    }
+      return { employee, score: minScore };
+    })
+    .filter(item => Number.isFinite(item.score))
+    .sort((a, b) => a.score - b.score);
+
+  if (scoredEmployees.length === 0) return null;
+
+  const best = scoredEmployees[0];
+  if (best.score > threshold) return null;
+
+  const second = scoredEmployees[1] || null;
+  const margin = second ? second.score - best.score : Number.POSITIVE_INFINITY;
+  if (second && Number.isFinite(second.score) && second.score <= threshold && margin < FACE_MATCH_MARGIN) {
+    return null;
   }
 
-  if (!best || best.score > threshold) return null;
-  const margin = secondScore - best.score;
-  if (secondEmployeeId && Number.isFinite(secondScore) && margin < FACE_MATCH_MARGIN) return null;
-  return { ...best, margin };
+  return { employee: best.employee, score: best.score, margin };
 }

@@ -15,6 +15,7 @@ import './BiometricDeviceModule.css';
 import {
   FACE_MATCH_MARGIN,
   FACE_MATCH_THRESHOLD,
+  FACE_VERIFY_THRESHOLD,
   type FaceDescriptor,
   assessBrowserFaceDetection,
   assessFaceFrame,
@@ -24,9 +25,6 @@ import {
   hasFaceEnrollment,
 } from '../utils/faceRecognition';
 import { performActiveLiveness, randomLivenessOrder } from '../utils/faceLiveness';
-
-// ── Types ──────────────────────────────────────────────────────────────────────
-
 type WsStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 type CaptureState = 'idle' | 'scanning' | 'captured' | 'error';
 type TabId = 'test' | 'enroll' | 'attendance';
@@ -801,49 +799,71 @@ export function BiometricDeviceModule({
       }
 
       const probe = createFaceDescriptorFromVideo(faceVideoRef.current, 'admin-verify');
-      let bestEmployee: Employee | null = null;
-      let bestScore = Number.POSITIVE_INFINITY;
-      let secondScore = Number.POSITIVE_INFINITY;
-      let secondEmployee: Employee | null = null;
+      const selectedEmp = employees.find(e => e.id === enrollEmpId);
+      const isTargeted = Boolean(selectedEmp && hasFaceEnrollment(selectedEmp));
+      const verifyThreshold = isTargeted ? FACE_VERIFY_THRESHOLD : FACE_MATCH_THRESHOLD;
 
-      for (const candidate of enrolledEmployees) {
-        for (const descriptor of getFaceDescriptors(candidate)) {
-          const score = compareFaceDescriptors(probe, descriptor);
-          if (!Number.isFinite(score)) continue;
-          if (score < bestScore) {
-            if (bestEmployee && bestEmployee.id !== candidate.id) {
-              secondScore = bestScore;
-              secondEmployee = bestEmployee;
+      const scoredCandidates = enrolledEmployees
+        .map(candidate => {
+          let minScore = Number.POSITIVE_INFINITY;
+          for (const descriptor of getFaceDescriptors(candidate)) {
+            const score = compareFaceDescriptors(probe, descriptor);
+            if (Number.isFinite(score) && score < minScore) {
+              minScore = score;
             }
-            bestScore = score;
-            bestEmployee = candidate;
-          } else if (bestEmployee?.id !== candidate.id && score < secondScore) {
-            secondScore = score;
-            secondEmployee = candidate;
           }
-        }
-      }
+          return { employee: candidate, score: minScore };
+        })
+        .filter(item => Number.isFinite(item.score))
+        .sort((a, b) => a.score - b.score);
 
-      if (!bestEmployee || !Number.isFinite(bestScore)) {
+      if (!scoredCandidates.length) {
         setFaceMsg({ type: 'err', text: 'Saved camera profiles are invalid. Save Face again.' });
         return;
       }
 
-      const margin = secondEmployee && Number.isFinite(secondScore) ? secondScore - bestScore : Number.POSITIVE_INFINITY;
-      if (secondEmployee && margin < FACE_MATCH_MARGIN) {
-        setFaceMsg({ type: 'err', text: `Face match is not unique enough. Best is ${bestEmployee.fullName}, close to ${secondEmployee.fullName}. Score ${bestScore.toFixed(3)}, margin ${margin.toFixed(3)}.` });
-        log(`Camera face recognition ambiguous: identities [REDACTED], score=${bestScore.toFixed(3)} margin=${margin.toFixed(3)}`);
+      const best = scoredCandidates[0];
+      const second = scoredCandidates[1] || null;
+
+      // If verifying for the selected employee specifically:
+      if (selectedEmp && isTargeted) {
+        const selectedMatch = scoredCandidates.find(c => c.employee.id === selectedEmp.id);
+        if (!selectedMatch || selectedMatch.score > verifyThreshold) {
+          const actualScore = selectedMatch ? selectedMatch.score.toFixed(3) : 'N/A';
+          setFaceMsg({ type: 'err', text: `Face did not match selected employee ${selectedEmp.fullName}. Score ${actualScore} is too high (required ${verifyThreshold.toFixed(3)} or lower). Re-save face centered with good lighting.` });
+          log(`Camera face verification failed for ${selectedEmp.fullName}: score=${actualScore}`);
+          return;
+        }
+
+        const margin = second && second.employee.id !== selectedEmp.id ? second.score - selectedMatch.score : Number.POSITIVE_INFINITY;
+        setRecognizedFaceMatch({ employee: selectedEmp, score: selectedMatch.score, margin });
+        if (second && second.employee.id !== selectedEmp.id && second.score <= verifyThreshold && margin < FACE_MATCH_MARGIN) {
+          setFaceMsg({ type: 'ok', text: `Face verified for ${selectedEmp.fullName} (${selectedEmp.employeeCode}) [Score: ${selectedMatch.score.toFixed(3)}]. Note: Profile ${second.employee.fullName} also has a similar face enrollment.` });
+        } else {
+          setFaceMsg({ type: 'ok', text: `Face verified: ${selectedEmp.fullName} (${selectedEmp.employeeCode}). Match score ${selectedMatch.score.toFixed(3)} (Passed).` });
+        }
+        log(`Camera face verified: ${selectedEmp.fullName}, score=${selectedMatch.score.toFixed(3)}`);
         return;
       }
 
-      if (bestScore <= FACE_MATCH_THRESHOLD) {
-        setRecognizedFaceMatch({ employee: bestEmployee, score: bestScore, margin });
-        setFaceMsg({ type: 'ok', text: `Face recognized: ${bestEmployee.fullName} (${bestEmployee.employeeCode}). Match score ${bestScore.toFixed(3)}.` });
-        log(`Camera face recognized: [REDACTED], score=${bestScore.toFixed(3)}`);
-      } else {
-        setFaceMsg({ type: 'err', text: `Not verified. Score ${bestScore.toFixed(3)} is too high. Re-save with full face centered and even light.` });
-        log(`Camera face recognition failed: identity [REDACTED], score=${bestScore.toFixed(3)}`);
+      // 1-to-N search across entire directory:
+      if (best.score > verifyThreshold) {
+        setFaceMsg({ type: 'err', text: `Not verified. Score ${best.score.toFixed(3)} is too high (required ${verifyThreshold.toFixed(3)} or lower). Re-save with full face centered and even light.` });
+        log(`Camera face recognition failed: score=${best.score.toFixed(3)}`);
+        return;
       }
+
+      const margin = second ? second.score - best.score : Number.POSITIVE_INFINITY;
+      if (second && Number.isFinite(second.score) && second.score <= verifyThreshold && margin < FACE_MATCH_MARGIN) {
+        setFaceMsg({ type: 'err', text: `Face match is ambiguous between ${best.employee.fullName} and ${second.employee.fullName}. Best score ${best.score.toFixed(3)}, margin ${margin.toFixed(3)}.` });
+        log(`Camera face recognition ambiguous: score=${best.score.toFixed(3)} margin=${margin.toFixed(3)}`);
+        return;
+      }
+
+      setRecognizedFaceMatch({ employee: best.employee, score: best.score, margin });
+      setFaceMsg({ type: 'ok', text: `Face recognized: ${best.employee.fullName} (${best.employee.employeeCode}). Match score ${best.score.toFixed(3)}.` });
+      log(`Camera face recognized: [REDACTED], score=${best.score.toFixed(3)}`);
+
     } catch (error) {
       setFaceMsg({ type: 'err', text: error instanceof Error ? error.message : 'Camera verification failed.' });
       log('Camera verification failed [REDACTED]');
