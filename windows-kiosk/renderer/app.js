@@ -1141,7 +1141,7 @@ async function runCameraLivenessChallenge() {
   const observations = [];
   let phase = 0;
   let consecutive = 0;
-  const matches = (target, yaw) => target === 'center' ? Math.abs(yaw) <= 0.12 : target === 'left' ? yaw <= -0.27 : yaw >= 0.27;
+  const matches = (target, yaw) => target === 'center' ? Math.abs(yaw) <= 0.12 : target === 'left' ? yaw >= 0.27 : yaw <= -0.27;
   try {
     while (Date.now() <= issued.expiresAt) {
       setLivenessProgress(phase, labels[phase], false, issued.order);

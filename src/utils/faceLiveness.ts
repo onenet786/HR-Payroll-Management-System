@@ -80,8 +80,8 @@ export function validateLivenessSequence(
     }
     maxCenterDrift = Math.max(maxCenterDrift, Math.hypot(item.centerX - baseX, item.centerY - baseY));
     maxScaleChange = Math.max(maxScaleChange, Math.abs(item.scale / baseScale - 1));
-    maxLeftYaw = Math.max(maxLeftYaw, -item.yaw);
-    maxRightYaw = Math.max(maxRightYaw, item.yaw);
+    maxLeftYaw = Math.max(maxLeftYaw, item.yaw);
+    maxRightYaw = Math.max(maxRightYaw, -item.yaw);
   }
   if (maxCenterDrift > LIVENESS_MAX_CENTER_DRIFT) {
     return { ok: false, message: 'The phone or face moved too far during verification. Hold the phone steady and turn only your head.' };
@@ -91,7 +91,7 @@ export function validateLivenessSequence(
   }
 
   const matches = (target: LivenessDirection | 'center', yaw: number) =>
-    target === 'center' ? Math.abs(yaw) <= 0.12 : target === 'left' ? yaw <= -0.27 : yaw >= 0.27;
+    target === 'center' ? Math.abs(yaw) <= 0.12 : target === 'left' ? yaw >= 0.27 : yaw <= -0.27;
   const frameCounts: [number, number, number, number, number] = [0, 0, 0, 0, 0];
   let phase = 0;
   for (const item of observations) {
@@ -139,7 +139,7 @@ export async function performActiveLiveness(
   let consecutive = 0;
   let lastPhase = -1;
   const matches = (target: LivenessDirection | 'center', yaw: number) =>
-    target === 'center' ? Math.abs(yaw) <= 0.12 : target === 'left' ? yaw <= -0.27 : yaw >= 0.27;
+    target === 'center' ? Math.abs(yaw) <= 0.12 : target === 'left' ? yaw >= 0.27 : yaw <= -0.27;
   while (Date.now() - start <= LIVENESS_MAX_DURATION_MS) {
     if (phase !== lastPhase) { onStatus?.(labels[phase], phase); lastPhase = phase; }
     const observation = await observeFaceLiveness(video);
