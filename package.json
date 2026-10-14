@@ -13,6 +13,7 @@
     "lint": "tsc --noEmit",
     "test": "tsx --test src/**/*.test.ts",
     "docs:build": "node scripts/generate-user-guide-docx.mjs",
+    "docs:pdf": "node scripts/build-complete-pdf-guide.mjs",
     "firestore:maintenance": "tsx scripts/firestore-maintenance.ts",
     "firestore:backup": "tsx scripts/firestore-maintenance.ts backup",
     "firestore:cleanup": "tsx scripts/firestore-maintenance.ts cleanup",
