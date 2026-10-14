@@ -975,12 +975,12 @@ function savePunch(store, employee, method, evidence, meta) {
   const lastPunchTime = existing?.lastPunchAt || existing?.punchOut || existing?.punchIn || '';
   if (lastPunchTime) {
     const secondsSinceLastPunch = timeToSeconds(at) - timeToSeconds(lastPunchTime);
-    if (secondsSinceLastPunch >= 0 && secondsSinceLastPunch < 60) {
-      const remaining = 60 - secondsSinceLastPunch;
+    if (secondsSinceLastPunch >= 0 && secondsSinceLastPunch < 120) {
+      const remaining = 120 - secondsSinceLastPunch;
       return {
         ok: false,
         alreadyRecorded: true,
-        message: `Please wait ${remaining} second${remaining === 1 ? '' : 's'} before punching again. Minimum delay is 1 minute between punches.`,
+        message: `Please wait ${remaining} second${remaining === 1 ? '' : 's'} before punching again. Minimum delay is 2 minutes between punches.`,
         cooldownSeconds: remaining,
         employee: kioskEmployee(employee),
       };

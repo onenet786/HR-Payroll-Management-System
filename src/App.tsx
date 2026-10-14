@@ -932,6 +932,16 @@ export default function App() {
       alert('A payroll run already exists for this period. Open the existing run instead of creating a duplicate.');
       return;
     }
+
+    const monthPrefix = `${year}-${String(month).padStart(2, '0')}`;
+    const pendingReviews = attendances.filter(
+      a => a.date.startsWith(monthPrefix) && a.regularizationRequested && a.regularizationApproved === undefined
+    );
+    if (pendingReviews.length > 0) {
+      alert(`Payroll cycle refused: There are ${pendingReviews.length} pending item(s) in "Needs Review" for ${month}/${year}. Clear all attendance exceptions and regularizations before locking the register.`);
+      return;
+    }
+
     const lastDay = new Date(year, month, 0).getDate();
     const eligibleEmployees = employees.filter(emp => emp.status === 'Active' || emp.status === 'On Leave');
     const runId = `run-${month}-${year}-${Date.now()}`;

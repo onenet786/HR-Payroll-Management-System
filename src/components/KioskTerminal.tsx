@@ -215,11 +215,11 @@ export function KioskTerminal({
       const lastPunchSeconds = lastHours * 3600 + lastMinutes * 60 + (lastSeconds || 0);
       const currentSeconds = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
       const secondsSinceLastPunch = currentSeconds - lastPunchSeconds;
-      if (secondsSinceLastPunch >= 0 && secondsSinceLastPunch < 60) {
+      if (secondsSinceLastPunch >= 0 && secondsSinceLastPunch < 120) {
         if (!isMultiMode) {
-          const remaining = 60 - secondsSinceLastPunch;
+          const remaining = 120 - secondsSinceLastPunch;
           setStatus('error');
-          setMessage(`Please wait ${remaining} second${remaining === 1 ? '' : 's'} before punching again. Minimum delay is 1 minute between punches.`);
+          setMessage(`Please wait ${remaining} second${remaining === 1 ? '' : 's'} before punching again. Minimum anti-passback delay is 2 minutes between punches.`);
           setTimeout(() => { setStatus('idle'); setMessage(''); }, 3500);
         }
         return;
