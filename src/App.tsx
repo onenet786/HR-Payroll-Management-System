@@ -1215,7 +1215,8 @@ export default function App() {
     setCompanies(nextCompanies); setBranches(nextBranches); setDepartments(nextDepartments); setDesignations(nextDesignations); setStatConfig(payload.statutoryConfig);
     if (payload.company?.name) {
       setBrandTitle(payload.company.name);
-      try { localStorage.setItem('hr_company_name', payload.company.name); } catch {}
+      try { localStorage.setItem('app_brand_name', payload.company.name); } catch {}
+      document.title = `${payload.company.name} - HR & Payroll`;
     }
     privacyStorage.setItem('hr_companies', JSON.stringify(nextCompanies)); privacyStorage.setItem('hr_branches', JSON.stringify(nextBranches));
     privacyStorage.setItem('hr_departments', JSON.stringify(nextDepartments)); privacyStorage.setItem('hr_designations', JSON.stringify(nextDesignations));
