@@ -106,6 +106,19 @@ async function main() {
       effectiveFrom: '2026-07-01',
     });
 
+    // 8. FBR Income Tax Slabs (Finance Act 2024 / 2025 - Salaried Individuals)
+    const defaultTaxSlabs = [
+      { id: 'fbr-slab-1', minIncome: 0, maxIncome: 600000, baseTax: 0, percentage: 0 },
+      { id: 'fbr-slab-2', minIncome: 600000, maxIncome: 1200000, baseTax: 0, percentage: 5 },
+      { id: 'fbr-slab-3', minIncome: 1200000, maxIncome: 2200000, baseTax: 30000, percentage: 15 },
+      { id: 'fbr-slab-4', minIncome: 2200000, maxIncome: 3200000, baseTax: 180000, percentage: 25 },
+      { id: 'fbr-slab-5', minIncome: 3200000, maxIncome: 4100000, baseTax: 430000, percentage: 30 },
+      { id: 'fbr-slab-6', minIncome: 4100000, maxIncome: 999999999, baseTax: 700000, percentage: 35 }
+    ];
+    for (const slab of defaultTaxSlabs) {
+      await upsert('taxSlabs', slab.id, slab);
+    }
+
     await client.query('COMMIT');
     console.log('✅ Local database successfully seeded!');
     console.log('--------------------------------------------------');

@@ -8,7 +8,7 @@ import {
   Eye, EyeOff, Mail, Lock, ArrowRight, ShieldCheck, Sparkles,
   Clock, TrendingUp, Database, AlertCircle, HelpCircle
 } from 'lucide-react';
-import { computePayslipDetails } from './data/defaults';
+import { computePayslipDetails, DEFAULT_TAX_SLABS } from './data/defaults';
 import {
   Employee, AttendanceLog, LeaveRequest, StatutoryConfig, TaxSlab, PayrollRun, Payslip, MobilePunchDetails,
   Role, UserAccount, Branch, Department, Designation, Holiday, LoanAdvance, SalaryRevision,
@@ -195,7 +195,7 @@ export default function App() {
   const [mobileDutyAuthorizations, setMobileDutyAuthorizations] = useState<MobileDutyAuthorization[]>([]);
   const [leaves, setLeaves] = useState<LeaveRequest[]>([]);
   const [statConfig, setStatConfig] = useState<StatutoryConfig>(emptyStatConfig);
-  const [taxSlabs, setTaxSlabs] = useState<TaxSlab[]>([]);
+  const [taxSlabs, setTaxSlabs] = useState<TaxSlab[]>(() => getInitialValue('hr_tax_slabs', DEFAULT_TAX_SLABS));
   const [branches, setBranches] = useState<Branch[]>([]);
   const [companies, setCompanies] = useState<Company[]>(() => getInitialValue('hr_companies', []));
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -423,7 +423,14 @@ export default function App() {
     registerCollectionListener('zones', setZones, 'hr_zones');
     registerCollectionListener('ucTowns', setUcTowns, 'hr_uc_towns');
     registerCollectionListener('wageTypes', setWageTypes, 'hr_wage_types');
-    registerCollectionListener('taxSlabs', setTaxSlabs, 'hr_tax_slabs');
+    registerCollectionListener('taxSlabs', (fetched: TaxSlab[]) => {
+      if (!fetched || fetched.length === 0) {
+        setTaxSlabs(DEFAULT_TAX_SLABS);
+        privacyStorage.setItem('hr_tax_slabs', JSON.stringify(DEFAULT_TAX_SLABS));
+      } else {
+        setTaxSlabs(fetched);
+      }
+    }, 'hr_tax_slabs');
     registerCollectionListener('roles', setRoles, 'hr_roles', () => setRolesLoaded(true));
     registerCollectionListener('holidays', setHolidays, 'hr_holidays');
     registerCollectionListener('loanAdvances', setLoanAdvances, 'hr_loans');

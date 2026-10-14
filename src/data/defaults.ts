@@ -13,16 +13,15 @@ import {
 import type { WageType } from '../types';
 import { resolveWageBasis } from './masterData';
 
-// Default FBR Income Tax Slabs for Salaried Individuals (Annual)
+// Official FBR Income Tax Slabs for Salaried Individuals (Annual)
+// Enacted under Finance Act, 2024 / First Schedule, Part I, Division I, Clause (2) of the Income Tax Ordinance, 2001
 export const DEFAULT_TAX_SLABS: TaxSlab[] = [
-  { id: 't1', minIncome: 0, maxIncome: 600000, baseTax: 0, percentage: 0 },
-  { id: 't2', minIncome: 600000, maxIncome: 1200000, baseTax: 0, percentage: 1 },
-  { id: 't3', minIncome: 1200000, maxIncome: 2200000, baseTax: 6000, percentage: 11 },
-  { id: 't4', minIncome: 2200000, maxIncome: 3200000, baseTax: 116000, percentage: 20 },
-  { id: 't5', minIncome: 3200000, maxIncome: 4100000, baseTax: 316000, percentage: 25 },
-  { id: 't6', minIncome: 4100000, maxIncome: 5600000, baseTax: 541000, percentage: 29 },
-  { id: 't7', minIncome: 5600000, maxIncome: 7000000, baseTax: 976000, percentage: 32 },
-  { id: 't8', minIncome: 7000000, maxIncome: 999999999, baseTax: 1424000, percentage: 35 }
+  { id: 'fbr-slab-1', minIncome: 0, maxIncome: 600000, baseTax: 0, percentage: 0 },
+  { id: 'fbr-slab-2', minIncome: 600000, maxIncome: 1200000, baseTax: 0, percentage: 5 },
+  { id: 'fbr-slab-3', minIncome: 1200000, maxIncome: 2200000, baseTax: 30000, percentage: 15 },
+  { id: 'fbr-slab-4', minIncome: 2200000, maxIncome: 3200000, baseTax: 180000, percentage: 25 },
+  { id: 'fbr-slab-5', minIncome: 3200000, maxIncome: 4100000, baseTax: 430000, percentage: 30 },
+  { id: 'fbr-slab-6', minIncome: 4100000, maxIncome: 999999999, baseTax: 700000, percentage: 35 }
 ];
 
 // Default Pakistan Statutory Config
@@ -384,23 +383,33 @@ export const DEFAULT_ATTENDANCES: AttendanceLog[] = [
 
 // Helper to calculate realistic Pakistan income tax (FBR annualised salaried individuals)
 export function calculateAnnualTax(annualTaxableIncome: number, slabs: TaxSlab[]): number {
-  if (annualTaxableIncome <= 600000) return 0;
+  if (!annualTaxableIncome || annualTaxableIncome <= 600000) return 0;
   const effectiveSlabs = Array.isArray(slabs) && slabs.length > 0 ? slabs : DEFAULT_TAX_SLABS;
   
   // Find matching slab
   const matchingSlab = effectiveSlabs.find(
+    s => s && typeof s.minIncome === 'number' && annualTaxableIncome > s.minIncome && annualTaxableIncome <= (s.maxIncome ?? Infinity)
+  ) || effectiveSlabs.find(
     s => s && typeof s.minIncome === 'number' && annualTaxableIncome >= s.minIncome && annualTaxableIncome < (s.maxIncome ?? Infinity)
   );
   
+  let baseCalculatedTax = 0;
   if (!matchingSlab) {
     // If somehow not found, go to highest
     const highest = effectiveSlabs[effectiveSlabs.length - 1] || DEFAULT_TAX_SLABS[DEFAULT_TAX_SLABS.length - 1];
-    const excess = annualTaxableIncome - (highest?.minIncome ?? 600000);
-    return (highest?.baseTax ?? 0) + (excess * (highest?.percentage ?? 0)) / 100;
+    const excess = annualTaxableIncome - (highest?.minIncome ?? 4100000);
+    baseCalculatedTax = (highest?.baseTax ?? 700000) + (excess * (highest?.percentage ?? 35)) / 100;
+  } else {
+    const excess = annualTaxableIncome - (matchingSlab.minIncome ?? 0);
+    baseCalculatedTax = (matchingSlab.baseTax ?? 0) + (excess * (matchingSlab.percentage ?? 0)) / 100;
   }
-  
-  const excess = annualTaxableIncome - (matchingSlab.minIncome ?? 0);
-  return (matchingSlab.baseTax ?? 0) + (excess * (matchingSlab.percentage ?? 0)) / 100;
+
+  // Section 4AB: 10% Surcharge on income exceeding Rs. 10 million (PKR 10,000,000)
+  if (annualTaxableIncome > 10000000) {
+    baseCalculatedTax += baseCalculatedTax * 0.10;
+  }
+
+  return Math.round(baseCalculatedTax);
 }
 
 // Function to calculate exact Pakistan Statutory & gross-to-net payslip details

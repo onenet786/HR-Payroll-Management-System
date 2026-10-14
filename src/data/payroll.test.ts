@@ -10,7 +10,7 @@ const calculate = (attendances: AttendanceLog[] = [], leaves: LeaveRequest[] = [
 
 test('applies Finance Act 2026 salaried slab progression', () => {
   const result = calculate();
-  assert.equal(result.incomeTaxDeduction, 2700);
+  assert.equal(result.incomeTaxDeduction, 5500);
   assert.equal(result.calculationVersion, 'PK-PAYROLL-2.0');
 });
 

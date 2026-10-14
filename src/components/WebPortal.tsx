@@ -9,14 +9,14 @@ import {
   Users, Calendar, CreditCard, ShieldCheck, FileText, Download, UserPlus,
   CheckCircle, AlertTriangle, Building, MapPin, Layers, Sliders, Info,
   CalendarDays, Banknote, TrendingUp, Star, Package, Briefcase, Calculator, Bell, Fingerprint,
-  Database, BookOpen, Menu, X, ChevronDown, ListTree, Search
+  Database, BookOpen, Menu, X, ChevronDown, ListTree, Search, RotateCcw
 } from 'lucide-react';
 import {
   Employee, AttendanceLog, LeaveRequest, StatutoryConfig, TaxSlab, PayrollRun, Payslip,
   Role, UserAccount, NewUserAccount, Branch, Department, Designation, Holiday, LoanAdvance, SalaryRevision,
   PerformanceReview, CompanyAsset, JobPosting, JobApplication, GratuitySettlement, AppNotification, Company, CompanySetupPayload, Zone, UcTown, WageType, MobileDutyAuthorization, MobileDutyType
 } from '../types';
-import { computePayslipDetails } from '../data/defaults';
+import { computePayslipDetails, DEFAULT_TAX_SLABS } from '../data/defaults';
 import { deriveEmployeeCompanyId, getEmployeeEditDepartmentOptions, getEmployeeEditOptions, resolveEmployeeCompanyId, resolveRecordId, resolveUcTownName, resolveWageBasis, resolveWageTypeName, resolveZoneName, synchronizeDepartmentSelection, validateEmployeeMasterSelection } from '../data/masterData';
 import { HolidayModule } from './HolidayModule';
 import { LoansModule } from './LoansModule';
@@ -463,8 +463,43 @@ export function WebPortal({
   });
 
   const closeSidebar = () => setSidebarOpen(false);
+  const activeTaxSlabs = taxSlabs && taxSlabs.length > 0 ? taxSlabs : DEFAULT_TAX_SLABS;
   const updateTaxSlab = (id: string, field: keyof Pick<TaxSlab, 'minIncome' | 'maxIncome' | 'baseTax' | 'percentage'>, value: number) =>
-    onUpdateTaxSlabs(taxSlabs.map(slab => slab.id === id ? { ...slab, [field]: value } : slab));
+    onUpdateTaxSlabs(activeTaxSlabs.map(slab => slab.id === id ? { ...slab, [field]: value } : slab));
+
+  const handleDownloadFbrCsv = () => {
+    const activeSlabs = taxSlabs && taxSlabs.length > 0 ? taxSlabs : DEFAULT_TAX_SLABS;
+    const headers = ['Slab #', 'Min Annual Income (PKR)', 'Max Annual Income (PKR)', 'Fixed Base Tax (PKR)', 'Tax Rate (%)', 'FBR Rule Description'];
+    const rows = activeSlabs.map((s, idx) => {
+      const slabNum = idx + 1;
+      const min = s.minIncome;
+      const max = s.maxIncome >= 999999999 ? 'Exceeding' : s.maxIncome;
+      const pctValue = s.percentage < 1 && s.percentage > 0 ? (s.percentage * 100) : s.percentage;
+      const rate = `${pctValue}%`;
+      const desc = s.maxIncome <= 600000 
+        ? 'Where taxable income does not exceed Rs. 600,000: 0%'
+        : s.maxIncome >= 999999999
+          ? `Where taxable income exceeds Rs. ${s.minIncome.toLocaleString()}: Rs. ${s.baseTax.toLocaleString()} + ${pctValue}% of the amount exceeding Rs. ${s.minIncome.toLocaleString()}`
+          : `Where taxable income exceeds Rs. ${s.minIncome.toLocaleString()} but does not exceed Rs. ${s.maxIncome.toLocaleString()}: Rs. ${s.baseTax.toLocaleString()} + ${pctValue}% of the amount exceeding Rs. ${s.minIncome.toLocaleString()}`;
+      return [slabNum, min, max, base, rate, `"${desc}"`].join(',');
+    });
+    rows.push('');
+    rows.push('"Note: Under Section 4AB of Income Tax Ordinance 2001, a 10% surcharge is levied on income tax payable where taxable income exceeds Rs. 10,000,000."');
+    
+    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `FBR_Salaried_Tax_Slabs_Finance_Act_${statConfig.taxYear || '2025'}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleUpdateFromFbr = () => {
+    onUpdateTaxSlabs(DEFAULT_TAX_SLABS);
+    alert('FBR Income Tax Slabs successfully updated & synchronized with official FBR Finance Act 2024/2025 rates (First Schedule, Part I, Division I, Clause 2).');
+  };
 
   const primaryCompany = companies[0];
   const companyDisplayName = (primaryCompany?.legalName || primaryCompany?.name || 'OneNet Solutions Pk.').trim();
@@ -3321,32 +3356,74 @@ export function WebPortal({
                     
                     {/* Tax slabs table editor */}
                     <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm lg:col-span-2 space-y-4">
-                      <h3 className="font-bold text-slate-800 text-xs uppercase tracking-wide font-mono">Current FBR Income Tax Slabs Table</h3>
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                        <div>
+                          <h3 className="font-bold text-slate-800 text-xs uppercase tracking-wide font-mono flex items-center gap-2">
+                            <span>Current FBR Income Tax Slabs Table</span>
+                            <span className="bg-emerald-100 text-emerald-800 text-[10px] font-semibold px-2 py-0.5 rounded-full">
+                              Finance Act {statConfig.taxYear || '2024–2025'}
+                            </span>
+                          </h3>
+                          <p className="text-[11px] text-slate-500 mt-0.5">First Schedule, Part I, Division I, Clause (2) - Salaried Individuals</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={handleDownloadFbrCsv}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg border border-slate-300 transition-colors shadow-sm cursor-pointer"
+                            title="Download Current FBR Tax Slabs CSV"
+                          >
+                            <Download className="w-3.5 h-3.5 text-slate-600" />
+                            <span>Download CSV</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleUpdateFromFbr}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg transition-colors shadow-sm cursor-pointer"
+                            title="Reset / Synchronize with Official FBR Tax Slabs"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            <span>Update from FBR</span>
+                          </button>
+                        </div>
+                      </div>
                       
                       <div className="space-y-3">
-                        {taxSlabs.map((slab, idx) => (
-                          <div key={slab.id} className="flex space-x-3 items-center bg-slate-50 p-2.5 rounded-lg text-xs font-mono">
-                            <span className="font-bold text-slate-400">Slab #{idx + 1}</span>
-                            <div className="flex-1 grid grid-cols-3 gap-2">
+                        {((taxSlabs && taxSlabs.length > 0) ? taxSlabs : DEFAULT_TAX_SLABS).map((slab, idx) => (
+                          <div key={slab.id || `slab-${idx}`} className="flex space-x-3 items-center bg-slate-50 p-2.5 rounded-lg text-xs font-mono hover:bg-slate-100/80 transition-colors">
+                            <span className="font-bold text-slate-500 w-16">Slab #{idx + 1}</span>
+                            <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-2">
                               <div>
                                 <span className="block text-[10px] text-slate-400 font-sans">Min Annual (PKR):</span>
-                                <input aria-label={`Slab ${idx + 1} minimum`} type="number" value={slab.minIncome} onChange={e => updateTaxSlab(slab.id, 'minIncome', Number(e.target.value))} className="w-full font-bold bg-white border border-slate-200 rounded px-1 py-0.5" />
+                                <input aria-label={`Slab ${idx + 1} minimum`} type="number" value={slab.minIncome} onChange={e => updateTaxSlab(slab.id, 'minIncome', Number(e.target.value))} className="w-full font-bold bg-white border border-slate-200 rounded px-1.5 py-1 text-slate-800" />
                               </div>
                               <div>
                                 <span className="block text-[10px] text-slate-400 font-sans">Max Annual (PKR):</span>
-                                <input aria-label={`Slab ${idx + 1} maximum`} type="number" value={slab.maxIncome} onChange={e => updateTaxSlab(slab.id, 'maxIncome', Number(e.target.value))} className="w-full font-bold bg-white border border-slate-200 rounded px-1 py-0.5" />
+                                <input aria-label={`Slab ${idx + 1} maximum`} type="number" value={slab.maxIncome} onChange={e => updateTaxSlab(slab.id, 'maxIncome', Number(e.target.value))} className="w-full font-bold bg-white border border-slate-200 rounded px-1.5 py-1 text-slate-800" />
                               </div>
                               <div>
-                                <span className="block text-[10px] text-slate-400 font-sans">Formula:</span>
-                                <div className="flex gap-1"><input aria-label={`Slab ${idx + 1} base tax`} type="number" value={slab.baseTax} onChange={e => updateTaxSlab(slab.id, 'baseTax', Number(e.target.value))} className="w-2/3 font-bold bg-white border border-slate-200 rounded px-1 py-0.5" /><input aria-label={`Slab ${idx + 1} percentage`} type="number" step="0.01" value={slab.percentage} onChange={e => updateTaxSlab(slab.id, 'percentage', Number(e.target.value))} className="w-1/3 font-bold bg-white border border-slate-200 rounded px-1 py-0.5" /></div>
+                                <span className="block text-[10px] text-slate-400 font-sans">Base Tax + Rate:</span>
+                                <div className="flex gap-1">
+                                  <input aria-label={`Slab ${idx + 1} base tax`} type="number" value={slab.baseTax} onChange={e => updateTaxSlab(slab.id, 'baseTax', Number(e.target.value))} className="w-2/3 font-bold bg-white border border-slate-200 rounded px-1.5 py-1 text-slate-800" title="Fixed Base Tax in PKR" />
+                                  <input aria-label={`Slab ${idx + 1} percentage`} type="number" step="0.01" value={slab.percentage} onChange={e => updateTaxSlab(slab.id, 'percentage', Number(e.target.value))} className="w-1/3 font-bold bg-white border border-slate-200 rounded px-1.5 py-1 text-slate-800" title="Tax Rate (e.g. 0.05 for 5%)" />
+                                </div>
                               </div>
                             </div>
                           </div>
                         ))}
                       </div>
 
-                      <div className="bg-slate-50 p-4 rounded-lg text-xs text-slate-500 border border-dashed border-slate-300">
-                        Slab parameters automatically recalculate basic payroll registers on fly. You can safely simulate different fiscal year slabs.
+                      {/* Section 4AB Surcharge Notice */}
+                      <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-900 flex items-start gap-2.5">
+                        <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                        <div>
+                          <span className="font-semibold block">Section 4AB Surcharge (Finance Act 2024 / 2025):</span>
+                          An additional 10% surcharge on tax liability is automatically computed for salaried individuals earning exceeding Rs. 10,000,000 (10 Million PKR) per annum.
+                        </div>
+                      </div>
+
+                      <div className="bg-slate-50 p-3 rounded-lg text-xs text-slate-500 border border-dashed border-slate-300">
+                        Slab parameters automatically recalculate basic payroll registers on the fly. You can safely simulate different fiscal year slabs or click <strong>&quot;Update from FBR&quot;</strong> to restore official rates.
                       </div>
                     </div>
 
