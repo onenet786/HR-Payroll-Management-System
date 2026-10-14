@@ -1583,17 +1583,21 @@ export default function App() {
   const [hasUsersInDb, setHasUsersInDb] = useState<boolean | null>(null);
   const [brandTitle, setBrandTitle] = useState<string>(() => {
     try {
+      const injected = (window as any).__APP_CONFIG__?.companyName;
+      if (injected && injected.trim()) return injected.trim();
       const stored = localStorage.getItem('app_brand_name');
       if (stored && stored.trim()) return stored.trim();
     } catch {}
-    return import.meta.env.VITE_APP_NAME || 'OneNet Solutions Pk.';
+    return 'OneNet Solutions Pk.';
   });
   const [brandSubtitle, setBrandSubtitle] = useState<string>(() => {
     try {
+      const injected = (window as any).__APP_CONFIG__?.companySubtitle;
+      if (injected && injected.trim()) return injected.trim();
       const stored = localStorage.getItem('app_brand_subtitle');
       if (stored && stored.trim()) return stored.trim();
     } catch {}
-    return import.meta.env.VITE_APP_SUBTITLE || 'Payroll Compliance & Attendance Management';
+    return 'Payroll Compliance & Attendance Management';
   });
 
   useEffect(() => {

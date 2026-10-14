@@ -65,7 +65,7 @@ function isOriginAllowed(origin) {
   return false;
 }
 
-// Dynamic Company Identity Branding Provider
+// Dynamic Company Identity Branding Provider - directly queries PostgreSQL System of Record
 let cachedBranding = { name: null, subtitle: null, expiresAt: 0 };
 
 async function getActiveBranding() {
@@ -104,21 +104,13 @@ async function getActiveBranding() {
     } catch {}
   }
 
-  // 2. Check environment overrides
-  if (!companyName && process.env.COMPANY_NAME) {
-    companyName = process.env.COMPANY_NAME.trim();
-  }
-  if (!companyName && process.env.VITE_APP_NAME) {
-    companyName = process.env.VITE_APP_NAME.trim();
-  }
-
-  // 3. Fallback default
+  // 2. Default fallback if database has no company record yet
   if (!companyName) {
     companyName = 'OneNet Solutions Pk.';
   }
 
-  companySubtitle = process.env.COMPANY_SUBTITLE || process.env.VITE_APP_SUBTITLE || 'Payroll Compliance & Attendance Management';
-  cachedBranding = { name: companyName, subtitle: companySubtitle, expiresAt: now + 30_000 };
+  companySubtitle = 'Payroll Compliance & Attendance Management';
+  cachedBranding = { name: companyName, subtitle: companySubtitle, expiresAt: now + 2000 };
   return cachedBranding;
 }
 
@@ -559,6 +551,8 @@ app.get('*', async (_req, res, next) => {
     const branding = await getActiveBranding();
     let html = fs.readFileSync(indexPath, 'utf8');
     html = html.replace(/<title>.*?<\/title>/i, `<title>${branding.name} - HR &amp; Payroll Management System</title>`);
+    const configScript = `<script>window.__APP_CONFIG__=${JSON.stringify({ companyName: branding.name, companySubtitle: branding.subtitle })};</script>`;
+    html = html.replace('</head>', `${configScript}</head>`);
     res.setHeader('Content-Type', 'text/html; charset=UTF-8');
     res.setHeader('Cache-Control', 'no-cache');
     return res.send(html);
