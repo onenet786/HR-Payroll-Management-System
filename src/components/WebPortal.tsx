@@ -3,13 +3,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { empAvatarUrl } from '../utils/avatar';
 import {
   Users, Calendar, CreditCard, ShieldCheck, FileText, Download, UserPlus,
   CheckCircle, AlertTriangle, Building, MapPin, Layers, Sliders, Info,
   CalendarDays, Banknote, TrendingUp, Star, Package, Briefcase, Calculator, Bell, Fingerprint,
-  Database, BookOpen, Menu, X, ChevronDown, ListTree
+  Database, BookOpen, Menu, X, ChevronDown, ListTree, Search
 } from 'lucide-react';
 import {
   Employee, AttendanceLog, LeaveRequest, StatutoryConfig, TaxSlab, PayrollRun, Payslip,
@@ -172,6 +172,178 @@ interface WebPortalProps {
 type PortalTab = 'dashboard' | 'employees' | 'attendance' | 'leaves' | 'payroll' | 'settings' | 'company-setup' | 'master-data' | 'access' | 'maintenance' | 'holidays' | 'loans' | 'revisions' | 'performance' | 'assets' | 'recruitment' | 'gratuity' | 'notifications' | 'biometric' | 'help';
 type NavGroupKey = 'people' | 'time' | 'payroll' | 'system';
 
+interface FlowStep {
+  step: number;
+  label: string;
+  tab: PortalTab;
+}
+
+const FLOW_STEPS: FlowStep[] = [
+  { step: 1, label: '1. Statutory', tab: 'settings' },
+  { step: 2, label: '2. Company', tab: 'company-setup' },
+  { step: 3, label: '3. People', tab: 'employees' },
+  { step: 4, label: '4. Holidays', tab: 'holidays' },
+  { step: 5, label: '5. Leave', tab: 'leaves' },
+  { step: 6, label: '6. Devices', tab: 'biometric' },
+  { step: 7, label: '7. Attendance', tab: 'attendance' },
+  { step: 8, label: '8. Loans', tab: 'loans' },
+  { step: 9, label: '9. Revisions', tab: 'revisions' },
+  { step: 10, label: '10. Payroll', tab: 'payroll' },
+  { step: 11, label: '11. Settlement', tab: 'gratuity' },
+  { step: 12, label: '12. Dashboard', tab: 'dashboard' },
+];
+
+const TAB_WORKFLOW_META: Record<PortalTab, {
+  heading: string;
+  help: string;
+  guideTitle: string;
+  guideContent: string;
+}> = {
+  dashboard: {
+    heading: 'Good morning. Five things need you today; the first three take a minute each.',
+    help: 'Everything on this page comes from the same records payroll uses, so if it looks right here it is right there.',
+    guideTitle: 'Guide for Operations Dashboard',
+    guideContent: 'Step 12 of 12. The dashboard only reports; it never computes anything of its own. If a number here is wrong, the fix is on one of the other eleven screens.'
+  },
+  settings: {
+    heading: 'Statutory parameters dictate monthly payroll deductions across all provinces.',
+    help: 'Fix required statutory thresholds. Provincial minimum wage, EOBI, and PESSI/SESSI ceilings determine statutory deductions for the upcoming payroll run.',
+    guideTitle: 'Guide for Statutory Config',
+    guideContent: 'Step 1 of 12. Set up statutory tax slabs, provincial minimum wage, EOBI contribution limits, and social security ceilings before onboarding staff and running payroll.'
+  },
+  'company-setup': {
+    heading: 'Tell the system who the company is and where people work.',
+    help: 'Payroll outputs print the legal name and registration numbers, and the province of each location decides minimum wage, social security and leave rules.',
+    guideTitle: 'Guide for Company & Master Data',
+    guideContent: 'Step 2 of 12. Fill the legal details and registration numbers (NTN, STRN, EOBI, PESSI/SESSI), check location provinces, and ensure departments and shifts exist, because the onboarding form in step 3 can only pick from these lists.'
+  },
+  'master-data': {
+    heading: 'Configure global branches, departments, designations, zones, and wage types.',
+    help: 'Master data provides standardized hierarchy lists used across employee onboarding, attendance allocation, and cost center payroll registers.',
+    guideTitle: 'Guide for Master Data Hierarchy',
+    guideContent: 'Define operational branches, departments, designations, and wage types. All records connect to these master definitions.'
+  },
+  employees: {
+    heading: 'Active employee directory and statutory compliance profile records.',
+    help: 'Manage employee profiles, statutory tax status, CNIC, and banking records. The onboarding wizard requires company master data to be defined first.',
+    guideTitle: 'Guide for Employee Directory',
+    guideContent: 'Step 3 of 12. Manage the employee roster, assign designations, departments, shifts, compensation packages, and CNIC details. Each employee\'s location determines their tax and provincial benefits.'
+  },
+  recruitment: {
+    heading: 'Recruitment pipelines, active job postings, and candidate applications.',
+    help: 'Post job openings, track candidate evaluation stages, and onboard hired applicants directly into the employee directory.',
+    guideTitle: 'Guide for Recruitment',
+    guideContent: 'Create job postings, review applicant resumes, schedule interviews, and initiate employee onboarding with one click upon hiring.'
+  },
+  performance: {
+    heading: 'Employee performance appraisals, KPI tracking, and rating reviews.',
+    help: 'Track quarterly and annual performance reviews, KPI goals, and appraisal ratings to inform merit salary revisions.',
+    guideTitle: 'Guide for Performance Management',
+    guideContent: 'Evaluate team members against measurable objectives and link appraisal scores directly into annual compensation reviews.'
+  },
+  assets: {
+    heading: 'Assets block an exit until they are back.',
+    help: 'What the company owns and who has it. When someone leaves, their assets appear on the settlement checklist automatically.',
+    guideTitle: 'Guide for Asset Management',
+    guideContent: 'Not on the payroll chain, but step 11 waits for it. Every company laptop, phone, or credential issued to staff is tracked here and must be cleared prior to final settlement payout.'
+  },
+  holidays: {
+    heading: 'Gazetted public holidays and corporate holiday calendar.',
+    help: 'Gazetted and optional holidays are factored into working day calculations and payroll period attendance.',
+    guideTitle: 'Guide for Holiday Calendar',
+    guideContent: 'Step 4 of 12. Configure federal and provincial public holidays. When payroll runs, working days and paid non-working days are automatically calculated based on this calendar.'
+  },
+  leaves: {
+    heading: 'Leave requests require supervisor review prior to payroll attendance cutoff.',
+    help: 'Process leave requests, track annual / casual / sick balances, and check encashment eligibility before payroll.',
+    guideTitle: 'Guide for Leave Management',
+    guideContent: 'Step 5 of 12. Approve or decline pending leave applications. Approved leaves are credited as paid days in the attendance register, preventing unauthorized absence salary deductions.'
+  },
+  biometric: {
+    heading: 'Readers at each location, and who is enrolled.',
+    help: 'Devices capture physical punches, while staff can also punch from the web or the mobile app with biometric facial verification and GPS geofencing.',
+    guideTitle: 'Guide for Biometric Devices',
+    guideContent: 'Step 6 of 12. A device is the easiest way to get clean punches, but it is not required: web and mobile punches are tagged by source and go through the same rules in step 7.'
+  },
+  attendance: {
+    heading: 'Who is in, what needs a decision, and the monthly register payroll will use.',
+    help: 'Two things need a decision before payroll. Clear regularization exceptions to ensure accurate work day counts for the monthly salary register.',
+    guideTitle: 'Guide for Attendance',
+    guideContent: 'Step 7 of 12. Clear everything in "Needs review" before running payroll; the payroll screen will refuse to lock a period with open items.'
+  },
+  loans: {
+    heading: 'Track company loans and salary advances with automated installment recovery.',
+    help: 'Track company loans and salary advances. Active loan installments are automatically deducted from the monthly payroll slip.',
+    guideTitle: 'Guide for Loans & Advances',
+    guideContent: 'Step 8 of 12. Review employee loan applications and approve advances. Approved repayment schedules are automatically included as payroll deductions.'
+  },
+  revisions: {
+    heading: 'Approved compensation increments and salary revision history.',
+    help: 'View salary histories, revision bands, and approved compensation increments before running current month payroll.',
+    guideTitle: 'Guide for Salary Revisions',
+    guideContent: 'Step 9 of 12. Schedule and approve salary adjustments, increment letters, and grade promotions before the payroll cut-off date.'
+  },
+  payroll: {
+    heading: 'Step 10 of 12: Monthly salary computation, statutory withholding, and disbursement.',
+    help: 'Review attendance and deductions, calculate tax withholding, and disburse bank payment sheets.',
+    guideTitle: 'Guide for Payroll Processing',
+    guideContent: 'Step 10 of 12. Run the monthly payroll cycle, verify tax withholding under the Income Tax Ordinance, verify EOBI/social security contributions, and generate bank disbursement sheets.'
+  },
+  gratuity: {
+    heading: 'Offboarding final settlements, gratuity entitlement, and clearance checklist.',
+    help: 'Assets block an exit until they are back. Compute final settlements, gratuity entitlements, and leave encashment clearances.',
+    guideTitle: 'Guide for Gratuity & Settlement',
+    guideContent: 'Step 11 of 12. Offboard exiting personnel with full final settlement calculation including gratuity (30 days basic pay per completed year of service) and unutilized leave encashment.'
+  },
+  access: {
+    heading: 'User access accounts, roles, and administrative permissions.',
+    help: 'Configure multi-tier roles (Super Admin, HR Manager, Payroll Officer, Auditor) and assign granular module permissions.',
+    guideTitle: 'Guide for User Management',
+    guideContent: 'Enforce dual authorization principles: one officer prepares payroll, another approves. Granular permissions govern access to salaries and audit logs.'
+  },
+  maintenance: {
+    heading: 'Database backup, Firestore synchronization, and system recovery snapshots.',
+    help: 'Verify server health, inspect local and cloud synchronization states, and export database recovery snapshots.',
+    guideTitle: 'Guide for Data Backup & Maintenance',
+    guideContent: 'Ensure offline logs and biometric attestation events are securely backed up. Cloud synchronization runs continuously.'
+  },
+  notifications: {
+    heading: 'System activity log, payroll cutoff reminders, and critical alerts.',
+    help: 'Review automated notifications, approval requests, reader connection warnings, and statutory filing deadlines.',
+    guideTitle: 'Guide for Notifications',
+    guideContent: 'Central notifications center displaying all items requiring decision or action by HR and payroll administrators.'
+  },
+  help: {
+    heading: 'Complete compliance handbook, Pakistan statutory labor laws, and portal guide.',
+    help: 'Reference guidelines for Income Tax Ordinance 2001, EOBI Act 1976, Provincial Social Security, and Factories Act.',
+    guideTitle: 'Guide for User Guide & Documentation',
+    guideContent: 'Comprehensive documentation and statutory reference materials for Pakistan HR and payroll operations.'
+  }
+};
+
+const SEARCHABLE_PAGES: Array<{ tab: PortalTab; label: string; category: string }> = [
+  { tab: 'dashboard', label: 'Operations Dashboard', category: 'Overview' },
+  { tab: 'settings', label: '1. Statutory Config', category: 'Set Up (Do Once)' },
+  { tab: 'company-setup', label: '2. Company & Master Data', category: 'Set Up (Do Once)' },
+  { tab: 'employees', label: '3. Employee Directory', category: 'People' },
+  { tab: 'recruitment', label: 'Recruitment', category: 'People' },
+  { tab: 'performance', label: 'Performance', category: 'People' },
+  { tab: 'assets', label: 'Asset Management', category: 'People' },
+  { tab: 'holidays', label: '4. Holiday Calendar', category: 'Time' },
+  { tab: 'leaves', label: '5. Leave Management', category: 'Time' },
+  { tab: 'biometric', label: '6. Biometric Devices', category: 'Time' },
+  { tab: 'attendance', label: '7. Attendance', category: 'Time' },
+  { tab: 'loans', label: '8. Loans & Advances', category: 'Payroll' },
+  { tab: 'revisions', label: '9. Salary Revisions', category: 'Payroll' },
+  { tab: 'payroll', label: '10. Payroll Processing', category: 'Payroll' },
+  { tab: 'gratuity', label: '11. Gratuity & Settlement', category: 'Payroll' },
+  { tab: 'maintenance', label: 'Data Backup', category: 'System' },
+  { tab: 'access', label: 'User Management', category: 'System' },
+  { tab: 'master-data', label: 'Master Data Lists', category: 'System' },
+  { tab: 'notifications', label: 'Notifications Center', category: 'System' },
+  { tab: 'help', label: 'User Guide & Labor Laws', category: 'Help' },
+];
+
 export function WebPortal({
   employees,
   attendances,
@@ -256,6 +428,40 @@ export function WebPortal({
   const [activeTab, setActiveTab] = useState<PortalTab>('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [expandedNavGroup, setExpandedNavGroup] = useState<NavGroupKey | null>('system');
+  const [showGuideModal, setShowGuideModal] = useState(false);
+  const [showQuickSearch, setShowQuickSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage(current => current === msg ? null : current);
+    }, 2600);
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowGuideModal(false);
+        setShowQuickSearch(false);
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setShowQuickSearch(v => !v);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  const currentDateString = new Date().toLocaleDateString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric'
+  });
+
   const closeSidebar = () => setSidebarOpen(false);
   const updateTaxSlab = (id: string, field: keyof Pick<TaxSlab, 'minIncome' | 'maxIncome' | 'baseTax' | 'percentage'>, value: number) =>
     onUpdateTaxSlabs(taxSlabs.map(slab => slab.id === id ? { ...slab, [field]: value } : slab));
@@ -1147,61 +1353,64 @@ export function WebPortal({
     closeSidebar();
   };
 
-  const navGroups: Array<{
-    key: NavGroupKey;
-    label: string;
-    icon: React.ElementType;
-    items: Array<{ tab: PortalTab; label: string; icon: React.ElementType; badge?: React.ReactNode }>;
-  }> = [
-    {
-      key: 'people', label: 'People', icon: Users,
-      items: [
-        { tab: 'employees', label: 'Employee Directory', icon: Users },
-        { tab: 'recruitment', label: 'Recruitment', icon: Briefcase, badge: jobPostings.filter(j => j.status === 'Open').length > 0 ? `${jobPostings.filter(j => j.status === 'Open').length} open` : undefined },
-        { tab: 'performance', label: 'Performance', icon: Star, badge: performanceReviews.length },
-        { tab: 'assets', label: 'Asset Management', icon: Package, badge: companyAssets.length }
-      ]
-    },
-    {
-      key: 'time', label: 'Time & Attendance', icon: CalendarDays,
-      items: [
-        { tab: 'attendance', label: 'Attendance Logs', icon: Calendar, badge: pendingRegularizationsCount || undefined },
-        { tab: 'leaves', label: 'Leave Management', icon: FileText, badge: pendingLeavesCount || undefined },
-        { tab: 'holidays', label: 'Holiday Calendar', icon: CalendarDays, badge: holidays.length },
-        { tab: 'biometric', label: 'Biometric Enrollment', icon: Fingerprint, badge: 'Face + Fingerprint' }
-      ]
-    },
-    {
-      key: 'payroll', label: 'Payroll & Benefits', icon: CreditCard,
-      items: [
-        { tab: 'payroll', label: 'Payroll Processing', icon: CreditCard },
-        { tab: 'revisions', label: 'Salary Revisions', icon: TrendingUp },
-        { tab: 'loans', label: 'Loans & Advances', icon: Banknote, badge: loanAdvances.filter(l => l.status === 'Pending').length > 0 ? `${loanAdvances.filter(l => l.status === 'Pending').length} pending` : undefined },
-        { tab: 'gratuity', label: 'Gratuity & Settlement', icon: Calculator },
-        { tab: 'settings', label: 'Statutory Config (FBR)', icon: Sliders }
-      ]
-    },
-    {
-      key: 'system', label: 'System', icon: ShieldCheck,
-      items: [
-        { tab: 'company-setup', label: 'Company Setup', icon: Building },
-        { tab: 'master-data', label: 'Master Data', icon: ListTree },
-        { tab: 'access', label: 'User Management', icon: Users, badge: users.length || undefined },
-        { tab: 'maintenance', label: 'Data Backup', icon: Database },
-        { tab: 'notifications', label: 'Notifications', icon: Bell, badge: notifications.filter(n => !n.readBy.includes(loggedInUser?.employeeId || loggedInUser?.username || '')).length || undefined },
-        { tab: 'help', label: 'User Guide', icon: BookOpen, badge: 'NEW' }
-      ]
+  const getFlowStepState = (step: FlowStep): { className: string; statusText: string } => {
+    const currentStepObj = FLOW_STEPS.find(s => s.tab === activeTab);
+    const currentStepNum = currentStepObj ? currentStepObj.step : 12;
+
+    if (activeTab === step.tab) {
+      return { className: 'now', statusText: 'you are here' };
     }
-  ];
+
+    if (step.tab === 'settings') {
+      const hasFix = !primaryCompany?.ntn || !primaryCompany?.eobiRegistration;
+      if (hasFix) return { className: 'fix', statusText: '4 fields to fix' };
+    }
+    if (step.tab === 'attendance') {
+      if (pendingRegularizationsCount > 0) {
+        return { className: 'fix', statusText: `${pendingRegularizationsCount} need review` };
+      }
+    }
+    if (step.tab === 'leaves') {
+      if (pendingLeavesCount > 0) {
+        return { className: 'fix', statusText: `${pendingLeavesCount} pending` };
+      }
+    }
+    if (step.tab === 'loans') {
+      const pendingLoans = loanAdvances.filter(l => l.status === 'Pending').length;
+      if (pendingLoans > 0) {
+        return { className: 'fix', statusText: `${pendingLoans} pending` };
+      }
+    }
+
+    if (step.step < currentStepNum) {
+      return { className: 'done', statusText: 'ready' };
+    }
+    return { className: 'todo', statusText: 'next' };
+  };
+
+  const unreadNotificationCount = notifications.filter(n => !n.readBy.includes(currentUserAccount?.employeeId || currentUserAccount?.username || '')).length;
+
+  const searchFilteredPages = SEARCHABLE_PAGES.filter(p =>
+    !searchQuery || p.label.toLowerCase().includes(searchQuery.toLowerCase()) || p.category.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const searchFilteredEmployees = employees.filter(e =>
+    searchQuery && (
+      e.fullName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (e.employeeCode && e.employeeCode.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (e.designation && e.designation.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (e.cnic && e.cnic.includes(searchQuery))
+    )
+  ).slice(0, 5);
 
   return (
     <div className="flex flex-col h-full bg-slate-50 text-slate-800 font-sans" id="web-portal-root">
       
-      {/* Upper Navigation Header */}
-      <header className="bg-white border-b border-slate-200 px-3 sm:px-6 py-3 flex items-center justify-between gap-2 flex-shrink-0" id="web-hdr">
+      {/* Friendly build v2 Top Bar */}
+      <div className="top" id="web-hdr">
         {/* Hamburger — mobile only */}
         <button
-          className="md:hidden p-2 rounded-lg hover:bg-slate-100 text-slate-600 flex-shrink-0"
+          className="md:hidden p-1.5 rounded-lg hover:bg-slate-800 text-slate-300 flex-shrink-0"
           onClick={() => setSidebarOpen(v => !v)}
           aria-label="Toggle menu"
         >
@@ -1209,54 +1418,82 @@ export function WebPortal({
         </button>
 
         {/* Brand */}
-        <div className="flex items-center space-x-2 sm:space-x-3 min-w-0">
-          <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-emerald-600 flex items-center justify-center text-white font-bold text-base sm:text-xl shadow-md shadow-emerald-200 flex-shrink-0">
-            {companyDisplayName.charAt(0).toUpperCase()}
-          </div>
-          <div className="min-w-0">
-            <h1 className="font-bold text-sm sm:text-lg text-slate-900 leading-tight truncate">{companyDisplayName} HR &amp; Payroll</h1>
-            <p className="text-xs text-slate-500 font-mono hidden sm:block">Company ID: {companyCode} • Pakistan Statutory Portal</p>
-          </div>
+        <div className="brand flex items-center gap-2">
+          <span>BIN ISHAQ HR &amp; PAYROLL</span>
+          <span style={{ fontSize: '10px', background: '#059669', borderRadius: '4px', padding: '1px 5px', color: '#fff', fontWeight: 600 }}>v2</span>
+          <small>Friendly build</small>
+        </div>
+
+        {/* Tenant Identity */}
+        <div
+          className="tenant"
+          onClick={() => setActiveTab('company-setup')}
+          title="Click to manage Company & Master Data"
+        >
+          <span className="text-emerald-400">●</span>
+          <b>{companyDisplayName}</b>
+          <span className="id">{primaryCompany?.city ? `${primaryCompany.city}, ${primaryCompany.province || 'PK'}` : 'Lahore, Punjab'}</span>
+          <span className="text-slate-400 text-[10px]">▾</span>
+        </div>
+
+        {/* Quick Search Bar */}
+        <div
+          className="search-bar hidden sm:flex"
+          onClick={() => setShowQuickSearch(true)}
+          title="Click or press Ctrl+K to find anything"
+        >
+          <span className="flex items-center gap-2 truncate text-slate-400">
+            <Search className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+            <span className="truncate">Find anything: a person, a payslip, a setting…</span>
+          </span>
+          <span className="flex items-center gap-1 flex-shrink-0">
+            <span className="kbd">Ctrl</span>
+            <span className="kbd">K</span>
+          </span>
         </div>
 
         {/* Right actions */}
-        <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
-          {/* Sync badge — hidden on mobile */}
-          <div className="hidden lg:block text-right">
-            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border ${syncBadgeClass}`}>
+        <div className="right">
+          <span className="hidden lg:inline text-slate-300 font-medium">{currentDateString}</span>
+
+          {/* Sync status indicator */}
+          <div className="hidden xl:flex items-center">
+            <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-semibold border ${syncBadgeClass}`}>
               ● {syncLabel}
             </span>
-            <div className="text-[10px] text-slate-400 font-mono mt-0.5">{firestoreSyncStatus.message}</div>
+          </div>
+
+          {/* Notifications Bell */}
+          <div
+            className="bell-btn"
+            onClick={() => setActiveTab('notifications')}
+            title={`${unreadNotificationCount} things need you`}
+          >
+            <Bell className="w-4 h-4 text-slate-300" />
+            {unreadNotificationCount > 0 && <i>{unreadNotificationCount}</i>}
           </div>
 
           {/* User chip */}
-          <div className="flex items-center gap-2 bg-slate-100 px-2 sm:px-3.5 py-1.5 rounded-xl border border-slate-200 select-none">
-            <div className="flex flex-col text-left hidden sm:flex">
-              <span className="text-[9px] font-bold uppercase text-slate-400 tracking-wide">Signed in as</span>
-              <span className="text-xs font-extrabold text-slate-800">{currentUserAccount.username}</span>
-              <span className="text-[9px] text-slate-500 italic">{currentUserRole?.name || (isRoleResolving ? 'Loading…' : 'No Role')}</span>
+          <div className="user-chip">
+            <div className="av">
+              {(currentUserAccount.username || 'A').charAt(0).toUpperCase()}
             </div>
-            <span className="text-xs font-extrabold text-slate-800 sm:hidden">{currentUserAccount.username}</span>
-            <button
-              onClick={onLogout}
-              className="bg-slate-200 hover:bg-rose-50 text-slate-600 hover:text-rose-600 font-bold px-2 sm:px-2.5 py-1 rounded-md text-[10px] transition uppercase tracking-wider border border-slate-300 hover:border-rose-200 cursor-pointer whitespace-nowrap"
-            >
-              Logout
-            </button>
+            <div className="hidden sm:block">
+              <div className="font-bold text-slate-100 leading-tight">{currentUserAccount.username}</div>
+              <small>{currentUserRole?.name || 'Super Admin'}</small>
+            </div>
           </div>
 
-          {/* Onboard — icon-only on mobile */}
-          {userPermissions.includes('manage_employees') && (
-            <button
-              onClick={openAddEmployee}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-sm px-2 sm:px-4 py-2 rounded-lg shadow-sm transition flex items-center space-x-1"
-            >
-              <UserPlus className="w-4 h-4" />
-              <span className="hidden sm:inline">Onboard Staff</span>
-            </button>
-          )}
+          {/* Logout button */}
+          <button
+            onClick={onLogout}
+            className="btn sm d"
+            title="Sign out of system"
+          >
+            Logout
+          </button>
         </div>
-      </header>
+      </div>
 
       {/* Main Framework Divider */}
       <div className="flex flex-1 overflow-hidden relative" id="web-main-container">
@@ -1271,88 +1508,227 @@ export function WebPortal({
 
         {/* Sidebar Nav */}
         <nav
-          className={`fixed inset-y-0 left-0 z-50 w-72 bg-slate-900 text-slate-300 flex flex-col p-4 border-r border-slate-800 transition-transform duration-300 ease-in-out
-            md:static md:z-auto md:w-52 xl:w-64 md:p-3 xl:p-4 md:flex-shrink-0 md:translate-x-0
+          className={`fixed inset-y-0 left-0 z-50 w-64 bg-slate-900 text-slate-300 flex flex-col border-r border-slate-800 transition-transform duration-300 ease-in-out side
+            md:static md:z-auto md:w-60 xl:w-64 md:flex-shrink-0 md:translate-x-0
             ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}
           id="web-sidebar"
         >
           {/* Close button — mobile only */}
-          <div className="flex items-center justify-between mb-3 md:hidden">
-            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Menu</span>
+          <div className="flex items-center justify-between mb-2 md:hidden px-2 pt-2">
+            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Navigation</span>
             <button onClick={closeSidebar} className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400">
               <X className="w-4 h-4" />
             </button>
           </div>
-          <div className="flex-1 overflow-y-auto pr-1 space-y-2" aria-label="HR portal navigation">
+
+          <div className="flex-1 overflow-y-auto px-1 pb-4 space-y-1" aria-label="HR portal navigation">
+            {/* Dashboard */}
             {hasPermission('dashboard') && (
               <button
                 type="button"
                 onClick={() => navigateFromSidebar('dashboard')}
-                aria-current={activeTab === 'dashboard' ? 'page' : undefined}
-                className={`w-full text-left px-3 py-2.5 rounded-lg text-sm font-semibold flex items-center gap-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 ${activeTab === 'dashboard' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
+                className={`side-item ${activeTab === 'dashboard' ? 'on' : ''}`}
               >
-                <Layers className="w-4 h-4 shrink-0" />
                 <span>Operations Dashboard</span>
               </button>
             )}
 
-            <div className="border-t border-slate-800" />
+            {/* Section: SET UP (DO ONCE) */}
+            <div className="sec"><span>SET UP (DO ONCE)</span></div>
+            {hasPermission('settings') && (
+              <button
+                type="button"
+                onClick={() => navigateFromSidebar('settings')}
+                className={`side-item ${activeTab === 'settings' ? 'on' : ''}`}
+              >
+                <span>1. Statutory Config</span>
+                {(!primaryCompany?.ntn || !primaryCompany?.eobiRegistration) && (
+                  <span className="n" style={{ background: '#B91C1C', color: '#fff' }}>fix</span>
+                )}
+              </button>
+            )}
+            {hasPermission('company-setup') && (
+              <button
+                type="button"
+                onClick={() => navigateFromSidebar('company-setup')}
+                className={`side-item ${activeTab === 'company-setup' ? 'on' : ''}`}
+              >
+                <span>2. Company &amp; Master Data</span>
+              </button>
+            )}
 
-            {navGroups.map(group => {
-              const permittedItems = group.items.filter(item => hasPermission(item.tab));
-              if (permittedItems.length === 0) return null;
-              const isExpanded = expandedNavGroup === group.key;
-              const containsActiveTab = permittedItems.some(item => item.tab === activeTab);
-              const GroupIcon = group.icon;
-              const panelId = `sidebar-group-${group.key}`;
+            {/* Section: PEOPLE */}
+            <div className="sec"><span>PEOPLE</span></div>
+            {hasPermission('employees') && (
+              <button
+                type="button"
+                onClick={() => navigateFromSidebar('employees')}
+                className={`side-item ${activeTab === 'employees' ? 'on' : ''}`}
+              >
+                <span>3. Employee Directory</span>
+              </button>
+            )}
+            {hasPermission('recruitment') && (
+              <button
+                type="button"
+                onClick={() => navigateFromSidebar('recruitment')}
+                className={`side-item ${activeTab === 'recruitment' ? 'on' : ''}`}
+              >
+                <span>Recruitment</span>
+                {jobPostings.filter(j => j.status === 'Open').length > 0 && (
+                  <span className="tag">{jobPostings.filter(j => j.status === 'Open').length}</span>
+                )}
+              </button>
+            )}
+            {hasPermission('performance') && (
+              <button
+                type="button"
+                onClick={() => navigateFromSidebar('performance')}
+                className={`side-item ${activeTab === 'performance' ? 'on' : ''}`}
+              >
+                <span>Performance</span>
+              </button>
+            )}
+            {hasPermission('assets') && (
+              <button
+                type="button"
+                onClick={() => navigateFromSidebar('assets')}
+                className={`side-item ${activeTab === 'assets' ? 'on' : ''}`}
+              >
+                <span>Asset Management</span>
+                {companyAssets.length > 0 && (
+                  <span className="n">{companyAssets.length}</span>
+                )}
+              </button>
+            )}
 
-              return (
-                <section key={group.key} aria-labelledby={`${panelId}-toggle`}>
-                  <button
-                    id={`${panelId}-toggle`}
-                    type="button"
-                    aria-expanded={isExpanded}
-                    aria-controls={panelId}
-                    onClick={() => setExpandedNavGroup(current => current === group.key ? null : group.key)}
-                    className={`w-full min-h-10 px-3 py-2 rounded-lg flex items-center gap-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 ${containsActiveTab ? 'bg-emerald-500/10 text-emerald-300' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'}`}
-                  >
-                    <GroupIcon className="w-4 h-4 shrink-0" />
-                    <span className="flex-1 text-[11px] font-bold uppercase tracking-[0.12em]">{group.label}</span>
-                    <span className="sr-only">{isExpanded ? 'Collapse' : 'Expand'} {group.label}</span>
-                    <ChevronDown className={`w-3.5 h-3.5 shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`} aria-hidden="true" />
-                  </button>
+            {/* Section: TIME */}
+            <div className="sec"><span>TIME</span></div>
+            {hasPermission('holidays') && (
+              <button
+                type="button"
+                onClick={() => navigateFromSidebar('holidays')}
+                className={`side-item ${activeTab === 'holidays' ? 'on' : ''}`}
+              >
+                <span>4. Holiday Calendar</span>
+              </button>
+            )}
+            {hasPermission('leaves') && (
+              <button
+                type="button"
+                onClick={() => navigateFromSidebar('leaves')}
+                className={`side-item ${activeTab === 'leaves' ? 'on' : ''}`}
+              >
+                <span>5. Leave Management</span>
+                {pendingLeavesCount > 0 && (
+                  <span className="n">{pendingLeavesCount}</span>
+                )}
+              </button>
+            )}
+            {hasPermission('biometric') && (
+              <button
+                type="button"
+                onClick={() => navigateFromSidebar('biometric')}
+                className={`side-item ${activeTab === 'biometric' ? 'on' : ''}`}
+              >
+                <span>6. Biometric Devices</span>
+              </button>
+            )}
+            {hasPermission('attendance') && (
+              <button
+                type="button"
+                onClick={() => navigateFromSidebar('attendance')}
+                className={`side-item ${activeTab === 'attendance' ? 'on' : ''}`}
+              >
+                <span>7. Attendance</span>
+                {pendingRegularizationsCount > 0 && (
+                  <span className="n">{pendingRegularizationsCount}</span>
+                )}
+              </button>
+            )}
 
-                  {isExpanded && (
-                    <div id={panelId} className="relative ml-5 mt-1 space-y-0.5 border-l border-slate-700/80 pl-2">
-                      {permittedItems.map(item => {
-                        const ItemIcon = item.icon;
-                        const isActive = item.tab === activeTab;
-                        return (
-                          <button
-                            key={item.tab}
-                            type="button"
-                            onClick={() => navigateFromSidebar(item.tab, group.key)}
-                            aria-current={isActive ? 'page' : undefined}
-                            className={`group/item w-full min-h-10 text-left px-2.5 py-2 rounded-md text-[12px] font-medium flex items-center gap-2.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 ${isActive ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
-                          >
-                            <ItemIcon className={`w-3.5 h-3.5 shrink-0 ${isActive ? 'text-emerald-100' : 'text-slate-500 group-hover/item:text-slate-300'}`} />
-                            <span className="flex-1 leading-tight">{item.label}</span>
-                            {item.badge !== undefined && (
-                              <span className={`shrink-0 max-w-24 truncate rounded px-1.5 py-0.5 text-[9px] font-bold leading-tight ${isActive ? 'bg-white/15 text-white' : item.tab === 'attendance' || item.tab === 'leaves' || item.tab === 'loans' ? 'bg-amber-500/15 text-amber-300' : item.tab === 'notifications' ? 'bg-rose-500/15 text-rose-300' : 'bg-slate-700 text-slate-300'}`}>
-                                {item.badge}
-                              </span>
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </section>
-              );
-            })}
+            {/* Section: PAYROLL */}
+            <div className="sec"><span>PAYROLL</span></div>
+            {hasPermission('loans') && (
+              <button
+                type="button"
+                onClick={() => navigateFromSidebar('loans')}
+                className={`side-item ${activeTab === 'loans' ? 'on' : ''}`}
+              >
+                <span>8. Loans &amp; Advances</span>
+                {loanAdvances.filter(l => l.status === 'Pending').length > 0 && (
+                  <span className="n">{loanAdvances.filter(l => l.status === 'Pending').length}</span>
+                )}
+              </button>
+            )}
+            {hasPermission('revisions') && (
+              <button
+                type="button"
+                onClick={() => navigateFromSidebar('revisions')}
+                className={`side-item ${activeTab === 'revisions' ? 'on' : ''}`}
+              >
+                <span>9. Salary Revisions</span>
+              </button>
+            )}
+            {hasPermission('payroll') && (
+              <button
+                type="button"
+                onClick={() => navigateFromSidebar('payroll')}
+                className={`side-item ${activeTab === 'payroll' ? 'on' : ''}`}
+              >
+                <span>10. Payroll Processing</span>
+              </button>
+            )}
+            {hasPermission('gratuity') && (
+              <button
+                type="button"
+                onClick={() => navigateFromSidebar('gratuity')}
+                className={`side-item ${activeTab === 'gratuity' ? 'on' : ''}`}
+              >
+                <span>11. Gratuity &amp; Settlement</span>
+              </button>
+            )}
+
+            {/* Section: SYSTEM */}
+            <div className="sec"><span>SYSTEM</span></div>
+            {hasPermission('maintenance') && (
+              <button
+                type="button"
+                onClick={() => navigateFromSidebar('maintenance')}
+                className={`side-item ${activeTab === 'maintenance' ? 'on' : ''}`}
+              >
+                <span>Data Backup</span>
+              </button>
+            )}
+            {hasPermission('access') && (
+              <button
+                type="button"
+                onClick={() => navigateFromSidebar('access')}
+                className={`side-item ${activeTab === 'access' ? 'on' : ''}`}
+              >
+                <span>User Management</span>
+              </button>
+            )}
+            {hasPermission('master-data') && (
+              <button
+                type="button"
+                onClick={() => navigateFromSidebar('master-data')}
+                className={`side-item ${activeTab === 'master-data' ? 'on' : ''}`}
+              >
+                <span>Master Data</span>
+              </button>
+            )}
+
+            {/* Section: HELP */}
+            <div className="sec"><span>HELP</span></div>
+            <button
+              type="button"
+              onClick={() => setShowGuideModal(true)}
+              className="side-item"
+            >
+              <span>❓ Guide for this page</span>
+            </button>
           </div>
-
-
         </nav>
 
         {/* Dynamic Display Area */}
@@ -1386,6 +1762,36 @@ export function WebPortal({
             </div>
           ) : (
             <>
+              {/* 12-Step Compliance & Payroll Flow */}
+              <div className="flow" aria-label="12-step compliance and payroll flow">
+                {FLOW_STEPS.map(step => {
+                  const { className, statusText } = getFlowStepState(step);
+                  return (
+                    <button
+                      key={step.tab}
+                      type="button"
+                      onClick={() => setActiveTab(step.tab)}
+                      className={`flow-step ${className}`}
+                      title={`Jump to ${step.label}`}
+                    >
+                      <b>{step.label}</b>
+                      <span>{statusText}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Contextual Help Banner for Current View */}
+              {TAB_WORKFLOW_META[activeTab] && (
+                <div className="help-banner">
+                  <div className="ic">💡</div>
+                  <div>
+                    <b>{TAB_WORKFLOW_META[activeTab].heading}</b>
+                    <span>{TAB_WORKFLOW_META[activeTab].help}</span>
+                  </div>
+                </div>
+              )}
+
               {/* TAB 1: DASHBOARD */}
               {activeTab === 'dashboard' && (
                 <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
@@ -5255,6 +5661,116 @@ export function WebPortal({
           </div>
         )}
       </AnimatePresence>
+
+      {/* ── Friendly build Guide Modal (#helpm) ── */}
+      {showGuideModal && (
+        <div
+          className="modal-overlay"
+          id="helpm"
+          onClick={e => {
+            if (e.target === e.currentTarget) setShowGuideModal(false);
+          }}
+        >
+          <div className="dlg">
+            <h2>{TAB_WORKFLOW_META[activeTab]?.guideTitle || `Guide for ${activeTab}`}</h2>
+            <p className="sub">What this screen is for and what happens next.</p>
+            <p style={{ fontSize: '13.5px', lineHeight: '1.6', color: '#334155', marginBottom: '14px' }}>
+              {TAB_WORKFLOW_META[activeTab]?.guideContent}
+            </p>
+            <p style={{ fontSize: '12px', color: '#64748B' }}>
+              Press <span className="kbd">Esc</span> to close any window. Nothing is deleted without a confirmation, and every change is logged with your name and the time.
+            </p>
+            <div className="ft">
+              <button className="btn" onClick={() => setShowGuideModal(false)}>Cancel</button>
+              <button className="btn p" onClick={() => { setShowGuideModal(false); showToast('Guide closed'); }}>Got it</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Friendly build Quick Search Modal (#quick-search-modal) ── */}
+      {showQuickSearch && (
+        <div
+          className="modal-overlay"
+          id="quick-search-modal"
+          onClick={e => {
+            if (e.target === e.currentTarget) {
+              setShowQuickSearch(false);
+              setSearchQuery('');
+            }
+          }}
+        >
+          <div className="dlg" style={{ maxWidth: '560px' }}>
+            <div className="flex items-center justify-between mb-2">
+              <h2>Find Anything</h2>
+              <span className="text-xs text-slate-400">Press <span className="kbd">Esc</span> to close</span>
+            </div>
+            <p className="sub">Quickly jump to any setup screen, payroll tool, or staff record.</p>
+
+            <div className="relative mb-3">
+              <input
+                type="text"
+                autoFocus
+                placeholder="Type to search: a person, a payslip, a setting…"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                className="w-full pl-3 pr-3 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:border-emerald-600 focus:bg-white"
+              />
+            </div>
+
+            <div className="max-h-72 overflow-y-auto space-y-1">
+              <div className="text-[10.5px] font-bold uppercase tracking-wider text-slate-400 px-1 py-1">Pages &amp; Compliance Workflow</div>
+              {searchFilteredPages.map(page => (
+                <button
+                  key={page.tab}
+                  type="button"
+                  onClick={() => {
+                    setActiveTab(page.tab);
+                    setShowQuickSearch(false);
+                    setSearchQuery('');
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-100 flex items-center justify-between text-sm text-slate-800 transition"
+                >
+                  <span className="font-semibold text-slate-900">{page.label}</span>
+                  <span className="text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded">{page.category}</span>
+                </button>
+              ))}
+
+              {searchFilteredEmployees.length > 0 && (
+                <>
+                  <div className="text-[10.5px] font-bold uppercase tracking-wider text-slate-400 px-1 pt-3 pb-1">Employees</div>
+                  {searchFilteredEmployees.map(emp => (
+                    <button
+                      key={emp.id}
+                      type="button"
+                      onClick={() => {
+                        setActiveTab('employees');
+                        setEmpSearch(emp.fullName);
+                        setShowQuickSearch(false);
+                        setSearchQuery('');
+                      }}
+                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-100 flex items-center justify-between text-sm text-slate-800 transition"
+                    >
+                      <div>
+                        <div className="font-semibold text-slate-900">{emp.fullName}</div>
+                        <div className="text-xs text-slate-500">{emp.employeeCode || emp.id} • {emp.designation}</div>
+                      </div>
+                      <span className="chip c-g text-xs">Jump to record</span>
+                    </button>
+                  ))}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Friendly build Toast Notification (#toast) ── */}
+      {toastMessage && (
+        <div className="toast-msg" id="toast">
+          {toastMessage}
+        </div>
+      )}
 
     </div>
   );

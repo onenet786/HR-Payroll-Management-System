@@ -260,44 +260,6 @@ export function DeviceEmulator({
   return (
     <div className="h-screen overflow-hidden bg-slate-900 text-slate-100 flex flex-col font-sans">
 
-      {/* Top header bar — branding + stats only, no device switcher */}
-      <header className="hidden sm:flex bg-slate-950 border-b border-slate-800 px-4 sm:px-6 py-3 items-center justify-between gap-4 flex-shrink-0">
-
-        <div className="flex items-center space-x-3">
-          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-tr from-emerald-600 to-green-500 flex items-center justify-center shadow-lg text-white flex-shrink-0">
-            <Layers className="w-4 h-4 sm:w-5 sm:h-5" />
-          </div>
-          <div>
-            <h1 className="font-bold text-xs sm:text-sm text-white tracking-wider uppercase flex flex-wrap items-center gap-2">
-              <span>{(companies[0]?.legalName?.trim() || companies[0]?.name?.trim() || 'OneNet Solutions Pk.')} HR &amp; Payroll</span>
-              <span className="font-mono text-[9px] px-1.5 py-0.5 bg-emerald-950 text-emerald-400 rounded-full border border-emerald-900 leading-none">
-                v1.2
-              </span>
-            </h1>
-            <p className="text-[11px] text-slate-400 mt-0.5 hidden sm:block">
-              FBR High-Compliance Multi-Tenant Engine
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-4 font-mono text-xs">
-          <span className="hidden md:block text-slate-400">
-            Total Staff: <span className="text-white font-bold">{employees.length}</span>
-          </span>
-          <span className="hidden md:block h-4 border-r border-slate-700" />
-          <span className="hidden md:block text-slate-400">
-            Active Logs: <span className="text-emerald-400 font-bold">{attendances.length} Synced</span>
-          </span>
-          <span className="hidden md:block h-4 border-r border-slate-700" />
-          <span className="text-slate-400 text-[11px]">
-            <span className="text-slate-300 font-semibold">{loggedInUser?.username}</span>
-            {' · '}
-            <span className="text-emerald-400">{roles.find(r => r.id === loggedInUser?.roleId)?.name ?? 'User'}</span>
-          </span>
-        </div>
-
-      </header>
-
       {/* Main workspace */}
       <div className="flex-1 flex overflow-hidden">
 
