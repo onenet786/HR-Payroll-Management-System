@@ -1,6 +1,7 @@
 node_modules/
 build/
 dist/
+dist.zip
 dist-kiosk*/
 dist-windows*/
 coverage/

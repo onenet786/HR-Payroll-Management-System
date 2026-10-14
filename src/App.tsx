@@ -1581,17 +1581,17 @@ export default function App() {
   const [hasUsersInDb, setHasUsersInDb] = useState<boolean | null>(null);
   const [brandTitle, setBrandTitle] = useState<string>(() => {
     try {
-      const stored = localStorage.getItem('hr_company_name');
+      const stored = localStorage.getItem('app_brand_name');
       if (stored && stored.trim()) return stored.trim();
     } catch {}
-    return 'BIN ISHAQ HR SUITE';
+    return import.meta.env.VITE_APP_NAME || 'OneNet Solutions';
   });
   const [brandSubtitle, setBrandSubtitle] = useState<string>(() => {
     try {
-      const stored = localStorage.getItem('hr_company_subtitle');
+      const stored = localStorage.getItem('app_brand_subtitle');
       if (stored && stored.trim()) return stored.trim();
     } catch {}
-    return 'Payroll Compliance & Attendance Management';
+    return import.meta.env.VITE_APP_SUBTITLE || 'Payroll Compliance & Attendance Management';
   });
 
   useEffect(() => {
@@ -1601,11 +1601,12 @@ export default function App() {
         setHasUsersInDb(Boolean(data.hasUsers));
         if (data.companyName) {
           setBrandTitle(data.companyName);
-          try { localStorage.setItem('hr_company_name', data.companyName); } catch {}
+          try { localStorage.setItem('app_brand_name', data.companyName); } catch {}
+          document.title = `${data.companyName} - HR & Payroll`;
         }
         if (data.companySubtitle) {
           setBrandSubtitle(data.companySubtitle);
-          try { localStorage.setItem('hr_company_subtitle', data.companySubtitle); } catch {}
+          try { localStorage.setItem('app_brand_subtitle', data.companySubtitle); } catch {}
         }
       })
       .catch(() => setHasUsersInDb(true));
@@ -1614,7 +1615,8 @@ export default function App() {
   useEffect(() => {
     if (companies && companies.length > 0 && companies[0]?.name) {
       setBrandTitle(companies[0].name);
-      try { localStorage.setItem('hr_company_name', companies[0].name); } catch {}
+      try { localStorage.setItem('app_brand_name', companies[0].name); } catch {}
+      document.title = `${companies[0].name} - HR & Payroll`;
     }
   }, [companies]);
 
@@ -1748,7 +1750,7 @@ function LoginScreen({
   onLogin,
   isDatabaseEmpty,
   onLaunchSetup,
-  appName = 'BIN ISHAQ HR SUITE',
+  appName = 'OneNet Solutions',
   appSubtitle = 'Payroll Compliance & Attendance Management',
 }: {
   authReady: boolean;
@@ -1841,7 +1843,7 @@ function LoginScreen({
             <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-emerald-500/25 via-teal-500/15 to-transparent blur-3xl scale-95 group-hover:scale-105 transition-transform duration-700 pointer-events-none" />
             <img
               src="/assets/hr-hero-illustration.webp"
-              alt="Bin Ishaq HR Suite Platform"
+              alt={`${appName} Platform`}
               className="relative z-10 w-full h-full object-contain drop-shadow-[0_20px_40px_rgba(16,185,129,0.3)] transition-transform duration-500 group-hover:scale-[1.02]"
             />
           </div>
@@ -2125,9 +2127,9 @@ function SetupWizardScreen({
   onCancel?: () => void;
   canCancel?: boolean;
 }) {
-  const [companyName, setCompanyName] = useState('Bin Ishaq Logistics Ltd.');
+  const [companyName, setCompanyName] = useState('OneNet Solutions');
   const [adminName, setAdminName] = useState('System Administrator');
-  const [adminEmail, setAdminEmail] = useState('admin@binishaq.com');
+  const [adminEmail, setAdminEmail] = useState('admin@onenet.com');
   const [adminPassword, setAdminPassword] = useState('admin123');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -2170,7 +2172,7 @@ function SetupWizardScreen({
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-1">
             <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">Company Name</label>
-            <input type="text" required value={companyName} onChange={e => setCompanyName(e.target.value)} placeholder="e.g. Bin Ishaq Logistics Ltd." className="w-full text-sm p-3 bg-slate-900 border border-slate-800 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none text-white" />
+            <input type="text" required value={companyName} onChange={e => setCompanyName(e.target.value)} placeholder="e.g. OneNet Solutions" className="w-full text-sm p-3 bg-slate-900 border border-slate-800 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none text-white" />
           </div>
 
           <div className="space-y-1">

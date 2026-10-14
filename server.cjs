@@ -1,3 +1,4 @@
+const fs = require('node:fs');
 const crypto = require('node:crypto');
 const path = require('node:path');
 const express = require('express');
@@ -62,6 +63,63 @@ function isOriginAllowed(origin) {
   }
 
   return false;
+}
+
+// Dynamic Company Identity Branding Provider
+let cachedBranding = { name: null, subtitle: null, expiresAt: 0 };
+
+async function getActiveBranding() {
+  const now = Date.now();
+  if (cachedBranding.name && cachedBranding.expiresAt > now) {
+    return cachedBranding;
+  }
+  let companyName = null;
+  let companySubtitle = null;
+
+  // 1. Query PostgreSQL companies table for saved company identity
+  try {
+    const { pool } = require('./server/db.cjs');
+    const compResult = await pool.query(
+      `SELECT COALESCE(data->>'name', data->>'tradingName', data->>'legalName', name) AS comp_name 
+       FROM companies 
+       WHERE data IS NOT NULL 
+       ORDER BY updated_at DESC, id ASC 
+       LIMIT 1`
+    );
+    if (compResult.rows[0]?.comp_name) {
+      companyName = String(compResult.rows[0].comp_name).trim();
+    }
+  } catch {
+    try {
+      const { pool } = require('./server/db.cjs');
+      const compResult = await pool.query(
+        `SELECT COALESCE(data->>'name', data->>'tradingName', data->>'legalName') AS comp_name 
+         FROM hr_documents 
+         WHERE collection_name = 'companies' 
+         LIMIT 1`
+      );
+      if (compResult.rows[0]?.comp_name) {
+        companyName = String(compResult.rows[0].comp_name).trim();
+      }
+    } catch {}
+  }
+
+  // 2. Check environment overrides
+  if (!companyName && process.env.COMPANY_NAME) {
+    companyName = process.env.COMPANY_NAME.trim();
+  }
+  if (!companyName && process.env.VITE_APP_NAME) {
+    companyName = process.env.VITE_APP_NAME.trim();
+  }
+
+  // 3. Fallback default
+  if (!companyName) {
+    companyName = 'OneNet Solutions';
+  }
+
+  companySubtitle = process.env.COMPANY_SUBTITLE || process.env.VITE_APP_SUBTITLE || 'Payroll Compliance & Attendance Management';
+  cachedBranding = { name: companyName, subtitle: companySubtitle, expiresAt: now + 30_000 };
+  return cachedBranding;
 }
 
 const app = express();
@@ -252,55 +310,13 @@ if (!process.env.DATA_BACKEND || (process.env.DATA_BACKEND || '').trim().toLower
         );
       }
       const userCount = Number(result.rows[0]?.count || 0);
-
-      let companyName = null;
-      let companySubtitle = null;
-
-      // 1. Query PostgreSQL companies table for the saved company identity (e.g. OneNet Solutions)
-      try {
-        const compResult = await pool.query(
-          `SELECT COALESCE(data->>'name', data->>'tradingName', data->>'legalName', name) AS comp_name, data 
-           FROM companies 
-           WHERE data IS NOT NULL 
-           ORDER BY updated_at DESC, id ASC 
-           LIMIT 1`
-        );
-        if (compResult.rows[0]?.comp_name) {
-          companyName = String(compResult.rows[0].comp_name).trim();
-        }
-      } catch {
-        try {
-          const compResult = await pool.query(
-            `SELECT COALESCE(data->>'name', data->>'tradingName', data->>'legalName') AS comp_name 
-             FROM hr_documents 
-             WHERE collection_name = 'companies' 
-             LIMIT 1`
-          );
-          if (compResult.rows[0]?.comp_name) {
-            companyName = String(compResult.rows[0].comp_name).trim();
-          }
-        } catch {}
-      }
-
-      // 2. If no company in DB yet, check explicit server environment override
-      if (!companyName && process.env.COMPANY_NAME) {
-        companyName = process.env.COMPANY_NAME.trim();
-      }
-
-      // 3. Fallback default
-      if (!companyName) {
-        companyName = 'BIN ISHAQ HR SUITE';
-      }
-
-      if (!companySubtitle) {
-        companySubtitle = process.env.COMPANY_SUBTITLE || 'Payroll Compliance & Attendance Management';
-      }
+      const branding = await getActiveBranding();
 
       return res.json({
         hasUsers: userCount > 0,
         userCount,
-        companyName,
-        companySubtitle,
+        companyName: branding.name,
+        companySubtitle: branding.subtitle,
       });
     } catch (err) {
       next(err);
@@ -420,7 +436,7 @@ if (!process.env.DATA_BACKEND || (process.env.DATA_BACKEND || '').trim().toLower
 
       const company = {
         id: 'c1',
-        name: companyName || 'Bin Ishaq Logistics Ltd.',
+        name: companyName || 'OneNet Solutions',
         status: 'Active',
       };
 
@@ -497,8 +513,56 @@ if (!process.env.DATA_BACKEND || (process.env.DATA_BACKEND || '').trim().toLower
   });
 }
 
+// Dynamic JS Asset delivery: automatically substitutes legacy static references with active company branding
+let jsAssetCache = new Map();
+
+app.get(/^\/assets\/index-.*\.js$/, async (req, res, next) => {
+  try {
+    const filePath = path.join(__dirname, 'dist', req.path);
+    if (!fs.existsSync(filePath)) {
+      return next();
+    }
+    const branding = await getActiveBranding();
+    const stat = fs.statSync(filePath);
+    const cacheKey = `${filePath}:${stat.mtimeMs}:${branding.name}`;
+
+    let content = jsAssetCache.get(cacheKey);
+    if (!content) {
+      let raw = fs.readFileSync(filePath, 'utf8');
+      if (raw.includes('BIN ISHAQ HR SUITE')) {
+        raw = raw.replaceAll('BIN ISHAQ HR SUITE', branding.name);
+      }
+      content = Buffer.from(raw, 'utf8');
+      jsAssetCache.clear();
+      jsAssetCache.set(cacheKey, content);
+    }
+
+    res.setHeader('Content-Type', 'application/javascript; charset=UTF-8');
+    res.setHeader('Cache-Control', 'public, max-age=60');
+    return res.send(content);
+  } catch (err) {
+    next(err);
+  }
+});
+
 app.use(express.static(path.join(__dirname, 'dist'), { index: false, dotfiles: 'deny' }));
-app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'dist', 'index.html')));
+
+app.get('*', async (_req, res, next) => {
+  try {
+    const indexPath = path.join(__dirname, 'dist', 'index.html');
+    if (!fs.existsSync(indexPath)) {
+      return res.status(404).json({ error: 'Frontend build not found. Please upload dist folder.' });
+    }
+    const branding = await getActiveBranding();
+    let html = fs.readFileSync(indexPath, 'utf8');
+    html = html.replace(/<title>.*?<\/title>/i, `<title>${branding.name} - HR &amp; Payroll Management System</title>`);
+    res.setHeader('Content-Type', 'text/html; charset=UTF-8');
+    res.setHeader('Cache-Control', 'no-cache');
+    return res.send(html);
+  } catch (err) {
+    next(err);
+  }
+});
 app.use((req, res) => res.status(404).json({ error: 'Resource not found.', correlationId: req.correlationId }));
 
 app.use((error, req, res, _next) => {

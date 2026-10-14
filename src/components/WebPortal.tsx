@@ -261,7 +261,7 @@ export function WebPortal({
     onUpdateTaxSlabs(taxSlabs.map(slab => slab.id === id ? { ...slab, [field]: value } : slab));
 
   const primaryCompany = companies[0];
-  const companyDisplayName = primaryCompany?.name || 'Bin Ishaq';
+  const companyDisplayName = primaryCompany?.name || 'OneNet Solutions';
   const companyLegalName = primaryCompany?.legalName || companyDisplayName;
   const companyCode = primaryCompany?.code || 'IND-KHI-456';
   const primaryBranch = branches.find(branch => branch.companyId === primaryCompany?.id);
