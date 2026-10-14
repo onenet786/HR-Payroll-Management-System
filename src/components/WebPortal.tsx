@@ -1397,8 +1397,12 @@ export function WebPortal({
     }
 
     if (step.tab === 'settings') {
-      const hasFix = !primaryCompany?.ntn || !primaryCompany?.eobiRegistration;
-      if (hasFix) return { className: 'fix', statusText: '4 fields to fix' };
+      const hasFix = !statConfig?.minimumWage || !statConfig?.taxYear || !taxSlabs || taxSlabs.length === 0;
+      if (hasFix) return { className: 'fix', statusText: 'slabs to set' };
+    }
+    if (step.tab === 'company-setup') {
+      const hasFix = !primaryCompany?.ntn && !primaryCompany?.taxRegistrationNumber;
+      if (hasFix) return { className: 'fix', statusText: 'NTN missing' };
     }
     if (step.tab === 'attendance') {
       if (pendingRegularizationsCount > 0) {
@@ -1577,7 +1581,7 @@ export function WebPortal({
                 className={`side-item ${activeTab === 'settings' ? 'on' : ''}`}
               >
                 <span>1. Statutory Config</span>
-                {(!primaryCompany?.ntn || !primaryCompany?.eobiRegistration) && (
+                {(!statConfig?.minimumWage || !statConfig?.taxYear || !taxSlabs || taxSlabs.length === 0) && (
                   <span className="n" style={{ background: '#B91C1C', color: '#fff' }}>fix</span>
                 )}
               </button>
@@ -1589,6 +1593,9 @@ export function WebPortal({
                 className={`side-item ${activeTab === 'company-setup' ? 'on' : ''}`}
               >
                 <span>2. Company &amp; Master Data</span>
+                {(!primaryCompany?.ntn && !primaryCompany?.taxRegistrationNumber) && (
+                  <span className="n" style={{ background: '#B91C1C', color: '#fff' }}>fix</span>
+                )}
               </button>
             )}
 
