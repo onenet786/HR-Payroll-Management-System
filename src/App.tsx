@@ -4,7 +4,10 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Eye, EyeOff } from 'lucide-react';
+import {
+  Eye, EyeOff, Mail, Lock, ArrowRight, ShieldCheck, Sparkles,
+  Clock, TrendingUp, Database, AlertCircle, HelpCircle
+} from 'lucide-react';
 import { computePayslipDetails } from './data/defaults';
 import {
   Employee, AttendanceLog, LeaveRequest, StatutoryConfig, TaxSlab, PayrollRun, Payslip, MobilePunchDetails,
@@ -1210,6 +1213,10 @@ export default function App() {
     await batch.commit();
 
     setCompanies(nextCompanies); setBranches(nextBranches); setDepartments(nextDepartments); setDesignations(nextDesignations); setStatConfig(payload.statutoryConfig);
+    if (payload.company?.name) {
+      setBrandTitle(payload.company.name);
+      try { localStorage.setItem('hr_company_name', payload.company.name); } catch {}
+    }
     privacyStorage.setItem('hr_companies', JSON.stringify(nextCompanies)); privacyStorage.setItem('hr_branches', JSON.stringify(nextBranches));
     privacyStorage.setItem('hr_departments', JSON.stringify(nextDepartments)); privacyStorage.setItem('hr_designations', JSON.stringify(nextDesignations));
     privacyStorage.setItem('hr_stat_config', JSON.stringify(payload.statutoryConfig));
@@ -1572,13 +1579,44 @@ export default function App() {
 
   const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
   const [hasUsersInDb, setHasUsersInDb] = useState<boolean | null>(null);
+  const [brandTitle, setBrandTitle] = useState<string>(() => {
+    try {
+      const stored = localStorage.getItem('hr_company_name');
+      if (stored && stored.trim()) return stored.trim();
+    } catch {}
+    return 'BIN ISHAQ HR SUITE';
+  });
+  const [brandSubtitle, setBrandSubtitle] = useState<string>(() => {
+    try {
+      const stored = localStorage.getItem('hr_company_subtitle');
+      if (stored && stored.trim()) return stored.trim();
+    } catch {}
+    return 'Payroll Compliance & Attendance Management';
+  });
 
   useEffect(() => {
     fetch(`${API_BASE}/api/auth/status`)
       .then(res => res.json())
-      .then(data => setHasUsersInDb(Boolean(data.hasUsers)))
+      .then(data => {
+        setHasUsersInDb(Boolean(data.hasUsers));
+        if (data.companyName) {
+          setBrandTitle(data.companyName);
+          try { localStorage.setItem('hr_company_name', data.companyName); } catch {}
+        }
+        if (data.companySubtitle) {
+          setBrandSubtitle(data.companySubtitle);
+          try { localStorage.setItem('hr_company_subtitle', data.companySubtitle); } catch {}
+        }
+      })
       .catch(() => setHasUsersInDb(true));
   }, [API_BASE]);
+
+  useEffect(() => {
+    if (companies && companies.length > 0 && companies[0]?.name) {
+      setBrandTitle(companies[0].name);
+      try { localStorage.setItem('hr_company_name', companies[0].name); } catch {}
+    }
+  }, [companies]);
 
   const isDatabaseEmpty = hasUsersInDb === false;
 
@@ -1610,6 +1648,8 @@ export default function App() {
         authMessage={authMessage}
         onLogin={handleLogin}
         isDatabaseEmpty={false}
+        appName={brandTitle}
+        appSubtitle={brandSubtitle}
       />
     );
   }
@@ -1708,104 +1748,369 @@ function LoginScreen({
   onLogin,
   isDatabaseEmpty,
   onLaunchSetup,
+  appName = 'BIN ISHAQ HR SUITE',
+  appSubtitle = 'Payroll Compliance & Attendance Management',
 }: {
   authReady: boolean;
   authMessage: string;
   onLogin: (email: string, password: string) => Promise<void>;
   isDatabaseEmpty?: boolean;
   onLaunchSetup?: () => void;
+  appName?: string;
+  appSubtitle?: string;
 }) {
-  const [loginId, setLoginId] = useState('');
+  const [loginId, setLoginId] = useState(() => {
+    try {
+      return localStorage.getItem('hr_remembered_email') || '';
+    } catch {
+      return '';
+    }
+  });
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(() => {
+    try {
+      return Boolean(localStorage.getItem('hr_remembered_email'));
+    } catch {
+      return false;
+    }
+  });
   const [error, setError] = useState('');
   const [isPasswordVisible, setIsPasswordVisible] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [capsLockOn, setCapsLockOn] = useState(false);
+  const [showForgotHelp, setShowForgotHelp] = useState(false);
 
   const handleSubmit = async (e: React.SyntheticEvent) => {
     e.preventDefault();
     setError('');
+    setIsSubmitting(true);
 
     try {
+      if (rememberMe) {
+        try { localStorage.setItem('hr_remembered_email', loginId.trim()); } catch {}
+      } else {
+        try { localStorage.removeItem('hr_remembered_email'); } catch {}
+      }
       await onLogin(loginId, password);
     } catch (loginError) {
       setError(loginError instanceof Error ? loginError.message : 'Unable to sign in.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  const renderError = () => (error || authMessage) ? (
-    <div className="bg-rose-950/30 border border-rose-900/50 p-3.5 rounded-xl text-rose-400 text-xs flex items-center space-x-2">
-      <span className="font-bold text-base leading-none">!</span>
-      <span>{error || authMessage}</span>
-    </div>
-  ) : null;
-
   return (
-    <div className="h-screen bg-slate-900 text-slate-100 flex flex-col items-center justify-center p-4 font-sans select-none relative overflow-hidden">
-      <div className="absolute top-1/4 left-1/4 w-96 h-96 rounded-full bg-emerald-500/10 blur-3xl pointer-events-none"></div>
-      <div className="absolute bottom-1/4 right-1/4 w-96 h-96 rounded-full bg-blue-500/10 blur-3xl pointer-events-none"></div>
+    <div className="min-h-screen bg-[#070b14] text-slate-100 flex items-center justify-center p-4 sm:p-6 md:p-8 font-sans relative overflow-x-hidden selection:bg-emerald-500 selection:text-white">
+      {/* Background ambient decorative blurs */}
+      <div className="absolute -top-32 -left-32 w-96 h-96 md:w-[500px] md:h-[500px] rounded-full bg-emerald-500/10 blur-[130px] pointer-events-none" />
+      <div className="absolute -bottom-32 -right-32 w-96 h-96 md:w-[550px] md:h-[550px] rounded-full bg-teal-500/10 blur-[140px] pointer-events-none" />
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[700px] bg-emerald-600/5 rounded-full blur-[160px] pointer-events-none" />
 
-      <div className="w-full max-w-md bg-slate-950/80 backdrop-blur-md p-8 rounded-3xl border border-slate-800 shadow-2xl relative z-10 space-y-6">
-        <div className="text-center space-y-2">
-          <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-600 to-green-500 mx-auto flex items-center justify-center shadow-lg text-white font-bold text-xl">
-            HR
+      {/* Subtle modern cyber-grid background */}
+      <div
+        className="absolute inset-0 pointer-events-none opacity-[0.03]"
+        style={{
+          backgroundImage: 'radial-gradient(circle at 1px 1px, #10b981 1px, transparent 0)',
+          backgroundSize: '32px 32px'
+        }}
+      />
+
+      {/* Main Split Layout Container */}
+      <div className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-14 items-center relative z-10 my-auto py-6">
+
+        {/* Left Column: Hero & Branding (Matches user reference image with elevated aesthetic) */}
+        <div className="lg:col-span-7 flex flex-col items-center lg:items-start text-center lg:text-left space-y-6">
+
+          {/* Top Tagline */}
+          <div className="space-y-2">
+            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold tracking-wider uppercase">
+              <Sparkles className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
+              <span>Enterprise Biometric &amp; HR Platform</span>
+            </div>
+            <h1 className="text-3xl sm:text-4xl md:text-5xl font-black tracking-tight text-white uppercase drop-shadow-md">
+              {appName}
+            </h1>
+            <p className="text-sm sm:text-base text-slate-400 font-medium tracking-wide max-w-lg">
+              {appSubtitle}
+            </p>
           </div>
-          <div>
-            <h2 className="text-xl font-bold tracking-tight text-white uppercase">Bin Ishaq HR Suite</h2>
-            <p className="text-xs text-slate-400">Payroll Compliance &amp; Attendance Management</p>
+
+          {/* Central High-Definition Illustration */}
+          <div className="relative w-full max-w-[420px] aspect-square flex items-center justify-center my-2 group">
+            {/* Ambient emerald backlight ring */}
+            <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-emerald-500/25 via-teal-500/15 to-transparent blur-3xl scale-95 group-hover:scale-105 transition-transform duration-700 pointer-events-none" />
+            <img
+              src="/assets/hr-hero-illustration.webp"
+              alt="Bin Ishaq HR Suite Platform"
+              className="relative z-10 w-full h-full object-contain drop-shadow-[0_20px_40px_rgba(16,185,129,0.3)] transition-transform duration-500 group-hover:scale-[1.02]"
+            />
           </div>
+
+          {/* Bottom Highlights & Pillars */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 w-full max-w-xl">
+            <div className="bg-slate-900/60 backdrop-blur-md border border-slate-800/80 rounded-2xl p-3.5 flex items-center gap-3 text-left hover:border-emerald-500/40 transition">
+              <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center shrink-0 text-emerald-400">
+                <Clock className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="text-xs font-bold text-white">Touchless Shift</div>
+                <div className="text-[10px] text-slate-400">Face HUD &amp; Biometric</div>
+              </div>
+            </div>
+
+            <div className="bg-slate-900/60 backdrop-blur-md border border-slate-800/80 rounded-2xl p-3.5 flex items-center gap-3 text-left hover:border-emerald-500/40 transition">
+              <div className="w-9 h-9 rounded-xl bg-teal-500/10 border border-teal-500/20 flex items-center justify-center shrink-0 text-teal-400">
+                <TrendingUp className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="text-xs font-bold text-white">Statutory Rules</div>
+                <div className="text-[10px] text-slate-400">Tax 2026, EOBI &amp; PESSI</div>
+              </div>
+            </div>
+
+            <div className="bg-slate-900/60 backdrop-blur-md border border-slate-800/80 rounded-2xl p-3.5 flex items-center gap-3 text-left hover:border-emerald-500/40 transition">
+              <div className="w-9 h-9 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center shrink-0 text-cyan-400">
+                <Database className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="text-xs font-bold text-white">PostgreSQL Core</div>
+                <div className="text-[10px] text-slate-400">27 Relational Tables</div>
+              </div>
+            </div>
+          </div>
+
         </div>
 
-        {isDatabaseEmpty && (
-          <div className="bg-amber-950/40 border border-amber-800/60 p-4 rounded-xl text-xs text-amber-300 space-y-2">
-            <p className="font-bold">Database is empty or uninitialized.</p>
-            <p>No user accounts exist in local PostgreSQL yet.</p>
-            {onLaunchSetup && (
-              <button type="button" onClick={onLaunchSetup} className="w-full mt-2 bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold py-2 rounded-lg text-xs transition">
-                Launch Setup Wizard
-              </button>
-            )}
-          </div>
-        )}
+        {/* Right Column: Floating Modern Glassmorphism Login Card */}
+        <div className="lg:col-span-5 relative w-full max-w-md mx-auto pt-7">
 
-        {!authReady ? (
-          <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-xl text-xs text-slate-300">
-            Checking authentication session...
+          {/* Top Floating Badge (HR in rounded emerald squircle) */}
+          <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-16 h-16 rounded-2xl bg-gradient-to-tr from-emerald-600 via-emerald-500 to-green-400 p-[2.5px] shadow-2xl shadow-emerald-500/50 ring-4 ring-[#070b14] flex items-center justify-center z-20 transition-transform duration-300 hover:scale-105">
+            <div className="w-full h-full rounded-[14px] bg-gradient-to-tr from-emerald-600 via-emerald-500 to-green-500 flex items-center justify-center text-white font-black text-2xl tracking-wider shadow-inner">
+              HR
+            </div>
           </div>
-        ) : (
-          <>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              {renderError()}
-              <div className="space-y-1">
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">Email</label>
-                <input type="email" autoComplete="username" required value={loginId} onChange={e => setLoginId(e.target.value)} placeholder="admin@company.com" className="w-full text-sm p-3 bg-slate-900 border border-slate-800 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none text-white placeholder-slate-500" />
-              </div>
-              <div className="space-y-1">
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">Password</label>
-                <div className="relative">
-                  <input type={isPasswordVisible ? 'text' : 'password'} autoComplete="current-password" required value={password} onChange={e => setPassword(e.target.value)} placeholder="Password" className="w-full text-sm py-3 pl-3 pr-12 bg-slate-900 border border-slate-800 rounded-xl focus:ring-2 focus-visible:ring-emerald-500 focus:outline-none text-white placeholder-slate-500 font-mono" />
-                  <button type="button" onClick={() => setIsPasswordVisible(visible => !visible)} aria-label={isPasswordVisible ? 'Hide password' : 'Show password'} aria-pressed={isPasswordVisible} className="absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-xl text-slate-400 transition-colors hover:text-emerald-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-500">
-                    {isPasswordVisible ? <EyeOff className="h-4 w-4" aria-hidden="true" /> : <Eye className="h-4 w-4" aria-hidden="true" />}
-                  </button>
-                </div>
-              </div>
-              <button type="submit" className="w-full bg-gradient-to-r from-emerald-600 to-green-500 hover:from-emerald-500 hover:to-green-400 text-white font-bold py-3.5 rounded-xl shadow-lg transition duration-200 text-sm">
+
+          {/* Frosted Glass Card Container */}
+          <div className="w-full bg-slate-900/75 backdrop-blur-2xl p-7 sm:p-9 rounded-[32px] border border-emerald-500/20 shadow-2xl shadow-black/80 relative overflow-hidden space-y-6 pt-12">
+
+            {/* Top Border Neon Line Glow */}
+            <div className="absolute top-0 inset-x-0 h-[1.5px] bg-gradient-to-r from-transparent via-emerald-500 to-transparent opacity-80" />
+
+            {/* Title / Heading inside card */}
+            <div className="text-center space-y-1">
+              <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-white">
                 Sign In to System
-              </button>
-            </form>
+              </h2>
+              <p className="text-xs text-slate-400 font-medium">
+                Enter your administrative credentials to continue
+              </p>
+            </div>
 
+            {/* Database Empty Alert / Setup Trigger */}
+            {isDatabaseEmpty && (
+              <div className="bg-amber-950/40 border border-amber-800/60 p-4 rounded-2xl text-xs text-amber-300 space-y-2">
+                <div className="flex items-center gap-2 font-bold text-amber-200">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>Database is uninitialized</span>
+                </div>
+                <p>No user accounts exist in local PostgreSQL yet.</p>
+                {onLaunchSetup && (
+                  <button
+                    type="button"
+                    onClick={onLaunchSetup}
+                    className="w-full mt-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold py-2.5 rounded-xl text-xs shadow-md transition"
+                  >
+                    Launch First-Time Setup Wizard
+                  </button>
+                )}
+              </div>
+            )}
+
+            {!authReady ? (
+              <div className="bg-slate-950/60 border border-slate-800 p-4 rounded-2xl text-xs text-slate-300 flex items-center justify-center gap-2">
+                <div className="w-3.5 h-3.5 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+                <span>Checking authentication session...</span>
+              </div>
+            ) : (
+              <form onSubmit={handleSubmit} className="space-y-4">
+
+                {/* Error Banner */}
+                {(error || authMessage) && (
+                  <div className="bg-rose-950/40 border border-rose-900/60 p-3.5 rounded-2xl text-rose-300 text-xs flex items-start gap-2.5">
+                    <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                    <span className="leading-relaxed">{error || authMessage}</span>
+                  </div>
+                )}
+
+                {/* Email Field */}
+                <div className="space-y-1.5">
+                  <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-widest">
+                    EMAIL
+                  </label>
+                  <div className="relative group">
+                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500 group-focus-within:text-emerald-400 transition-colors">
+                      <Mail className="h-4 w-4" />
+                    </div>
+                    <input
+                      type="email"
+                      autoComplete="username"
+                      required
+                      value={loginId}
+                      onChange={e => setLoginId(e.target.value)}
+                      placeholder="admin@binishaqsoft.com"
+                      className="w-full text-sm py-3 pl-10 pr-4 bg-slate-950/80 border border-slate-800/90 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all"
+                    />
+                  </div>
+                </div>
+
+                {/* Password Field */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-widest">
+                      PASSWORD
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setShowForgotHelp(true)}
+                      className="text-[11px] text-slate-400 hover:text-emerald-400 transition-colors font-medium hover:underline cursor-pointer"
+                    >
+                      Forgot Password?
+                    </button>
+                  </div>
+                  <div className="relative group">
+                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500 group-focus-within:text-emerald-400 transition-colors">
+                      <Lock className="h-4 w-4" />
+                    </div>
+                    <input
+                      type={isPasswordVisible ? 'text' : 'password'}
+                      autoComplete="current-password"
+                      required
+                      value={password}
+                      onChange={e => setPassword(e.target.value)}
+                      onKeyDown={e => {
+                        if (typeof e.getModifierState === 'function') {
+                          setCapsLockOn(e.getModifierState('CapsLock'));
+                        }
+                      }}
+                      onKeyUp={e => {
+                        if (typeof e.getModifierState === 'function') {
+                          setCapsLockOn(e.getModifierState('CapsLock'));
+                        }
+                      }}
+                      placeholder="••••••••••••"
+                      className="w-full text-sm py-3 pl-10 pr-12 bg-slate-950/80 border border-slate-800/90 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 font-mono transition-all"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setIsPasswordVisible(visible => !visible)}
+                      aria-label={isPasswordVisible ? 'Hide password' : 'Show password'}
+                      className="absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-xl text-slate-400 hover:text-emerald-400 focus:outline-none transition-colors cursor-pointer"
+                    >
+                      {isPasswordVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                  {capsLockOn && (
+                    <p className="text-[10px] text-amber-400 flex items-center gap-1 font-mono pt-0.5">
+                      <AlertCircle className="w-3 h-3" /> Caps Lock is ON
+                    </p>
+                  )}
+                </div>
+
+                {/* Remember Me Checkbox */}
+                <div className="flex items-center justify-between pt-1">
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={rememberMe}
+                      onChange={e => setRememberMe(e.target.checked)}
+                      className="w-4 h-4 rounded bg-slate-950 border-slate-800 text-emerald-500 focus:ring-emerald-500/30 focus:ring-offset-0 transition cursor-pointer"
+                    />
+                    <span className="text-xs text-slate-300 font-medium">Remember Me</span>
+                  </label>
+                  <span className="text-[10px] text-slate-500 font-mono flex items-center gap-1">
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-500/70" /> 256-bit Encrypted
+                  </span>
+                </div>
+
+                {/* Primary CTA Submit Button */}
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="w-full mt-2 bg-gradient-to-r from-emerald-500 via-green-500 to-emerald-600 hover:from-emerald-400 hover:via-green-400 hover:to-emerald-500 text-slate-950 font-bold py-3.5 rounded-xl shadow-lg shadow-emerald-500/30 hover:shadow-emerald-500/50 hover:scale-[1.01] active:scale-[0.99] transition-all duration-200 text-sm flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
+                      <span>Authenticating...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Sign In to System</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </>
+                  )}
+                </button>
+              </form>
+            )}
+
+            {/* Quick Setup Link for uninitialized DB */}
             {isDatabaseEmpty && onLaunchSetup && (
               <div className="pt-2 border-t border-slate-800/80 text-center">
-                <button type="button" onClick={onLaunchSetup} className="text-xs text-slate-400 hover:text-emerald-400 transition underline underline-offset-4">
+                <button
+                  type="button"
+                  onClick={onLaunchSetup}
+                  className="text-xs text-slate-400 hover:text-emerald-400 transition underline underline-offset-4 cursor-pointer"
+                >
                   New installation or database cleared? Launch Setup Wizard
                 </button>
               </div>
             )}
 
-          </>
-        )}
-      </div>
+            {/* Modal for Forgot Password Help */}
+            {showForgotHelp && (
+              <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-sm w-full p-6 space-y-4 shadow-2xl">
+                  <div className="flex items-center gap-3 text-emerald-400 font-bold text-base">
+                    <HelpCircle className="w-5 h-5" />
+                    <span>Password Reset Assistance</span>
+                  </div>
+                  <p className="text-xs text-slate-300 leading-relaxed">
+                    To maintain organizational security, administrative account credentials are managed through your local PostgreSQL instance or by the Super Administrator.
+                  </p>
+                  <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-[11px] font-mono text-slate-400 space-y-1">
+                    <div>1. Contact your system admin.</div>
+                    <div>2. Or run reset script via aaPanel SSH terminal.</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowForgotHelp(false)}
+                    className="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold py-2 rounded-xl text-xs transition cursor-pointer"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            )}
 
-      <div className="text-center text-[10px] text-slate-500 mt-6 font-mono">
-        Bin Ishaq HR Suite - PostgreSQL Local Enterprise Engine
+            {/* Live Server Indicator & Engine Footer */}
+            <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between text-[10px] text-slate-500 font-mono">
+              <span className="flex items-center gap-1.5 text-emerald-400 font-medium">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse inline-block" />
+                <span>Engine Online</span>
+              </span>
+              <span>PostgreSQL • Port 8080</span>
+            </div>
+
+          </div>
+
+          {/* Under-Card Footnote */}
+          <div className="text-center text-[10px] text-slate-500 mt-4 font-mono">
+            {appName} • PostgreSQL Local Enterprise Engine
+          </div>
+
+        </div>
+
       </div>
     </div>
   );

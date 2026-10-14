@@ -114,8 +114,8 @@ NODE_ENV=production
 DEBUG=false
 RATE_LIMIT_MAX=10000
 
-# Domain & Security
-ALLOWED_ORIGIN=https://mcs.binishaqsoft.com
+# Domain & Security (Comma-separated list or wildcard like https://*.binishaqsoft.com)
+ALLOWED_ORIGIN=https://attendance.binishaqsoft.com,https://mcs.binishaqsoft.com
 APP_URL=https://mcs.binishaqsoft.com
 
 # Frontend API Endpoint

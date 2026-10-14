@@ -6,13 +6,62 @@ const { rateLimit } = require('express-rate-limit');
 require('dotenv').config({ path: ['.env.local', '.env'], quiet: true });
 
 const isProduction = process.env.NODE_ENV === 'production';
-const allowedOrigin = process.env.ALLOWED_ORIGIN?.trim();
+const rawAllowedOrigins = [
+  process.env.ALLOWED_ORIGIN,
+  process.env.ALLOWED_ORIGINS,
+  process.env.APP_URL,
+]
+  .filter(Boolean)
+  .flatMap(val => String(val).split(/[,;\s]+/))
+  .map(o => o.trim().replace(/\/+$/, ''))
+  .filter(Boolean);
+
 const appUrl = process.env.APP_URL?.trim();
-if (isProduction && (!allowedOrigin || !appUrl || /replace-with/i.test(`${allowedOrigin}${appUrl}`))) {
+if (isProduction && (rawAllowedOrigins.length === 0 || !appUrl || /replace-with/i.test(`${rawAllowedOrigins.join('')}${appUrl}`))) {
   throw new Error('Production startup refused: APP_URL and ALLOWED_ORIGIN must be configured.');
 }
 if (isProduction && process.env.DEBUG === 'true') {
   throw new Error('Production startup refused: DEBUG must be false.');
+}
+
+function isOriginAllowed(origin) {
+  if (!origin) return true;
+  if (!isProduction) return true;
+  if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin)) return true;
+  if (origin === 'file://' || origin === 'null' || origin.startsWith('app://') || origin.startsWith('vscode-webview://')) return true;
+
+  const normalized = origin.trim().replace(/\/+$/, '').toLowerCase();
+  for (const allowed of rawAllowedOrigins) {
+    const cleanAllowed = allowed.toLowerCase();
+    if (cleanAllowed === normalized) return true;
+    if (cleanAllowed.includes('*')) {
+      const pattern = new RegExp('^' + cleanAllowed.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$', 'i');
+      if (pattern.test(normalized)) return true;
+    }
+  }
+
+  // Automatic apex/subdomain pairing: if mcs.binishaqsoft.com or attendance.binishaqsoft.com are in same apex domain
+  try {
+    const originUrl = new URL(normalized);
+    for (const allowed of rawAllowedOrigins) {
+      try {
+        const allowedUrl = new URL(allowed.replace(/\*/g, 'wildcard'));
+        const allowedParts = allowedUrl.hostname.split('.');
+        if (allowedParts.length >= 2) {
+          const rootDomain = allowedParts.slice(-2).join('.');
+          if (originUrl.hostname === rootDomain || originUrl.hostname.endsWith('.' + rootDomain)) {
+            return true;
+          }
+        }
+      } catch {
+        // ignore malformed allowed URLs
+      }
+    }
+  } catch {
+    // ignore malformed origin
+  }
+
+  return false;
 }
 
 const app = express();
@@ -25,6 +74,33 @@ app.use((req, res, next) => {
   next();
 });
 
+const connectSrcHosts = new Set([
+  "'self'",
+  'https:',
+  'wss:',
+  'https://mcs.binishaqsoft.com',
+  'wss://mcs.binishaqsoft.com',
+  'https://attendance.binishaqsoft.com',
+  'wss://attendance.binishaqsoft.com',
+  'http://localhost:*',
+  'http://127.0.0.1:*',
+  'https://*.googleapis.com',
+  'ws://127.0.0.1:*',
+  'ws://localhost:*',
+]);
+
+for (const origin of rawAllowedOrigins) {
+  if (/^https?:\/\//i.test(origin) && !origin.includes('*')) {
+    connectSrcHosts.add(origin);
+    try {
+      const u = new URL(origin);
+      connectSrcHosts.add(`${u.protocol === 'https:' ? 'wss:' : 'ws:'}//${u.host}`);
+    } catch {
+      // ignore
+    }
+  }
+}
+
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -33,8 +109,7 @@ app.use(helmet({
       styleSrc: ["'self'", "'unsafe-inline'"],
       imgSrc: ["'self'", 'data:', 'blob:'],
       fontSrc: ["'self'", 'data:'],
-      connectSrc: ["'self'", 'https:', 'wss:', 'https://mcs.binishaqsoft.com', 'wss://mcs.binishaqsoft.com', 'http://localhost:*', 'http://127.0.0.1:*', 'https://*.googleapis.com', 'ws://127.0.0.1:*', 'ws://localhost:*'],
-
+      connectSrc: Array.from(connectSrcHosts),
 
       frameSrc: ["'self'", 'https://accounts.google.com'],
       objectSrc: ["'none'"],
@@ -52,22 +127,25 @@ app.use(helmet({
 
 app.use((req, res, next) => {
   const origin = req.get('origin');
-  const isLocalhost = origin && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
-  const isElectronOrFile = origin === 'file://' || origin === 'null' || (origin && origin.startsWith('app://')) || (origin && origin.startsWith('vscode-webview://'));
-  const isAllowed = !origin || isLocalhost || isElectronOrFile || origin === allowedOrigin || !isProduction;
+  const allowed = isOriginAllowed(origin);
 
-  if (origin && isAllowed) {
+  if (origin && allowed) {
     res.setHeader('Access-Control-Allow-Origin', origin === 'null' ? '*' : origin);
     res.setHeader('Vary', 'Origin');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Correlation-ID');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Correlation-ID, X-Requested-With, Accept, Origin');
+    res.setHeader('Access-Control-Max-Age', '86400');
   }
 
   if (req.method === 'OPTIONS') {
-    return res.sendStatus(204);
+    if (allowed) {
+      return res.sendStatus(204);
+    }
+    return res.status(403).json({ error: 'Request origin is not allowed.', correlationId: req.correlationId });
   }
 
-  if (isAllowed) {
+  if (allowed) {
     return next();
   }
 
@@ -174,7 +252,56 @@ if (!process.env.DATA_BACKEND || (process.env.DATA_BACKEND || '').trim().toLower
         );
       }
       const userCount = Number(result.rows[0]?.count || 0);
-      return res.json({ hasUsers: userCount > 0, userCount });
+
+      let companyName = null;
+      let companySubtitle = null;
+
+      // 1. Query PostgreSQL companies table for the saved company identity (e.g. OneNet Solutions)
+      try {
+        const compResult = await pool.query(
+          `SELECT COALESCE(data->>'name', data->>'tradingName', data->>'legalName', name) AS comp_name, data 
+           FROM companies 
+           WHERE data IS NOT NULL 
+           ORDER BY updated_at DESC, id ASC 
+           LIMIT 1`
+        );
+        if (compResult.rows[0]?.comp_name) {
+          companyName = String(compResult.rows[0].comp_name).trim();
+        }
+      } catch {
+        try {
+          const compResult = await pool.query(
+            `SELECT COALESCE(data->>'name', data->>'tradingName', data->>'legalName') AS comp_name 
+             FROM hr_documents 
+             WHERE collection_name = 'companies' 
+             LIMIT 1`
+          );
+          if (compResult.rows[0]?.comp_name) {
+            companyName = String(compResult.rows[0].comp_name).trim();
+          }
+        } catch {}
+      }
+
+      // 2. If no company in DB yet, check explicit server environment override
+      if (!companyName && process.env.COMPANY_NAME) {
+        companyName = process.env.COMPANY_NAME.trim();
+      }
+
+      // 3. Fallback default
+      if (!companyName) {
+        companyName = 'BIN ISHAQ HR SUITE';
+      }
+
+      if (!companySubtitle) {
+        companySubtitle = process.env.COMPANY_SUBTITLE || 'Payroll Compliance & Attendance Management';
+      }
+
+      return res.json({
+        hasUsers: userCount > 0,
+        userCount,
+        companyName,
+        companySubtitle,
+      });
     } catch (err) {
       next(err);
     }
