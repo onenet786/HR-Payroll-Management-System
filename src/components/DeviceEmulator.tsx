@@ -214,7 +214,7 @@ export function DeviceEmulator({
           <div className="flex items-center space-x-3">
             <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
             <span className="text-xs font-mono font-bold uppercase tracking-wider text-slate-300">
-              {companies[0]?.name || 'OneNet Solutions'} Attendance Terminal — Locked Mode
+              {(companies[0]?.legalName?.trim() || companies[0]?.name?.trim() || 'OneNet Solutions Pk.')} Attendance Terminal — Locked Mode
             </span>
           </div>
           <button
@@ -269,7 +269,7 @@ export function DeviceEmulator({
           </div>
           <div>
             <h1 className="font-bold text-xs sm:text-sm text-white tracking-wider uppercase flex flex-wrap items-center gap-2">
-              <span>{companies[0]?.name || 'OneNet Solutions'} HR &amp; Payroll</span>
+              <span>{(companies[0]?.legalName?.trim() || companies[0]?.name?.trim() || 'OneNet Solutions Pk.')} HR &amp; Payroll</span>
               <span className="font-mono text-[9px] px-1.5 py-0.5 bg-emerald-950 text-emerald-400 rounded-full border border-emerald-900 leading-none">
                 v1.2
               </span>

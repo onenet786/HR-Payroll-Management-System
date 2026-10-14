@@ -76,11 +76,11 @@ async function getActiveBranding() {
   let companyName = null;
   let companySubtitle = null;
 
-  // 1. Query PostgreSQL companies table for saved company identity
+  // 1. Query PostgreSQL companies table for saved company identity (prioritize official legalName)
   try {
     const { pool } = require('./server/db.cjs');
     const compResult = await pool.query(
-      `SELECT COALESCE(data->>'name', data->>'tradingName', data->>'legalName', name) AS comp_name 
+      `SELECT COALESCE(NULLIF(TRIM(data->>'legalName'), ''), NULLIF(TRIM(data->>'tradingName'), ''), NULLIF(TRIM(data->>'name'), ''), name) AS comp_name 
        FROM companies 
        WHERE data IS NOT NULL 
        ORDER BY updated_at DESC, id ASC 
@@ -93,7 +93,7 @@ async function getActiveBranding() {
     try {
       const { pool } = require('./server/db.cjs');
       const compResult = await pool.query(
-        `SELECT COALESCE(data->>'name', data->>'tradingName', data->>'legalName') AS comp_name 
+        `SELECT COALESCE(NULLIF(TRIM(data->>'legalName'), ''), NULLIF(TRIM(data->>'tradingName'), ''), NULLIF(TRIM(data->>'name'), '')) AS comp_name 
          FROM hr_documents 
          WHERE collection_name = 'companies' 
          LIMIT 1`
@@ -114,7 +114,7 @@ async function getActiveBranding() {
 
   // 3. Fallback default
   if (!companyName) {
-    companyName = 'OneNet Solutions';
+    companyName = 'OneNet Solutions Pk.';
   }
 
   companySubtitle = process.env.COMPANY_SUBTITLE || process.env.VITE_APP_SUBTITLE || 'Payroll Compliance & Attendance Management';
@@ -531,6 +531,9 @@ app.get(/^\/assets\/index-.*\.js$/, async (req, res, next) => {
       let raw = fs.readFileSync(filePath, 'utf8');
       if (raw.includes('BIN ISHAQ HR SUITE')) {
         raw = raw.replaceAll('BIN ISHAQ HR SUITE', branding.name);
+      }
+      if (branding.name && branding.name !== 'OneNet Solutions' && raw.includes('OneNet Solutions') && !raw.includes(branding.name)) {
+        raw = raw.replaceAll('OneNet Solutions', branding.name);
       }
       content = Buffer.from(raw, 'utf8');
       jsAssetCache.clear();

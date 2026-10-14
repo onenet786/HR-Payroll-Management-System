@@ -1213,10 +1213,11 @@ export default function App() {
     await batch.commit();
 
     setCompanies(nextCompanies); setBranches(nextBranches); setDepartments(nextDepartments); setDesignations(nextDesignations); setStatConfig(payload.statutoryConfig);
-    if (payload.company?.name) {
-      setBrandTitle(payload.company.name);
-      try { localStorage.setItem('app_brand_name', payload.company.name); } catch {}
-      document.title = `${payload.company.name} - HR & Payroll`;
+    const activeName = (payload.company?.legalName?.trim() || payload.company?.name?.trim());
+    if (activeName) {
+      setBrandTitle(activeName);
+      try { localStorage.setItem('app_brand_name', activeName); } catch {}
+      document.title = `${activeName} - HR & Payroll`;
     }
     privacyStorage.setItem('hr_companies', JSON.stringify(nextCompanies)); privacyStorage.setItem('hr_branches', JSON.stringify(nextBranches));
     privacyStorage.setItem('hr_departments', JSON.stringify(nextDepartments)); privacyStorage.setItem('hr_designations', JSON.stringify(nextDesignations));
@@ -1585,7 +1586,7 @@ export default function App() {
       const stored = localStorage.getItem('app_brand_name');
       if (stored && stored.trim()) return stored.trim();
     } catch {}
-    return import.meta.env.VITE_APP_NAME || 'OneNet Solutions';
+    return import.meta.env.VITE_APP_NAME || 'OneNet Solutions Pk.';
   });
   const [brandSubtitle, setBrandSubtitle] = useState<string>(() => {
     try {
@@ -1614,10 +1615,14 @@ export default function App() {
   }, [API_BASE]);
 
   useEffect(() => {
-    if (companies && companies.length > 0 && companies[0]?.name) {
-      setBrandTitle(companies[0].name);
-      try { localStorage.setItem('app_brand_name', companies[0].name); } catch {}
-      document.title = `${companies[0].name} - HR & Payroll`;
+    if (companies && companies.length > 0) {
+      const comp = companies[0];
+      const activeName = (comp?.legalName?.trim() || comp?.name?.trim());
+      if (activeName) {
+        setBrandTitle(activeName);
+        try { localStorage.setItem('app_brand_name', activeName); } catch {}
+        document.title = `${activeName} - HR & Payroll`;
+      }
     }
   }, [companies]);
 
@@ -1751,7 +1756,7 @@ function LoginScreen({
   onLogin,
   isDatabaseEmpty,
   onLaunchSetup,
-  appName = 'OneNet Solutions',
+  appName = 'OneNet Solutions Pk.',
   appSubtitle = 'Payroll Compliance & Attendance Management',
 }: {
   authReady: boolean;
