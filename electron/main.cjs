@@ -125,7 +125,7 @@ function createSplashWindow() {
       sandbox: true,
     },
   });
-  splashWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(splashHtml('Bin Ishaq HR Suite', 'Starting payroll and attendance services...'))}`);
+  splashWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(splashHtml('HR & Payroll Suite', 'Starting payroll and attendance services...'))}`);
   splashWindow.once('ready-to-show', () => {
     if (splashWindow && !splashWindow.isDestroyed()) splashWindow.show();
   });
@@ -196,7 +196,7 @@ function createWindow() {
     height: 860,
     minWidth: 1100,
     minHeight: 720,
-    title: 'Bin Ishaq HR Suite',
+    title: 'HR & Payroll Suite',
     icon: getAppIconPath(),
     backgroundColor: '#08111f',
     show: false,

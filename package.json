@@ -29,7 +29,7 @@
   },
   "build": {
     "appId": "com.binishaq.hrsuite",
-    "productName": "Bin Ishaq HR Suite",
+    "productName": "HR & Payroll Suite",
     "icon": "assets/icon.png",
     "directories": {
       "output": "dist-windows"

@@ -363,7 +363,7 @@ function createWindow() {
     kiosk: !!store.terminal.autoFullscreen,
     fullscreen: !!store.terminal.autoFullscreen,
     autoHideMenuBar: true,
-    title: 'Bin Ishaq Attendance Kiosk',
+    title: 'HR Attendance Kiosk',
     icon: getAppIconPath(),
     backgroundColor: '#020c17',
     show: false,

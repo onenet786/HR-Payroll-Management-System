@@ -246,7 +246,7 @@ export function FirestoreMaintenanceModule() {
   const buildBackup = async (collectionsToBackup: CollectionKey[]): Promise<BackupFile> => {
     const backup: BackupFile = {
       metadata: {
-        app: 'Bin Ishaq HR Suite',
+        app: 'HR & Payroll Suite',
         projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
         databaseId: import.meta.env.VITE_FIRESTORE_DATABASE_ID,
         createdAt: new Date().toISOString(),

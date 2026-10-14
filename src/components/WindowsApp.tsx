@@ -94,7 +94,7 @@ export function WindowsApp({
             B
           </div>
           <span className="font-sans font-medium text-xs tracking-wide">
-            Bin Ishaq Enterprise HR client v2.4.1 (64-bit) - [Production Node: 42.10.x]
+            Enterprise HR &amp; Payroll Client v2.4.1 (64-bit) - [Production Node: 42.10.x]
           </span>
         </div>
         
@@ -113,7 +113,7 @@ export function WindowsApp({
         <span className="hover:bg-slate-200 px-1.5 py-0.5 rounded cursor-pointer transition" onClick={() => alert('Connected Biometric machine is in full sync mode.')}>Tools</span>
         <span className="hover:bg-slate-200 px-1.5 py-0.5 rounded cursor-pointer transition">Config</span>
         <span className="hover:bg-slate-200 px-1.5 py-0.5 rounded cursor-pointer transition">View</span>
-        <span className="hover:bg-slate-200 px-1.5 py-0.5 rounded cursor-pointer transition" onClick={() => alert('Bin Ishaq Enterprise client builds on React framework for cross-system standardizations.')}>Help</span>
+        <span className="hover:bg-slate-200 px-1.5 py-0.5 rounded cursor-pointer transition" onClick={() => alert('Enterprise client builds on React framework for cross-system standardizations.')}>Help</span>
       </div>
 
       {/* 3. Classic High density Toolbar */}

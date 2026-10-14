@@ -524,6 +524,15 @@ app.get(/^\/assets\/index-.*\.js$/, async (req, res, next) => {
       if (raw.includes('BIN ISHAQ HR SUITE')) {
         raw = raw.replaceAll('BIN ISHAQ HR SUITE', branding.name);
       }
+      if (raw.includes('BIN ISHAQ HR & PAYROLL')) {
+        raw = raw.replaceAll('BIN ISHAQ HR & PAYROLL', `${branding.name} HR & PAYROLL`);
+      }
+      if (raw.includes('BIN ISHAQ')) {
+        raw = raw.replaceAll('BIN ISHAQ', branding.name);
+      }
+      if (raw.includes('Bin Ishaq')) {
+        raw = raw.replaceAll('Bin Ishaq', branding.name);
+      }
       if (branding.name && branding.name !== 'OneNet Solutions' && raw.includes('OneNet Solutions') && !raw.includes(branding.name)) {
         raw = raw.replaceAll('OneNet Solutions', branding.name);
       }

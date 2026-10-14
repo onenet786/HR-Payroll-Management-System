@@ -1458,7 +1458,7 @@ export function WebPortal({
 
         {/* Brand */}
         <div className="brand flex items-center gap-2">
-          <span>BIN ISHAQ HR &amp; PAYROLL</span>
+          <span>{companyDisplayName} HR &amp; PAYROLL</span>
           <span style={{ fontSize: '10px', background: '#059669', borderRadius: '4px', padding: '1px 5px', color: '#fff', fontWeight: 600 }}>v2</span>
           <small>Friendly build</small>
         </div>
@@ -3972,7 +3972,7 @@ export function WebPortal({
                 <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="h-full -mx-6 -mt-3">
                   <iframe
                     src="/user-guide.html"
-                    title="Bin Ishaq HR Suite — User Guide"
+                    title={`${companyDisplayName} — User Guide`}
                     className="w-full border-0"
                     style={{ height: 'calc(100vh - 64px)' }}
                   />

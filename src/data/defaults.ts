@@ -51,7 +51,8 @@ export const DEFAULT_STATUTORY_CONFIG: StatutoryConfig = {
 export const DEFAULT_COMPANIES: Company[] = [
   {
     id: 'c1',
-    name: 'Bin Ishaq Logistics Ltd.',
+    name: 'OneNet Solutions Pk.',
+    legalName: 'OneNet Solutions Pk.',
     industry: 'Trading & Services',
     taxRegistrationNumber: 'NTN-4567891-2',
     eobiRegistrationNumber: 'EOBI- Karachi-987654',
@@ -698,7 +699,7 @@ export const DEFAULT_HOLIDAYS: Holiday[] = [
   { id: 'hol-10', name: 'Independence Day', date: '2026-08-14', type: 'Public', isRecurring: true, description: 'Pakistan Independence Day' },
   { id: 'hol-11', name: 'Iqbal Day', date: '2026-11-09', type: 'Public', isRecurring: true, description: 'Allama Iqbal birthday' },
   { id: 'hol-12', name: 'Quaid-e-Azam Day', date: '2026-12-25', type: 'Public', isRecurring: true, description: 'Birthday of Quaid-e-Azam Muhammad Ali Jinnah' },
-  { id: 'hol-c1', name: 'Company Foundation Day', date: '2026-07-15', type: 'Company', isRecurring: true, description: 'Bin Ishaq Logistics annual foundation celebration' }
+  { id: 'hol-c1', name: 'Company Foundation Day', date: '2026-07-15', type: 'Company', isRecurring: true, description: 'Annual company foundation celebration' }
 ];
 
 // Sample Loan & Advance Records

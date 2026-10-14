@@ -57,7 +57,8 @@ async function main() {
 
     // 3. Initial Company
     await upsert('companies', 'c1', {
-      name: 'Bin Ishaq Logistics Ltd.',
+      name: 'OneNet Solutions Pk.',
+      legalName: 'OneNet Solutions Pk.',
       industry: 'Trading & Services',
       taxRegistrationNumber: 'NTN-4567891-2',
       eobiRegistrationNumber: 'EOBI-Karachi-987654',
