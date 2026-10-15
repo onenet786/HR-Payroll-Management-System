@@ -11,8 +11,8 @@ import { KioskTerminal } from './KioskTerminal';
 import { MobileApp } from './MobileApp';
 import type { FirestoreSyncStatus } from '../App';
 import {
-  Employee, AttendanceLog, LeaveRequest, StatutoryConfig, TaxSlab, PayrollRun, Payslip, Designation, Branch, Department,
-  Role, UserAccount, NewUserAccount, Holiday, LoanAdvance, SalaryRevision,
+  Employee, AttendanceLog, AttendancePeriod, LeaveRequest, StatutoryConfig, TaxSlab, PayrollRun, Payslip, Designation, Branch, Department,
+  Role, UserAccount, NewUserAccount, Holiday, LoanAdvance, SalaryRevision, PayrollAdjustment,
   PerformanceReview, CompanyAsset, JobPosting, JobApplication, GratuitySettlement, AppNotification, Company, CompanySetupPayload, Zone, UcTown, WageType, MobileDutyAuthorization
 } from '../types';
 import { motion } from 'motion/react';
@@ -25,7 +25,11 @@ interface DeviceEmulatorProps {
   statConfig: StatutoryConfig;
   taxSlabs: TaxSlab[];
   payrollRuns: PayrollRun[];
+  attendancePeriods: AttendancePeriod[];
   payrollPayslips: Payslip[];
+  payrollAdjustments: PayrollAdjustment[];
+  onCreatePayrollAdjustment: (adjustment: PayrollAdjustment) => void | Promise<void>;
+  onReviewPayrollAdjustment: (id: string, status: 'Approved' | 'Rejected') => void | Promise<void>;
   onAddEmployee: (emp: Employee) => void;
   onUpdateEmployee: (emp: Employee) => void;
   onUpdateStatConfig: (config: StatutoryConfig) => void;
@@ -35,7 +39,10 @@ interface DeviceEmulatorProps {
   onApproveRegularization: (id: string) => void;
   onRejectRegularization: (id: string) => void;
   onCreatePayrollRun: (title: string, month: number, year: number) => void;
-  onUpdatePayrollStatus: (runId: string, status: 'Approved' | 'Disbursed') => void;
+  onLockAttendancePeriod: (month: number, year: number) => void;
+  onUpdatePayrollStatus: (runId: string, status: 'Approved' | 'Disbursed', disbursementReference?: string) => void;
+  onRecordBankAdvice: (runId: string, checksum: string, employeeCount: number, total: number) => void | Promise<void>;
+  onSendPayslips: (runId: string) => Promise<{ sent: number; skipped: number; failed: Array<{ employeeId: string; error: string }> }>;
   onSimulatePunch: (employeeId: string, punchIn: string, punchOut: string, method: string, lat?: number, lon?: number, locationAccuracyMeters?: number, locationCapturedAt?: string, locationAddress?: string) => void | Promise<void>;
   onApplyLeave: (leave: LeaveRequest) => void;
   onAddRegularization: (employeeId: string, date: string, reason: string) => void;
@@ -108,7 +115,11 @@ export function DeviceEmulator({
   statConfig,
   taxSlabs,
   payrollRuns,
+  attendancePeriods,
   payrollPayslips,
+  payrollAdjustments,
+  onCreatePayrollAdjustment,
+  onReviewPayrollAdjustment,
   onAddEmployee,
   onUpdateEmployee,
   onUpdateStatConfig,
@@ -118,7 +129,10 @@ export function DeviceEmulator({
   onApproveRegularization,
   onRejectRegularization,
   onCreatePayrollRun,
+  onLockAttendancePeriod,
   onUpdatePayrollStatus,
+  onRecordBankAdvice,
+  onSendPayslips,
   onSimulatePunch,
   onApplyLeave,
   onAddRegularization,
@@ -278,7 +292,11 @@ export function DeviceEmulator({
               statConfig={statConfig}
               taxSlabs={taxSlabs}
               payrollRuns={payrollRuns}
+              attendancePeriods={attendancePeriods}
               payrollPayslips={payrollPayslips}
+              payrollAdjustments={payrollAdjustments}
+              onCreatePayrollAdjustment={onCreatePayrollAdjustment}
+              onReviewPayrollAdjustment={onReviewPayrollAdjustment}
               onAddEmployee={onAddEmployee}
               onUpdateEmployee={onUpdateEmployee}
               onUpdateStatConfig={onUpdateStatConfig}
@@ -288,7 +306,10 @@ export function DeviceEmulator({
               onApproveRegularization={onApproveRegularization}
               onRejectRegularization={onRejectRegularization}
               onCreatePayrollRun={onCreatePayrollRun}
+              onLockAttendancePeriod={onLockAttendancePeriod}
               onUpdatePayrollStatus={onUpdatePayrollStatus}
+              onRecordBankAdvice={onRecordBankAdvice}
+              onSendPayslips={onSendPayslips}
               onApplyLeave={onApplyLeave}
               onAddAttendance={onAddAttendance}
               branches={branches}

@@ -13,9 +13,9 @@ import {
   ZoomIn, Eye, ExternalLink
 } from 'lucide-react';
 import {
-  Employee, AttendanceLog, LeaveRequest, StatutoryConfig, TaxSlab, PayrollRun, Payslip,
+  Employee, AttendanceLog, AttendancePeriod, LeaveRequest, StatutoryConfig, TaxSlab, PayrollRun, Payslip,
   Role, UserAccount, NewUserAccount, Branch, Department, Designation, Holiday, LoanAdvance, SalaryRevision,
-  PerformanceReview, CompanyAsset, JobPosting, JobApplication, GratuitySettlement, AppNotification, Company, CompanySetupPayload, Zone, UcTown, WageType, MobileDutyAuthorization, MobileDutyType
+  PerformanceReview, CompanyAsset, JobPosting, JobApplication, GratuitySettlement, AppNotification, Company, CompanySetupPayload, Zone, UcTown, WageType, MobileDutyAuthorization, MobileDutyType, PayrollAdjustment, PayrollAdjustmentType
 } from '../types';
 import { computePayslipDetails, DEFAULT_TAX_SLABS, calculateFbrSalarySplit, calculateGrossFromTakeHome } from '../data/defaults';
 import { deriveEmployeeCompanyId, getEmployeeEditDepartmentOptions, getEmployeeEditOptions, resolveEmployeeCompanyId, resolveRecordId, resolveUcTownName, resolveWageBasis, resolveWageTypeName, resolveZoneName, synchronizeDepartmentSelection, validateEmployeeMasterSelection } from '../data/masterData';
@@ -33,6 +33,10 @@ import { CompanySetupModule } from './CompanySetupModule';
 import { MasterDataModule } from './MasterDataModule';
 import { motion, AnimatePresence } from 'motion/react';
 import type { FirestoreSyncStatus } from '../App';
+import { bankAdviceChecksum } from '../data/bankAdvice';
+import { createStatutoryReport, type StatutoryReportKind } from '../data/statutoryReports';
+import { createPayrollJournal } from '../data/accountingJournal';
+import { authenticatedApiRequest } from '../data/postgresStore';
 
 const PAKISTAN_BANKS = [
   { name: 'Habib Bank Limited (HBL)', code: 'HABB' },
@@ -130,7 +134,11 @@ interface WebPortalProps {
   statConfig: StatutoryConfig;
   taxSlabs: TaxSlab[];
   payrollRuns: PayrollRun[];
+  attendancePeriods: AttendancePeriod[];
   payrollPayslips: Payslip[];
+  payrollAdjustments: PayrollAdjustment[];
+  onCreatePayrollAdjustment: (adjustment: PayrollAdjustment) => void | Promise<void>;
+  onReviewPayrollAdjustment: (id: string, status: 'Approved' | 'Rejected') => void | Promise<void>;
   onAddEmployee: (emp: Employee) => void;
   onUpdateEmployee: (emp: Employee) => void;
   onUpdateStatConfig: (config: StatutoryConfig) => void;
@@ -140,7 +148,10 @@ interface WebPortalProps {
   onApproveRegularization: (id: string) => void;
   onRejectRegularization: (id: string) => void;
   onCreatePayrollRun: (title: string, month: number, year: number) => void;
-  onUpdatePayrollStatus: (runId: string, status: 'Approved' | 'Disbursed') => void;
+  onLockAttendancePeriod: (month: number, year: number) => void;
+  onUpdatePayrollStatus: (runId: string, status: 'Approved' | 'Disbursed', disbursementReference?: string) => void;
+  onRecordBankAdvice: (runId: string, checksum: string, employeeCount: number, total: number) => void | Promise<void>;
+  onSendPayslips: (runId: string) => Promise<{ sent: number; skipped: number; failed: Array<{ employeeId: string; error: string }> }>;
   onApplyLeave: (leave: LeaveRequest) => void;
   onAddAttendance: (log: AttendanceLog) => void;
   branches: Branch[];
@@ -387,7 +398,11 @@ export function WebPortal({
   statConfig,
   taxSlabs,
   payrollRuns,
+  attendancePeriods,
   payrollPayslips,
+  payrollAdjustments,
+  onCreatePayrollAdjustment,
+  onReviewPayrollAdjustment,
   onAddEmployee,
   onUpdateEmployee,
   onUpdateStatConfig,
@@ -397,7 +412,10 @@ export function WebPortal({
   onApproveRegularization,
   onRejectRegularization,
   onCreatePayrollRun,
+  onLockAttendancePeriod,
   onUpdatePayrollStatus,
+  onRecordBankAdvice,
+  onSendPayslips,
   onApplyLeave,
   onAddAttendance,
   branches,
@@ -532,6 +550,37 @@ export function WebPortal({
     document.body.removeChild(link);
   };
 
+  const downloadStatutoryReport = (kind: StatutoryReportKind, run: PayrollRun) => {
+    try {
+      const report = createStatutoryReport(kind, run, payrollPayslips, employees);
+      const url = URL.createObjectURL(new Blob([report.csv], { type: 'text/csv;charset=utf-8' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = report.filename;
+      link.click();
+      URL.revokeObjectURL(url);
+      if (report.warnings.length) alert(`Return pack generated with ${report.warnings.length} review warning(s):\n• ${report.warnings.slice(0, 8).join('\n• ')}`);
+      else showToast(`${kind.replace('_', ' ')} return reconciled: PKR ${report.total.toLocaleString()}`);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Statutory report could not be generated.');
+    }
+  };
+
+  const downloadAccountingJournal = (run: PayrollRun) => {
+    try {
+      const journal = createPayrollJournal(run, payrollPayslips);
+      const url = URL.createObjectURL(new Blob([journal.csv], { type: 'text/csv;charset=utf-8' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = journal.filename;
+      link.click();
+      URL.revokeObjectURL(url);
+      showToast(`Balanced journal exported: PKR ${journal.totalDebit.toLocaleString()}`);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Accounting journal could not be generated.');
+    }
+  };
+
   const handleUpdateFromFbr = () => {
     onUpdateTaxSlabs(DEFAULT_TAX_SLABS);
     alert('FBR Income Tax Slabs successfully updated & synchronized with official FBR Finance Act 2024/2025 rates (First Schedule, Part I, Division I, Clause 2).');
@@ -631,6 +680,7 @@ export function WebPortal({
     wageTypeId: '',
     wageType: 'Salaried' as string,
     basicSalary: 85000,
+    shiftStartTime: '09:00', shiftEndTime: '17:00', shiftGraceMinutes: 15, shiftHalfDayMinutes: 120, shiftBreakMinutes: 0,
     providentFundOptIn: true,
     providentFundRate: 5.0,
     gratuityOptIn: true,
@@ -651,6 +701,8 @@ export function WebPortal({
     otherAllowances: 0,
     eobiEnabled: true,
     fbrEnabled: true,
+    priorEmployerTaxableIncome: 0,
+    priorEmployerTaxDeducted: 0,
     employeeCode: '',
     maritalStatus: 'Single'
   });
@@ -670,6 +722,7 @@ export function WebPortal({
     wageTypeId: '',
     wageType: 'Salaried' as string,
     basicSalary: 85000,
+    shiftStartTime: '09:00', shiftEndTime: '17:00', shiftGraceMinutes: 15, shiftHalfDayMinutes: 120, shiftBreakMinutes: 0,
     providentFundOptIn: true,
     providentFundRate: 5.0,
     gratuityOptIn: true,
@@ -689,6 +742,8 @@ export function WebPortal({
     otherAllowances: 0,
     eobiEnabled: true,
     fbrEnabled: true,
+    priorEmployerTaxableIncome: 0,
+    priorEmployerTaxDeducted: 0,
     employeeCode: '',
     maritalStatus: 'Single'
   });
@@ -700,6 +755,13 @@ export function WebPortal({
   const now = new Date();
   const [payrollMonth, setPayrollMonth] = useState(now.getMonth() + 1);
   const [payrollYear, setPayrollYear] = useState(now.getFullYear());
+  const [adjustmentEmployeeId, setAdjustmentEmployeeId] = useState('');
+  const [adjustmentType, setAdjustmentType] = useState<PayrollAdjustmentType>('Bonus');
+  const [adjustmentAmount, setAdjustmentAmount] = useState('');
+  const [adjustmentTaxable, setAdjustmentTaxable] = useState(true);
+  const [adjustmentReason, setAdjustmentReason] = useState('');
+  const [mfaEnrollment, setMfaEnrollment] = useState<{ enrollmentId: string; secret: string; issuer: string; account: string } | null>(null);
+  const [mfaEnrollmentCode, setMfaEnrollmentCode] = useState('');
 
   // Settlement manual additions for offboarding
   const [settlementLeavesEncash, setSettlementLeavesEncash] = useState(10);
@@ -1086,6 +1148,7 @@ export function WebPortal({
       wageTypeId: selectedWageType?.id,
       wageType: selectedWageType?.name ?? newEmpForm.wageType,
       basicSalary: Number(newEmpForm.basicSalary),
+      shift: { id: 'employee-shift', name: 'Employee Shift', startTime: newEmpForm.shiftStartTime, endTime: newEmpForm.shiftEndTime, graceMinutes: Number(newEmpForm.shiftGraceMinutes), halfDayMinutes: Number(newEmpForm.shiftHalfDayMinutes), overtimeMultiplier: statConfig.overtimeMultiplier || 2, breakMinutes: Number(newEmpForm.shiftBreakMinutes), workingDays: [1, 2, 3, 4, 5, 6] },
       providentFundOptIn: newEmpForm.providentFundOptIn,
       providentFundRate: Number(newEmpForm.providentFundRate),
       gratuityOptIn: newEmpForm.gratuityOptIn,
@@ -1109,6 +1172,8 @@ export function WebPortal({
       otherAllowances: newEmpForm.otherAllowances > 0 ? Number(newEmpForm.otherAllowances) : undefined,
       eobiEnabled: newEmpForm.eobiEnabled,
       fbrEnabled: newEmpForm.fbrEnabled,
+      priorEmployerTaxableIncome: Number(newEmpForm.priorEmployerTaxableIncome) || 0,
+      priorEmployerTaxDeducted: Number(newEmpForm.priorEmployerTaxDeducted) || 0,
       maritalStatus: newEmpForm.maritalStatus as 'Single' | 'Married' | 'Divorced' | 'Widowed'
     };
 
@@ -1131,6 +1196,7 @@ export function WebPortal({
       wageTypeId: activeWageTypes[0]?.id ?? '',
       wageType: 'Salaried',
       basicSalary: 85000,
+      shiftStartTime: '09:00', shiftEndTime: '17:00', shiftGraceMinutes: 15, shiftHalfDayMinutes: 120, shiftBreakMinutes: 0,
       providentFundOptIn: true,
       providentFundRate: 5.0,
       gratuityOptIn: true,
@@ -1150,6 +1216,8 @@ export function WebPortal({
       otherAllowances: 0,
       eobiEnabled: true,
       fbrEnabled: true,
+      priorEmployerTaxableIncome: 0,
+      priorEmployerTaxDeducted: 0,
       employeeCode: '',
       maritalStatus: 'Single'
     });
@@ -1206,6 +1274,7 @@ export function WebPortal({
       wageTypeId: selectedWageType?.id,
       wageType: selectedWageType?.name ?? editEmpForm.wageType,
       basicSalary: Number(editEmpForm.basicSalary),
+      shift: { id: editingEmployee.shift?.id || 'employee-shift', name: editingEmployee.shift?.name || 'Employee Shift', startTime: editEmpForm.shiftStartTime, endTime: editEmpForm.shiftEndTime, graceMinutes: Number(editEmpForm.shiftGraceMinutes), halfDayMinutes: Number(editEmpForm.shiftHalfDayMinutes), overtimeMultiplier: editingEmployee.shift?.overtimeMultiplier || statConfig.overtimeMultiplier || 2, breakMinutes: Number(editEmpForm.shiftBreakMinutes), workingDays: editingEmployee.shift?.workingDays || [1, 2, 3, 4, 5, 6] },
       providentFundOptIn: editEmpForm.providentFundOptIn,
       providentFundRate: Number(editEmpForm.providentFundRate),
       gratuityOptIn: editEmpForm.gratuityOptIn,
@@ -1228,6 +1297,8 @@ export function WebPortal({
       otherAllowances: editEmpForm.otherAllowances > 0 ? Number(editEmpForm.otherAllowances) : undefined,
       eobiEnabled: editEmpForm.eobiEnabled,
       fbrEnabled: editEmpForm.fbrEnabled,
+      priorEmployerTaxableIncome: Number(editEmpForm.priorEmployerTaxableIncome) || 0,
+      priorEmployerTaxDeducted: Number(editEmpForm.priorEmployerTaxDeducted) || 0,
       maritalStatus: editEmpForm.maritalStatus as 'Single' | 'Married' | 'Divorced' | 'Widowed'
     };
 
@@ -1279,6 +1350,11 @@ export function WebPortal({
       wageTypeId: resolvedWageTypeId,
       wageType: emp.wageType,
       basicSalary: emp.basicSalary,
+      shiftStartTime: emp.shift?.startTime || '09:00',
+      shiftEndTime: emp.shift?.endTime || '17:00',
+      shiftGraceMinutes: emp.shift?.graceMinutes ?? 15,
+      shiftHalfDayMinutes: emp.shift?.halfDayMinutes ?? 120,
+      shiftBreakMinutes: emp.shift?.breakMinutes ?? 0,
       providentFundOptIn: emp.providentFundOptIn,
       providentFundRate: emp.providentFundRate,
       gratuityOptIn: emp.gratuityOptIn,
@@ -1298,6 +1374,8 @@ export function WebPortal({
       otherAllowances: emp.otherAllowances || 0,
       eobiEnabled: emp.eobiEnabled !== false,
       fbrEnabled: emp.fbrEnabled !== false,
+      priorEmployerTaxableIncome: emp.priorEmployerTaxableIncome || 0,
+      priorEmployerTaxDeducted: emp.priorEmployerTaxDeducted || 0,
       employeeCode: emp.employeeCode,
       maritalStatus: emp.maritalStatus || 'Single'
     });
@@ -2445,13 +2523,17 @@ export function WebPortal({
                                     <div className="flex justify-end space-x-2 pt-2 border-t border-slate-100">
                                       <button 
                                         onClick={() => onRejectRegularization(att.id)}
-                                        className="px-2.5 py-1 text-slate-600 border border-slate-355 hover:bg-slate-100 rounded"
+                                        disabled={att.requestedById === currentUserAccount.id}
+                                        title={att.requestedById === currentUserAccount.id ? 'The requester cannot review their own attendance adjustment.' : 'Decline request'}
+                                        className="px-2.5 py-1 text-slate-600 border border-slate-355 hover:bg-slate-100 rounded disabled:cursor-not-allowed disabled:opacity-40"
                                       >
                                         Decline
                                       </button>
                                       <button 
                                         onClick={() => onApproveRegularization(att.id)}
-                                        className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded font-bold shadow-xs flex items-center"
+                                        disabled={att.requestedById === currentUserAccount.id}
+                                        title={att.requestedById === currentUserAccount.id ? 'The requester cannot approve their own attendance adjustment.' : 'Approve request'}
+                                        className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded font-bold shadow-xs flex items-center disabled:cursor-not-allowed disabled:opacity-40"
                                       >
                                         <CheckCircle className="w-3.5 h-3.5 mr-1" /> Approve
                                       </button>
@@ -3299,12 +3381,83 @@ export function WebPortal({
                         {Array.from({ length: 12 }, (_, i) => <option key={i + 1} value={i + 1}>{new Date(2000, i).toLocaleString('en-PK', { month: 'long' })}</option>)}
                       </select>
                       <input aria-label="Payroll year" type="number" min="2020" max="2100" value={payrollYear} onChange={e => setPayrollYear(Number(e.target.value))} className="w-24 border border-slate-300 rounded-lg px-2 py-2 text-xs bg-white text-slate-800" />
+                      <button
+                        onClick={() => onLockAttendancePeriod(payrollMonth, payrollYear)}
+                        className="bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs px-3 py-2 rounded-lg shadow transition"
+                      >
+                        {attendancePeriods.some(item => item.periodMonth === payrollMonth && item.periodYear === payrollYear) ? 'Re-lock Register' : 'Lock Register'}
+                      </button>
                       <button 
                         onClick={() => onCreatePayrollRun(`Payroll - ${new Date(payrollYear, payrollMonth - 1).toLocaleString('en-PK', { month: 'long', year: 'numeric' })}`, payrollMonth, payrollYear)}
                         className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3 py-2 rounded-lg flex items-center space-x-1 shadow transition"
                       >
                         <span>Run New Payroll Cycle</span>
                       </button>
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-4">
+                    <div>
+                      <h3 className="font-bold text-slate-900 text-sm uppercase tracking-wide">One-time payroll adjustments</h3>
+                      <p className="text-xs text-slate-500">Period-specific items require approval by a different payroll user and can be consumed by one payroll run only.</p>
+                    </div>
+                    <form className="grid grid-cols-1 md:grid-cols-6 gap-3" onSubmit={async event => {
+                      event.preventDefault();
+                      const amount = Number(adjustmentAmount);
+                      if (!adjustmentEmployeeId || !Number.isFinite(amount) || amount <= 0 || !adjustmentReason.trim()) {
+                        showToast('Select an employee and enter a positive amount with a reason.');
+                        return;
+                      }
+                      const nonTaxableType = adjustmentType === 'Reimbursement' || adjustmentType === 'Deduction' || adjustmentType === 'Tax Adjustment';
+                      await onCreatePayrollAdjustment({
+                        id: `adjustment-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                        employeeId: adjustmentEmployeeId,
+                        periodMonth: payrollMonth,
+                        periodYear: payrollYear,
+                        type: adjustmentType,
+                        amount,
+                        taxable: nonTaxableType ? false : adjustmentTaxable,
+                        reason: adjustmentReason.trim(),
+                        status: 'Pending',
+                        createdAt: new Date().toISOString(),
+                        createdById: currentUserAccount.id,
+                        createdBy: currentUserAccount.username,
+                      });
+                      setAdjustmentAmount('');
+                      setAdjustmentReason('');
+                      showToast('Adjustment submitted for independent approval.');
+                    }}>
+                      <select aria-label="Adjustment employee" value={adjustmentEmployeeId} onChange={e => setAdjustmentEmployeeId(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-2 text-xs bg-white">
+                        <option value="">Select employee</option>
+                        {employees.map(employee => <option key={employee.id} value={employee.id}>{employee.employeeCode} — {employee.fullName}</option>)}
+                      </select>
+                      <select aria-label="Adjustment type" value={adjustmentType} onChange={e => setAdjustmentType(e.target.value as PayrollAdjustmentType)} className="border border-slate-300 rounded-lg px-3 py-2 text-xs bg-white">
+                        {(['Bonus', 'Commission', 'Arrears', 'Reimbursement', 'Deduction', 'Tax Adjustment'] as PayrollAdjustmentType[]).map(type => <option key={type}>{type}</option>)}
+                      </select>
+                      <input aria-label="Adjustment amount" type="number" min="1" step="0.01" value={adjustmentAmount} onChange={e => setAdjustmentAmount(e.target.value)} placeholder="Amount (PKR)" className="border border-slate-300 rounded-lg px-3 py-2 text-xs" />
+                      <input aria-label="Adjustment reason" value={adjustmentReason} onChange={e => setAdjustmentReason(e.target.value)} placeholder="Reason / reference" className="border border-slate-300 rounded-lg px-3 py-2 text-xs md:col-span-2" />
+                      <button type="submit" className="bg-indigo-700 hover:bg-indigo-800 text-white font-bold text-xs px-3 py-2 rounded-lg">Submit for approval</button>
+                      {!['Reimbursement', 'Deduction', 'Tax Adjustment'].includes(adjustmentType) && <label className="md:col-span-6 flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" checked={adjustmentTaxable} onChange={e => setAdjustmentTaxable(e.target.checked)} /> Include in taxable salary</label>}
+                    </form>
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full text-xs">
+                        <thead className="bg-slate-50 text-slate-500 uppercase text-[10px]"><tr><th className="p-2 text-left">Employee</th><th className="p-2 text-left">Type</th><th className="p-2 text-right">Amount</th><th className="p-2 text-left">Reason</th><th className="p-2 text-left">Maker</th><th className="p-2 text-left">Status / action</th></tr></thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {payrollAdjustments.filter(item => item.periodMonth === payrollMonth && item.periodYear === payrollYear).map(item => (
+                            <tr key={item.id}>
+                              <td className="p-2 font-medium">{employees.find(employee => employee.id === item.employeeId)?.fullName || item.employeeId}</td>
+                              <td className="p-2">{item.type}{item.taxable ? ' · taxable' : ''}</td>
+                              <td className="p-2 text-right font-mono">PKR {item.amount.toLocaleString()}</td>
+                              <td className="p-2 text-slate-600">{item.reason}</td>
+                              <td className="p-2 text-slate-500">{item.createdBy}</td>
+                              <td className="p-2">
+                                {item.status === 'Pending' ? <div className="flex gap-2"><button type="button" disabled={item.createdById === currentUserAccount.id} onClick={() => onReviewPayrollAdjustment(item.id, 'Approved')} className="text-emerald-700 font-bold disabled:text-slate-400" title={item.createdById === currentUserAccount.id ? 'Another payroll user must approve.' : 'Approve'}>Approve</button><button type="button" disabled={item.createdById === currentUserAccount.id} onClick={() => onReviewPayrollAdjustment(item.id, 'Rejected')} className="text-rose-700 font-bold disabled:text-slate-400">Reject</button></div> : <span className={item.status === 'Approved' ? 'text-emerald-700 font-bold' : 'text-rose-700 font-bold'}>{item.status}{item.payrollRunId ? ' · consumed' : ''}</span>}
+                              </td>
+                            </tr>
+                          ))}
+                          {!payrollAdjustments.some(item => item.periodMonth === payrollMonth && item.periodYear === payrollYear) && <tr><td colSpan={6} className="p-4 text-center text-slate-400">No adjustments for this payroll period.</td></tr>}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
 
@@ -3334,17 +3487,25 @@ export function WebPortal({
                                 <span>Net Total:</span>
                                 <span>PKR {run.totalNetPay.toLocaleString()}</span>
                               </div>
+                              {(run.preflightWarningCount || 0) > 0 && <div className="rounded bg-amber-50 px-2 py-1 text-amber-800 font-semibold">{run.preflightWarningCount} material pay variance warning(s)</div>}
                               
                               <div className="border-t border-slate-200 pt-2 flex justify-between space-x-1.5 text-[11px]">
-                                <button 
+                                <button disabled={run.status === 'Draft'} title={run.status === 'Draft' ? 'Approve payroll before generating bank advice.' : 'Generate bank advice'}
                                   onClick={() => setShowBankFileModal(run)}
-                                  className="text-emerald-750 hover:underline flex items-center"
+                                  className="text-emerald-750 hover:underline flex items-center disabled:text-slate-400 disabled:no-underline disabled:cursor-not-allowed"
                                 >
                                   <Download className="w-3 h-3 mr-0.5" /> Bank Advice File
                                 </button>
-                                {run.status === 'Draft' && <button onClick={() => onUpdatePayrollStatus(run.id, 'Approved')} className="text-blue-700 hover:underline">Approve</button>}
-                                {run.status === 'Approved' && <button onClick={() => onUpdatePayrollStatus(run.id, 'Disbursed')} className="text-emerald-700 hover:underline">Mark Disbursed</button>}
+                                {run.status === 'Draft' && <button disabled={run.createdById === currentUserAccount.id} title={run.createdById === currentUserAccount.id ? 'Prepared by you; another payroll officer must approve.' : 'Approve payroll'} onClick={() => onUpdatePayrollStatus(run.id, 'Approved')} className="text-blue-700 hover:underline disabled:cursor-not-allowed disabled:text-slate-400 disabled:no-underline">Approve</button>}
+                                {run.status === 'Approved' && <button disabled={run.approvedById === currentUserAccount.id || !run.bankAdviceChecksum} title={run.approvedById === currentUserAccount.id ? 'Approved by you; another authorized user must disburse.' : !run.bankAdviceChecksum ? 'Generate and download bank advice first.' : 'Mark payroll disbursed'} onClick={() => { const reference = window.prompt('Enter the bank transaction/reference number shown by your bank:')?.trim(); if (reference) onUpdatePayrollStatus(run.id, 'Disbursed', reference); }} className="text-emerald-700 hover:underline disabled:cursor-not-allowed disabled:text-slate-400 disabled:no-underline">Mark Disbursed</button>}
                               </div>
+                              {run.status !== 'Draft' && <div className="flex flex-wrap gap-x-3 gap-y-1 border-t border-slate-200 pt-2 text-[10px] font-semibold">
+                                <button type="button" onClick={() => downloadStatutoryReport('FBR', run)} className="text-indigo-700 hover:underline">FBR withholding CSV</button>
+                                <button type="button" onClick={() => downloadStatutoryReport('EOBI', run)} className="text-indigo-700 hover:underline">EOBI return CSV</button>
+                                <button type="button" onClick={() => downloadStatutoryReport('SOCIAL_SECURITY', run)} className="text-indigo-700 hover:underline">PESSI/SESSI CSV</button>
+                                <button type="button" onClick={() => downloadAccountingJournal(run)} className="text-indigo-700 hover:underline">Accounting journal CSV</button>
+                                <button type="button" onClick={async () => { try { const result = await onSendPayslips(run.id); const message = `${result.sent} sent, ${result.skipped} already delivered, ${result.failed.length} failed.`; if (result.failed.length) alert(`Payslip delivery completed with exceptions: ${message}`); else showToast(`Payslip delivery: ${message}`); } catch (error) { alert(error instanceof Error ? error.message : 'Payslips could not be sent.'); } }} className="text-indigo-700 hover:underline">Email payslips</button>
+                              </div>}
                             </div>
                           );
                         })}
@@ -3377,7 +3538,7 @@ export function WebPortal({
                           <tbody className="divide-y divide-slate-200 text-slate-700 font-mono">
                             {employees.map(emp => {
                               const sheet = computePayslipDetails(
-                                emp, payrollMonth, payrollYear, attendances, leaves, statConfig, taxSlabs, departments, designations, branches, loanAdvances, wageTypes
+                                emp, payrollMonth, payrollYear, attendances, leaves, statConfig, taxSlabs, departments, designations, branches, loanAdvances, wageTypes, holidays, payrollPayslips, payrollAdjustments
                               );
                               return (
                                 <tr key={emp.id} className="hover:bg-slate-50/50">
@@ -3590,6 +3751,18 @@ export function WebPortal({
                       <h2 className="text-xl font-bold text-slate-900">User Management &amp; Access</h2>
                       <p className="text-xs text-slate-500">Create mobile login accounts, link each employee, and assign roles and permissions.</p>
                     </div>
+                  </div>
+
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-xs text-emerald-950">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div><strong>Authenticator MFA</strong><p className="mt-1 text-emerald-800">Protect this {currentUserRole?.name || 'user'} account with a time-based code. Payroll and administrator accounts should enable it.</p></div>
+                      {currentUserAccount.mfaEnabled ? <span className="rounded bg-emerald-700 px-3 py-1.5 font-bold text-white">MFA enabled</span> : <button type="button" onClick={async () => { try { const enrollment = await authenticatedApiRequest('/api/auth/mfa/enroll', { method: 'POST', body: '{}' }); setMfaEnrollment(enrollment); setMfaEnrollmentCode(''); } catch (error) { alert(error instanceof Error ? error.message : 'MFA enrollment could not start.'); } }} className="rounded bg-emerald-700 px-3 py-1.5 font-bold text-white hover:bg-emerald-800">Set up MFA</button>}
+                    </div>
+                    {mfaEnrollment && <div className="mt-3 rounded-lg border border-emerald-200 bg-white p-3 space-y-2">
+                      <p>Add this account manually in Google Authenticator, Microsoft Authenticator, Authy, or a compatible app:</p>
+                      <div className="font-mono text-[11px] break-all rounded bg-slate-950 p-2 text-emerald-300">Issuer: {mfaEnrollment.issuer}<br />Account: {mfaEnrollment.account}<br />Secret: {mfaEnrollment.secret}</div>
+                      <div className="flex flex-wrap gap-2"><input aria-label="Authenticator verification code" value={mfaEnrollmentCode} onChange={event => setMfaEnrollmentCode(event.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" maxLength={6} placeholder="6-digit code" className="rounded border border-slate-300 px-2 py-1.5 font-mono" /><button type="button" onClick={async () => { try { await authenticatedApiRequest('/api/auth/mfa/confirm', { method: 'POST', body: JSON.stringify({ enrollmentId: mfaEnrollment.enrollmentId, code: mfaEnrollmentCode }) }); setMfaEnrollment(null); alert('Authenticator MFA is enabled. Other sessions for this account were revoked.'); } catch (error) { alert(error instanceof Error ? error.message : 'Authenticator code could not be verified.'); } }} className="rounded bg-slate-900 px-3 py-1.5 font-bold text-white">Confirm MFA</button><button type="button" onClick={() => setMfaEnrollment(null)} className="px-2 py-1.5 text-slate-600 underline">Cancel</button></div>
+                    </div>}
                   </div>
 
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -4155,6 +4328,30 @@ export function WebPortal({
                         onChange={(e) => setNewEmpForm({ ...newEmpForm, cnic: formatCNIC(e.target.value) })}
                         className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg font-mono text-xs text-slate-900 bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all focus:outline-none placeholder:text-slate-400"
                       />
+                    </div>
+                    <div>
+                      <label className="block font-bold mb-1 text-slate-700 text-xs">Shift Start:</label>
+                      <input type="time" aria-label="Shift Start" value={newEmpForm.shiftStartTime} onChange={e => setNewEmpForm({ ...newEmpForm, shiftStartTime: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs" />
+                    </div>
+                    <div>
+                      <label className="block font-bold mb-1 text-slate-700 text-xs">Shift End:</label>
+                      <input type="time" aria-label="Shift End" value={newEmpForm.shiftEndTime} onChange={e => setNewEmpForm({ ...newEmpForm, shiftEndTime: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs" />
+                    </div>
+                    <div>
+                      <label className="block font-bold mb-1 text-slate-700 text-xs">Grace Minutes:</label>
+                      <input type="number" min="0" max="180" aria-label="Shift Grace Minutes" value={newEmpForm.shiftGraceMinutes} onChange={e => setNewEmpForm({ ...newEmpForm, shiftGraceMinutes: Number(e.target.value) })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs" />
+                    </div>
+                    <div>
+                      <label className="block font-bold mb-1 text-slate-700 text-xs">Break Minutes:</label>
+                      <input type="number" min="0" max="240" aria-label="Shift Break Minutes" value={newEmpForm.shiftBreakMinutes} onChange={e => setNewEmpForm({ ...newEmpForm, shiftBreakMinutes: Number(e.target.value) })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs" />
+                    </div>
+                    <div>
+                      <label className="block font-bold mb-1 text-slate-700 text-xs">Prior Employer Taxable Income:</label>
+                      <input type="number" min="0" aria-label="Prior Employer Taxable Income" value={newEmpForm.priorEmployerTaxableIncome} onChange={e => setNewEmpForm({ ...newEmpForm, priorEmployerTaxableIncome: Number(e.target.value) })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs" />
+                    </div>
+                    <div>
+                      <label className="block font-bold mb-1 text-slate-700 text-xs">Prior Employer Tax Deducted:</label>
+                      <input type="number" min="0" aria-label="Prior Employer Tax Deducted" value={newEmpForm.priorEmployerTaxDeducted} onChange={e => setNewEmpForm({ ...newEmpForm, priorEmployerTaxDeducted: Number(e.target.value) })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs" />
                     </div>
                   </div>
 
@@ -4862,6 +5059,30 @@ export function WebPortal({
                         onChange={(e) => setEditEmpForm({ ...editEmpForm, cnic: formatCNIC(e.target.value) })}
                         className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg font-mono text-xs text-slate-900 bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all focus:outline-none placeholder:text-slate-400"
                       />
+                    </div>
+                    <div>
+                      <label className="block font-bold mb-1 text-slate-700 text-xs">Shift Start:</label>
+                      <input type="time" aria-label="Edit Shift Start" value={editEmpForm.shiftStartTime} onChange={e => setEditEmpForm({ ...editEmpForm, shiftStartTime: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs" />
+                    </div>
+                    <div>
+                      <label className="block font-bold mb-1 text-slate-700 text-xs">Shift End:</label>
+                      <input type="time" aria-label="Edit Shift End" value={editEmpForm.shiftEndTime} onChange={e => setEditEmpForm({ ...editEmpForm, shiftEndTime: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs" />
+                    </div>
+                    <div>
+                      <label className="block font-bold mb-1 text-slate-700 text-xs">Grace Minutes:</label>
+                      <input type="number" min="0" max="180" aria-label="Edit Shift Grace Minutes" value={editEmpForm.shiftGraceMinutes} onChange={e => setEditEmpForm({ ...editEmpForm, shiftGraceMinutes: Number(e.target.value) })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs" />
+                    </div>
+                    <div>
+                      <label className="block font-bold mb-1 text-slate-700 text-xs">Break Minutes:</label>
+                      <input type="number" min="0" max="240" aria-label="Edit Shift Break Minutes" value={editEmpForm.shiftBreakMinutes} onChange={e => setEditEmpForm({ ...editEmpForm, shiftBreakMinutes: Number(e.target.value) })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs" />
+                    </div>
+                    <div>
+                      <label className="block font-bold mb-1 text-slate-700 text-xs">Prior Employer Taxable Income:</label>
+                      <input type="number" min="0" aria-label="Edit Prior Employer Taxable Income" value={editEmpForm.priorEmployerTaxableIncome} onChange={e => setEditEmpForm({ ...editEmpForm, priorEmployerTaxableIncome: Number(e.target.value) })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs" />
+                    </div>
+                    <div>
+                      <label className="block font-bold mb-1 text-slate-700 text-xs">Prior Employer Tax Deducted:</label>
+                      <input type="number" min="0" aria-label="Edit Prior Employer Tax Deducted" value={editEmpForm.priorEmployerTaxDeducted} onChange={e => setEditEmpForm({ ...editEmpForm, priorEmployerTaxDeducted: Number(e.target.value) })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs" />
                     </div>
                   </div>
 
@@ -5720,6 +5941,20 @@ export function WebPortal({
                               <span className="text-rose-700 font-bold">-{showPayslipModal.incomeTaxDeduction.toLocaleString()} PKR</span>
                             </div>
                           </div>
+                          {showPayslipModal.taxYear && (
+                            <div className="my-2 rounded border border-slate-200 bg-slate-50 p-2 text-[9px] leading-relaxed text-slate-500">
+                              <div className="flex justify-between"><span>Tax Year</span><strong className="text-slate-700">{showPayslipModal.taxYear}</strong></div>
+                              <div className="flex justify-between"><span>Taxable income YTD</span><span>PKR {(showPayslipModal.taxableIncomeYtd || 0).toLocaleString()}</span></div>
+                              <div className="flex justify-between"><span>Tax deducted previously</span><span>PKR {(showPayslipModal.taxDeductedBeforeCurrentPeriod || 0).toLocaleString()}</span></div>
+                              <div className="flex justify-between"><span>Projected annual income</span><span>PKR {(showPayslipModal.projectedAnnualTaxableIncome || 0).toLocaleString()}</span></div>
+                            </div>
+                          )}
+                          {([['Bonus', showPayslipModal.bonusEarnings], ['Commission', showPayslipModal.commissionEarnings], ['Arrears', showPayslipModal.arrearsEarnings], ['Reimbursement', showPayslipModal.reimbursements]] as const).map(([label, amount]) => Boolean(amount) && (
+                            <div key={label} className="flex justify-between">
+                              <span className="text-slate-500">{label}:</span>
+                              <span className="text-emerald-700 font-semibold">+{(amount || 0).toLocaleString()} PKR</span>
+                            </div>
+                          ))}
                           <div className="flex justify-between items-center">
                             <span className="text-slate-500">EOBI Employee:</span>
                             <div className="flex items-center space-x-1">
@@ -5741,6 +5976,8 @@ export function WebPortal({
                               <span className="text-rose-700">-{showPayslipModal.unpaidLeaveDeduction.toLocaleString()} PKR</span>
                             </div>
                           )}
+                          {(showPayslipModal.otherAdjustmentsDeduction || 0) > 0 && <div className="flex justify-between"><span className="text-slate-500">Other deductions:</span><span className="text-rose-700">-{(showPayslipModal.otherAdjustmentsDeduction || 0).toLocaleString()} PKR</span></div>}
+                          {(showPayslipModal.manualTaxAdjustment || 0) > 0 && <div className="flex justify-between"><span className="text-slate-500">Tax adjustment:</span><span className="text-rose-700">-{(showPayslipModal.manualTaxAdjustment || 0).toLocaleString()} PKR</span></div>}
                         </div>
                       </div>
 
@@ -5877,13 +6114,15 @@ export function WebPortal({
 
               <div className="px-6 py-4 bg-slate-50 border-t flex justify-end space-x-2">
                 <button 
-                  onClick={() => {
+                  onClick={async () => {
                     const rows = payrollPayslips.filter(p => p.payrollRunId === showBankFileModal.id);
                     const csvCell = (value: string | number | undefined) => `"${String(value ?? '').replace(/"/g, '""')}"`;
                     const csv = [
                       ['Employee Code', 'Beneficiary Name', 'Bank', 'IBAN', 'Account Number', 'Net Amount PKR'].map(csvCell).join(','),
                       ...rows.map(p => [p.employeeCode, p.employeeName, p.bankName, p.iban, p.bankAccountNumber, p.netSalary].map(csvCell).join(','))
                     ].join('\r\n');
+                    const checksum = await bankAdviceChecksum(rows);
+                    await onRecordBankAdvice(showBankFileModal.id, checksum, rows.length, rows.reduce((sum, row) => sum + row.netSalary, 0));
                     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
                     const link = document.createElement('a');
                     link.href = url;
@@ -5891,6 +6130,7 @@ export function WebPortal({
                     link.click();
                     URL.revokeObjectURL(url);
                     setShowBankFileModal(null);
+                    showToast(`Bank advice generated · SHA-256 ${checksum.slice(0, 12)}…`);
                   }}
                   className="bg-slate-900 text-white font-semibold text-xs px-4 py-2 rounded-lg"
                 >

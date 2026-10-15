@@ -22,6 +22,19 @@ export function getAuthToken(): string | null {
   return localAuthToken;
 }
 
+export async function authenticatedApiRequest(path: string, init: RequestInit = {}) {
+  const token = localAuthToken || (import.meta.env.DEV ? 'dev-token' : null);
+  if (!token) throw new Error('Authentication required.');
+  const response = await fetch(`${API_BASE}${path}`, { ...init, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...(init.headers || {}) } });
+  const body = await response.json().catch(() => ({}));
+  if (response.status === 401 && typeof window !== 'undefined') {
+    setAuthToken(null);
+    window.dispatchEvent(new CustomEvent('hr:session-expired'));
+  }
+  if (!response.ok) throw new Error(body.error || `API request failed (${response.status}).`);
+  return body;
+}
+
 async function request(path: string, init: RequestInit = {}) {
   const token = localAuthToken || (import.meta.env.DEV ? 'dev-token' : null);
   if (!token) throw new Error('Authentication required.');
@@ -30,6 +43,10 @@ async function request(path: string, init: RequestInit = {}) {
     ...init,
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...(init.headers || {}) },
   });
+  if (response.status === 401 && typeof window !== 'undefined') {
+    setAuthToken(null);
+    window.dispatchEvent(new CustomEvent('hr:session-expired'));
+  }
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
     throw new Error(body.error || `API request failed (${response.status}).`);

@@ -22,3 +22,11 @@ Audit date: July 2026.
 2. Provision Firebase Auth UID-keyed user profiles and emulator-test/deploy the checked-in Firestore rules without weakening them.
 
 The production web process should be started with `npm start` behind an HTTPS reverse proxy, or deployed using the checked-in Firebase Hosting configuration. HSTS is effective only over HTTPS.
+# Encrypted backup and recovery
+
+- Generate a dedicated 32-byte key with `openssl rand -base64 32` and store it outside the web root.
+- Set `BACKUP_DIR` to a restricted directory outside `/www/wwwroot/hr-payroll`.
+- Run `npm run postgres:backup` daily from the hosting scheduler.
+- Run `npm run postgres:backup:verify -- /absolute/path/to/file.dump.enc` after each backup or at least weekly.
+- Copy encrypted backups and manifests to a second server or object-storage account.
+- Test restoration quarterly on a separate staging database. Production restore requires `CONFIRM_DATABASE_RESTORE=RESTORE_HR_PAYROLL_DATABASE`.

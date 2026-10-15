@@ -54,6 +54,9 @@ export interface Branch {
   city: string;
   province: Province;
   address: string;
+  geofenceLatitude?: number;
+  geofenceLongitude?: number;
+  geofenceRadiusMeters?: number;
 }
 
 export interface Department {
@@ -105,6 +108,9 @@ export interface Shift {
   graceMinutes: number; // 15 mins
   halfDayMinutes: number; // Late by 120 mins = Half Day
   overtimeMultiplier: number; // e.g. 1.5x or 2.0x
+  breakMinutes?: number;
+  overtimeAfterMinutes?: number;
+  workingDays?: number[]; // JavaScript weekdays: 0 Sunday ... 6 Saturday
 }
 
 // Employee Master Record
@@ -130,6 +136,8 @@ export interface Employee {
   zoneId?: string;
   ucTownId?: string;
   basicSalary: number; // Basic Monthly Wage or Daily Wage Rate
+  shiftId?: string;
+  shift?: Shift; // backwards-compatible embedded policy until centralized rosters are assigned
   providentFundOptIn: boolean;
   providentFundRate: number; // Percentage e.g. 5% or 8.33%
   gratuityOptIn: boolean;
@@ -156,6 +164,8 @@ export interface Employee {
   otherAllowances?: number;
   eobiEnabled?: boolean;
   fbrEnabled?: boolean;
+  priorEmployerTaxableIncome?: number;
+  priorEmployerTaxDeducted?: number;
   maritalStatus?: 'Single' | 'Married' | 'Divorced' | 'Widowed';
   emergencyContactName?: string;
   emergencyContactNumber?: string;
@@ -278,6 +288,26 @@ export interface AttendanceLog {
   regularizationRequested?: boolean;
   regularizationReason?: string;
   regularizationApproved?: boolean;
+  requestedById?: string;
+  geofenceStatus?: 'inside' | 'authorized-offsite' | 'needs-review';
+  geofenceDistanceMeters?: number;
+  reviewedAt?: string;
+  reviewedBy?: string;
+  reviewedById?: string;
+  reviewComment?: string;
+}
+
+export interface AttendancePeriod {
+  id: string;
+  periodMonth: number;
+  periodYear: number;
+  status: 'Locked';
+  lockedAt: string;
+  lockedBy: string;
+  attendanceCount: number;
+  employeeCount: number;
+  integrityHash: string;
+  exceptionCount: number;
 }
 
 // Leave Requests
@@ -355,16 +385,51 @@ export interface PayrollRun {
   statutoryEffectiveFrom?: string;
   approvedAt?: string;
   approvedBy?: string;
+  createdById?: string;
+  approvedById?: string;
   disbursedAt?: string;
   disbursedBy?: string;
+  disbursedById?: string;
   payslips?: Payslip[];
   auditTrail?: PayrollAuditEvent[];
+  attendancePeriodId: string;
+  attendanceIntegrityHash: string;
+  preflightCriticalCount?: number;
+  preflightWarningCount?: number;
+  bankAdviceChecksum?: string;
+  bankAdviceGeneratedAt?: string;
+  bankAdviceGeneratedById?: string;
+  bankAdviceEmployeeCount?: number;
+  bankAdviceTotal?: number;
+  disbursementReference?: string;
+}
+
+export type PayrollAdjustmentType = 'Bonus' | 'Commission' | 'Arrears' | 'Reimbursement' | 'Deduction' | 'Tax Adjustment';
+
+export interface PayrollAdjustment {
+  id: string;
+  employeeId: string;
+  periodMonth: number;
+  periodYear: number;
+  type: PayrollAdjustmentType;
+  amount: number;
+  taxable: boolean;
+  reason: string;
+  status: 'Pending' | 'Approved' | 'Rejected';
+  createdAt: string;
+  createdById: string;
+  createdBy: string;
+  reviewedAt?: string;
+  reviewedById?: string;
+  reviewedBy?: string;
+  payrollRunId?: string;
 }
 
 export interface PayrollAuditEvent {
   action: 'Created' | 'Approved' | 'Disbursed';
   at: string;
   by: string;
+  actorId?: string;
 }
 
 // Individual Payslip details calculated under a Payroll Run
@@ -397,10 +462,22 @@ export interface Payslip {
   conveyanceAllowance: number; // e.g. 10% of basic
   medicalAllowance: number; // e.g. 10% of basic
   otherAllowances: number;
+  bonusEarnings?: number;
+  commissionEarnings?: number;
+  arrearsEarnings?: number;
+  reimbursements?: number;
+  otherAdjustmentsDeduction?: number;
+  manualTaxAdjustment?: number;
+  payrollAdjustmentIds?: string[];
   grossSalary: number; // Sum of allowances & basic
   
   // Deductions Detail (Pakistan statutory)
   incomeTaxDeduction: number; // calculated according to annual slab
+  taxYear?: string;
+  taxableIncomeYtd?: number;
+  taxDeductedBeforeCurrentPeriod?: number;
+  projectedAnnualTaxableIncome?: number;
+  projectedAnnualTaxLiability?: number;
   eobiEmployeeDeduction: number; // 1% of FBR minimum wage
   pessiEmployeeDeduction: number; // usually 0, or employer-paid
   providentFundDeduction: number; // e.g. 5% of basic
@@ -451,6 +528,8 @@ export interface UserAccount {
   employeeId?: string; // Links to Employee if they represent an internal worker
   status: 'Active' | 'Inactive';
   passwordHash?: string;
+  mfaEnabled?: boolean;
+  mfaEnrolledAt?: string;
 }
 
 export type NewUserAccount = Omit<UserAccount, 'passwordHash'> & { password: string };

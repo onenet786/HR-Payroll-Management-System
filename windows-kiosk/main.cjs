@@ -13,6 +13,7 @@ const {
 } = require('./attendance-state.cjs');
 const { createChallengeManager, isValidAttestation } = require('./liveness.cjs');
 const { authorizeCameraAttempt, requireSecureEnrollment } = require('./camera-authorization.cjs');
+const { evaluateAttendanceTimes } = require('./attendance-rules.cjs');
 
 dotenv.config({ quiet: true });
 
@@ -792,14 +793,15 @@ function mergeEmployeeBiometricTemplates(employees, biometricRecords) {
   });
 }
 
-function computePunch(existingLog, method, terminal, evidenceId, outReason, at) {
+function computePunch(existingLog, method, terminal, evidenceId, outReason, at, shift) {
   if (!existingLog) {
+    const evaluated = evaluateAttendanceTimes(at, undefined, shift);
     return {
       id: `att-kiosk-${Date.now()}`,
       date: todayDate(),
       punchIn: at,
       method,
-      status: at > '09:15:00' ? 'Late' : 'Present',
+      status: evaluated.status,
       overtimeMinutes: 0,
       terminalId: terminal.id,
       terminalLocation: terminal.location,
@@ -819,10 +821,9 @@ function computePunch(existingLog, method, terminal, evidenceId, outReason, at) 
     evidenceId: evidenceId || existingLog.evidenceId || '',
     lastPunchAt: at,
   };
-  if (updated.punchIn && at > '18:00:00') {
-    const [h, m] = at.split(':').map(Number);
-    updated.overtimeMinutes = Math.max(0, (h * 60 + m) - 18 * 60);
-  }
+  const evaluated = evaluateAttendanceTimes(updated.punchIn, at, shift, updated.breaks);
+  updated.status = evaluated.status;
+  updated.overtimeMinutes = evaluated.overtimeMinutes;
   return updated;
 }
 
@@ -882,7 +883,7 @@ function savePunch(store, employee, method, evidence, meta) {
       })
     : null;
   const log = {
-    ...(resumed?.log || computePunch(existing, method, store.terminal, evidence?.id, outReason, at)),
+    ...(resumed?.log || computePunch(existing, method, store.terminal, evidence?.id, outReason, at, employee.shift)),
     employeeId: employee.id,
     employeeName: employee.fullName || '',
     employeeCode: employee.employeeCode || '',
@@ -1557,4 +1558,3 @@ process.on('uncaughtException', error => {
 process.on('unhandledRejection', (reason) => {
   console.warn('[Kiosk Unhandled Rejection]', reason);
 });
-

@@ -235,9 +235,15 @@ app.use('/api/auth/password-reset', resetLimiter);
 if (!process.env.DATA_BACKEND || (process.env.DATA_BACKEND || '').trim().toLowerCase() === 'postgres') {
   const bcrypt = require('bcryptjs');
   const { authenticate } = require('./server/auth.cjs');
+  const { createSession, revokeSession } = require('./server/sessions.cjs');
+  const { router: mfaRoutes, publicRouter: mfaPublicRoutes, createLoginChallenge } = require('./server/mfa.cjs');
   const documentRoutes = require('./server/documents.cjs');
+  const payrollDeliveryRoutes = require('./server/payroll-delivery.cjs');
   const { getTableName } = require('./server/collections.cjs');
   app.use('/api/documents', authenticate, documentRoutes);
+  app.use('/api/payroll-delivery', authenticate, payrollDeliveryRoutes);
+  app.use('/api/auth/mfa', mfaPublicRoutes);
+  app.use('/api/auth/mfa', authenticate, mfaRoutes);
 
   app.post('/api/auth/login', async (req, res, next) => {
     try {
@@ -282,12 +288,26 @@ if (!process.env.DATA_BACKEND || (process.env.DATA_BACKEND || '').trim().toLower
         return res.status(401).json({ error: 'Invalid email or password.' });
       }
 
-      const token = userDoc.document_id;
-      const { passwordHash: _, ...safeUser } = user;
+      if (user.mfaEnabled) {
+        const mfaChallenge = await createLoginChallenge(userDoc.document_id);
+        res.setHeader('Cache-Control', 'no-store');
+        return res.json({ mfaRequired: true, mfaChallenge });
+      }
+      const token = await createSession(userDoc.document_id, req);
+      const { passwordHash: _, password: _legacyPassword, mfaSecretCipher: _mfaSecret, ...safeUser } = user;
+      res.setHeader('Cache-Control', 'no-store');
       return res.json({ token, user: safeUser });
     } catch (err) {
       next(err);
     }
+  });
+
+  app.post('/api/auth/logout', authenticate, async (req, res, next) => {
+    try {
+      await revokeSession(req.identity.sessionToken);
+      res.setHeader('Cache-Control', 'no-store');
+      res.status(204).end();
+    } catch (err) { next(err); }
   });
 
   app.get('/api/auth/status', async (_req, res, next) => {
@@ -489,7 +509,9 @@ if (!process.env.DATA_BACKEND || (process.env.DATA_BACKEND || '').trim().toLower
       }
 
       const { passwordHash: _, ...safeUser } = adminUser;
-      return res.json({ token: 'usr-admin', user: safeUser });
+      const token = await createSession(adminUser.id, req);
+      res.setHeader('Cache-Control', 'no-store');
+      return res.json({ token, user: safeUser });
     } catch (err) {
       next(err);
     }
@@ -580,4 +602,3 @@ app.use((error, req, res, _next) => {
 const port = Number(process.env.PORT || 8080);
 const host = process.env.HOST || '0.0.0.0';
 app.listen(port, host, () => console.info(`Production server listening on http://${host}:${port}.`));
-

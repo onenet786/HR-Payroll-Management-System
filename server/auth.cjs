@@ -1,4 +1,5 @@
 const { pool } = require('./db.cjs');
+const { tokenHash, userAgentHash } = require('./sessions.cjs');
 
 async function authenticate(req, res, next) {
   try {
@@ -10,7 +11,16 @@ async function authenticate(req, res, next) {
     if (!tokenStr) {
       return res.status(401).json({ error: 'Authentication token required.', correlationId: req.correlationId });
     }
-    const token = { uid: tokenStr };
+    const sessionResult = await pool.query(
+      `SELECT user_id FROM auth_sessions WHERE token_hash=$1 AND revoked_at IS NULL
+       AND idle_expires_at>now() AND absolute_expires_at>now() AND user_agent_hash=$2 FOR UPDATE`,
+      [tokenHash(tokenStr), userAgentHash(req)],
+    );
+    const session = sessionResult.rows[0];
+    if (!session) return res.status(401).json({ error: 'Session expired or invalid.', correlationId: req.correlationId });
+    const idleMinutes = Math.max(5, Number(process.env.SESSION_IDLE_MINUTES || 30));
+    await pool.query(`UPDATE auth_sessions SET last_seen_at=now(),idle_expires_at=LEAST(absolute_expires_at,now()+($2*interval '1 minute')) WHERE token_hash=$1`, [tokenHash(tokenStr), idleMinutes]);
+    const token = { uid: session.user_id };
 
     let result;
     try {
@@ -43,6 +53,7 @@ async function authenticate(req, res, next) {
       roleId: profile.roleId,
       employeeId: profile.employeeId || null,
       permissions: new Set(roleResult.rows[0]?.data?.permissions || []),
+      sessionToken: tokenStr,
     };
     next();
   } catch (error) {

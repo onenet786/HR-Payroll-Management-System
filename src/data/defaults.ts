@@ -8,8 +8,9 @@ import {
   AttendanceLog, LeaveRequest, StatutoryConfig, TaxSlab, Payslip,
   Role, UserAccount, Holiday, LoanAdvance, SalaryRevision,
   PerformanceReview, CompanyAsset, JobPosting, JobApplication,
-  GratuitySettlement, AppNotification
+  GratuitySettlement, AppNotification, PayrollAdjustment
 } from '../types';
+import { countScheduledWorkingDays } from './attendanceRules';
 import type { WageType } from '../types';
 import { resolveWageBasis } from './masterData';
 
@@ -413,6 +414,45 @@ export function calculateAnnualTax(annualTaxableIncome: number, slabs: TaxSlab[]
   return Math.round(baseCalculatedTax);
 }
 
+export function pakistanTaxYearForPeriod(month: number, year: number): string {
+  return String(month >= 7 ? year + 1 : year);
+}
+
+export function calculateReconciledMonthlyTax(
+  employee: Employee,
+  grossSalary: number,
+  month: number,
+  year: number,
+  slabs: TaxSlab[],
+  historicalPayslips: Payslip[] = []
+) {
+  const taxYear = pakistanTaxYearForPeriod(month, year);
+  const taxYearStartYear = Number(taxYear) - 1;
+  const taxYearStart = `${taxYearStartYear}-07-01`;
+  const periodStart = `${year}-${String(month).padStart(2, '0')}-01`;
+  const previous = historicalPayslips.filter(item => item.employeeId === employee.id
+    && item.periodMonth && item.periodYear
+    && `${item.periodYear}-${String(item.periodMonth).padStart(2, '0')}-01` >= taxYearStart
+    && `${item.periodYear}-${String(item.periodMonth).padStart(2, '0')}-01` < periodStart);
+  const priorEmployerIncome = Math.max(0, employee.priorEmployerTaxableIncome || 0);
+  const priorEmployerTax = Math.max(0, employee.priorEmployerTaxDeducted || 0);
+  const currentEmployerIncomeBefore = previous.reduce((sum, item) => sum + item.grossSalary, 0);
+  const currentEmployerTaxBefore = previous.reduce((sum, item) => sum + item.incomeTaxDeduction, 0);
+  const remainingPeriods = month >= 7 ? 19 - month : 7 - month;
+  const projectedAnnualTaxableIncome = priorEmployerIncome + currentEmployerIncomeBefore + grossSalary * remainingPeriods;
+  const projectedAnnualTaxLiability = calculateAnnualTax(projectedAnnualTaxableIncome, slabs);
+  const taxDeductedBeforeCurrentPeriod = priorEmployerTax + currentEmployerTaxBefore;
+  const incomeTaxDeduction = Math.max(0, Math.round((projectedAnnualTaxLiability - taxDeductedBeforeCurrentPeriod) / remainingPeriods));
+  return {
+    taxYear,
+    taxableIncomeYtd: priorEmployerIncome + currentEmployerIncomeBefore + grossSalary,
+    taxDeductedBeforeCurrentPeriod,
+    projectedAnnualTaxableIncome,
+    projectedAnnualTaxLiability,
+    incomeTaxDeduction,
+  };
+}
+
 /**
  * Reverse calculate Gross Contract Salary from target Net Take-Home pay
  * accounting for progressive FBR income tax and statutory EOBI employee deduction.
@@ -530,7 +570,10 @@ export function computePayslipDetails(
   designations: Designation[],
   branches: Branch[],
   loanAdvances: LoanAdvance[] = [],
-  wageTypes: WageType[] = []
+  wageTypes: WageType[] = [],
+  holidays: Holiday[] = [],
+  historicalPayslips: Payslip[] = [],
+  payrollAdjustments: PayrollAdjustment[] = []
 ): Payslip {
   
   // Basic wage context
@@ -642,16 +685,32 @@ export function computePayslipDetails(
     overtimePay = overtimeHours * otBaseHourly * (statConfigs.overtimeMultiplier || 2);
   }
   
-  const grossSalary = Math.round(
+  const periodAdjustments = payrollAdjustments.filter(item => item.employeeId === employee.id
+    && item.periodMonth === month && item.periodYear === year && item.status === 'Approved' && !item.payrollRunId);
+  const adjustmentTotal = (type: PayrollAdjustment['type']) => periodAdjustments.filter(item => item.type === type).reduce((sum, item) => sum + item.amount, 0);
+  const bonusEarnings = adjustmentTotal('Bonus');
+  const commissionEarnings = adjustmentTotal('Commission');
+  const arrearsEarnings = adjustmentTotal('Arrears');
+  const reimbursements = adjustmentTotal('Reimbursement');
+  const otherAdjustmentsDeduction = adjustmentTotal('Deduction');
+  const manualTaxAdjustment = adjustmentTotal('Tax Adjustment');
+  const taxableAdjustments = periodAdjustments.filter(item => item.taxable && !['Deduction', 'Tax Adjustment', 'Reimbursement'].includes(item.type)).reduce((sum, item) => sum + item.amount, 0);
+  const baseGrossSalary = Math.round(
     basicEarnings + houseRentAllowance + conveyanceAllowance + medicalAllowance + otherAllowances + overtimePay - unpaidLeaveDeduction
   );
+  const grossSalary = baseGrossSalary + bonusEarnings + commissionEarnings + arrearsEarnings;
+  const taxableGrossSalary = baseGrossSalary + taxableAdjustments;
   
   // 1. Income Tax Calculation (FBR)
   let incomeTaxDeduction = 0;
+  let taxReconciliation = {
+    taxYear: pakistanTaxYearForPeriod(month, year), taxableIncomeYtd: grossSalary,
+    taxDeductedBeforeCurrentPeriod: 0, projectedAnnualTaxableIncome: grossSalary * 12,
+    projectedAnnualTaxLiability: 0, incomeTaxDeduction: 0,
+  };
   if (employee.fbrEnabled !== false) {
-    const estimatedAnnualGross = grossSalary * 12;
-    const annualTax = calculateAnnualTax(estimatedAnnualGross, taxSlabs);
-    incomeTaxDeduction = Math.round(annualTax / 12);
+    taxReconciliation = calculateReconciledMonthlyTax(employee, taxableGrossSalary, month, year, taxSlabs, historicalPayslips);
+    incomeTaxDeduction = taxReconciliation.incomeTaxDeduction;
   }
   
   // 2. EOBI Calculation (Employees' Old-Age Benefits Institution)
@@ -691,10 +750,10 @@ export function computePayslipDetails(
   const loanRepaymentDeduction = activeLoans.reduce((sum, l) => sum + l.monthlyInstallment, 0);
 
   const totalDeductions = Math.round(
-    incomeTaxDeduction + eobiEmployeeDeduction + providentFundDeduction + loanRepaymentDeduction
+    incomeTaxDeduction + manualTaxAdjustment + eobiEmployeeDeduction + providentFundDeduction + loanRepaymentDeduction + otherAdjustmentsDeduction
   );
 
-  const netSalary = Math.max(0, grossSalary - totalDeductions);
+  const netSalary = Math.max(0, grossSalary + reimbursements - totalDeductions);
 
   // Resolve names via lookup
   const departmentName = departments.find(d => d.id === employee.departmentId)?.name || 'Unknown Dept';
@@ -728,9 +787,17 @@ export function computePayslipDetails(
     conveyanceAllowance: Math.round(conveyanceAllowance),
     medicalAllowance: Math.round(medicalAllowance),
     otherAllowances,
+    bonusEarnings,
+    commissionEarnings,
+    arrearsEarnings,
+    reimbursements,
+    otherAdjustmentsDeduction,
+    manualTaxAdjustment,
+    payrollAdjustmentIds: periodAdjustments.map(item => item.id),
     grossSalary,
     
     incomeTaxDeduction,
+    ...taxReconciliation,
     eobiEmployeeDeduction,
     pessiEmployeeDeduction: 0, // usually paid 100% by employer in Pak
     providentFundDeduction,
@@ -744,10 +811,10 @@ export function computePayslipDetails(
     providentFundEmployerContribution,
     province: branch?.province,
     paidDays: presentDays + paidLeaveDays + (halfDays * 0.5),
-    scheduledWorkingDays: totalDaysInMonth,
+    scheduledWorkingDays: countScheduledWorkingDays(year, month, employee.shift, holidays),
     explicitAbsentDays,
     statutoryConfigId: statConfigs.id,
-    calculationVersion: 'PK-PAYROLL-2.0',
+    calculationVersion: 'PK-PAYROLL-3.0-YTD',
     periodMonth: month,
     periodYear: year
   };

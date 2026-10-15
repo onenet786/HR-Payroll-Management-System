@@ -502,7 +502,7 @@ export function MobileApp({
               </div>
               <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
                 <MapPin className="w-3 h-3 text-slate-500" />
-                <span>Clifton HQ Geofence • <span className="text-emerald-400">In Range</span></span>
+                <span>Assigned branch geofence • <span className={todayAttendance?.geofenceStatus === 'inside' ? 'text-emerald-400' : todayAttendance?.regularizationRequested ? 'text-amber-400' : 'text-slate-300'}>{todayAttendance?.geofenceStatus === 'inside' ? 'Verified in range' : todayAttendance?.regularizationRequested ? 'Manager review' : 'Verified when punching'}</span></span>
               </div>
               <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
                 <Clock className="w-3 h-3 text-slate-500" />
