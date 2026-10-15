@@ -283,7 +283,7 @@ export function MobileApp({
     const timeStr = nowTimeStr();
 
     // Mobile attendance is location-bound. Require a fresh, reasonably accurate
-    // device fix and persist its accuracy/timestamp with the Firestore record.
+    // device fix and persist its accuracy/timestamp with the database record.
     if (!navigator.geolocation) throw new Error('Location is unavailable on this device. Attendance was not recorded.');
     const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
       navigator.geolocation.getCurrentPosition(resolve, reject, {

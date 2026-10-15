@@ -16,25 +16,11 @@ const { authorizeCameraAttempt, requireSecureEnrollment } = require('./camera-au
 
 dotenv.config({ quiet: true });
 
-// Vite reads .env.local automatically, but Electron does not. The kiosk build
-// bundles only that browser-safe Firebase configuration as kiosk.env beside
-// the packaged resources; no service-account credentials are included.
+// Load local or packaged environment
 const kioskEnvironmentPath = app.isPackaged
   ? path.join(process.resourcesPath, 'kiosk.env')
   : path.join(__dirname, '..', '.env.local');
 dotenv.config({ path: kioskEnvironmentPath, quiet: true, override: false });
-const localFirebaseKeys = [
-  'FIREBASE_API_KEY',
-  'FIREBASE_AUTH_DOMAIN',
-  'FIREBASE_PROJECT_ID',
-  'FIREBASE_STORAGE_BUCKET',
-  'FIREBASE_MESSAGING_SENDER_ID',
-  'FIREBASE_APP_ID',
-  'FIRESTORE_DATABASE_ID',
-];
-for (const key of localFirebaseKeys) {
-  if (!process.env[key] && process.env[`VITE_${key}`]) process.env[key] = process.env[`VITE_${key}`];
-}
 if (!process.env.PORTAL_URL) process.env.PORTAL_URL = process.env.VITE_API_BASE_URL || process.env.APP_URL || 'https://mcs.binishaqsoft.com';
 
 
@@ -180,12 +166,7 @@ function closeSplashWindow() {
   splashWindow = null;
 }
 
-const firebaseConfig = {
-  portalUrl: process.env.PORTAL_URL || process.env.VITE_API_BASE_URL || process.env.APP_URL || 'https://mcs.binishaqsoft.com',
-};
-
-
-let firebaseSdkPromise = null;
+const kioskPortalUrl = (process.env.PORTAL_URL || process.env.VITE_API_BASE_URL || process.env.APP_URL || 'https://mcs.binishaqsoft.com').replace(/\/$/, '');
 
 const checkoutReasons = [
   'End of Shift',
@@ -401,52 +382,7 @@ function configureCameraPermission() {
   });
 }
 
-// ─── Firestore REST Helpers ─────────────────────────────────────────────────
-
-function firestoreUrl(collectionName, docId) {
-  const base = `/v1/projects/${firebaseConfig.projectId}/databases/${firebaseConfig.databaseId}/documents/${collectionName}`;
-  const suffix = docId ? `/${encodeURIComponent(docId)}` : '';
-  return `https://firestore.googleapis.com${base}${suffix}?key=${firebaseConfig.apiKey}`;
-}
-
-function fromFirestoreValue(value) {
-  if (!value || typeof value !== 'object') return undefined;
-  if ('stringValue' in value) return value.stringValue;
-  if ('integerValue' in value) return Number(value.integerValue);
-  if ('doubleValue' in value) return Number(value.doubleValue);
-  if ('booleanValue' in value) return Boolean(value.booleanValue);
-  if ('timestampValue' in value) return value.timestampValue;
-  if ('arrayValue' in value) return (value.arrayValue.values || []).map(fromFirestoreValue);
-  if ('mapValue' in value) return fromFirestoreFields(value.mapValue.fields || {});
-  if ('nullValue' in value) return null;
-  return undefined;
-}
-
-function fromFirestoreFields(fields) {
-  const out = {};
-  for (const [key, value] of Object.entries(fields || {})) out[key] = fromFirestoreValue(value);
-  return out;
-}
-
-function toFirestoreValue(value) {
-  if (value === null || value === undefined) return { nullValue: null };
-  if (Array.isArray(value)) return { arrayValue: { values: value.map(toFirestoreValue) } };
-  if (typeof value === 'boolean') return { booleanValue: value };
-  if (typeof value === 'number' && Number.isInteger(value)) return { integerValue: String(value) };
-  if (typeof value === 'number') return { doubleValue: value };
-  if (typeof value === 'object') {
-    const fields = {};
-    for (const [key, child] of Object.entries(value)) fields[key] = toFirestoreValue(child);
-    return { mapValue: { fields } };
-  }
-  return { stringValue: String(value) };
-}
-
-function toFirestoreDocument(obj) {
-  const fields = {};
-  for (const [key, value] of Object.entries(obj)) fields[key] = toFirestoreValue(value);
-  return { fields };
-}
+// ─── Kiosk PostgreSQL API Helpers ──────────────────────────────────────────
 
 function requestJson(method, url, body) {
   return new Promise((resolve, reject) => {
@@ -485,68 +421,8 @@ function requestJson(method, url, body) {
   });
 }
 
-
-async function getFirebaseSdkDb() {
-  if (!firebaseSdkPromise) {
-    firebaseSdkPromise = Promise.all([
-      import('firebase/app'),
-      import('firebase/firestore'),
-    ]).then(([appMod, firestoreMod]) => {
-      const appConfig = {
-        apiKey: firebaseConfig.apiKey,
-        authDomain: firebaseConfig.authDomain,
-        projectId: firebaseConfig.projectId,
-        storageBucket: firebaseConfig.storageBucket,
-        messagingSenderId: firebaseConfig.messagingSenderId,
-        appId: firebaseConfig.appId,
-      };
-      const firebaseApp = appMod.getApps().length ? appMod.getApp() : appMod.initializeApp(appConfig);
-      return {
-        db: firestoreMod.getFirestore(firebaseApp, firebaseConfig.databaseId),
-        firestoreMod,
-      };
-    });
-  }
-  return firebaseSdkPromise;
-}
-
-async function fetchFirestoreCollectionViaSdk(collectionName) {
-  const { db, firestoreMod } = await getFirebaseSdkDb();
-  const snapshot = await firestoreMod.getDocs(firestoreMod.collection(db, collectionName));
-  return snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() }));
-}
-
-async function fetchFirestoreCollectionByField(collectionName, fieldName, value) {
-  const { db, firestoreMod } = await getFirebaseSdkDb();
-  const ref = firestoreMod.collection(db, collectionName);
-  const queryRef = firestoreMod.query(ref, firestoreMod.where(fieldName, '==', value));
-  const snapshot = await firestoreMod.getDocs(queryRef);
-  return snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() }));
-}
-
-async function fetchFirestoreCollectionByIds(collectionName, fieldName, values) {
-  const unique = [...new Set((values || []).map(String).filter(Boolean))];
-  if (!unique.length) return [];
-  const { db, firestoreMod } = await getFirebaseSdkDb();
-  const records = [];
-  for (let offset = 0; offset < unique.length; offset += 30) {
-    const chunk = unique.slice(offset, offset + 30);
-    const ref = firestoreMod.collection(db, collectionName);
-    const queryRef = firestoreMod.query(ref, firestoreMod.where(fieldName, 'in', chunk));
-    const snapshot = await firestoreMod.getDocs(queryRef);
-    records.push(...snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() })));
-  }
-  return records;
-}
-
-async function putFirestoreDocumentViaSdk(collectionName, docId, data) {
-  const { db, firestoreMod } = await getFirebaseSdkDb();
-  await firestoreMod.setDoc(firestoreMod.doc(db, collectionName, docId), data, { merge: true });
-}
-
 async function fetchFirestoreCollection(collectionName) {
-  const baseUrl = (process.env.PORTAL_URL || process.env.VITE_API_BASE_URL || process.env.APP_URL || 'https://mcs.binishaqsoft.com').replace(/\/$/, '');
-  const url = `${baseUrl}/api/kiosk/sync/${encodeURIComponent(collectionName)}`;
+  const url = `${kioskPortalUrl}/api/kiosk/sync/${encodeURIComponent(collectionName)}`;
   try {
     const result = await requestJson('GET', url, null);
     return (result?.documents || []).map(doc => ({ id: doc.id || doc.document_id, ...doc }));
@@ -568,8 +444,7 @@ async function fetchFirestoreCollectionByIds(collectionName, fieldName, values) 
 }
 
 async function putFirestoreDocument(collectionName, docId, data) {
-  const baseUrl = (process.env.PORTAL_URL || process.env.VITE_API_BASE_URL || process.env.APP_URL || 'https://mcs.binishaqsoft.com').replace(/\/$/, '');
-  const url = `${baseUrl}/api/kiosk/punch`;
+  const url = `${kioskPortalUrl}/api/kiosk/punch`;
   return await requestJson('POST', url, { collection: collectionName, documentId: docId, data });
 }
 
@@ -1091,9 +966,8 @@ ipcMain.handle('kiosk:get-state', async () => {
     branches,
     assignedBranch: branches.find(branch => branch.id === store.terminal.branchId) || null,
     syncTarget: {
-      portalUrl: firebaseConfig.portalUrl,
-      projectId: firebaseConfig.projectId,
-      databaseId: firebaseConfig.databaseId,
+      portalUrl: kioskPortalUrl,
+      backend: 'PostgreSQL',
       collections: ['employees', 'attendances', 'branches', 'departments', 'designations', 'biometricTemplates'],
     },
     platform: process.platform,

@@ -979,7 +979,7 @@ export const DEFAULT_JOB_POSTINGS: JobPosting[] = [
     vacancies: 2, experienceRequired: '3-5 years', qualificationRequired: 'BS Computer Science or equivalent',
     salaryRange: 'PKR 150,000 – 200,000', jobType: 'Full Time',
     postedDate: '2026-06-01', closingDate: '2026-06-30', status: 'Open',
-    description: 'We are looking for experienced React developers to join our growing IT team. Candidates must have hands-on experience with TypeScript, Firebase, and modern CI/CD workflows.'
+    description: 'We are looking for experienced React developers to join our growing IT team. Candidates must have hands-on experience with TypeScript, PostgreSQL, and modern CI/CD workflows.'
   },
   {
     id: 'job-002', title: 'Logistics Coordinator', departmentId: 'd3', branchId: 'b2',
@@ -1004,7 +1004,7 @@ export const DEFAULT_JOB_APPLICATIONS: JobApplication[] = [
     applicantEmail: 'fahad.iqbal@gmail.com', applicantPhone: '0321-9988776',
     cnic: '42101-8877665-1', currentSalary: 110000, expectedSalary: 175000,
     appliedDate: '2026-06-05', stage: 'Interviewed',
-    interviewDate: '2026-06-15', interviewNotes: 'Strong React skills. Needs Firebase deepening. Recommended for round 2.'
+    interviewDate: '2026-06-15', interviewNotes: 'Strong React skills. Needs PostgreSQL deepening. Recommended for round 2.'
   },
   {
     id: 'app-002', jobPostingId: 'job-001', applicantName: 'Zainab Malik',

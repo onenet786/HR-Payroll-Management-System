@@ -387,7 +387,7 @@ export function DeviceEmulator({
               <div className="space-y-1">
                 <h4 className="font-bold text-white text-xs">⭐ 100% Shared State Coordination</h4>
                 <p>
-                  Any action on the <strong>Mobile ESS App</strong> (marking geofenced attendance or applying sick leave) immediately propagates to Firestore and refreshes the live dashboards on the <strong>Web Admin Portal</strong>.
+                  Any action on the <strong>Mobile ESS App</strong> (marking geofenced attendance or applying sick leave) immediately propagates to the Server Database and refreshes the live dashboards on the <strong>Web Admin Portal</strong>.
                 </p>
               </div>
 
@@ -415,7 +415,7 @@ export function DeviceEmulator({
               <div className="bg-emerald-950/20 p-3.5 rounded-xl border border-emerald-900/30 text-[11px] text-emerald-300 flex items-start space-x-2">
                 <Info className="w-4 h-4 flex-shrink-0 mt-0.5 text-emerald-400" />
                 <p>
-                  <strong>Tip:</strong> All payroll, attendance, and leave data syncs live with Firestore. Changes appear instantly across all logged-in sessions.
+                  <strong>Tip:</strong> All payroll, attendance, and leave data syncs live with PostgreSQL. Changes appear instantly across all logged-in sessions.
                 </p>
               </div>
 

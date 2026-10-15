@@ -337,10 +337,10 @@ const TAB_WORKFLOW_META: Record<PortalTab, {
     guideContent: 'Enforce dual authorization principles: one officer prepares payroll, another approves. Granular permissions govern access to salaries and audit logs.'
   },
   maintenance: {
-    heading: 'Database backup, Firestore synchronization, and system recovery snapshots.',
-    help: 'Verify server health, inspect local and cloud synchronization states, and export database recovery snapshots.',
+    heading: 'Database backup, PostgreSQL synchronization, and system recovery snapshots.',
+    help: 'Verify server health, inspect local and database synchronization states, and export database recovery snapshots.',
     guideTitle: 'Guide for Data Backup & Maintenance',
-    guideContent: 'Ensure offline logs and biometric attestation events are securely backed up. Cloud synchronization runs continuously.'
+    guideContent: 'Ensure offline logs and biometric attestation events are securely backed up. Database synchronization runs continuously.'
   },
   notifications: {
     heading: 'System activity log, payroll cutoff reminders, and critical alerts.',
@@ -509,6 +509,7 @@ export function WebPortal({
       const slabNum = idx + 1;
       const min = s.minIncome;
       const max = s.maxIncome >= 999999999 ? 'Exceeding' : s.maxIncome;
+      const base = s.baseTax;
       const pctValue = s.percentage < 1 && s.percentage > 0 ? (s.percentage * 100) : s.percentage;
       const rate = `${pctValue}%`;
       const desc = s.maxIncome <= 600000 
@@ -551,7 +552,7 @@ export function WebPortal({
 
   const currentUserRole = roles.find(r => r.id === currentUserAccount.roleId);
   const isCanonicalSuperAdmin = currentUserAccount.roleId === 'role-admin' || currentUserRole?.name === 'Super Admin';
-  // Older Firestore Super Admin role documents may predate manage_access.
+  // Older Super Admin role documents may predate manage_access.
   // Preserve the canonical administrator's recovery path to User Management;
   // all other roles remain governed strictly by their saved permissions.
   const userPermissions = currentUserRole
@@ -1495,7 +1496,7 @@ export function WebPortal({
     searchQuery && (
       e.fullName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (e.employeeCode && e.employeeCode.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (e.designation && e.designation.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      ((designations.find(d => d.id === e.designationId)?.title || '').toLowerCase().includes(searchQuery.toLowerCase())) ||
       (e.cnic && e.cnic.includes(searchQuery))
     )
   ).slice(0, 5);
@@ -3717,16 +3718,9 @@ export function WebPortal({
                               password
                             });
                             form.reset();
-                            alert('Success: Firebase Authentication account and HR profile created.');
+                            alert('Success: User account and HR profile created.');
                           } catch (error) {
-                            const code = typeof error === 'object' && error && 'code' in error
-                              ? String((error as { code?: unknown }).code)
-                              : '';
-                            const message = code === 'auth/email-already-in-use'
-                              ? 'An Authentication account already uses this email.'
-                              : code === 'auth/weak-password'
-                                ? 'Firebase rejected this password as too weak.'
-                                : 'Unable to create the user account. No partial HR profile was saved.';
+                            const message = (error as Error)?.message || 'Unable to create the user account. No partial HR profile was saved.';
                             alert(message);
                           }
                         }} className="space-y-3">
@@ -3876,7 +3870,7 @@ export function WebPortal({
                           </label>
                           <label className="text-xs font-semibold text-slate-700">Authentication Email
                             <input value={editingUser.email} readOnly className="mt-1 w-full cursor-not-allowed rounded-lg border border-slate-200 bg-slate-100 p-2.5 text-sm text-slate-500" />
-                            <span className="mt-1 block text-[10px] font-normal text-slate-400">Email changes require a separate Firebase Auth workflow.</span>
+                            <span className="mt-1 block text-[10px] font-normal text-slate-400">Email is unique and read-only for identity security.</span>
                           </label>
                           <label className="text-xs font-semibold text-slate-700">Role
                             <select value={editingUser.roleId} onChange={event => setEditingUser({ ...editingUser, roleId: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 bg-white p-2.5 text-sm">
@@ -4457,7 +4451,7 @@ export function WebPortal({
                             onChange={(e) => {
                               const checked = e.target.checked;
                               setNewEmpTakeHome(checked);
-                              const split = calculateFbrSalarySplit(newEmpForm.basicSalary, checked, taxSlabs, statConfigs.minimumWage);
+                              const split = calculateFbrSalarySplit(newEmpForm.basicSalary, checked, taxSlabs, (statConfig?.minimumWage || 37000));
                               setNewEmpForm(prev => ({
                                 ...prev,
                                 houseRentAllowance: split.houseRentAllowance,
@@ -4479,7 +4473,7 @@ export function WebPortal({
                         onChange={(e) => {
                           const val = Number(e.target.value);
                           if (newEmpTakeHome) {
-                            const split = calculateFbrSalarySplit(val, true, taxSlabs, statConfigs.minimumWage);
+                            const split = calculateFbrSalarySplit(val, true, taxSlabs, (statConfig?.minimumWage || 37000));
                             setNewEmpForm({
                               ...newEmpForm,
                               basicSalary: val,
@@ -4558,7 +4552,7 @@ export function WebPortal({
                         <button
                           type="button"
                           onClick={() => {
-                            const split = calculateFbrSalarySplit(newEmpForm.basicSalary, newEmpTakeHome, taxSlabs, statConfigs.minimumWage);
+                            const split = calculateFbrSalarySplit(newEmpForm.basicSalary, newEmpTakeHome, taxSlabs, (statConfig?.minimumWage || 37000));
                             setNewEmpForm(prev => ({
                               ...prev,
                               houseRentAllowance: split.houseRentAllowance,
@@ -4574,7 +4568,7 @@ export function WebPortal({
                       </div>
 
                       {(() => {
-                        const split = calculateFbrSalarySplit(newEmpForm.basicSalary, newEmpTakeHome, taxSlabs, statConfigs.minimumWage);
+                        const split = calculateFbrSalarySplit(newEmpForm.basicSalary, newEmpTakeHome, taxSlabs, (statConfig?.minimumWage || 37000));
                         return (
                           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 text-center text-xs">
                             <div className="bg-white p-2 rounded-lg border border-slate-200 shadow-2xs">
@@ -5176,7 +5170,7 @@ export function WebPortal({
                             onChange={(e) => {
                               const checked = e.target.checked;
                               setEditEmpTakeHome(checked);
-                              const split = calculateFbrSalarySplit(editEmpForm.basicSalary, checked, taxSlabs, statConfigs.minimumWage);
+                              const split = calculateFbrSalarySplit(editEmpForm.basicSalary, checked, taxSlabs, (statConfig?.minimumWage || 37000));
                               setEditEmpForm(prev => ({
                                 ...prev,
                                 houseRentAllowance: split.houseRentAllowance,
@@ -5198,7 +5192,7 @@ export function WebPortal({
                         onChange={(e) => {
                           const val = Number(e.target.value);
                           if (editEmpTakeHome) {
-                            const split = calculateFbrSalarySplit(val, true, taxSlabs, statConfigs.minimumWage);
+                            const split = calculateFbrSalarySplit(val, true, taxSlabs, (statConfig?.minimumWage || 37000));
                             setEditEmpForm({
                               ...editEmpForm,
                               basicSalary: val,
@@ -5277,7 +5271,7 @@ export function WebPortal({
                         <button
                           type="button"
                           onClick={() => {
-                            const split = calculateFbrSalarySplit(editEmpForm.basicSalary, editEmpTakeHome, taxSlabs, statConfigs.minimumWage);
+                            const split = calculateFbrSalarySplit(editEmpForm.basicSalary, editEmpTakeHome, taxSlabs, (statConfig?.minimumWage || 37000));
                             setEditEmpForm(prev => ({
                               ...prev,
                               houseRentAllowance: split.houseRentAllowance,
@@ -5293,7 +5287,7 @@ export function WebPortal({
                       </div>
 
                       {(() => {
-                        const split = calculateFbrSalarySplit(editEmpForm.basicSalary, editEmpTakeHome, taxSlabs, statConfigs.minimumWage);
+                        const split = calculateFbrSalarySplit(editEmpForm.basicSalary, editEmpTakeHome, taxSlabs, (statConfig?.minimumWage || 37000));
                         return (
                           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 text-center text-xs">
                             <div className="bg-white p-2 rounded-lg border border-slate-200 shadow-2xs">
@@ -6222,7 +6216,6 @@ export function WebPortal({
                       type="button"
                       onClick={() => {
                         setActiveTab('employees');
-                        setEmpSearch(emp.fullName);
                         setShowQuickSearch(false);
                         setSearchQuery('');
                       }}
@@ -6230,7 +6223,7 @@ export function WebPortal({
                     >
                       <div>
                         <div className="font-semibold text-slate-900">{emp.fullName}</div>
-                        <div className="text-xs text-slate-500">{emp.employeeCode || emp.id} • {emp.designation}</div>
+                        <div className="text-xs text-slate-500">{emp.employeeCode || emp.id} • {(designations.find(d => d.id === emp.designationId)?.title || '')}</div>
                       </div>
                       <span className="chip c-g text-xs">Jump to record</span>
                     </button>

@@ -1,18 +1,4 @@
-const admin = require('firebase-admin');
 const { pool } = require('./db.cjs');
-
-const apps = admin.apps || admin.default?.apps || [];
-const credentialJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON?.trim();
-
-if (!apps.length && credentialJson) {
-  try {
-    admin.initializeApp({
-      credential: admin.credential.cert(JSON.parse(credentialJson)),
-    });
-  } catch (err) {
-    console.warn('Firebase Admin initialization warning:', err.message);
-  }
-}
 
 async function authenticate(req, res, next) {
   try {
@@ -20,21 +6,11 @@ async function authenticate(req, res, next) {
     if (!header.startsWith('Bearer ')) {
       return res.status(401).json({ error: 'Authentication required.', correlationId: req.correlationId });
     }
-    const tokenStr = header.slice(7);
-    let token = null;
-    const activeApps = admin.apps || admin.default?.apps || [];
-
-    if (activeApps.length) {
-      try {
-        token = await admin.auth().verifyIdToken(tokenStr, true);
-      } catch (err) {
-        token = { uid: tokenStr };
-      }
-    } else if (tokenStr) {
-      token = { uid: tokenStr };
-    } else {
-      return res.status(401).json({ error: 'Authentication service not initialized.', correlationId: req.correlationId });
+    const tokenStr = header.slice(7).trim();
+    if (!tokenStr) {
+      return res.status(401).json({ error: 'Authentication token required.', correlationId: req.correlationId });
     }
+    const token = { uid: tokenStr };
 
     let result;
     try {

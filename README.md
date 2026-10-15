@@ -21,14 +21,12 @@ View your app in AI Studio: https://ai.studio/apps/0ab7c3a1-e4ca-49b5-86f4-68838
 
 1. Install dependencies:
    `npm install`
-2. Copy `.env.example` to `.env.local` and fill in the required values. Variables beginning with `VITE_` are embedded in the browser bundle; only the listed Firebase public web configuration belongs there. Keep Gemini, OAuth, JWT, database, service-account, Stripe secret, and other privileged keys server-side without a `VITE_` prefix.
+2. Copy `.env.example` to `.env.local` and fill in the required values. Keep database passwords, server secrets, and privileged keys server-side without a `VITE_` prefix.
 3. Run the app:
    `npm run dev`
 
 ## Deployment security requirements
 
-- The checked-in Firestore rules are deny-by-default and require Firebase Authentication. Deploy and emulator-test them before launch. The legacy custom-login client and kiosk cannot satisfy these rules until migrated to Firebase Auth identities; do not weaken the rules to preserve legacy access.
-- Never place Firebase Admin/service-account credentials, Supabase service-role keys, Stripe secret keys, database URLs, OAuth client secrets, JWT signing secrets, or third-party private API keys in `VITE_*` variables or frontend code.
-- Do not deploy the local-storage authentication fallback for production HR or payroll data.
-
-> **Secret rotation warning:** Firebase configuration and demo passwords were previously hardcoded. Git retains removed values in history and existing clones. Rotate/restrict the previously committed Firebase key immediately, invalidate all previously seeded passwords, review key usage, and consider purging sensitive values from Git history before deployment.
+- The system operates on a dedicated PostgreSQL server backend. Configure aaPanel with Node.js and PostgreSQL services.
+- Never place database URLs, OAuth client secrets, JWT signing secrets, or third-party private API keys in `VITE_*` variables or frontend code.
+- Always use HTTPS in production with proper reverse proxy and SSL certificates.

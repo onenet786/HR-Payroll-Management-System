@@ -43,6 +43,7 @@ const stripDeleted = (value: unknown): unknown => {
   return Object.fromEntries(Object.entries(value).filter(([, item]) => !(item as DeleteSentinel)?.__deleteField).map(([key, item]) => [key, stripDeleted(item)]));
 };
 
+export const db = {};
 export const collection = (_db: unknown, name: string): CollectionRef => ({ kind: 'collection', name });
 export const doc = (_db: unknown, collectionName: string, id: string): DocumentRef => ({ kind: 'document', collection: collectionName, id });
 export const where = (field: string, op: '==', value: unknown) => ({ field, op, value });

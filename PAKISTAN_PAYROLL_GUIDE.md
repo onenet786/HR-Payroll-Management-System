@@ -30,4 +30,4 @@ The CSV is a general payroll bank-advice export. Confirm column order, identifie
 
 ## Deployment security
 
-New local application users are stored with PBKDF2 password hashes. A production deployment must additionally enforce Firebase Authentication or an equivalent trusted identity provider, restrictive Firestore Security Rules, least-privilege roles, MFA for payroll administrators, and protected biometric/document storage.
+New local application users are stored with bcrypt password hashes. A production deployment must enforce HTTPS, PostgreSQL connection security, least-privilege roles, MFA for payroll administrators, and protected biometric/document storage.

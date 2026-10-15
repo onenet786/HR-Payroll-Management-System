@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { collection, doc, getDocs, setDoc, writeBatch } from '../data/postgresStore';
+import { db, collection, doc, getDocs, setDoc, writeBatch } from '../data/postgresStore';
 import { AlertTriangle, CheckCircle, Database, Download, RefreshCw, RotateCcw, Trash2, Upload } from 'lucide-react';
-import { db } from '../firebase';
 
 
 type CollectionKey =
@@ -247,8 +246,8 @@ export function FirestoreMaintenanceModule() {
     const backup: BackupFile = {
       metadata: {
         app: 'HR & Payroll Suite',
-        projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-        databaseId: import.meta.env.VITE_FIRESTORE_DATABASE_ID,
+        projectId: 'postgresql-primary',
+        databaseId: 'hr_payroll',
         createdAt: new Date().toISOString(),
         collections: collectionsToBackup,
       },
@@ -264,13 +263,13 @@ export function FirestoreMaintenanceModule() {
 
   const downloadBackup = async (collectionsToBackup: CollectionKey[], reason: string) => {
     const backup = await buildBackup(collectionsToBackup);
-    downloadJson(`firestore-backup-${timestampForFile()}-${reason}.json`, backup);
+    downloadJson(`database-backup-${timestampForFile()}-${reason}.json`, backup);
     return backup;
   };
 
   const handleBackupAll = async () => {
     setIsBusy(true);
-    setStatus('Creating full Firestore backup...');
+    setStatus('Creating full database backup...');
     try {
       await downloadBackup(ALL_COLLECTIONS, 'full');
       setStatus('Full backup downloaded.');
@@ -423,7 +422,7 @@ export function FirestoreMaintenanceModule() {
         <div>
           <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
             <Database className="w-5 h-5 text-emerald-600" />
-            Firestore Backup & Restore
+            Database Backup & Restore
           </h2>
           <p className="text-sm text-slate-500 mt-1">Customer-safe tools for backup, restore, cleanup, and selected collection delete.</p>
         </div>
@@ -450,7 +449,7 @@ export function FirestoreMaintenanceModule() {
         <section className="bg-white border border-slate-200 rounded-lg p-5 space-y-4">
           <div>
             <h3 className="font-bold text-slate-900">Backup</h3>
-            <p className="text-xs text-slate-500 mt-1">Download all or selected Firestore collections.</p>
+            <p className="text-xs text-slate-500 mt-1">Download all or selected database collections.</p>
           </div>
           <button
             type="button"

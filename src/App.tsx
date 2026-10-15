@@ -15,16 +15,12 @@ import {
   PerformanceReview, CompanyAsset, JobPosting, JobApplication, GratuitySettlement, AppNotification, Company, CompanySetupPayload, Zone, UcTown, WageType, NewUserAccount, MobileDutyAuthorization
 } from './types';
 import { DeviceEmulator } from './components/DeviceEmulator';
-import { db } from './firebase';
-
-
 import {
-  collection, deleteDoc, deleteField, doc, getDoc, setDoc, updateDoc, onSnapshot, writeBatch, query, where, setAuthToken
+  db, collection, deleteDoc, deleteField, doc, getDoc, setDoc, updateDoc, onSnapshot, writeBatch, query, where, setAuthToken
 } from './data/postgresStore';
 
-
 // HR and payroll records must never be persisted in browser-accessible storage.
-// Remove legacy cache entries and keep application state in memory/Firestore only.
+// Application state is stored securely in PostgreSQL server backend and memory only.
 const privacyStorage = {
   getItem: (_key: string): string | null => null,
   setItem: (_key: string, _value: string): void => undefined,
@@ -32,41 +28,6 @@ const privacyStorage = {
 };
 
 const publicUser = ({ passwordHash: _passwordHash, ...profile }: UserAccount): UserAccount => profile;
-
-const authErrorCode = (error: unknown): string =>
-  typeof error === 'object' && error && 'code' in error
-    ? String((error as { code?: unknown }).code)
-    : '';
-
-const safeAuthErrorMessage = (error: unknown): string => {
-  const code = authErrorCode(error);
-  switch (code) {
-    case 'auth/operation-not-allowed':
-      return 'Email/password sign-in is not enabled in Firebase Authentication.';
-    case 'auth/network-request-failed':
-      return 'Unable to reach Firebase Authentication. Check DNS, proxy, firewall, and internet access.';
-    case 'auth/too-many-requests':
-      return 'Too many sign-in attempts. Wait before trying again or reset the password.';
-    case 'auth/unauthorized-domain':
-      return 'This application domain is not authorized in Firebase Authentication.';
-    case 'auth/configuration-not-found':
-      return 'Firebase Authentication is not configured for this project. Enable Email/Password sign-in.';
-    case 'auth/app-not-authorized':
-      return 'This application is not authorized to use Firebase Authentication with the configured API key.';
-    case 'auth/invalid-api-key':
-    case 'auth/api-key-not-valid.-please-pass-a-valid-api-key.':
-      return 'The Firebase web API key is invalid or is not permitted to use Firebase Authentication.';
-    case 'auth/user-disabled':
-      return 'This account is disabled. Contact your administrator.';
-    case 'auth/invalid-credential':
-    case 'auth/invalid-login-credentials':
-    case 'auth/user-not-found':
-    case 'auth/wrong-password':
-      return 'Invalid email or password. Confirm the account exists under Firebase Authentication → Users.';
-    default:
-      return 'Invalid email or password.';
-  }
-};
 
 for (let index = localStorage.length - 1; index >= 0; index -= 1) {
   const key = localStorage.key(index);
@@ -909,7 +870,7 @@ export default function App() {
     try {
       await setDoc(doc(db, 'attendances', newRegLog.id), cleanData(newRegLog));
     } catch (err) {
-      console.warn('Firebase regularization delayed:');
+      console.warn('Database regularization delayed:');
     }
   };
 
@@ -922,7 +883,7 @@ export default function App() {
     try {
       await setDoc(doc(db, 'attendances', newAtt.id), cleanData(newAtt));
     } catch (err) {
-      console.warn('Firebase attendance add delayed:');
+      console.warn('Database attendance add delayed:');
     }
   };
 
@@ -995,7 +956,7 @@ export default function App() {
       await setDoc(doc(db, 'payrollRuns', newRun.id), cleanData(newRun));
       await Promise.all(sheets.map(sheet => setDoc(doc(db, 'payrollPayslips', sheet.id), cleanData(sheet))));
     } catch (err) {
-      console.warn('Firebase payroll run sync delayed:');
+      console.warn('Database payroll run sync delayed:');
     }
 
     alert(`Draft payroll created for ${eligibleEmployees.length} employees. Review and approve it before loan deductions or disbursement.\nGross Pay: PKR ${totalGrossPay.toLocaleString()}\nNet Pay: PKR ${totalNetPay.toLocaleString()}`);
@@ -1049,7 +1010,7 @@ export default function App() {
     try {
       await setDoc(doc(db, 'roles', newRole.id), cleanData(newRole));
     } catch (err) {
-      console.warn('Firebase role sync delayed:');
+      console.warn('Database role sync delayed:');
     }
   };
 
@@ -1116,7 +1077,7 @@ export default function App() {
       try {
         await updateDoc(doc(db, 'users', userId), { roleId });
       } catch (err) {
-        console.warn('Firebase user role update delayed:');
+        console.warn('Database user role update delayed:');
       }
     }
   };
@@ -1250,7 +1211,7 @@ export default function App() {
     try {
       await setDoc(doc(db, 'branches', newBranch.id), cleanData(newBranch));
     } catch (err) {
-      console.warn('Firebase branch sync delayed:');
+      console.warn('Database branch sync delayed:');
     }
   };
 
@@ -1263,7 +1224,7 @@ export default function App() {
     try {
       await setDoc(doc(db, 'departments', newDept.id), cleanData(newDept));
     } catch (err) {
-      console.warn('Firebase department sync delayed:');
+      console.warn('Database department sync delayed:');
     }
   };
 
@@ -1276,7 +1237,7 @@ export default function App() {
     try {
       await setDoc(doc(db, 'designations', newDesg.id), cleanData(newDesg));
     } catch (err) {
-      console.warn('Firebase designation sync delayed:');
+      console.warn('Database designation sync delayed:');
     }
   };
 
@@ -1313,7 +1274,7 @@ export default function App() {
     try {
       await setDoc(doc(db, 'holidays', holiday.id), cleanData(holiday));
     } catch (err) {
-      console.warn('Firebase holiday add delayed:');
+      console.warn('Database holiday add delayed:');
     }
   };
 
@@ -1326,7 +1287,7 @@ export default function App() {
     try {
       await setDoc(doc(db, 'holidays', holiday.id), cleanData(holiday));
     } catch (err) {
-      console.warn('Firebase holiday update delayed:');
+      console.warn('Database holiday update delayed:');
     }
   };
 
@@ -1336,7 +1297,7 @@ export default function App() {
       privacyStorage.setItem('hr_holidays', JSON.stringify(updated));
       return updated;
     });
-    // Soft delete: no Firestore delete to avoid accidental data loss
+    // Soft delete: no database delete to avoid accidental data loss
   };
 
   // ─── Loan & Advance Handlers ──────────────────────────────────────────────
@@ -1349,7 +1310,7 @@ export default function App() {
     try {
       await setDoc(doc(db, 'loanAdvances', loan.id), cleanData(loan));
     } catch (err) {
-      console.warn('Firebase loan apply delayed:');
+      console.warn('Database loan apply delayed:');
     }
   };
 
@@ -1366,7 +1327,7 @@ export default function App() {
     try {
       await updateDoc(doc(db, 'loanAdvances', id), { status: 'Active', approvedBy: approverName, approvedOn: today, disbursedDate: today });
     } catch (err) {
-      console.warn('Firebase loan approval delayed:');
+      console.warn('Database loan approval delayed:');
     }
   };
 
@@ -1379,7 +1340,7 @@ export default function App() {
     try {
       await updateDoc(doc(db, 'loanAdvances', id), { status: 'Rejected' });
     } catch (err) {
-      console.warn('Firebase loan rejection delayed:');
+      console.warn('Database loan rejection delayed:');
     }
   };
 
@@ -1402,7 +1363,7 @@ export default function App() {
     try {
       await setDoc(doc(db, 'salaryRevisions', revision.id), cleanData(revision));
     } catch (err) {
-      console.warn('Firebase salary revision delayed:');
+      console.warn('Database salary revision delayed:');
     }
   };
 
@@ -1416,7 +1377,7 @@ export default function App() {
     try {
       await setDoc(doc(db, 'performanceReviews', review.id), cleanData(review));
     } catch (err) {
-      console.warn('Firebase performance review add delayed:');
+      console.warn('Database performance review add delayed:');
     }
   };
 
@@ -1429,7 +1390,7 @@ export default function App() {
     try {
       await setDoc(doc(db, 'performanceReviews', review.id), cleanData(review));
     } catch (err) {
-      console.warn('Firebase performance review update delayed:');
+      console.warn('Database performance review update delayed:');
     }
   };
 
@@ -1443,7 +1404,7 @@ export default function App() {
     try {
       await setDoc(doc(db, 'companyAssets', asset.id), cleanData(asset));
     } catch (err) {
-      console.warn('Firebase asset add delayed:');
+      console.warn('Database asset add delayed:');
     }
   };
 
@@ -1456,7 +1417,7 @@ export default function App() {
     try {
       await setDoc(doc(db, 'companyAssets', asset.id), cleanData(asset));
     } catch (err) {
-      console.warn('Firebase asset update delayed:');
+      console.warn('Database asset update delayed:');
     }
   };
 
@@ -1470,7 +1431,7 @@ export default function App() {
     try {
       await setDoc(doc(db, 'jobPostings', posting.id), cleanData(posting));
     } catch (err) {
-      console.warn('Firebase job posting add delayed:');
+      console.warn('Database job posting add delayed:');
     }
   };
 
@@ -1483,7 +1444,7 @@ export default function App() {
     try {
       await setDoc(doc(db, 'jobPostings', posting.id), cleanData(posting));
     } catch (err) {
-      console.warn('Firebase job posting update delayed:');
+      console.warn('Database job posting update delayed:');
     }
   };
 
@@ -1496,7 +1457,7 @@ export default function App() {
     try {
       await setDoc(doc(db, 'jobApplications', app.id), cleanData(app));
     } catch (err) {
-      console.warn('Firebase job application add delayed:');
+      console.warn('Database job application add delayed:');
     }
   };
 
@@ -1509,7 +1470,7 @@ export default function App() {
     try {
       await setDoc(doc(db, 'jobApplications', app.id), cleanData(app));
     } catch (err) {
-      console.warn('Firebase job application update delayed:');
+      console.warn('Database job application update delayed:');
     }
   };
 
@@ -1523,7 +1484,7 @@ export default function App() {
     try {
       await setDoc(doc(db, 'gratuitySettlements', settlement.id), cleanData(settlement));
     } catch (err) {
-      console.warn('Firebase gratuity settlement add delayed:');
+      console.warn('Database gratuity settlement add delayed:');
     }
   };
 
@@ -1536,7 +1497,7 @@ export default function App() {
     try {
       await setDoc(doc(db, 'gratuitySettlements', settlement.id), cleanData(settlement));
     } catch (err) {
-      console.warn('Firebase gratuity settlement update delayed:');
+      console.warn('Database gratuity settlement update delayed:');
     }
   };
 
@@ -1550,7 +1511,7 @@ export default function App() {
     try {
       await setDoc(doc(db, 'notifications', notification.id), cleanData(notification));
     } catch (err) {
-      console.warn('Firebase notification add delayed:');
+      console.warn('Database notification add delayed:');
     }
   };
 
@@ -1569,7 +1530,7 @@ export default function App() {
         await updateDoc(doc(db, 'notifications', id), { readBy: [...notif.readBy, empId] });
       }
     } catch (err) {
-      console.warn('Firebase notification mark-read delayed:');
+      console.warn('Database notification mark-read delayed:');
     }
   };
 

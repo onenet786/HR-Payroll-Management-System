@@ -390,7 +390,7 @@ export function WindowsApp({
                 <p className="text-yellow-500">[SYSTEM_INFO] BI-HR client local runtime booted at {new Date().toISOString()}</p>
                 <p className="text-slate-400">[PORT_SETUP] Initializing Serial connection on default COM3...</p>
                 <p className="text-emerald-500">[PORT_OK] COM3 responding with baudrate 115200. ZKTeco firmware v4.11</p>
-                <p className="text-blue-400">[SOCKET] Established persistent websocket handshake to Firestore ai-studio-0ab7c3a1...</p>
+                <p className="text-blue-400">[SOCKET] Established persistent connection to Server PostgreSQL Database...</p>
                 <p className="text-slate-500">[POLLING] Awaiting hardware signals... (No action required)</p>
                 {attendances.slice(-5).map((att, idx) => {
                   const emp = employees.find(e => e.id === att.employeeId);

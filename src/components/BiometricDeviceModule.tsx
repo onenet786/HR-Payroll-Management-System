@@ -579,7 +579,7 @@ export function BiometricDeviceModule({
     const updated: Employee = { ...emp, fingerprintTemplates: enrollSamples };
     try {
       await onUpdateEmployee(updated);
-      setEnrollMsg({ type: 'ok', text: `✓ ${enrollSamples.length} fingerprint samples enrolled for ${emp.fullName} and saved to Firestore.` });
+      setEnrollMsg({ type: 'ok', text: `✓ ${enrollSamples.length} fingerprint samples enrolled for ${emp.fullName} and saved to Database.` });
       log(`✓ Enrollment saved: [REDACTED] (${enrollSamples.length} templates)`);
       setTimeout(() => setEnrollMsg(null), 4000);
     } catch {
@@ -1259,7 +1259,7 @@ export function BiometricDeviceModule({
                 <div>
                   <h3 className="font-bold text-slate-800 text-sm">Enroll Employee Biometrics</h3>
                   <p className="text-xs text-slate-500 mt-1">
-                    Capture fingerprint samples and a camera face profile. All samples are stored in Firestore under the employee record.
+                    Capture fingerprint samples and a camera face profile. All samples are stored in Database under the employee record.
                   </p>
                 </div>
 
@@ -1649,7 +1649,7 @@ export function BiometricDeviceModule({
                 <div>
                   <h3 className="font-bold text-slate-800 text-sm">Mark Attendance</h3>
                   <p className="text-xs text-slate-500 mt-1">
-                    Select the employee, then scan their enrolled finger. Attendance is marked in Firestore immediately upon successful verification.
+                    Select the employee, then scan their enrolled finger. Attendance is marked in Database immediately upon successful verification.
                   </p>
                 </div>
 
