@@ -9,14 +9,15 @@ import {
   Users, Calendar, CreditCard, ShieldCheck, FileText, Download, UserPlus,
   CheckCircle, AlertTriangle, Building, MapPin, Layers, Sliders, Info,
   CalendarDays, Banknote, TrendingUp, Star, Package, Briefcase, Calculator, Bell, Fingerprint,
-  Database, BookOpen, Menu, X, ChevronDown, ListTree, Search, RotateCcw
+  Database, BookOpen, Menu, X, ChevronDown, ListTree, Search, RotateCcw,
+  ZoomIn, Eye, ExternalLink
 } from 'lucide-react';
 import {
   Employee, AttendanceLog, LeaveRequest, StatutoryConfig, TaxSlab, PayrollRun, Payslip,
   Role, UserAccount, NewUserAccount, Branch, Department, Designation, Holiday, LoanAdvance, SalaryRevision,
   PerformanceReview, CompanyAsset, JobPosting, JobApplication, GratuitySettlement, AppNotification, Company, CompanySetupPayload, Zone, UcTown, WageType, MobileDutyAuthorization, MobileDutyType
 } from '../types';
-import { computePayslipDetails, DEFAULT_TAX_SLABS } from '../data/defaults';
+import { computePayslipDetails, DEFAULT_TAX_SLABS, calculateFbrSalarySplit, calculateGrossFromTakeHome } from '../data/defaults';
 import { deriveEmployeeCompanyId, getEmployeeEditDepartmentOptions, getEmployeeEditOptions, resolveEmployeeCompanyId, resolveRecordId, resolveUcTownName, resolveWageBasis, resolveWageTypeName, resolveZoneName, synchronizeDepartmentSelection, validateEmployeeMasterSelection } from '../data/masterData';
 import { HolidayModule } from './HolidayModule';
 import { LoansModule } from './LoansModule';
@@ -62,6 +63,40 @@ const formatCNIC = (val: string): string => {
     return `${digits.slice(0, 5)}-${digits.slice(5)}`;
   }
   return `${digits.slice(0, 5)}-${digits.slice(5, 12)}-${digits.slice(12, 13)}`;
+};
+
+export const deriveCompanyPrefix = (
+  company?: { code?: string; name?: string; legalName?: string } | null,
+  fallback = 'ONENET'
+): string => {
+  if (company?.code?.trim()) {
+    return company.code.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  }
+  const raw = (company?.legalName || company?.name || fallback).trim();
+  const stripped = raw.replace(/\b(Pvt|Ltd|Limited|LLC|Inc|Corp|Pk|Pakistan)\b/gi, '').trim();
+  const words = stripped.split(/[\s-_]+/).filter(Boolean);
+  if (words.length === 0) return 'ONENET';
+  if (words.length > 1 && words[0].length <= 3 && words[0].length + words[1].length <= 12) {
+    return `${words[0]}${words[1]}`.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  }
+  return words[0].toUpperCase().replace(/[^A-Z0-9]/g, '') || 'ONENET';
+};
+
+export const formatPakMobileNumber = (raw: string): string => {
+  let digits = (raw || '').replace(/\D/g, '');
+  if (digits.startsWith('923')) {
+    digits = digits.slice(3);
+  } else if (digits.startsWith('03')) {
+    digits = digits.slice(2);
+  } else if (digits.startsWith('3')) {
+    digits = digits.slice(1);
+  }
+  const clean9 = digits.slice(0, 9);
+  return clean9.length > 0 ? `+923${clean9}` : '+923';
+};
+
+export const isValidPakMobileNumber = (val: string): boolean => {
+  return /^\+923\d{9}$/.test((val || '').trim());
 };
 
 type LegacyEmployeeAssignment = Employee & {
@@ -583,7 +618,7 @@ export function WebPortal({
   const [newEmpForm, setNewEmpForm] = useState({
     fullName: '',
     email: '',
-    contactNumber: '0300-1234567',
+    contactNumber: '+923001234567',
     cnic: '42101-1234567-3',
     gender: 'Male',
     dateOfBirth: '1995-01-01',
@@ -622,7 +657,7 @@ export function WebPortal({
   const [editEmpForm, setEditEmpForm] = useState({
     fullName: '',
     email: '',
-    contactNumber: '',
+    contactNumber: '+923001234567',
     cnic: '',
     gender: 'Male',
     dateOfBirth: '1995-01-01',
@@ -657,6 +692,10 @@ export function WebPortal({
     maritalStatus: 'Single'
   });
 
+  const [newEmpTakeHome, setNewEmpTakeHome] = useState(false);
+  const [editEmpTakeHome, setEditEmpTakeHome] = useState(false);
+  const [viewImageModal, setViewImageModal] = useState<{ open: boolean; url: string; title: string; subtitle?: string } | null>(null);
+
   const now = new Date();
   const [payrollMonth, setPayrollMonth] = useState(now.getMonth() + 1);
   const [payrollYear, setPayrollYear] = useState(now.getFullYear());
@@ -677,6 +716,7 @@ export function WebPortal({
   const editingCompanyId = editingEmployee
     ? resolveEmployeeCompanyId(editingEmployee, localBranches, companies.map(company => company.id), primaryCompany?.id)
     : '';
+  const editingCompany = companies.find(company => company.id === editingCompanyId) || primaryCompany;
   const editBranchOptions = getEmployeeEditOptions(localBranches, editingCompanyId, editEmpForm.branchId);
   const editCompanyBranchIds = new Set(localBranches
     .filter(branch => !editingCompanyId || branch.companyId === editingCompanyId)
@@ -786,12 +826,15 @@ export function WebPortal({
   const [autoGenNewCode, setAutoGenNewCode] = useState(false);
   const [autoGenEditCode, setAutoGenEditCode] = useState(false);
 
-  const getAutoEmployeeCode = (_branchId: string, departmentId: string) => {
+  const getAutoEmployeeCode = (branchId: string, departmentId: string) => {
+    const branch = localBranches.find(b => b.id === branchId);
+    const company = companies.find(c => c.id === branch?.companyId) || primaryCompany;
+    const compPrefix = deriveCompanyPrefix(company, companyDisplayName);
     const dept = localDepartments.find(d => d.id === departmentId);
     const deptCode = dept?.code || 'GEN';
     const matchingCount = employees.filter(e => e.departmentId === departmentId).length;
     const nextSeq = String(matchingCount + 1).padStart(5, '0');
-    return `BINISHAQ-${deptCode.toUpperCase()}-${nextSeq}`;
+    return `${compPrefix}-${deptCode.toUpperCase()}-${nextSeq}`;
   };
 
   React.useEffect(() => {
@@ -801,7 +844,7 @@ export function WebPortal({
         employeeCode: getAutoEmployeeCode(prev.branchId, prev.departmentId)
       }));
     }
-  }, [autoGenNewCode, newEmpForm.branchId, newEmpForm.departmentId, localDepartments, employees]);
+  }, [autoGenNewCode, newEmpForm.branchId, newEmpForm.departmentId, localDepartments, localBranches, companies, companyDisplayName, employees]);
 
   React.useEffect(() => {
     if (autoGenEditCode) {
@@ -810,7 +853,7 @@ export function WebPortal({
         employeeCode: getAutoEmployeeCode(prev.branchId, prev.departmentId)
       }));
     }
-  }, [autoGenEditCode, editEmpForm.branchId, editEmpForm.departmentId, localDepartments, employees]);
+  }, [autoGenEditCode, editEmpForm.branchId, editEmpForm.departmentId, localDepartments, localBranches, companies, companyDisplayName, employees]);
 
   // Picture Upload Handlers
   const handlePictureFileChange = (e: React.ChangeEvent<HTMLInputElement>, isEdit: boolean) => {
@@ -1010,10 +1053,16 @@ export function WebPortal({
       alert('CNIC format must be valid (e.g. 42101-1234567-3)');
       return;
     }
+
+    if (!isValidPakMobileNumber(newEmpForm.contactNumber)) {
+      alert('Mobile Contact must start with +923 followed by exactly 9 digits (e.g. +923214444444).');
+      return;
+    }
+
     const masterErrors = validateEmployeeMasterSelection(newEmpForm, { branches: companyBranches, departments: localDepartments, designations: localDesignations, zones, ucTowns, wageTypes });
     if (masterErrors.length) { alert(`Please correct the employee assignment:\n• ${masterErrors.join('\n• ')}`); return; }
 
-    const generatedCode = newEmpForm.branchId === 'b1' ? `IND-KHI-${Math.floor(100 + Math.random() * 900)}` : `IND-LHR-${Math.floor(100 + Math.random() * 900)}`;
+    const generatedCode = getAutoEmployeeCode(newEmpForm.branchId, newEmpForm.departmentId);
 
     const selectedZone = zones.find(item => item.id === newEmpForm.zoneId);
     const selectedUcTown = ucTowns.find(item => item.id === newEmpForm.ucTownId);
@@ -1064,11 +1113,12 @@ export function WebPortal({
 
     onAddEmployee(newEmp);
     setShowAddEmpModal(false);
+    setNewEmpTakeHome(false);
     // Reset
     setNewEmpForm({
       fullName: '',
       email: '',
-      contactNumber: '0300-1234567',
+      contactNumber: '+923001234567',
       cnic: '42101-1234567-3',
       gender: 'Male',
       dateOfBirth: '1995-01-01',
@@ -1117,6 +1167,12 @@ export function WebPortal({
       alert('CNIC format must be valid (e.g. 42101-1234567-3)');
       return;
     }
+
+    if (!isValidPakMobileNumber(editEmpForm.contactNumber)) {
+      alert('Mobile Contact must start with +923 followed by exactly 9 digits (e.g. +923214444444).');
+      return;
+    }
+
     const masterErrors = validateEmployeeMasterSelection(editEmpForm, {
       branches: editBranchOptions,
       departments: editDepartmentOptions,
@@ -1176,6 +1232,7 @@ export function WebPortal({
 
     onUpdateEmployee(updatedEmp);
     setShowEditEmpModal(false);
+    setEditEmpTakeHome(false);
     setEditingEmployee(null);
   };
 
@@ -1209,7 +1266,7 @@ export function WebPortal({
     setEditEmpForm({
       fullName: emp.fullName,
       email: emp.email,
-      contactNumber: emp.contactNumber,
+      contactNumber: formatPakMobileNumber(emp.contactNumber || ''),
       cnic: emp.cnic,
       gender: emp.gender,
       dateOfBirth: emp.dateOfBirth,
@@ -1243,6 +1300,7 @@ export function WebPortal({
       employeeCode: emp.employeeCode,
       maritalStatus: emp.maritalStatus || 'Single'
     });
+    setEditEmpTakeHome(false);
     setEditDepartmentMoveNotice('');
     setShowEditEmpModal(true);
   };
@@ -2049,11 +2107,28 @@ export function WebPortal({
                                 <tr key={emp.id} className="hover:bg-slate-50/80 transition">
                                   <td className="px-6 py-4 whitespace-nowrap">
                                     <div className="flex items-center space-x-3">
-                                      <img 
-                                        src={empAvatarUrl(emp)}
-                                        alt={emp.fullName} 
-                                        className="w-9 h-9 rounded-full object-cover border border-slate-200" 
-                                      />
+                                      <div
+                                        className="relative cursor-pointer group flex-shrink-0"
+                                        onClick={() => setViewImageModal({
+                                          open: true,
+                                          url: empAvatarUrl(emp),
+                                          title: emp.fullName,
+                                          subtitle: `${emp.employeeCode} • ${desig?.title || 'Employee'} • ${dept?.name || 'Department'}`
+                                        })}
+                                        title="Click to view full photo"
+                                      >
+                                        <img 
+                                          src={empAvatarUrl(emp)}
+                                          alt={emp.fullName} 
+                                          className="w-9 h-9 rounded-full object-cover border border-slate-200 group-hover:ring-2 group-hover:ring-emerald-500 transition-all" 
+                                          onError={(e) => {
+                                            (e.target as HTMLImageElement).src = empAvatarUrl({ gender: emp.gender });
+                                          }}
+                                        />
+                                        <div className="absolute inset-0 rounded-full bg-black/30 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white text-[10px]">
+                                          <Eye className="w-3.5 h-3.5" />
+                                        </div>
+                                      </div>
                                       <div>
                                         <div className="font-semibold text-slate-900">{emp.fullName}</div>
                                         <div className="text-xs font-mono text-slate-500 mt-0.5">{emp.employeeCode} • {emp.email}</div>
@@ -4042,7 +4117,7 @@ export function WebPortal({
                       <input
                         type="email" required
                         aria-label="Official Email ID"
-                        placeholder="e.g. ahmed@binishaq.com"
+                        placeholder="e.g. employee@company.com"
                         value={newEmpForm.email}
                         onChange={(e) => setNewEmpForm({ ...newEmpForm, email: e.target.value })}
                         className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-sans text-slate-900 bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all focus:outline-none placeholder:text-slate-400"
@@ -4056,7 +4131,7 @@ export function WebPortal({
                         <input
                           type="text"
                           aria-label="Employee Code"
-                          placeholder="e.g. BINISHAQ-HR-00001"
+                          placeholder={`e.g. ${deriveCompanyPrefix(primaryCompany, companyDisplayName)}-02-00001`}
                           disabled={autoGenNewCode}
                           value={newEmpForm.employeeCode}
                           onChange={(e) => setNewEmpForm({ ...newEmpForm, employeeCode: e.target.value })}
@@ -4093,15 +4168,25 @@ export function WebPortal({
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
                         <span>Mobile Contact:</span>
+                        <span className={`text-[10px] font-mono ${isValidPakMobileNumber(newEmpForm.contactNumber) ? 'text-emerald-600 font-bold' : 'text-slate-400'}`}>
+                          {isValidPakMobileNumber(newEmpForm.contactNumber) ? '✓ Valid (9 digits)' : `${Math.max(0, 9 - (newEmpForm.contactNumber.replace(/\D/g, '').slice(3).length))} digits left`}
+                        </span>
                       </label>
-                      <input
-                        type="text" required
-                        aria-label="Mobile Contact Number"
-                        placeholder="e.g. 0300-1234567"
-                        value={newEmpForm.contactNumber}
-                        onChange={(e) => setNewEmpForm({ ...newEmpForm, contactNumber: e.target.value })}
-                        className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg font-mono text-xs text-slate-900 bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all focus:outline-none placeholder:text-slate-400"
-                      />
+                      <div className="relative">
+                        <input
+                          type="text" required
+                          aria-label="Mobile Contact Number"
+                          maxLength={13}
+                          placeholder="+923XXXXXXXXX"
+                          value={newEmpForm.contactNumber}
+                          onChange={(e) => setNewEmpForm({ ...newEmpForm, contactNumber: formatPakMobileNumber(e.target.value) })}
+                          className={`w-full h-9 px-3 py-1.5 border rounded-lg font-mono text-xs text-slate-900 bg-white focus:outline-none transition-all placeholder:text-slate-400 ${
+                            isValidPakMobileNumber(newEmpForm.contactNumber) 
+                              ? 'border-emerald-500 focus:ring-2 focus:ring-emerald-500/20' 
+                              : 'border-slate-300 focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500'
+                          }`}
+                        />
+                      </div>
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
@@ -4150,14 +4235,60 @@ export function WebPortal({
 
                   <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4 items-start">
                     <div className="sm:col-span-2 lg:col-span-4">
-                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
-                        <span>Picture URL / Upload:</span>
-                      </label>
-                      <div className="flex space-x-2 items-center h-9">
+                      <div className="flex items-center justify-between mb-1 min-h-[1.25rem]">
+                        <label className="font-bold text-slate-700 font-sans text-xs">
+                          <span>Picture URL / Upload:</span>
+                        </label>
+                        {newEmpForm.pictureUrl && (
+                          <button
+                            type="button"
+                            onClick={() => setViewImageModal({
+                              open: true,
+                              url: empAvatarUrl({ pictureUrl: newEmpForm.pictureUrl, gender: newEmpForm.gender }),
+                              title: newEmpForm.fullName || 'Employee Picture Preview',
+                              subtitle: newEmpForm.employeeCode || 'New Registration'
+                            })}
+                            className="text-[11px] text-emerald-600 hover:text-emerald-700 font-bold flex items-center gap-1 hover:underline cursor-pointer"
+                          >
+                            <ZoomIn className="w-3 h-3" /> View Large
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex space-x-2.5 items-center">
+                        {/* Live Thumbnail Preview */}
+                        <div 
+                          className="relative w-10 h-10 rounded-lg border-2 border-slate-200 overflow-hidden bg-slate-100 flex-shrink-0 cursor-pointer group shadow-2xs"
+                          onClick={() => {
+                            if (newEmpForm.pictureUrl) {
+                              setViewImageModal({
+                                open: true,
+                                url: empAvatarUrl({ pictureUrl: newEmpForm.pictureUrl, gender: newEmpForm.gender }),
+                                title: newEmpForm.fullName || 'Employee Picture Preview',
+                                subtitle: newEmpForm.employeeCode || 'New Registration'
+                              });
+                            }
+                          }}
+                          title={newEmpForm.pictureUrl ? 'Click to view high-resolution photo' : 'No photo uploaded'}
+                        >
+                          <img
+                            src={empAvatarUrl({ pictureUrl: newEmpForm.pictureUrl, gender: newEmpForm.gender })}
+                            alt="Preview"
+                            className="w-full h-full object-cover"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).src = empAvatarUrl({ gender: newEmpForm.gender });
+                            }}
+                          />
+                          {newEmpForm.pictureUrl && (
+                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white">
+                              <Eye className="w-3.5 h-3.5" />
+                            </div>
+                          )}
+                        </div>
+
                         <input
                           type="text"
                           aria-label="Picture URL"
-                          placeholder="e.g. https://domain.com/pic.jpg"
+                          placeholder="Paste image URL (https://...) or click Browse to upload"
                           value={newEmpForm.pictureUrl}
                           onChange={(e) => setNewEmpForm({ ...newEmpForm, pictureUrl: e.target.value })}
                           className="flex-1 h-9 px-3 py-1.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none font-mono text-xs text-slate-900 bg-white transition-all placeholder:text-slate-400"
@@ -4315,15 +4446,52 @@ export function WebPortal({
                       </select>
                     </div>
                     <div>
-                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
-                        <span>Basic Monthly Wage / Daily Rate (PKR):</span>
-                      </label>
+                      <div className="flex items-center justify-between mb-1 min-h-[1.25rem]">
+                        <label className="font-bold text-slate-700 font-sans text-xs">
+                          <span>{newEmpTakeHome ? 'Target Take Home (Net PKR):' : 'Basic Monthly Wage / Daily Rate (PKR):'}</span>
+                        </label>
+                        <label className="flex items-center gap-1.5 cursor-pointer select-none bg-emerald-50 hover:bg-emerald-100/80 px-2 py-0.5 rounded border border-emerald-200 text-emerald-800 transition-colors" title="Check to enter target take-home pay and auto-calculate gross and FBR allowances">
+                          <input
+                            type="checkbox"
+                            checked={newEmpTakeHome}
+                            onChange={(e) => {
+                              const checked = e.target.checked;
+                              setNewEmpTakeHome(checked);
+                              const split = calculateFbrSalarySplit(newEmpForm.basicSalary, checked, taxSlabs, statConfigs.minimumWage);
+                              setNewEmpForm(prev => ({
+                                ...prev,
+                                houseRentAllowance: split.houseRentAllowance,
+                                conveyanceAllowance: split.conveyanceAllowance,
+                                medicalAllowance: split.medicalAllowance,
+                                otherAllowances: 0
+                              }));
+                            }}
+                            className="rounded text-emerald-600 focus:ring-emerald-500 w-3.5 h-3.5"
+                          />
+                          <span className="text-[11px] font-bold">Take Home (FBR Auto)</span>
+                        </label>
+                      </div>
                       <input
                         type="number" required
                         aria-label="Basic Monthly Wage / Daily Rate (PKR)"
-                        placeholder="e.g. 85000"
+                        placeholder="e.g. 100000"
                         value={newEmpForm.basicSalary}
-                        onChange={(e) => setNewEmpForm({ ...newEmpForm, basicSalary: Number(e.target.value) })}
+                        onChange={(e) => {
+                          const val = Number(e.target.value);
+                          if (newEmpTakeHome) {
+                            const split = calculateFbrSalarySplit(val, true, taxSlabs, statConfigs.minimumWage);
+                            setNewEmpForm({
+                              ...newEmpForm,
+                              basicSalary: val,
+                              houseRentAllowance: split.houseRentAllowance,
+                              conveyanceAllowance: split.conveyanceAllowance,
+                              medicalAllowance: split.medicalAllowance,
+                              otherAllowances: 0
+                            });
+                          } else {
+                            setNewEmpForm({ ...newEmpForm, basicSalary: val });
+                          }
+                        }}
                         className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg font-mono text-xs text-slate-900 bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all focus:outline-none placeholder:text-slate-400"
                       />
                     </div>
@@ -4376,6 +4544,72 @@ export function WebPortal({
                       />
                     </div>
                   </div>
+
+                  {/* FBR Live Salary & Allowance Breakdown Card */}
+                  {((wageTypes.find(item => item.id === newEmpForm.wageTypeId)?.calculationBasis ?? (newEmpForm.wageType === 'Daily Wager' ? 'Daily' : 'Monthly')) === 'Monthly') && (
+                    <div className="bg-gradient-to-r from-emerald-50/80 via-slate-50 to-emerald-50/50 p-3 rounded-xl border border-emerald-200/90 shadow-2xs">
+                      <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                          <span className="text-xs font-bold text-slate-800">
+                            {newEmpTakeHome ? '🎯 FBR Take-Home Net Pay Mode (Auto-Calculated)' : '📋 Standard FBR Package Segregation (50/30/10/10)'}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const split = calculateFbrSalarySplit(newEmpForm.basicSalary, newEmpTakeHome, taxSlabs, statConfigs.minimumWage);
+                            setNewEmpForm(prev => ({
+                              ...prev,
+                              houseRentAllowance: split.houseRentAllowance,
+                              conveyanceAllowance: split.conveyanceAllowance,
+                              medicalAllowance: split.medicalAllowance,
+                              otherAllowances: 0
+                            }));
+                          }}
+                          className="text-[10px] font-bold text-emerald-700 hover:text-emerald-800 bg-white hover:bg-emerald-50 border border-emerald-300 px-2 py-0.5 rounded transition shadow-2xs cursor-pointer"
+                        >
+                          Auto-fill FBR Allowances
+                        </button>
+                      </div>
+
+                      {(() => {
+                        const split = calculateFbrSalarySplit(newEmpForm.basicSalary, newEmpTakeHome, taxSlabs, statConfigs.minimumWage);
+                        return (
+                          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 text-center text-xs">
+                            <div className="bg-white p-2 rounded-lg border border-slate-200 shadow-2xs">
+                              <span className="block text-[10px] text-slate-500 font-medium">Gross Salary</span>
+                              <span className="font-bold font-mono text-slate-900">{split.grossSalary.toLocaleString()} PKR</span>
+                            </div>
+                            <div className="bg-white p-2 rounded-lg border border-slate-200 shadow-2xs">
+                              <span className="block text-[10px] text-slate-500 font-medium">Basic Pay (50%)</span>
+                              <span className="font-bold font-mono text-slate-900">{split.basicWage.toLocaleString()} PKR</span>
+                            </div>
+                            <div className="bg-white p-2 rounded-lg border border-slate-200 shadow-2xs">
+                              <span className="block text-[10px] text-slate-500 font-medium">House Rent (30%)</span>
+                              <span className="font-bold font-mono text-emerald-700">{split.houseRentAllowance.toLocaleString()} PKR</span>
+                            </div>
+                            <div className="bg-white p-2 rounded-lg border border-slate-200 shadow-2xs">
+                              <span className="block text-[10px] text-slate-500 font-medium">Conveyance (10%)</span>
+                              <span className="font-bold font-mono text-slate-700">{split.conveyanceAllowance.toLocaleString()} PKR</span>
+                            </div>
+                            <div className="bg-white p-2 rounded-lg border border-slate-200 shadow-2xs">
+                              <span className="block text-[10px] text-slate-500 font-medium">Medical (10% exempt)</span>
+                              <span className="font-bold font-mono text-teal-700">{split.medicalAllowance.toLocaleString()} PKR</span>
+                            </div>
+                            <div className="bg-white p-2 rounded-lg border border-rose-100 shadow-2xs">
+                              <span className="block text-[10px] text-rose-500 font-medium">Est. Tax + EOBI</span>
+                              <span className="font-bold font-mono text-rose-600">-{(split.monthlyTax + split.eobiDeduction).toLocaleString()} PKR</span>
+                            </div>
+                            <div className="bg-emerald-600 text-white p-2 rounded-lg shadow-2xs">
+                              <span className="block text-[10px] text-emerald-100 font-medium">Net Take-Home</span>
+                              <span className="font-bold font-mono">{split.netTakeHome.toLocaleString()} PKR</span>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
 
                   <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4 items-start">
                     <div className="sm:col-span-2">
@@ -4590,7 +4824,7 @@ export function WebPortal({
                       <input
                         type="email" required
                         aria-label="Official Email ID"
-                        placeholder="e.g. ahmed@binishaq.com"
+                        placeholder="e.g. employee@company.com"
                         value={editEmpForm.email}
                         onChange={(e) => setEditEmpForm({ ...editEmpForm, email: e.target.value })}
                         className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-sans text-slate-900 bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all focus:outline-none placeholder:text-slate-400"
@@ -4604,7 +4838,7 @@ export function WebPortal({
                         <input
                           type="text"
                           aria-label="Employee Code"
-                          placeholder="e.g. BINISHAQ-HR-00001"
+                          placeholder={`e.g. ${deriveCompanyPrefix(editingCompany, companyDisplayName)}-02-00001`}
                           disabled={autoGenEditCode}
                           value={editEmpForm.employeeCode}
                           onChange={(e) => setEditEmpForm({ ...editEmpForm, employeeCode: e.target.value })}
@@ -4641,15 +4875,25 @@ export function WebPortal({
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
                         <span>Mobile Contact:</span>
+                        <span className={`text-[10px] font-mono ${isValidPakMobileNumber(editEmpForm.contactNumber) ? 'text-indigo-600 font-bold' : 'text-slate-400'}`}>
+                          {isValidPakMobileNumber(editEmpForm.contactNumber) ? '✓ Valid (9 digits)' : `${Math.max(0, 9 - (editEmpForm.contactNumber.replace(/\D/g, '').slice(3).length))} digits left`}
+                        </span>
                       </label>
-                      <input
-                        type="text" required
-                        aria-label="Mobile Contact Number"
-                        placeholder="e.g. 0300-1234567"
-                        value={editEmpForm.contactNumber}
-                        onChange={(e) => setEditEmpForm({ ...editEmpForm, contactNumber: e.target.value })}
-                        className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg font-mono text-xs text-slate-900 bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all focus:outline-none placeholder:text-slate-400"
-                      />
+                      <div className="relative">
+                        <input
+                          type="text" required
+                          aria-label="Mobile Contact Number"
+                          maxLength={13}
+                          placeholder="+923XXXXXXXXX"
+                          value={editEmpForm.contactNumber}
+                          onChange={(e) => setEditEmpForm({ ...editEmpForm, contactNumber: formatPakMobileNumber(e.target.value) })}
+                          className={`w-full h-9 px-3 py-1.5 border rounded-lg font-mono text-xs text-slate-900 bg-white focus:outline-none transition-all placeholder:text-slate-400 ${
+                            isValidPakMobileNumber(editEmpForm.contactNumber) 
+                              ? 'border-indigo-500 focus:ring-2 focus:ring-indigo-500/20' 
+                              : 'border-slate-300 focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500'
+                          }`}
+                        />
+                      </div>
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
@@ -4698,14 +4942,60 @@ export function WebPortal({
 
                   <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4 items-start">
                     <div className="sm:col-span-2 lg:col-span-4">
-                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
-                        <span>Picture URL / Upload:</span>
-                      </label>
-                      <div className="flex space-x-2 items-center h-9">
+                      <div className="flex items-center justify-between mb-1 min-h-[1.25rem]">
+                        <label className="font-bold text-slate-700 font-sans text-xs">
+                          <span>Picture URL / Upload:</span>
+                        </label>
+                        {editEmpForm.pictureUrl && (
+                          <button
+                            type="button"
+                            onClick={() => setViewImageModal({
+                              open: true,
+                              url: empAvatarUrl({ pictureUrl: editEmpForm.pictureUrl, gender: editEmpForm.gender }),
+                              title: editEmpForm.fullName || 'Employee Picture Preview',
+                              subtitle: editEmpForm.employeeCode || 'Employee Record'
+                            })}
+                            className="text-[11px] text-indigo-600 hover:text-indigo-700 font-bold flex items-center gap-1 hover:underline cursor-pointer"
+                          >
+                            <ZoomIn className="w-3 h-3" /> View Large
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex space-x-2.5 items-center">
+                        {/* Live Thumbnail Preview */}
+                        <div 
+                          className="relative w-10 h-10 rounded-lg border-2 border-slate-200 overflow-hidden bg-slate-100 flex-shrink-0 cursor-pointer group shadow-2xs"
+                          onClick={() => {
+                            if (editEmpForm.pictureUrl) {
+                              setViewImageModal({
+                                open: true,
+                                url: empAvatarUrl({ pictureUrl: editEmpForm.pictureUrl, gender: editEmpForm.gender }),
+                                title: editEmpForm.fullName || 'Employee Picture Preview',
+                                subtitle: editEmpForm.employeeCode || 'Employee Record'
+                              });
+                            }
+                          }}
+                          title={editEmpForm.pictureUrl ? 'Click to view high-resolution photo' : 'No photo uploaded'}
+                        >
+                          <img
+                            src={empAvatarUrl({ pictureUrl: editEmpForm.pictureUrl, gender: editEmpForm.gender })}
+                            alt="Preview"
+                            className="w-full h-full object-cover"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).src = empAvatarUrl({ gender: editEmpForm.gender });
+                            }}
+                          />
+                          {editEmpForm.pictureUrl && (
+                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white">
+                              <Eye className="w-3.5 h-3.5" />
+                            </div>
+                          )}
+                        </div>
+
                         <input
                           type="text"
                           aria-label="Picture URL"
-                          placeholder="e.g. https://domain.com/pic.jpg"
+                          placeholder="Paste image URL (https://...) or click Browse to upload"
                           value={editEmpForm.pictureUrl}
                           onChange={(e) => setEditEmpForm({ ...editEmpForm, pictureUrl: e.target.value })}
                           className="flex-1 h-9 px-3 py-1.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none font-mono text-xs text-slate-900 bg-white transition-all placeholder:text-slate-400"
@@ -4875,15 +5165,52 @@ export function WebPortal({
                       {!editEmpForm.wageTypeId && editEmpForm.wageType && <p className="mt-1 text-[10px] leading-tight text-amber-700">Saved wage type “{editEmpForm.wageType}” is not linked to current Master Data. Choose its replacement.</p>}
                     </div>
                     <div>
-                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
-                        <span>Basic Monthly Wage / Daily Rate (PKR):</span>
-                      </label>
+                      <div className="flex items-center justify-between mb-1 min-h-[1.25rem]">
+                        <label className="font-bold text-slate-700 font-sans text-xs">
+                          <span>{editEmpTakeHome ? 'Target Take Home (Net PKR):' : 'Basic Monthly Wage / Daily Rate (PKR):'}</span>
+                        </label>
+                        <label className="flex items-center gap-1.5 cursor-pointer select-none bg-indigo-50 hover:bg-indigo-100/80 px-2 py-0.5 rounded border border-indigo-200 text-indigo-800 transition-colors" title="Check to enter target take-home pay and auto-calculate gross and FBR allowances">
+                          <input
+                            type="checkbox"
+                            checked={editEmpTakeHome}
+                            onChange={(e) => {
+                              const checked = e.target.checked;
+                              setEditEmpTakeHome(checked);
+                              const split = calculateFbrSalarySplit(editEmpForm.basicSalary, checked, taxSlabs, statConfigs.minimumWage);
+                              setEditEmpForm(prev => ({
+                                ...prev,
+                                houseRentAllowance: split.houseRentAllowance,
+                                conveyanceAllowance: split.conveyanceAllowance,
+                                medicalAllowance: split.medicalAllowance,
+                                otherAllowances: 0
+                              }));
+                            }}
+                            className="rounded text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5"
+                          />
+                          <span className="text-[11px] font-bold">Take Home (FBR Auto)</span>
+                        </label>
+                      </div>
                       <input
                         type="number" required
                         aria-label="Basic Monthly Wage / Daily Rate (PKR)"
-                        placeholder="e.g. 85000"
+                        placeholder="e.g. 100000"
                         value={editEmpForm.basicSalary}
-                        onChange={(e) => setEditEmpForm({ ...editEmpForm, basicSalary: Number(e.target.value) })}
+                        onChange={(e) => {
+                          const val = Number(e.target.value);
+                          if (editEmpTakeHome) {
+                            const split = calculateFbrSalarySplit(val, true, taxSlabs, statConfigs.minimumWage);
+                            setEditEmpForm({
+                              ...editEmpForm,
+                              basicSalary: val,
+                              houseRentAllowance: split.houseRentAllowance,
+                              conveyanceAllowance: split.conveyanceAllowance,
+                              medicalAllowance: split.medicalAllowance,
+                              otherAllowances: 0
+                            });
+                          } else {
+                            setEditEmpForm({ ...editEmpForm, basicSalary: val });
+                          }
+                        }}
                         className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg font-mono text-xs text-slate-900 bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all focus:outline-none placeholder:text-slate-400"
                       />
                     </div>
@@ -4936,6 +5263,72 @@ export function WebPortal({
                       />
                     </div>
                   </div>
+
+                  {/* FBR Live Salary & Allowance Breakdown Card */}
+                  {((wageTypes.find(item => item.id === editEmpForm.wageTypeId)?.calculationBasis ?? (editEmpForm.wageType === 'Daily Wager' ? 'Daily' : 'Monthly')) === 'Monthly') && (
+                    <div className="bg-gradient-to-r from-indigo-50/80 via-slate-50 to-indigo-50/50 p-3 rounded-xl border border-indigo-200/90 shadow-2xs">
+                      <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 animate-pulse"></span>
+                          <span className="text-xs font-bold text-slate-800">
+                            {editEmpTakeHome ? '🎯 FBR Take-Home Net Pay Mode (Auto-Calculated)' : '📋 Standard FBR Package Segregation (50/30/10/10)'}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const split = calculateFbrSalarySplit(editEmpForm.basicSalary, editEmpTakeHome, taxSlabs, statConfigs.minimumWage);
+                            setEditEmpForm(prev => ({
+                              ...prev,
+                              houseRentAllowance: split.houseRentAllowance,
+                              conveyanceAllowance: split.conveyanceAllowance,
+                              medicalAllowance: split.medicalAllowance,
+                              otherAllowances: 0
+                            }));
+                          }}
+                          className="text-[10px] font-bold text-indigo-700 hover:text-indigo-800 bg-white hover:bg-indigo-50 border border-indigo-300 px-2 py-0.5 rounded transition shadow-2xs cursor-pointer"
+                        >
+                          Auto-fill FBR Allowances
+                        </button>
+                      </div>
+
+                      {(() => {
+                        const split = calculateFbrSalarySplit(editEmpForm.basicSalary, editEmpTakeHome, taxSlabs, statConfigs.minimumWage);
+                        return (
+                          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 text-center text-xs">
+                            <div className="bg-white p-2 rounded-lg border border-slate-200 shadow-2xs">
+                              <span className="block text-[10px] text-slate-500 font-medium">Gross Salary</span>
+                              <span className="font-bold font-mono text-slate-900">{split.grossSalary.toLocaleString()} PKR</span>
+                            </div>
+                            <div className="bg-white p-2 rounded-lg border border-slate-200 shadow-2xs">
+                              <span className="block text-[10px] text-slate-500 font-medium">Basic Pay (50%)</span>
+                              <span className="font-bold font-mono text-slate-900">{split.basicWage.toLocaleString()} PKR</span>
+                            </div>
+                            <div className="bg-white p-2 rounded-lg border border-slate-200 shadow-2xs">
+                              <span className="block text-[10px] text-slate-500 font-medium">House Rent (30%)</span>
+                              <span className="font-bold font-mono text-indigo-700">{split.houseRentAllowance.toLocaleString()} PKR</span>
+                            </div>
+                            <div className="bg-white p-2 rounded-lg border border-slate-200 shadow-2xs">
+                              <span className="block text-[10px] text-slate-500 font-medium">Conveyance (10%)</span>
+                              <span className="font-bold font-mono text-slate-700">{split.conveyanceAllowance.toLocaleString()} PKR</span>
+                            </div>
+                            <div className="bg-white p-2 rounded-lg border border-slate-200 shadow-2xs">
+                              <span className="block text-[10px] text-slate-500 font-medium">Medical (10% exempt)</span>
+                              <span className="font-bold font-mono text-teal-700">{split.medicalAllowance.toLocaleString()} PKR</span>
+                            </div>
+                            <div className="bg-white p-2 rounded-lg border border-rose-100 shadow-2xs">
+                              <span className="block text-[10px] text-rose-500 font-medium">Est. Tax + EOBI</span>
+                              <span className="font-bold font-mono text-rose-600">-{(split.monthlyTax + split.eobiDeduction).toLocaleString()} PKR</span>
+                            </div>
+                            <div className="bg-indigo-600 text-white p-2 rounded-lg shadow-2xs">
+                              <span className="block text-[10px] text-indigo-100 font-medium">Net Take-Home</span>
+                              <span className="font-bold font-mono">{split.netTakeHome.toLocaleString()} PKR</span>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
 
                   <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4 items-start">
                     <div className="sm:col-span-2">
@@ -5844,6 +6237,74 @@ export function WebPortal({
                   ))}
                 </>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── High-Resolution Image Viewer Modal ── */}
+      {viewImageModal?.open && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 animate-in fade-in duration-200"
+          onClick={() => setViewImageModal(null)}
+        >
+          <div
+            className="relative bg-slate-900 border border-slate-700 rounded-2xl max-w-2xl w-full overflow-hidden shadow-2xl flex flex-col max-h-[90vh]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-800 bg-slate-900/90 text-white">
+              <div>
+                <h3 className="font-bold text-sm tracking-wide flex items-center gap-2">
+                  <span>{viewImageModal.title}</span>
+                </h3>
+                {viewImageModal.subtitle && (
+                  <p className="text-xs text-slate-400 font-mono mt-0.5">{viewImageModal.subtitle}</p>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <a
+                  href={viewImageModal.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition"
+                  title="Open full image in new tab"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setViewImageModal(null)}
+                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition cursor-pointer"
+                  title="Close viewer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body / Image Stage */}
+            <div className="flex-1 overflow-auto p-4 flex items-center justify-center bg-slate-950 min-h-[300px]">
+              <img
+                src={viewImageModal.url}
+                alt={viewImageModal.title}
+                className="max-h-[70vh] max-w-full object-contain rounded-lg shadow-lg border border-slate-800"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src = empAvatarUrl({ gender: 'Male' });
+                }}
+              />
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-5 py-2.5 bg-slate-900/90 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
+              <span className="font-mono text-[11px] truncate max-w-md">{viewImageModal.url}</span>
+              <button
+                type="button"
+                onClick={() => setViewImageModal(null)}
+                className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-xs transition cursor-pointer"
+              >
+                Close
+              </button>
             </div>
           </div>
         </div>

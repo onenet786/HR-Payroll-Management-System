@@ -105,7 +105,7 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
     employeeCode: 'IND-KHI-001',
     fullName: 'Ali Raza Khan',
     email: 'ali.raza@induslog.com',
-    contactNumber: '0300-1234567',
+    contactNumber: '+923001234567',
     cnic: '42101-1234567-3',
     gender: 'Male',
     dateOfBirth: '1992-04-12',
@@ -138,7 +138,7 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
     employeeCode: 'IND-KHI-002',
     fullName: 'Sara Ahmed',
     email: 'sara.ahmed@induslog.com',
-    contactNumber: '0321-7654321',
+    contactNumber: '+923217654321',
     cnic: '42201-9876543-2',
     gender: 'Female',
     dateOfBirth: '1989-08-25',
@@ -172,7 +172,7 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
     employeeCode: 'IND-LHR-003',
     fullName: 'Muhammad Usman',
     email: 'usman.m@induslog.com',
-    contactNumber: '0333-3112233',
+    contactNumber: '+923333112233',
     cnic: '35202-1234561-1',
     gender: 'Male',
     dateOfBirth: '1991-01-05',
@@ -205,7 +205,7 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
     employeeCode: 'IND-LHR-004',
     fullName: 'Tariq Mahmood',
     email: 'tariq.m@induslog.com',
-    contactNumber: '0312-9988776',
+    contactNumber: '+923129988776',
     cnic: '35103-5143219-5',
     gender: 'Male',
     dateOfBirth: '1985-06-15',
@@ -243,7 +243,7 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
     employeeCode: 'IND-LHR-WS01',
     fullName: 'Kamran Bashir',
     email: 'kamran.dispatch@induslog.com',
-    contactNumber: '0345-4455667',
+    contactNumber: '+923454455667',
     cnic: '35201-9988221-7',
     gender: 'Male',
     dateOfBirth: '1995-12-01',
@@ -274,10 +274,10 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
     branchId: 'b1',
     departmentId: 'd1',
     designationId: 'ds1',
-    employeeCode: 'BINISHAQ-IT-00002',
+    employeeCode: 'ONENET-IT-00002',
     fullName: 'Aqeel Ur Rehman',
     email: 'aaqueel@gmail.com',
-    contactNumber: '0300-1234567',
+    contactNumber: '+923001234567',
     cnic: '35201-1599874-1',
     gender: 'Male',
     dateOfBirth: '1990-05-15',
@@ -411,6 +411,110 @@ export function calculateAnnualTax(annualTaxableIncome: number, slabs: TaxSlab[]
   }
 
   return Math.round(baseCalculatedTax);
+}
+
+/**
+ * Reverse calculate Gross Contract Salary from target Net Take-Home pay
+ * accounting for progressive FBR income tax and statutory EOBI employee deduction.
+ */
+export function calculateGrossFromTakeHome(
+  targetNet: number,
+  slabs: TaxSlab[] = DEFAULT_TAX_SLABS,
+  minimumWage = 37000,
+  eobiEmployeeRate = 1
+): { gross: number; monthlyTax: number; eobi: number; net: number } {
+  if (!targetNet || targetNet <= 0) return { gross: 0, monthlyTax: 0, eobi: 0, net: 0 };
+  const eobi = Math.round(minimumWage * (eobiEmployeeRate / 100));
+
+  let low = targetNet;
+  let high = targetNet * 2 + 50000;
+  let bestGross = targetNet;
+
+  for (let i = 0; i < 40; i++) {
+    const mid = (low + high) / 2;
+    const annualTax = calculateAnnualTax(mid * 12, slabs);
+    const mTax = annualTax / 12;
+    const computedNet = mid - mTax - eobi;
+
+    if (Math.abs(computedNet - targetNet) < 0.5) {
+      bestGross = Math.round(mid);
+      break;
+    }
+    if (computedNet < targetNet) {
+      low = mid;
+    } else {
+      high = mid;
+      bestGross = Math.round(mid);
+    }
+  }
+
+  const annualTax = calculateAnnualTax(bestGross * 12, slabs);
+  const monthlyTax = Math.round(annualTax / 12);
+  const net = bestGross - monthlyTax - eobi;
+  return { gross: bestGross, monthlyTax, eobi, net };
+}
+
+/**
+ * Segregate salary package according to standard Pakistan FBR / market practices:
+ * - Basic Wage: 50%
+ * - House Rent Allowance: 30% (standard 45% of basic / 30% of gross)
+ * - Conveyance Allowance: 10%
+ * - Medical Allowance: 10% (FBR Clause 139 exempts medical allowance up to 10% of basic)
+ */
+export function calculateFbrSalarySplit(
+  amount: number,
+  isTakeHome: boolean,
+  slabs: TaxSlab[] = DEFAULT_TAX_SLABS,
+  minimumWage = 37000
+) {
+  if (!amount || amount <= 0) {
+    return {
+      targetAmount: 0,
+      isTakeHome,
+      grossSalary: 0,
+      basicWage: 0,
+      houseRentAllowance: 0,
+      conveyanceAllowance: 0,
+      medicalAllowance: 0,
+      otherAllowances: 0,
+      monthlyTax: 0,
+      eobiDeduction: 0,
+      netTakeHome: 0,
+    };
+  }
+
+  let gross = amount;
+  let monthlyTax = 0;
+  let eobiDeduction = Math.round(minimumWage * 0.01);
+
+  if (isTakeHome) {
+    const rev = calculateGrossFromTakeHome(amount, slabs, minimumWage);
+    gross = rev.gross;
+    monthlyTax = rev.monthlyTax;
+    eobiDeduction = rev.eobi;
+  } else {
+    monthlyTax = Math.round(calculateAnnualTax(gross * 12, slabs) / 12);
+  }
+
+  const basicWage = Math.round(gross * 0.50);
+  const houseRentAllowance = Math.round(gross * 0.30);
+  const conveyanceAllowance = Math.round(gross * 0.10);
+  const medicalAllowance = Math.round(gross * 0.10);
+  const netTakeHome = gross - monthlyTax - eobiDeduction;
+
+  return {
+    targetAmount: amount,
+    isTakeHome,
+    grossSalary: gross,
+    basicWage,
+    houseRentAllowance,
+    conveyanceAllowance,
+    medicalAllowance,
+    otherAllowances: 0,
+    monthlyTax,
+    eobiDeduction,
+    netTakeHome,
+  };
 }
 
 // Function to calculate exact Pakistan Statutory & gross-to-net payslip details

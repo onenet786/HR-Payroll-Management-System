@@ -19,7 +19,16 @@ export const MALE_AVATAR_URL = `data:image/svg+xml;base64,${btoa(MALE_SVG)}`;
 export const FEMALE_AVATAR_URL = `data:image/svg+xml;base64,${btoa(FEMALE_SVG)}`;
 
 export function empAvatarUrl(emp: { pictureUrl?: string; gender?: string } | null | undefined): string {
-  // Do not load arbitrary third-party URLs: they disclose the viewer's IP/device metadata.
-  if (emp?.pictureUrl?.startsWith('data:image/') || emp?.pictureUrl?.startsWith('blob:')) return emp.pictureUrl;
+  const url = emp?.pictureUrl?.trim();
+  if (url && (
+    url.startsWith('data:image/') ||
+    url.startsWith('blob:') ||
+    url.startsWith('http://') ||
+    url.startsWith('https://') ||
+    url.startsWith('/') ||
+    url.startsWith('./')
+  )) {
+    return url;
+  }
   return emp?.gender?.toLowerCase().startsWith('f') ? FEMALE_AVATAR_URL : MALE_AVATAR_URL;
 }
