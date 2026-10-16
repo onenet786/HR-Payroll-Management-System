@@ -971,7 +971,7 @@ function drawKioskMultiFaceHUD(canvas, faces) {
     ctx.stroke();
 
     // Top Label
-    const topTitle = employeeName || (status === 'unknown' ? 'Unknown' : 'neutral');
+    const topTitle = employeeName || (status === 'unknown' ? 'Unknown' : 'Scanning');
     ctx.font = `bold ${fontSizeLarge}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
     const titleWidth = ctx.measureText(topTitle).width;
     const topPillW = titleWidth + 20;
@@ -1038,6 +1038,18 @@ function setKioskCamMode(mode) {
     }
   }
   resetResultToIdle();
+}
+
+// Short on-face label for why a face was not matched (the full message is too long for the overlay).
+function shortFaceFailure(result) {
+  const message = String(result?.message || '');
+  if (result?.ambiguous) return 'Ambiguous · Enter Code';
+  if (result?.duplicate) return 'Not recognized';
+  if (/re-enroll|no face profile|no enrolled faces/i.test(message)) return 'Face not enrolled · See HR';
+  if (/not recognized/i.test(message)) return 'Not recognized';
+  if (/hold still|no clear face|too small/i.test(message)) return 'Look at camera · Hold still';
+  if (/sync/i.test(message)) return 'Sync kiosk in Settings';
+  return message.slice(0, 30) || 'Unknown Person';
 }
 
 // One identification at a time, so two faces can never be matched in parallel against the same employee.
@@ -1220,14 +1232,14 @@ async function runMultiFaceStep() {
                 }
               } else {
                 tracker.status = 'unknown';
-                tracker.statusText = finalResult?.ambiguous ? 'Ambiguous · Enter Code' : finalResult?.duplicate ? 'Not recognized' : (finalResult?.message?.slice(0, 30) || 'Unknown Person');
+                tracker.statusText = shortFaceFailure(finalResult);
                 tracker.matchedEmployeeCode = null;
                 tracker.matchedEmployeeId = null;
                 tracker.retryAfter = Date.now() + 2500;
               }
             } catch (error) {
               tracker.status = 'unknown';
-              tracker.statusText = String(error?.message || 'Scan retry').slice(0, 30);
+              tracker.statusText = shortFaceFailure({ message: error?.message || 'Scan retry' });
               tracker.matchedEmployeeCode = null;
               tracker.matchedEmployeeId = null;
               tracker.retryAfter = Date.now() + 1500;
@@ -1235,9 +1247,10 @@ async function runMultiFaceStep() {
               tracker.isPunching = false;
             }
           })();
-        } else {
+        } else if (!(tracker.status === 'unknown' && now < (tracker.retryAfter || 0))) {
+          // Keep the last failure reason on screen until the retry; otherwise show progress up to 3.
           tracker.status = 'verifying';
-          tracker.statusText = `Verifying ${tracker.stableFrames}/3…`;
+          tracker.statusText = `Verifying ${Math.min(tracker.stableFrames, 3)}/3…`;
         }
       }
     }
