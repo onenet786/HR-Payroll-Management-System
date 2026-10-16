@@ -1567,7 +1567,7 @@ export default function App() {
 
   const handleAddUser = async (newUser: NewUserAccount) => {
     const { password, id: _temporaryId, ...profile } = newUser;
-    if (password.length < 8) throw new Error('Password must be at least 8 characters.');
+    if (password.length < 12) throw new Error('Password must be at least 12 characters.');
 
     const uid = `usr-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const securedUser: UserAccount = {
@@ -1615,7 +1615,9 @@ export default function App() {
     }
   };
 
-  const handleUpdateUser = async (user: UserAccount) => {
+  const handleUpdateUser = async (user: UserAccount & { newPassword?: string }) => {
+    const newPassword = user.newPassword?.trim() ? user.newPassword : '';
+    if (newPassword && newPassword.length < 12) throw new Error('Password must be at least 12 characters.');
     const existing = users.find(item => item.id === user.id);
     if (!existing) throw new Error('User account no longer exists.');
     const username = user.username.trim();
@@ -1648,6 +1650,8 @@ export default function App() {
       roleId: updated.roleId,
       status: updated.status,
       employeeId: updated.employeeId || deleteField(),
+      // Hashed by the server; never kept in the browser.
+      ...(newPassword ? { password: newPassword } : {}),
     });
     setUsers(previous => previous.map(item => item.id === updated.id ? updated : item));
     if (currentUserAccount.id === updated.id) setCurrentUserAccount(publicUser(updated));

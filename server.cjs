@@ -229,7 +229,7 @@ const apiLimiter = rateLimit({
 
 // These guards apply automatically when trusted server-side auth routes are added.
 app.use('/api', apiLimiter, express.json({ limit: '2mb', strict: true }));
-app.use(['/api/auth/login', '/api/auth/signup', '/api/auth/otp'], loginLimiter);
+app.use(['/api/auth/login', '/api/auth/signup', '/api/auth/otp', '/api/auth/setup'], loginLimiter);
 app.use('/api/auth/password-reset', resetLimiter);
 
 if (!process.env.DATA_BACKEND || (process.env.DATA_BACKEND || '').trim().toLowerCase() === 'postgres') {
@@ -282,8 +282,12 @@ if (!process.env.DATA_BACKEND || (process.env.DATA_BACKEND || '').trim().toLower
       let passwordValid = false;
       if (user.passwordHash) {
         passwordValid = await bcrypt.compare(password, user.passwordHash);
-      } else if (user.password) {
-        passwordValid = (password === user.password);
+      } else if (typeof user.password === 'string' && user.password) {
+        // Legacy plain-text record: compare in constant time, then store it hashed from now on.
+        const given = Buffer.from(String(password));
+        const stored = Buffer.from(user.password);
+        passwordValid = given.length === stored.length && require('node:crypto').timingSafeEqual(given, stored);
+        if (passwordValid) await require('./server/user-secrets.cjs').hashLegacyPasswords(pool).catch(() => undefined);
       }
 
       if (!passwordValid) {
@@ -379,6 +383,10 @@ if (!process.env.DATA_BACKEND || (process.env.DATA_BACKEND || '').trim().toLower
         return res.status(400).json({ error: 'Admin email and password are required.' });
       }
 
+      if (String(adminPassword).length < 12) {
+        return res.status(400).json({ error: 'Choose an administrator password of at least 12 characters.' });
+      }
+
       const { pool } = require('./server/db.cjs');
       const cleanEmail = String(adminEmail).trim().toLowerCase();
       const passwordHash = await bcrypt.hash(adminPassword, 10);
@@ -417,6 +425,14 @@ if (!process.env.DATA_BACKEND || (process.env.DATA_BACKEND || '').trim().toLower
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
+        // First-time setup only: once any account exists this route must never create or overwrite an admin.
+        await client.query(`SELECT pg_advisory_xact_lock(814201)`);
+        const existingUsers = await client.query(`SELECT 1 FROM users LIMIT 1`).catch(() => ({ rowCount: 0 }));
+        const legacyUsers = await client.query(`SELECT 1 FROM hr_documents WHERE collection_name='users' LIMIT 1`).catch(() => ({ rowCount: 0 }));
+        if (existingUsers.rowCount || legacyUsers.rowCount) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({ error: 'This system is already set up. Sign in with an existing account.' });
+        }
         try {
           await client.query(
             `INSERT INTO roles(id, name, status, data) VALUES('role-admin', 'Super Admin', 'Active', $1::jsonb) ON CONFLICT DO NOTHING`,
@@ -555,4 +571,13 @@ app.use((error, req, res, _next) => {
 
 const port = Number(process.env.PORT || 8080);
 const host = process.env.HOST || '0.0.0.0';
-app.listen(port, host, () => console.info(`Production server listening on http://${host}:${port}.`));
+app.listen(port, host, () => {
+  console.info(`Production server listening on http://${host}:${port}.`);
+  // Older builds stored User Management passwords in plain text; hash any that remain.
+  if (process.env.DATABASE_URL) {
+    const { pool } = require('./server/db.cjs');
+    require('./server/user-secrets.cjs').hashLegacyPasswords(pool)
+      .then(count => { if (count) console.info(`Secured ${count} legacy plain-text password(s).`); })
+      .catch(() => undefined);
+  }
+});

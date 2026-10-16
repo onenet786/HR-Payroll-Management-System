@@ -216,7 +216,7 @@ export interface WebPortalProps {
   onAddUser: (user: NewUserAccount) => Promise<void>;
   onDeleteUser: (userId: string) => Promise<void>;
   onUpdateUserRole: (userId: string, roleId: string) => void;
-  onUpdateUser: (user: UserAccount) => Promise<void>;
+  onUpdateUser: (user: UserAccount & { newPassword?: string }) => Promise<void>;
   onSaveMobileDutyAuthorization: (authorization: MobileDutyAuthorization) => Promise<void>;
   onCancelMobileDutyAuthorization: (id: string) => Promise<void>;
   onLogout: () => void;
@@ -811,7 +811,7 @@ export function WebPortal({
   const [showBankFileModal, setShowBankFileModal] = useState<PayrollRun | null>(null);
   const [showPayslipModal, setShowPayslipModal] = useState<Payslip | null>(null);
   const [showOffboardModal, setShowOffboardModal] = useState<Employee | null>(null);
-  const [editingUser, setEditingUser] = useState<UserAccount | null>(null);
+  const [editingUser, setEditingUser] = useState<(UserAccount & { newPassword?: string }) | null>(null);
   const [userEditSaving, setUserEditSaving] = useState(false);
   const [userEditError, setUserEditError] = useState('');
   
@@ -4837,6 +4837,11 @@ export function WebPortal({
                               return <option key={employee.id} value={employee.id} disabled={linkedElsewhere}>{employee.fullName} ({employee.employeeCode}){linkedElsewhere ? ' — already linked' : ''}</option>;
                             })}
                           </select>
+                        </label>
+
+                        <label className="block text-xs font-semibold text-slate-700">Reset password (optional)
+                          <input type="password" autoComplete="new-password" value={editingUser.newPassword || ''} onChange={event => setEditingUser({ ...editingUser, newPassword: event.target.value })} placeholder="Leave blank to keep the current password" className="mt-1 w-full rounded-lg border border-slate-300 p-2.5 text-sm" />
+                          <span className="mt-1 block text-[10px] font-normal text-slate-400">At least 12 characters. The user is signed out everywhere and must sign in with the new password. Confirm their identity first.</span>
                         </label>
 
                         {userEditError && <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">{userEditError}</div>}

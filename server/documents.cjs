@@ -2,6 +2,7 @@ const express = require('express');
 const crypto = require('node:crypto');
 const { transaction, pool } = require('./db.cjs');
 const { policyFor, allowed, getTableName } = require('./collections.cjs');
+const { publicUserData, prepareUserWrite } = require('./user-secrets.cjs');
 
 const router = express.Router();
 const safeName = value => typeof value === 'string' && /^[A-Za-z][A-Za-z0-9_]{0,79}$/.test(value);
@@ -495,7 +496,7 @@ router.get('/:collection', async (req, res, next) => {
     if (!canReadAll && !managedRead) employeeFilter = req.identity.employeeId;
     if ((policy.read === 'selfUser' || policy.read.startsWith('selfUserOr:')) && !canReadAll) {
       const result = await pool.query(`SELECT id AS document_id, data, version, updated_at FROM ${table} WHERE id=$1`, [req.identity.uid]);
-      return res.json({ documents: result.rows });
+      return res.json({ documents: table === 'users' ? result.rows.map(row => ({ ...row, data: publicUserData(row.data) })) : result.rows });
     }
     if (!allowed(policy.read, req.identity, '', employeeFilter)) return res.status(403).json({ error: 'Insufficient permission.' });
     const params = [];
@@ -506,7 +507,7 @@ router.get('/:collection', async (req, res, next) => {
     }
     sql += ` ORDER BY id LIMIT 10000`;
     const result = await pool.query(sql, params);
-    res.json({ documents: result.rows });
+    res.json({ documents: table === 'users' ? result.rows.map(row => ({ ...row, data: publicUserData(row.data) })) : result.rows });
   } catch (error) { next(error); }
 });
 
@@ -521,7 +522,7 @@ router.get('/:collection/:id', async (req, res, next) => {
     if (!row) return res.status(404).json({ error: 'Resource not found.' });
     if (!allowed(policy.read, req.identity, id, row.employee_id)) return res.status(403).json({ error: 'Insufficient permission.' });
     res.setHeader('ETag', `"${row.version}"`);
-    res.json(row);
+    res.json(table === 'users' ? { ...row, data: publicUserData(row.data) } : row);
   } catch (error) { next(error); }
 });
 
@@ -541,6 +542,12 @@ router.put('/:collection/:id', async (req, res, next) => {
       const expected = req.get('if-match')?.replaceAll('"', '');
       if (expected && existing && Number(expected) !== Number(existing.version)) {
         const conflict = new Error('Document changed since it was read.'); conflict.status = 409; throw conflict;
+      }
+      if (table === 'users') {
+        // Passwords are hashed here; stored hashes and MFA state are never taken from the browser.
+        const { record, passwordChanged } = await prepareUserWrite(req.body, existing?.data);
+        req.body = record;
+        if (passwordChanged) await client.query(`UPDATE auth_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL`, [id]);
       }
       const version = existing ? Number(existing.version) + 1 : 1;
       const status = typeof req.body.status === 'string' ? req.body.status : (table === 'users' || table === 'companies' ? 'Active' : null);
@@ -591,7 +598,9 @@ router.put('/:collection/:id', async (req, res, next) => {
       await client.query(
         `INSERT INTO hr_audit_log(actor_uid,actor_role_id,action,collection_name,document_id,previous_version,new_version,previous_data,new_data,correlation_id,source_ip)
          VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10,$11)`,
-        [req.identity.uid, req.identity.roleId, existing ? 'update' : 'create', name, id, existing?.version || null, version, existing ? JSON.stringify(existing.data) : null, JSON.stringify(req.body), req.correlationId, req.ip],
+        [req.identity.uid, req.identity.roleId, existing ? 'update' : 'create', name, id, existing?.version || null, version,
+          existing ? JSON.stringify(table === 'users' ? publicUserData(existing.data) : existing.data) : null,
+          JSON.stringify(table === 'users' ? publicUserData(req.body) : req.body), req.correlationId, req.ip],
       );
       return version;
     });
