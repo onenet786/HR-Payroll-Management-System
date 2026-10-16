@@ -2358,7 +2358,8 @@ function LoginScreen({
   };
 
   return (
-    <div className="min-h-screen bg-[#070b14] text-slate-100 flex items-center justify-center p-4 sm:p-6 md:p-8 font-sans relative overflow-x-hidden selection:bg-emerald-500 selection:text-white">
+    // The app shell locks page scrolling, so the sign-in screen owns its scroll area; on phones it must reach the form.
+    <div className="h-[100dvh] overflow-y-auto bg-[#070b14] text-slate-100 flex justify-center p-4 sm:p-6 md:p-8 font-sans relative overflow-x-hidden selection:bg-emerald-500 selection:text-white">
       {/* Background ambient decorative blurs */}
       <div className="absolute -top-32 -left-32 w-96 h-96 md:w-[500px] md:h-[500px] rounded-full bg-emerald-500/10 blur-[130px] pointer-events-none" />
       <div className="absolute -bottom-32 -right-32 w-96 h-96 md:w-[550px] md:h-[550px] rounded-full bg-teal-500/10 blur-[140px] pointer-events-none" />
@@ -2394,7 +2395,7 @@ function LoginScreen({
           </div>
 
           {/* Central High-Definition Illustration */}
-          <div className="relative w-full max-w-[420px] aspect-square flex items-center justify-center my-2 group">
+          <div className="relative w-full max-w-[420px] aspect-square hidden lg:flex items-center justify-center my-2 group">
             {/* Ambient emerald backlight ring */}
             <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-emerald-500/25 via-teal-500/15 to-transparent blur-3xl scale-95 group-hover:scale-105 transition-transform duration-700 pointer-events-none" />
             <img
@@ -2405,7 +2406,7 @@ function LoginScreen({
           </div>
 
           {/* Bottom Highlights & Pillars */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 w-full max-w-xl">
+          <div className="hidden lg:grid grid-cols-1 sm:grid-cols-3 gap-3 w-full max-w-xl">
             <div className="bg-slate-900/60 backdrop-blur-md border border-slate-800/80 rounded-2xl p-3.5 flex items-center gap-3 text-left hover:border-emerald-500/40 transition">
               <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center shrink-0 text-emerald-400">
                 <Clock className="w-4 h-4" />
