@@ -19,7 +19,14 @@ async function authenticate(req, res, next) {
     const session = sessionResult.rows[0];
     if (!session) return res.status(401).json({ error: 'Session expired or invalid.', correlationId: req.correlationId });
     const idleMinutes = Math.max(5, Number(process.env.SESSION_IDLE_MINUTES || 30));
-    await pool.query(`UPDATE auth_sessions SET last_seen_at=now(),idle_expires_at=LEAST(absolute_expires_at,now()+($2*interval '1 minute')) WHERE token_hash=$1`, [tokenHash(tokenStr), idleMinutes]);
+    // Slide the idle window by the session's own length: "remember me" sessions keep their 5-day window,
+    // ordinary sessions keep the configured idle timeout. Never beyond the absolute expiry.
+    await pool.query(
+      `UPDATE auth_sessions SET last_seen_at=now(),
+         idle_expires_at=LEAST(absolute_expires_at, now() + GREATEST($2*interval '1 minute', idle_expires_at - last_seen_at))
+       WHERE token_hash=$1`,
+      [tokenHash(tokenStr), idleMinutes],
+    );
     const token = { uid: session.user_id };
 
     let result;

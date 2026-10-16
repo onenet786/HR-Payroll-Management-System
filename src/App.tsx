@@ -211,17 +211,23 @@ export default function App() {
     let active = true;
     const restoreSession = async () => {
       if (!getAuthToken()) { if (active) setAuthReady(true); return; }
-      try {
-        const data = await authenticatedApiRequest('/api/auth/session') as { user: UserAccount };
-        if (!active || !data.user?.id) return;
-        const restored = publicUser(data.user);
-        setLoggedInUser(restored);
-        setCurrentUserAccount(restored);
-      } catch {
-        setAuthToken(null);
-      } finally {
-        if (active) setAuthReady(true);
+      // Only a server rejection ends the saved session. Phones often open the app before the network is
+      // up, so connection failures are retried and the saved sign-in is kept for the next launch.
+      for (let attempt = 0; attempt < 4 && active; attempt += 1) {
+        try {
+          const data = await authenticatedApiRequest('/api/auth/session') as { user: UserAccount };
+          if (!active || !data.user?.id) break;
+          const restored = publicUser(data.user);
+          setLoggedInUser(restored);
+          setCurrentUserAccount(restored);
+          break;
+        } catch (error) {
+          const status = (error as { status?: number }).status;
+          if (status === 401 || status === 403) { setAuthToken(null); break; }
+          await new Promise(resolve => setTimeout(resolve, 1500 * (attempt + 1)));
+        }
       }
+      if (active) setAuthReady(true);
     };
     void restoreSession();
     return () => { active = false; };

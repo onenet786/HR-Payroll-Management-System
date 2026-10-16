@@ -31,7 +31,7 @@ export async function authenticatedApiRequest(path: string, init: RequestInit = 
     setAuthToken(null);
     window.dispatchEvent(new CustomEvent('hr:session-expired'));
   }
-  if (!response.ok) throw new Error(body.error || `API request failed (${response.status}).`);
+  if (!response.ok) throw Object.assign(new Error(body.error || `API request failed (${response.status}).`), { status: response.status });
   return body;
 }
 
