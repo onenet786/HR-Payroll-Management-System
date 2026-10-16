@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, session } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, session, safeStorage } = require('electron');
 const { spawn } = require('child_process');
 const fs = require('fs');
 const net = require('net');
@@ -385,17 +385,49 @@ function configureCameraPermission() {
 
 // ─── Kiosk PostgreSQL API Helpers ──────────────────────────────────────────
 
+// Device key issued by /api/kiosk/register. Kept out of the main store and encrypted with the Windows user's
+// DPAPI key when available, so copying the store file to another PC does not copy the kiosk's access.
+function deviceKeyPath() {
+  return path.join(app.getPath('userData'), 'kiosk-device-key.json');
+}
+
+function readDeviceRegistration() {
+  try {
+    const saved = JSON.parse(fs.readFileSync(deviceKeyPath(), 'utf8'));
+    const key = saved.encrypted ? safeStorage.decryptString(Buffer.from(saved.key, 'base64')) : saved.key;
+    return key ? { key, name: saved.name || '', registeredAt: saved.registeredAt || null, portalUrl: saved.portalUrl || '' } : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeDeviceRegistration(registration) {
+  if (!registration) {
+    try { fs.unlinkSync(deviceKeyPath()); } catch { /* already removed */ }
+    return;
+  }
+  const encrypted = safeStorage.isEncryptionAvailable();
+  const key = encrypted ? safeStorage.encryptString(registration.key).toString('base64') : registration.key;
+  fs.writeFileSync(deviceKeyPath(), JSON.stringify({ ...registration, key, encrypted }), { mode: 0o600 });
+}
+
+function publicDeviceRegistration() {
+  const registration = readDeviceRegistration();
+  return registration
+    ? { registered: true, name: registration.name, registeredAt: registration.registeredAt, portalUrl: registration.portalUrl || kioskPortalUrl }
+    : { registered: false, portalUrl: kioskPortalUrl };
+}
+
 function requestJson(method, url, body) {
   return new Promise((resolve, reject) => {
     const targetUrl = new URL(url);
     const transport = targetUrl.protocol === 'http:' ? http : https;
     const payload = body ? Buffer.from(JSON.stringify(body), 'utf8') : null;
-    const req = transport.request(targetUrl, {
-      method,
-      headers: payload
-        ? { 'Content-Type': 'application/json', 'Content-Length': payload.length }
-        : { 'Content-Type': 'application/json' },
-    }, res => {
+    const headers = { 'Content-Type': 'application/json' };
+    if (payload) headers['Content-Length'] = payload.length;
+    const deviceKey = readDeviceRegistration()?.key;
+    if (deviceKey) headers['X-Kiosk-Token'] = deviceKey;
+    const req = transport.request(targetUrl, { method, headers }, res => {
       let data = '';
       res.setEncoding('utf8');
       res.on('data', chunk => { data += chunk; });
@@ -989,6 +1021,7 @@ ipcMain.handle('kiosk:get-state', async () => {
       collections: ['employees', 'attendances', 'branches', 'departments', 'designations', 'biometricTemplates'],
     },
     platform: process.platform,
+    deviceRegistration: publicDeviceRegistration(),
     bridgeRunning: await isBridgePortOpen(),
   };
 });
@@ -1088,6 +1121,31 @@ ipcMain.handle('kiosk:save-settings', async (_event, settings) => {
   }
 
   return store.terminal;
+});
+
+ipcMain.handle('kiosk:device-status', async () => publicDeviceRegistration());
+
+ipcMain.handle('kiosk:register-device', async (_event, payload) => {
+  const email = String(payload?.email || '').trim();
+  const password = String(payload?.password || '');
+  if (!email || !password) return { ok: false, error: 'Enter the kiosk account email and password.' };
+  const store = readStore();
+  const terminalName = [store.terminal.id, store.terminal.location].filter(Boolean).join(' — ');
+  try {
+    const result = await requestJson('POST', `${kioskPortalUrl}/api/kiosk/register`, { email, password, terminalName });
+    if (!result?.deviceToken) return { ok: false, error: 'The server did not issue a device key.' };
+    writeDeviceRegistration({ key: result.deviceToken, name: result.name || terminalName, registeredAt: new Date().toISOString(), portalUrl: kioskPortalUrl });
+    addEvent('config', `Kiosk registered with the server as ${result.name || terminalName}`);
+    return { ok: true, ...publicDeviceRegistration() };
+  } catch (error) {
+    return { ok: false, error: error.message || 'Registration failed.' };
+  }
+});
+
+ipcMain.handle('kiosk:unregister-device', async () => {
+  writeDeviceRegistration(null);
+  addEvent('config', 'Kiosk device key removed from this PC');
+  return publicDeviceRegistration();
 });
 
 ipcMain.handle('kiosk:sync', async () => {

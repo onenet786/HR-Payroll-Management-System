@@ -366,89 +366,11 @@ if (!process.env.DATA_BACKEND || (process.env.DATA_BACKEND || '').trim().toLower
     }
   });
 
-  app.get('/api/kiosk/sync/:collection', async (req, res, next) => {
-    try {
-      const name = req.params.collection;
-      const table = getTableName(name);
-      if (!table) {
-        return res.status(404).json({ error: 'Unknown collection.' });
-      }
-      const { pool } = require('./server/db.cjs');
-      let result;
-      try {
-        result = await pool.query(
-          `SELECT id AS document_id, data FROM ${table} ORDER BY id LIMIT 10000`
-        );
-      } catch {
-        result = await pool.query(
-          `SELECT document_id, data FROM hr_documents WHERE collection_name = $1 ORDER BY document_id LIMIT 10000`,
-          [name]
-        );
-      }
-      const items = result.rows.map(row => ({ id: row.document_id, ...row.data }));
-      return res.json({ documents: items });
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  app.post('/api/kiosk/punch', async (req, res, next) => {
-    try {
-      const { collection, documentId, data } = req.body || {};
-      if (!collection || !documentId || !data) {
-        return res.status(400).json({ error: 'collection, documentId, and data are required.' });
-      }
-      const table = getTableName(collection);
-      const { pool } = require('./server/db.cjs');
-      const employeeId = data.employeeId || null;
-      const status = typeof data.status === 'string' ? data.status : null;
-
-      if (table === 'attendances') {
-        const punchDate = data.date || (typeof data.punchIn === 'string' && data.punchIn.length >= 10 ? data.punchIn.slice(0, 10) : null);
-        try {
-          await pool.query(
-            `INSERT INTO attendances (id, employee_id, date, status, data, version, updated_at)
-             VALUES ($1, $2, $3, $4, $5::jsonb, 1, NOW())
-             ON CONFLICT (id)
-             DO UPDATE SET data = EXCLUDED.data,
-                           employee_id = COALESCE(EXCLUDED.employee_id, attendances.employee_id),
-                           date = COALESCE(EXCLUDED.date, attendances.date),
-                           status = COALESCE(EXCLUDED.status, attendances.status),
-                           version = attendances.version + 1,
-                           updated_at = NOW()`,
-            [documentId, employeeId, punchDate, status, JSON.stringify(data)]
-          );
-          return res.json({ ok: true, id: documentId });
-        } catch {
-          // fall through to fallback
-        }
-      } else if (table) {
-        try {
-          await pool.query(
-            `INSERT INTO ${table} (id, employee_id, status, data, version, updated_at)
-             VALUES ($1, $2, $3, $4::jsonb, 1, NOW())
-             ON CONFLICT (id)
-             DO UPDATE SET data = EXCLUDED.data, employee_id = COALESCE(EXCLUDED.employee_id, ${table}.employee_id), status = COALESCE(EXCLUDED.status, ${table}.status), version = ${table}.version + 1, updated_at = NOW()`,
-            [documentId, employeeId, status, JSON.stringify(data)]
-          );
-          return res.json({ ok: true, id: documentId });
-        } catch {
-          // fall through to fallback
-        }
-      }
-
-      await pool.query(
-        `INSERT INTO hr_documents (collection_name, document_id, data)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (collection_name, document_id)
-         DO UPDATE SET data = EXCLUDED.data, version = hr_documents.version + 1, updated_at = NOW()`,
-        [collection, documentId, JSON.stringify(data)]
-      );
-      return res.json({ ok: true, id: documentId });
-    } catch (err) {
-      next(err);
-    }
-  });
+  // Kiosk terminals authenticate with a per-device key issued by /api/kiosk/register (see server/kiosk.cjs).
+  const kiosk = require('./server/kiosk.cjs');
+  app.use('/api/kiosk/register', loginLimiter);
+  app.use('/api/kiosk', kiosk.router);
+  app.use('/api/kiosk-devices', authenticate, kiosk.adminRouter);
 
   app.post('/api/auth/setup', async (req, res, next) => {
     try {

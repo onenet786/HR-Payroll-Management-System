@@ -165,6 +165,12 @@ const el = {
   // settings
   settingsOverlay:id('settingsOverlay'),
   settingsClose:  id('settingsClose'),
+  stRegStatus:    id('stRegStatus'),
+  stRegForm:      id('stRegForm'),
+  stRegEmail:     id('stRegEmail'),
+  stRegPassword:  id('stRegPassword'),
+  stRegister:     id('stRegister'),
+  stUnregister:   id('stUnregister'),
   stTerminalId:   id('stTerminalId'),
   stLocation:     id('stLocation'),
   stBranchId:     id('stBranchId'),
@@ -2150,7 +2156,9 @@ async function performSync() {
     refreshStats();
     renderEventLog();
   } catch (err) {
-    el.syncStatus.textContent = 'Sync failed — offline mode';
+    el.syncStatus.textContent = kioskState?.deviceRegistration?.registered === false
+      ? 'Not registered — open Settings to register this kiosk'
+      : 'Sync failed — offline mode';
     setPill(el.pillOnline, 'offline');
   } finally {
     el.syncBtn.classList.remove('spinning');
@@ -2195,7 +2203,57 @@ function openSettings() {
   }
 
   renderSettingsEvents();
+  renderRegistration(kioskState.deviceRegistration);
   el.settingsOverlay.classList.remove('hidden');
+}
+
+function renderRegistration(registration) {
+  const registered = !!registration?.registered;
+  el.stRegStatus.textContent = registered
+    ? `Registered as "${registration.name}" on ${new Date(registration.registeredAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })} with ${registration.portalUrl}.`
+    : `Not registered. This kiosk cannot download employees or upload punches until it is registered with ${registration?.portalUrl || 'the server'}.`;
+  el.stRegStatus.style.color = registered ? 'var(--em)' : 'var(--red)';
+  el.stRegForm.classList.toggle('hidden', registered);
+  el.stRegister.classList.toggle('hidden', registered);
+  el.stUnregister.classList.toggle('hidden', !registered);
+  el.stRegPassword.value = '';
+}
+
+async function registerKiosk() {
+  el.stRegister.disabled = true;
+  el.stRegStatus.textContent = 'Registering…';
+  try {
+    const result = await api.registerDevice({ email: el.stRegEmail.value, password: el.stRegPassword.value });
+    el.stRegPassword.value = '';
+    if (!result.ok) {
+      el.stRegStatus.textContent = result.error || 'Registration failed.';
+      el.stRegStatus.style.color = 'var(--red)';
+      return;
+    }
+    if (kioskState) kioskState.deviceRegistration = result;
+    renderRegistration(result);
+    renderSettingsEvents();
+    performSync();
+  } finally {
+    el.stRegister.disabled = false;
+  }
+}
+
+async function unregisterKiosk() {
+  const confirmed = await showMessageDialog({
+    tone: 'danger',
+    eyebrow: 'Server Registration',
+    title: 'Remove this kiosk\'s device key?',
+    message: 'The kiosk will stop syncing until it is registered again. Punches stay queued on this PC.',
+    detail: 'To block a lost or stolen kiosk, also revoke it from the web portal.',
+    confirmLabel: 'Remove Key',
+    cancelLabel: 'Keep',
+    showCancel: true,
+  });
+  if (!confirmed) return;
+  const registration = await api.unregisterDevice();
+  if (kioskState) kioskState.deviceRegistration = registration;
+  renderRegistration(registration);
 }
 
 async function renderSettingsEvents() {
@@ -2507,6 +2565,9 @@ function bindEvents() {
       first.focus();
     }
   });
+  el.stRegister.addEventListener('click', registerKiosk);
+  el.stRegPassword.addEventListener('keydown', e => { if (e.key === 'Enter') registerKiosk(); });
+  el.stUnregister.addEventListener('click', unregisterKiosk);
   el.stStartBridge.addEventListener('click', async () => {
     const result = await api.startBridge();
     await refreshStats();

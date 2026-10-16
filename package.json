@@ -12,7 +12,7 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "test": "tsx --test src/**/*.test.ts",
-    "test:integration": "node --test --test-concurrency=1 server/documents.integration.cjs server/payroll-alerts.integration.cjs server/vault-email.integration.cjs server/auth-session.integration.cjs server/trusted-device.integration.cjs",
+    "test:integration": "node --test --test-concurrency=1 server/documents.integration.cjs server/payroll-alerts.integration.cjs server/vault-email.integration.cjs server/auth-session.integration.cjs server/trusted-device.integration.cjs server/kiosk.integration.cjs",
     "docs:build": "node scripts/generate-user-guide-docx.mjs",
     "docs:pdf": "node scripts/build-complete-pdf-guide.mjs",
     "postgres:migrate": "node scripts/postgres-migrate.cjs",

@@ -410,6 +410,26 @@
 
       <div class="dialog-body">
         <div class="dialog-section">
+          <h3 class="dialog-section-title">Server Registration</h3>
+          <p class="form-help" id="stRegStatus">Checking registration…</p>
+          <div class="form-grid" id="stRegForm">
+            <label class="form-field">
+              <span class="form-label">Kiosk account email or username</span>
+              <input id="stRegEmail" class="form-input" autocomplete="off" placeholder="kiosk.gate1@company.com" />
+            </label>
+            <label class="form-field">
+              <span class="form-label">Password</span>
+              <input id="stRegPassword" class="form-input" type="password" autocomplete="off" />
+            </label>
+            <small class="form-help full">Use a user with the <b>Kiosk Terminal</b> role (User Management). The password is sent once and not stored; this PC receives its own device key, which an administrator can revoke.</small>
+          </div>
+          <div class="dialog-footer-left" style="margin-top:10px">
+            <button class="btn btn-primary" id="stRegister" type="button">Register this kiosk</button>
+            <button class="btn btn-ghost hidden" id="stUnregister" type="button">Remove device key</button>
+          </div>
+        </div>
+
+        <div class="dialog-section">
           <h3 class="dialog-section-title">Terminal Configuration</h3>
           <div class="form-grid">
             <label class="form-field">

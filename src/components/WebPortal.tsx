@@ -60,6 +60,7 @@ import { applyUrduInterface } from '../utils/urduInterface';
 import { authenticatedApiRequest as payrollApi } from '../data/postgresStore';
 import { exportTemplatesFor, renderExport, type ExportKind } from '../data/exportTemplates';
 import { authenticatedApiRequest } from '../data/postgresStore';
+import KioskDevicesPanel from './KioskDevicesPanel';
 import QRCode from 'qrcode';
 
 const PAKISTAN_BANKS = [
@@ -4547,8 +4548,10 @@ export function WebPortal({
                     )}
                   </section>
 
+                  <KioskDevicesPanel />
+
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    
+
                     {/* Users List & Role Assignment */}
                     <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm lg:col-span-2 space-y-4">
                       <h3 className="font-bold text-slate-800 text-xs uppercase tracking-wide font-mono">System Users</h3>
