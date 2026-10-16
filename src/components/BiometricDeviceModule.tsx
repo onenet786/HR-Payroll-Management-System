@@ -1624,7 +1624,7 @@ export function BiometricDeviceModule({
                   className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm font-bold py-2.5 rounded-xl transition shadow-sm"
                 >
                   <Database className="w-4 h-4" />
-                  Save 3 Faces
+                  Save 5 Faces
                 </button>
                 <button
                   type="button"
