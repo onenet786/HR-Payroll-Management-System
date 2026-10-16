@@ -52,6 +52,7 @@ import { PaymentExceptionsModal } from './PaymentExceptionsModal';
 import { PayrollReportsPanel } from './PayrollReportsPanel';
 import { StatutoryGovernancePanel } from './StatutoryGovernancePanel';
 import { leaveBalances } from '../data/leavePolicy';
+import { companyInitialsPrefix, employeeCodePrefixError } from '../data/masterCodes';
 import { goLiveReadiness } from '../data/goLiveReadiness';
 import { GoLiveReadinessPanel } from './GoLiveReadinessPanel';
 import { ParallelRunPanel } from './ParallelRunPanel';
@@ -96,17 +97,8 @@ export const deriveCompanyPrefix = (
   company?: { code?: string; name?: string; legalName?: string } | null,
   fallback = 'ONENET'
 ): string => {
-  if (company?.code?.trim()) {
-    return company.code.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-  }
-  const raw = (company?.legalName || company?.name || fallback).trim();
-  const stripped = raw.replace(/\b(Pvt|Ltd|Limited|LLC|Inc|Corp|Pk|Pakistan)\b/gi, '').trim();
-  const words = stripped.split(/[\s-_]+/).filter(Boolean);
-  if (words.length === 0) return 'ONENET';
-  if (words.length > 1 && words[0].length <= 3 && words[0].length + words[1].length <= 12) {
-    return `${words[0]}${words[1]}`.toUpperCase().replace(/[^A-Z0-9]/g, '');
-  }
-  return words[0].toUpperCase().replace(/[^A-Z0-9]/g, '') || 'ONENET';
+  // Company policy: employee codes start with the first three company initials (OneNet Solutions → ONS).
+  return companyInitialsPrefix(company?.name || company?.legalName || fallback);
 };
 
 export const formatPakMobileNumber = (raw: string): string => {
@@ -1248,10 +1240,17 @@ export function WebPortal({
     const company = companies.find(c => c.id === branch?.companyId) || primaryCompany;
     const compPrefix = deriveCompanyPrefix(company, companyDisplayName);
     const dept = localDepartments.find(d => d.id === departmentId);
-    const deptCode = dept?.code || 'GEN';
-    const matchingCount = employees.filter(e => e.departmentId === departmentId).length;
-    const nextSeq = String(matchingCount + 1).padStart(5, '0');
-    return `${compPrefix}-${deptCode.toUpperCase()}-${nextSeq}`;
+    // Department codes may already embed company/branch (BI-LHR-IT); the employee code uses its own token only.
+    const deptCode = (dept?.code || 'GEN').toUpperCase().split('-').filter(Boolean).pop()!.replace(/[^A-Z0-9]/g, '') || 'GEN';
+    const stem = `${compPrefix}-${deptCode}-`;
+    const usedCodes = new Set(employees.map(e => (e.employeeCode || '').toUpperCase()));
+    // Continue from the highest number in use so deletions never recycle a code.
+    let sequence = employees.reduce((max, e) => {
+      const code = (e.employeeCode || '').toUpperCase();
+      return code.startsWith(stem) ? Math.max(max, Number(code.slice(stem.length)) || 0) : max;
+    }, 0) + 1;
+    while (usedCodes.has(`${stem}${String(sequence).padStart(5, '0')}`)) sequence += 1;
+    return `${stem}${String(sequence).padStart(5, '0')}`;
   };
 
   React.useEffect(() => {
@@ -1575,6 +1574,11 @@ export function WebPortal({
     if (masterErrors.length) { alert(`Please correct the employee assignment:\n• ${masterErrors.join('\n• ')}`); return; }
 
     const generatedCode = getAutoEmployeeCode(newEmpForm.branchId, newEmpForm.departmentId);
+    const newCodeCompany = companies.find(c => c.id === localBranches.find(b => b.id === newEmpForm.branchId)?.companyId) || primaryCompany;
+    const newCode = (newEmpForm.employeeCode.trim() || generatedCode).toUpperCase();
+    const newCodeError = employeeCodePrefixError(newCode, newCodeCompany?.name || newCodeCompany?.legalName || companyDisplayName);
+    if (newCodeError) { alert(newCodeError); return; }
+    if (employees.some(e => (e.employeeCode || '').toUpperCase() === newCode)) { alert(`Employee code ${newCode} is already in use.`); return; }
 
     const selectedZone = zones.find(item => item.id === newEmpForm.zoneId);
     const selectedUcTown = ucTowns.find(item => item.id === newEmpForm.ucTownId);
@@ -1585,7 +1589,7 @@ export function WebPortal({
       branchId: newEmpForm.branchId,
       departmentId: newEmpForm.departmentId,
       designationId: newEmpForm.designationId,
-      employeeCode: newEmpForm.employeeCode.trim() || generatedCode,
+      employeeCode: newCode,
       fullName: newEmpForm.fullName,
       email: newEmpForm.email,
       contactNumber: newEmpForm.contactNumber,
@@ -1731,6 +1735,15 @@ export function WebPortal({
 
     if (!editingEmployee) return;
 
+    // Existing codes are kept as they are (payslips and attendance reference them); a changed code must follow the rule.
+    const editedCode = (editEmpForm.employeeCode.trim() || editingEmployee.employeeCode).toUpperCase();
+    if (editedCode !== (editingEmployee.employeeCode || '').toUpperCase()) {
+      const editCompany = companies.find(c => c.id === localBranches.find(b => b.id === editEmpForm.branchId)?.companyId) || primaryCompany;
+      const editCodeError = employeeCodePrefixError(editedCode, editCompany?.name || editCompany?.legalName || companyDisplayName);
+      if (editCodeError) { alert(editCodeError); return; }
+      if (employees.some(e => e.id !== editingEmployee.id && (e.employeeCode || '').toUpperCase() === editedCode)) { alert(`Employee code ${editedCode} is already in use.`); return; }
+    }
+
     const selectedBranch = localBranches.find(item => item.id === editEmpForm.branchId);
     const selectedZone = zones.find(item => item.id === editEmpForm.zoneId);
     const selectedUcTown = ucTowns.find(item => item.id === editEmpForm.ucTownId);
@@ -1741,7 +1754,7 @@ export function WebPortal({
       branchId: editEmpForm.branchId,
       departmentId: editEmpForm.departmentId,
       designationId: editEmpForm.designationId,
-      employeeCode: editEmpForm.employeeCode.trim() || editingEmployee.employeeCode,
+      employeeCode: editedCode,
       fullName: editEmpForm.fullName,
       email: editEmpForm.email,
       contactNumber: editEmpForm.contactNumber,
@@ -5087,7 +5100,7 @@ export function WebPortal({
                         <input
                           type="text"
                           aria-label="Employee Code"
-                          placeholder={`e.g. ${deriveCompanyPrefix(primaryCompany, companyDisplayName)}-02-00001`}
+                          placeholder={`e.g. ${deriveCompanyPrefix(primaryCompany, companyDisplayName)}-PRD-00001`}
                           disabled={autoGenNewCode}
                           value={newEmpForm.employeeCode}
                           onChange={(e) => setNewEmpForm({ ...newEmpForm, employeeCode: e.target.value })}
@@ -5867,7 +5880,7 @@ export function WebPortal({
                         <input
                           type="text"
                           aria-label="Employee Code"
-                          placeholder={`e.g. ${deriveCompanyPrefix(editingCompany, companyDisplayName)}-02-00001`}
+                          placeholder={`e.g. ${deriveCompanyPrefix(editingCompany, companyDisplayName)}-PRD-00001`}
                           disabled={autoGenEditCode}
                           value={editEmpForm.employeeCode}
                           onChange={(e) => setEditEmpForm({ ...editEmpForm, employeeCode: e.target.value })}

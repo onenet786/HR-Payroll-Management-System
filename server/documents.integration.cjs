@@ -15,7 +15,7 @@ const express = require('express');
 const { pool } = require('./db.cjs');
 const documentRoutes = require('./documents.cjs');
 
-const TABLES = ['roles', 'users', 'employees', 'branches', 'attendances', 'attendance_periods', 'payroll_runs', 'payroll_payslips', 'payroll_adjustments',
+const TABLES = ['roles', 'users', 'companies', 'employees', 'branches', 'attendances', 'attendance_periods', 'payroll_runs', 'payroll_payslips', 'payroll_adjustments',
   'stat_config', 'tax_slabs', 'statutory_change_requests', 'lifecycle_requests', 'salary_revisions', 'gratuity_settlements', 'hr_audit_log'];
 const PERIOD = { month: 9, year: 2026, prefix: '2026-09', days: 30 };
 let server;
@@ -202,4 +202,15 @@ test('a disbursed run accepts a parallel-run result from the recording user and 
   assert.equal(await put('u-third', 'payrollRuns', 'run-c', { ...disbursed, parallelRun: { ...result, matched: -1 } }), 403, 'counts are validated');
   assert.equal(await put('u-third', 'payrollRuns', 'run-c', { ...disbursed, parallelRun: result, totalNetPay: 1 }), 403, 'cannot piggyback financial edits');
   assert.equal(await put('u-third', 'payrollRuns', 'run-c', { ...disbursed, parallelRun: result }), 200);
+});
+
+test('employee codes must start with the company prefix (OneNet Solutions -> ONS-)', async () => {
+  await seed('companies', 'co-ons', { name: 'OneNet Solutions', legalName: 'OneNet Solutions (Pvt) Ltd' });
+  const employee = code => ({ fullName: 'New Hire', status: 'Active', companyId: 'co-ons', employeeCode: code, dateOfJoining: '2026-10-17' });
+  assert.equal(await put('u-hr', 'employees', 'emp-new-1', employee('ONENET-PRD-00001')), 403, 'old-style prefix refused');
+  assert.equal(await put('u-hr', 'employees', 'emp-new-1', employee('ONS-PRD-00001')), 200);
+  assert.equal(await put('u-hr', 'employees', 'emp-new-2', employee('ons-prd-00001')), 403, 'duplicate code (case-insensitive) refused');
+  await seed('employees', 'emp-legacy', { fullName: 'Legacy Staff', status: 'Active', companyId: 'co-ons', employeeCode: 'ONENET-HR-00007' });
+  assert.equal(await put('u-hr', 'employees', 'emp-legacy', { fullName: 'Legacy Staff (renamed)', status: 'Active', companyId: 'co-ons', employeeCode: 'ONENET-HR-00007' }), 200, 'existing codes stay editable');
+  assert.equal(await put('u-hr', 'employees', 'emp-legacy', { fullName: 'Legacy Staff', status: 'Active', companyId: 'co-ons', employeeCode: 'XYZ-HR-00007' }), 403, 'a changed code must follow the rule');
 });

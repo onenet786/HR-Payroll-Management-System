@@ -86,6 +86,17 @@ function impossibleTravel(points) {
   return null;
 }
 
+// Mirrors src/data/masterCodes.ts companyInitialsPrefix: "OneNet Solutions (Pvt) Ltd" -> ONS.
+function companyInitialsPrefix(name) {
+  const cleaned = String(name || '').replace(/\(.*?\)/g, ' ').replace(/\b(?:pvt|private|ltd|limited|llc|inc|corp|corporation|co|company|pk|pakistan|smc|plc)\b\.?/gi, ' ');
+  const parts = cleaned.replace(/([a-z0-9])([A-Z])/g, '$1 $2').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').split(/[^A-Za-z0-9]+/).filter(Boolean);
+  if (!parts.length) return 'EMP';
+  let prefix = parts.map(part => part[0]).join('').slice(0, 3);
+  const last = parts[parts.length - 1];
+  for (let index = 1; prefix.length < 3 && index < last.length; index += 1) prefix += last[index];
+  return prefix.toUpperCase().padEnd(3, 'X');
+}
+
 const payrollRunImmutableFields = ['title', 'periodMonth', 'periodYear', 'startDate', 'endDate', 'createdAt', 'createdById', 'totalGrossPay', 'totalDeductions', 'totalNetPay',
   'totalEobiEmployer', 'totalSocialSecurityEmployer', 'employeeCount', 'statutoryConfigId', 'approvedAt', 'approvedById', 'bankAdviceChecksum', 'disbursedAt', 'disbursedById', 'disbursementReference'];
 
@@ -277,6 +288,16 @@ async function authorizeWrite(client, name, table, id, identity, existing, next)
         const run = await client.query(`SELECT data FROM payroll_runs WHERE id=$1 FOR SHARE`, [previous.payrollRunId]);
         if (run.rows[0]?.data?.status !== 'Cancelled') return false;
       } else return false;
+    }
+  }
+  if ((name === 'employees' || table === 'employees') && typeof next.employeeCode === 'string') {
+    // New or changed employee codes must carry the company prefix; existing codes are left untouched.
+    const codeChanged = !existing || String(existing.data?.employeeCode || '').toUpperCase() !== next.employeeCode.trim().toUpperCase();
+    if (codeChanged) {
+      const company = (await client.query(`SELECT data FROM companies WHERE id=$1`, [next.companyId])).rows[0]?.data;
+      if (company && !next.employeeCode.trim().toUpperCase().startsWith(`${companyInitialsPrefix(company.name || company.legalName)}-`)) return false;
+      const duplicate = await client.query(`SELECT 1 FROM employees WHERE id<>$1 AND UPPER(COALESCE(employee_code, data->>'employeeCode'))=$2 LIMIT 1`, [id, next.employeeCode.trim().toUpperCase()]);
+      if (duplicate.rowCount) return false;
     }
   }
   if (name === 'payrollPayslips' || table === 'payroll_payslips') {

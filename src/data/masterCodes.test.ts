@@ -89,3 +89,18 @@ test('generated hierarchy trail exposes every source segment and collision suffi
     { value: 'UC', label: 'Location type' }, { value: '178', label: 'Location' },
   ]);
 });
+
+test('employee code prefix is the first three company initials, reading capitals inside words', async () => {
+  const { companyInitialsPrefix, employeeCodePrefixError } = await import('./masterCodes');
+  assert.equal(companyInitialsPrefix('OneNet Solutions'), 'ONS');
+  assert.equal(companyInitialsPrefix('OneNet Solutions (Pvt) Ltd.'), 'ONS');
+  assert.equal(companyInitialsPrefix('OneNet Solutions Pk.'), 'ONS');
+  assert.equal(companyInitialsPrefix('Smoke Test Industries (Pvt) Ltd'), 'STI');
+  assert.equal(companyInitialsPrefix('Bin Ishaq'), 'BIS');
+  assert.equal(companyInitialsPrefix('Acme'), 'ACM');
+  assert.equal(companyInitialsPrefix('Pak Arab Refinery Limited'), 'PAR');
+  assert.equal(companyInitialsPrefix(''), 'EMP');
+  assert.equal(employeeCodePrefixError('ONS-PRD-00001', 'OneNet Solutions'), undefined);
+  assert.equal(employeeCodePrefixError('ons-prd-00001', 'OneNet Solutions'), undefined);
+  assert.match(employeeCodePrefixError('ONENET-PRD-00001', 'OneNet Solutions') || '', /must start with ONS-/);
+});

@@ -155,3 +155,26 @@ export function masterCodeTrail(
   }
   return completeItems;
 }
+
+const LEGAL_SUFFIXES = /\b(?:pvt|private|ltd|limited|llc|inc|corp|corporation|co|company|pk|pakistan|smc|plc)\b\.?/gi;
+
+/**
+ * Employee-code prefix: the first three initials of the company name, reading capitals inside words too,
+ * so "OneNet Solutions (Pvt) Ltd" → ONS. Short names are filled from the last word: "Bin Ishaq" → BIS.
+ */
+export function companyInitialsPrefix(name?: string): string {
+  const cleaned = (name || '').replace(/\(.*?\)/g, ' ').replace(LEGAL_SUFFIXES, ' ');
+  const parts = cleaned.replace(/([a-z0-9])([A-Z])/g, '$1 $2').normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+    .split(/[^A-Za-z0-9]+/).filter(Boolean);
+  if (!parts.length) return 'EMP';
+  let prefix = parts.map(part => part[0]).join('').slice(0, 3);
+  const last = parts[parts.length - 1];
+  for (let index = 1; prefix.length < 3 && index < last.length; index += 1) prefix += last[index];
+  return prefix.toUpperCase().padEnd(3, 'X');
+}
+
+/** A new or changed employee code must start with the company prefix, e.g. ONS-PRD-00001. */
+export function employeeCodePrefixError(code: string, companyName?: string): string | undefined {
+  const prefix = companyInitialsPrefix(companyName);
+  return code.trim().toUpperCase().startsWith(`${prefix}-`) ? undefined : `Employee code must start with ${prefix}- (company prefix).`;
+}
