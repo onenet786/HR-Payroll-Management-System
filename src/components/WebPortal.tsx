@@ -1452,7 +1452,7 @@ export function WebPortal({
   const pendingPayrollAdjustmentsCount = payrollAdjustments.filter(item => item.status === 'Pending').length;
   const approvalInbox = [
     ...leaves.filter(item => item.status === 'Pending').map(item => ({
-      id: `leave-${item.id}`, tab: 'leave', type: 'Leave request', date: item.appliedOn || item.startDate,
+      id: `leave-${item.id}`, tab: 'leaves', type: 'Leave request', date: item.appliedOn || item.startDate,
       employee: employees.find(employee => employee.id === item.employeeId)?.fullName || 'Employee',
       detail: `${item.leaveType} · ${item.totalDays} day${item.totalDays === 1 ? '' : 's'}`,
     })),
