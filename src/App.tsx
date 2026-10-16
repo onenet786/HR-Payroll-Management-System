@@ -268,11 +268,14 @@ export default function App() {
         }
         if (data.trustedDeviceToken) writeTrustedDevice(email, data.trustedDeviceToken);
         setAuthToken(data.token);
+        // Keep the server's full public profile (including mfaEnabled) so the session looks the same
+        // right after sign-in as after a refresh. Never assume a role the server did not send.
         const userProfile: UserAccount = {
-          id: data.user.id || data.token,
+          ...publicUser(data.user),
+          id: data.user.id,
           username: data.user.username || data.user.email || email,
           email: data.user.email || email,
-          roleId: data.user.roleId || 'role-admin',
+          roleId: data.user.roleId || '',
           status: data.user.status || 'Active',
           employeeId: data.user.employeeId || undefined,
         };
