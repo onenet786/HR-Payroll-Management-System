@@ -238,16 +238,18 @@ if (!process.env.DATA_BACKEND || (process.env.DATA_BACKEND || '').trim().toLower
   const { createSession, revokeSession } = require('./server/sessions.cjs');
   const { router: mfaRoutes, publicRouter: mfaPublicRoutes, createLoginChallenge } = require('./server/mfa.cjs');
   const documentRoutes = require('./server/documents.cjs');
+  const employeeDocumentRoutes = require('./server/employee-documents.cjs');
   const payrollDeliveryRoutes = require('./server/payroll-delivery.cjs');
   const { getTableName } = require('./server/collections.cjs');
   app.use('/api/documents', authenticate, documentRoutes);
+  app.use('/api/employee-documents', authenticate, employeeDocumentRoutes);
   app.use('/api/payroll-delivery', authenticate, payrollDeliveryRoutes);
   app.use('/api/auth/mfa', mfaPublicRoutes);
   app.use('/api/auth/mfa', authenticate, mfaRoutes);
 
   app.post('/api/auth/login', async (req, res, next) => {
     try {
-      const { email, password } = req.body || {};
+      const { email, password, rememberMe } = req.body || {};
       if (!email || !password) {
         return res.status(400).json({ error: 'Email and password are required.' });
       }
@@ -288,12 +290,21 @@ if (!process.env.DATA_BACKEND || (process.env.DATA_BACKEND || '').trim().toLower
         return res.status(401).json({ error: 'Invalid email or password.' });
       }
 
+      if (process.env.MFA_ENFORCE_PRIVILEGED === 'true' && !user.mfaEnabled) {
+        const role = await pool.query(`SELECT data FROM roles WHERE id=$1`, [user.roleId]);
+        const permissions = new Set(role.rows[0]?.data?.permissions || []);
+        if (user.roleId === 'role-admin' || permissions.has('manage_payroll') || permissions.has('manage_access')) {
+          return res.status(403).json({ error: 'MFA enrollment is required for this privileged account. Choose an authenticator app or email verification.' });
+        }
+      }
+
       if (user.mfaEnabled) {
         const mfaChallenge = await createLoginChallenge(userDoc.document_id);
         res.setHeader('Cache-Control', 'no-store');
-        return res.json({ mfaRequired: true, mfaChallenge });
+        const mfaMethods = user.mfaMethod === 'email' ? ['email'] : user.mfaMethod === 'totp' ? ['totp'] : ['totp', 'email'];
+        return res.json({ mfaRequired: true, mfaChallenge, mfaMethods });
       }
-      const token = await createSession(userDoc.document_id, req);
+      const token = await createSession(userDoc.document_id, req, rememberMe === true);
       const { passwordHash: _, password: _legacyPassword, mfaSecretCipher: _mfaSecret, ...safeUser } = user;
       res.setHeader('Cache-Control', 'no-store');
       return res.json({ token, user: safeUser });
@@ -307,6 +318,18 @@ if (!process.env.DATA_BACKEND || (process.env.DATA_BACKEND || '').trim().toLower
       await revokeSession(req.identity.sessionToken);
       res.setHeader('Cache-Control', 'no-store');
       res.status(204).end();
+    } catch (err) { next(err); }
+  });
+
+  app.get('/api/auth/session', authenticate, async (req, res, next) => {
+    try {
+      const { pool } = require('./server/db.cjs');
+      const result = await pool.query(`SELECT data FROM users WHERE id=$1`, [req.identity.uid]);
+      const user = result.rows[0]?.data;
+      if (!user) return res.status(401).json({ error: 'Session user was not found.' });
+      const { passwordHash, password, mfaSecretCipher, ...safeUser } = user;
+      res.setHeader('Cache-Control', 'no-store');
+      res.json({ user: safeUser });
     } catch (err) { next(err); }
   });
 

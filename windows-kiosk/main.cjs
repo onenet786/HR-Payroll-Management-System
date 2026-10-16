@@ -13,7 +13,7 @@ const {
 } = require('./attendance-state.cjs');
 const { createChallengeManager, isValidAttestation } = require('./liveness.cjs');
 const { authorizeCameraAttempt, requireSecureEnrollment } = require('./camera-authorization.cjs');
-const { evaluateAttendanceTimes } = require('./attendance-rules.cjs');
+const { LOW_CONFIDENCE_BIOMETRIC_PERCENT, biometricMatchEvidence, evaluateAttendanceTimes } = require('./attendance-rules.cjs');
 
 dotenv.config({ quiet: true });
 
@@ -22,7 +22,7 @@ const kioskEnvironmentPath = app.isPackaged
   ? path.join(process.resourcesPath, 'kiosk.env')
   : path.join(__dirname, '..', '.env.local');
 dotenv.config({ path: kioskEnvironmentPath, quiet: true, override: false });
-if (!process.env.PORTAL_URL) process.env.PORTAL_URL = process.env.VITE_API_BASE_URL || process.env.APP_URL || 'https://mcs.binishaqsoft.com';
+if (!process.env.PORTAL_URL) process.env.PORTAL_URL = process.env.VITE_API_BASE_URL || process.env.APP_URL || 'https://attendance.binishaqsoft.com';
 
 
 const bridgePort = 15896;
@@ -167,7 +167,7 @@ function closeSplashWindow() {
   splashWindow = null;
 }
 
-const kioskPortalUrl = (process.env.PORTAL_URL || process.env.VITE_API_BASE_URL || process.env.APP_URL || 'https://mcs.binishaqsoft.com').replace(/\/$/, '');
+const kioskPortalUrl = (process.env.PORTAL_URL || process.env.VITE_API_BASE_URL || process.env.APP_URL || 'https://attendance.binishaqsoft.com').replace(/\/$/, '');
 
 const checkoutReasons = [
   'End of Shift',
@@ -491,6 +491,15 @@ async function performSync() {
     report.branches = records.length;
   } catch (error) {
     report.errors.push('branches: sync failed');
+  }
+
+  // Review cutoff for weak biometric matches comes from the approved statutory configuration.
+  try {
+    const configs = await fetchFirestoreCollection('statConfig');
+    const percent = Number(configs[0]?.lowConfidenceBiometricPercent);
+    store.biometricPolicy = { lowConfidencePercent: Number.isFinite(percent) && percent >= 0 && percent <= 100 ? percent : LOW_CONFIDENCE_BIOMETRIC_PERCENT };
+  } catch (error) {
+    report.errors.push('statConfig: sync failed (using last known biometric review cutoff)');
   }
 
   // Auto-heal invalid or stale branch assignment
@@ -874,6 +883,8 @@ function savePunch(store, employee, method, evidence, meta) {
       reasons: checkoutReasons,
     };
   }
+  const matchKind = method === 'Camera' ? 'face' : method === 'Biometric' ? 'fingerprint' : null;
+  const biometricMatch = matchKind ? biometricMatchEvidence(matchKind, Number(meta?.score), Number(meta?.threshold), store.biometricPolicy?.lowConfidencePercent ?? LOW_CONFIDENCE_BIOMETRIC_PERCENT) : null;
   const resumed = isReturningFromBreak
     ? resumeFromTemporaryExit(existing, {
         at,
@@ -884,6 +895,12 @@ function savePunch(store, employee, method, evidence, meta) {
     : null;
   const log = {
     ...(resumed?.log || computePunch(existing, method, store.terminal, evidence?.id, outReason, at, employee.shift)),
+    ...(biometricMatch && { biometricMatch }),
+    ...(biometricMatch?.lowConfidence && existing?.regularizationApproved === undefined && {
+      regularizationRequested: true,
+      requestedAt: new Date().toISOString(),
+      regularizationReason: `Low-confidence ${biometricMatch.kind} match (${biometricMatch.strengthPercent}% strength); supervisor verification required.`,
+    }),
     employeeId: employee.id,
     employeeName: employee.fullName || '',
     employeeCode: employee.employeeCode || '',
@@ -1184,6 +1201,7 @@ ipcMain.handle('kiosk:punch-camera', async (_event, payload) => {
     ...(payload.meta || {}),
     camera: payload.meta?.camera || 'webcam',
     score: match.score,
+    threshold: matchThreshold,
     recognizedBy: crossBranch ? 'cross-branch-code-face-liveness' : typedEmployee ? 'camera-code-face-liveness' : 'camera-face-liveness',
     crossBranch,
     livenessMethod: payload.mode === 'multi-face' ? 'multi-face-walkthrough' : 'active-turn-v1',
@@ -1245,6 +1263,7 @@ ipcMain.handle('kiosk:punch-fingerprint', async (_event, payload) => {
     ...(payload.meta || {}),
     quality: match.quality,
     score: match.score,
+    threshold: FINGERPRINT_MATCH_THRESHOLD,
     device: match.device,
   });
 });
@@ -1304,6 +1323,9 @@ ipcMain.handle('kiosk:exit', async () => {
 
 // ─── Fingerprint Identification ─────────────────────────────────────────────
 
+// DigitalPersona dissimilarity threshold for a false-accept rate of 1 in 1,000,000 (0x7FFFFFFF / 1,000,000).
+const FINGERPRINT_MATCH_THRESHOLD = 2147;
+
 function identifyFingerprint(gallery) {
   return new Promise(resolve => {
     const socket = new WebSocketClient(`ws://127.0.0.1:${bridgePort}`);
@@ -1313,7 +1335,7 @@ function identifyFingerprint(gallery) {
     }, 45000);
 
     socket.on('open', () => {
-      socket.send(JSON.stringify({ action: 'Identify', threshold: 2147, gallery }));
+      socket.send(JSON.stringify({ action: 'Identify', threshold: FINGERPRINT_MATCH_THRESHOLD, gallery }));
     });
     socket.on('message', raw => {
       let msg;

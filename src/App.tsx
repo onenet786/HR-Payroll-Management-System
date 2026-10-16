@@ -12,16 +12,20 @@ import { computePayslipDetails, DEFAULT_TAX_SLABS } from './data/defaults';
 import {
   Employee, AttendanceLog, AttendancePeriod, LeaveRequest, StatutoryConfig, TaxSlab, PayrollRun, PayrollAdjustment, Payslip, MobilePunchDetails,
   Role, UserAccount, Branch, Department, Designation, Holiday, LoanAdvance, SalaryRevision,
-  PerformanceReview, CompanyAsset, JobPosting, JobApplication, GratuitySettlement, AppNotification, Company, CompanySetupPayload, Zone, UcTown, WageType, NewUserAccount, MobileDutyAuthorization
+  PerformanceReview, CompanyAsset, JobPosting, JobApplication, GratuitySettlement, AppNotification, Company, CompanySetupPayload, Zone, UcTown, WageType, NewUserAccount, MobileDutyAuthorization,
+  StatutoryChangeRequest, LifecycleRequest
 } from './types';
-import { attendancePeriodId, createAttendancePeriod, isAttendancePeriodValid } from './data/attendancePeriod';
-import { evaluateAttendanceTimes } from './data/attendanceRules';
-import { evaluateBranchGeofence, validateLocationEvidence } from './data/geofence';
-import { attendanceReviewError, payrollTransitionError } from './data/approvalRules';
+import { attendancePeriodId, createAttendancePeriod, isAttendancePeriodValid, reopenAttendancePeriod } from './data/attendancePeriod';
+import { evaluateAttendanceTimes, isDuplicatePunch } from './data/attendanceRules';
+import { attendanceLocations, evaluateBranchGeofence, impossibleTravel, validateLocationEvidence } from './data/geofence';
+import { applyLifecycleRequest, lifecycleRequestError, lifecycleReviewError } from './data/lifecycle';
+import { leaveBalanceError } from './data/leavePolicy';
+import { computeFinalSettlementPayslip, computeSupplementaryPayslip, retroRecalculationAdjustment } from './data/offCyclePayroll';
+import { attendanceReviewError, isRegularizationOverdue, lineManagerReviewer, payrollCancellationError, payrollTransitionError, salaryRevisionApprovalError, salaryRevisionArrears, statutoryChangedFields, statutoryReviewError } from './data/approvalRules';
 import { payrollPreflight } from './data/payrollPreflight';
 import { DeviceEmulator } from './components/DeviceEmulator';
 import {
-  db, collection, deleteDoc, deleteField, doc, getDoc, setDoc, updateDoc, onSnapshot, writeBatch, query, where, setAuthToken, authenticatedApiRequest
+  db, collection, deleteDoc, deleteField, doc, getDoc, setDoc, updateDoc, onSnapshot, writeBatch, query, where, setAuthToken, getAuthToken, authenticatedApiRequest
 } from './data/postgresStore';
 
 // HR and payroll records must never be persisted in browser-accessible storage.
@@ -34,9 +38,10 @@ const privacyStorage = {
 
 const publicUser = ({ passwordHash: _passwordHash, ...profile }: UserAccount): UserAccount => profile;
 
+const retainedBrowserKeys = new Set(['hr_auth_token', 'hr_remembered_email']);
 for (let index = localStorage.length - 1; index >= 0; index -= 1) {
   const key = localStorage.key(index);
-  if (key?.startsWith('hr_') || key?.startsWith('webauthn_')) localStorage.removeItem(key);
+  if ((key?.startsWith('hr_') && !retainedBrowserKeys.has(key)) || key?.startsWith('webauthn_')) localStorage.removeItem(key);
 }
 
 type BiometricTemplateRecord = {
@@ -126,7 +131,7 @@ export default function App() {
     effectiveFrom: '',
     taxYear: '',
     socialSecurityWageCeiling: 0,
-    provincialSocialSecurityRates: { Punjab: 6, Sindh: 6, KPK: 6, Balochistan: 6 },
+    provincialSocialSecurityRates: { Punjab: 6, Sindh: 6, KPK: 6, Balochistan: 6, ICT: 6 },
     overtimeMultiplier: 2,
     standardMonthlyHours: 208
   };
@@ -180,6 +185,8 @@ export default function App() {
   const [gratuitySettlements, setGratuitySettlements] = useState<GratuitySettlement[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [payrollPayslips, setPayrollPayslips] = useState<Payslip[]>([]);
+  const [statutoryChangeRequests, setStatutoryChangeRequests] = useState<StatutoryChangeRequest[]>([]);
+  const [lifecycleRequests, setLifecycleRequests] = useState<LifecycleRequest[]>([]);
   const [payrollAdjustments, setPayrollAdjustments] = useState<PayrollAdjustment[]>([]);
 
   // User & RBAC States
@@ -188,7 +195,7 @@ export default function App() {
   const [users, setUsers] = useState<UserAccount[]>(() => getInitialValue('hr_users', []));
   const [rolesLoaded, setRolesLoaded] = useState(true);
   const [usersLoaded, setUsersLoaded] = useState(true);
-  const [authReady, setAuthReady] = useState(true);
+  const [authReady, setAuthReady] = useState(false);
   const [authMessage, setAuthMessage] = useState('');
   const [firestoreSyncStatus, setFirestoreSyncStatus] = useState<FirestoreSyncStatus>({
     state: 'synced',
@@ -201,15 +208,26 @@ export default function App() {
   });
 
   useEffect(() => {
-    const savedUser = getInitialValue<UserAccount | null>('hr_logged_in_user', null);
-    if (savedUser && savedUser.id) {
-      setLoggedInUser(savedUser);
-      setCurrentUserAccount(savedUser);
-    }
-    setAuthReady(true);
+    let active = true;
+    const restoreSession = async () => {
+      if (!getAuthToken()) { if (active) setAuthReady(true); return; }
+      try {
+        const data = await authenticatedApiRequest('/api/auth/session') as { user: UserAccount };
+        if (!active || !data.user?.id) return;
+        const restored = publicUser(data.user);
+        setLoggedInUser(restored);
+        setCurrentUserAccount(restored);
+      } catch {
+        setAuthToken(null);
+      } finally {
+        if (active) setAuthReady(true);
+      }
+    };
+    void restoreSession();
+    return () => { active = false; };
   }, []);
 
-  const handleLogin = async (email: string, password: string, mfaChallenge?: string, mfaCode?: string): Promise<{ mfaChallenge?: string } | void> => {
+  const handleLogin = async (email: string, password: string, mfaChallenge?: string, mfaCode?: string, mfaMethod: 'totp' | 'email' = 'totp', rememberMe = false): Promise<{ mfaChallenge?: string; mfaMethods?: Array<'totp' | 'email'> } | void> => {
     setAuthMessage('');
     const apiBase = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 
@@ -217,11 +235,11 @@ export default function App() {
       const response = await fetch(`${apiBase}${mfaChallenge ? '/api/auth/mfa/verify-login' : '/api/auth/login'}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(mfaChallenge ? { challenge: mfaChallenge, code: mfaCode } : { email: email.trim(), password }),
+        body: JSON.stringify(mfaChallenge ? { challenge: mfaChallenge, code: mfaCode, method: mfaMethod, rememberMe } : { email: email.trim(), password, rememberMe }),
       });
       if (response.ok) {
         const data = await response.json();
-        if (data.mfaRequired && data.mfaChallenge) return { mfaChallenge: data.mfaChallenge };
+        if (data.mfaRequired && data.mfaChallenge) return { mfaChallenge: data.mfaChallenge, mfaMethods: data.mfaMethods };
         setAuthToken(data.token);
         const userProfile: UserAccount = {
           id: data.user.id || data.token,
@@ -473,6 +491,10 @@ export default function App() {
     registerCollectionListener('payrollRuns', setPayrollRuns, 'hr_payroll_runs');
     registerCollectionListener('payrollPayslips', setPayrollPayslips, 'hr_payroll_payslips', undefined, true);
     registerCollectionListener('payrollAdjustments', setPayrollAdjustments, 'hr_payroll_adjustments', undefined, true);
+    if (loggedInUser.roleId !== 'role-employee') {
+      registerCollectionListener('statutoryChangeRequests', setStatutoryChangeRequests, 'hr_statutory_change_requests');
+      registerCollectionListener('lifecycleRequests', setLifecycleRequests, 'hr_lifecycle_requests');
+    }
 
     // StatConfig Sync (single document)
     try {
@@ -564,31 +586,69 @@ export default function App() {
   };
 
   // ─── Statutory Config Handlers ────────────────────────────────────────────
-  const handleUpdateStatConfig = async (newConfig: StatutoryConfig) => {
-    setStatConfig(newConfig);
-    privacyStorage.setItem('hr_stat_config', JSON.stringify(newConfig));
+  // Statutory rates are maker-checker controlled: edits accumulate in one pending change request and
+  // only reach the live configuration after a different authorized user approves them.
+  const pendingStatutoryChange = statutoryChangeRequests.find(item => item.status === 'Pending');
+
+  const proposeStatutoryChange = async (proposedConfig: StatutoryConfig, proposedTaxSlabs: TaxSlab[]) => {
+    if (pendingStatutoryChange && pendingStatutoryChange.createdById !== currentUserAccount.id) {
+      alert(`A statutory change proposed by ${pendingStatutoryChange.createdBy} is awaiting review. Approve or reject it before proposing another change.`);
+      return;
+    }
+    const request: StatutoryChangeRequest = {
+      id: pendingStatutoryChange?.id || `stat-change-${Date.now()}`,
+      status: 'Pending',
+      proposedConfig: { ...proposedConfig, id: statConfig.id },
+      proposedTaxSlabs,
+      changedFields: statutoryChangedFields(statConfig, proposedConfig, taxSlabs, proposedTaxSlabs),
+      createdAt: pendingStatutoryChange?.createdAt || new Date().toISOString(),
+      createdById: currentUserAccount.id,
+      createdBy: currentUserAccount.username,
+    };
+    setStatutoryChangeRequests(previous => [...previous.filter(item => item.id !== request.id), request]);
     try {
-      await setDoc(doc(db, 'statConfig', newConfig.id), newConfig);
+      await setDoc(doc(db, 'statutoryChangeRequests', request.id), cleanData(request));
     } catch (err) {
-      console.warn('PostgreSQL statConfig update delayed:');
+      console.warn('PostgreSQL statutory change request delayed:');
     }
   };
 
-  const handleUpdateTaxSlabs = async (newSlabs: TaxSlab[]) => {
-    setTaxSlabs(newSlabs);
-    privacyStorage.setItem('hr_tax_slabs', JSON.stringify(newSlabs));
-    try {
-      for (const slab of newSlabs) {
-        await setDoc(doc(db, 'taxSlabs', slab.id), slab);
-      }
-    } catch (err) {
-      console.warn('PostgreSQL tax slabs update delayed:');
-    }
+  const handleUpdateStatConfig = (newConfig: StatutoryConfig) =>
+    proposeStatutoryChange(newConfig, pendingStatutoryChange?.proposedTaxSlabs || taxSlabs);
+
+  const handleUpdateTaxSlabs = (newSlabs: TaxSlab[]) =>
+    proposeStatutoryChange(pendingStatutoryChange?.proposedConfig || statConfig, newSlabs);
+
+  const handleReviewStatutoryChange = async (id: string, decision: 'Approved' | 'Rejected', reviewComment: string) => {
+    const request = statutoryChangeRequests.find(item => item.id === id);
+    if (!request) return;
+    const withdrawing = decision === 'Rejected' && request.createdById === currentUserAccount.id && request.status === 'Pending';
+    const reviewError = withdrawing ? undefined : statutoryReviewError(request, currentUserAccount.id);
+    if (reviewError) { alert(`Maker-checker control: ${reviewError}`); return; }
+    if (!withdrawing && reviewComment.trim().length < 5) { alert('Enter a review comment (for example the FBR/EOBI notification reference).'); return; }
+    const now = new Date().toISOString();
+    const decided: StatutoryChangeRequest = { ...request, status: decision, reviewedAt: now, reviewedById: currentUserAccount.id, reviewedBy: currentUserAccount.username, reviewComment: reviewComment.trim() || 'Withdrawn by proposer' };
+    await setDoc(doc(db, 'statutoryChangeRequests', id), cleanData(decided));
+    setStatutoryChangeRequests(previous => previous.map(item => item.id === id ? decided : item));
+    if (decision !== 'Approved') return;
+    const liveConfig: StatutoryConfig = { ...request.proposedConfig, id: statConfig.id, changeRequestId: id, updatedAt: now };
+    await setDoc(doc(db, 'statConfig', liveConfig.id), cleanData(liveConfig));
+    setStatConfig(liveConfig);
+    privacyStorage.setItem('hr_stat_config', JSON.stringify(liveConfig));
+    const proposedIds = new Set(request.proposedTaxSlabs.map(slab => slab.id));
+    await Promise.all(request.proposedTaxSlabs.map(slab => setDoc(doc(db, 'taxSlabs', slab.id), cleanData({ ...slab, changeRequestId: id }))));
+    await Promise.all(taxSlabs.filter(slab => !proposedIds.has(slab.id)).map(slab => deleteDoc(doc(db, 'taxSlabs', slab.id))));
+    setTaxSlabs(request.proposedTaxSlabs);
+    privacyStorage.setItem('hr_tax_slabs', JSON.stringify(request.proposedTaxSlabs));
   };
 
 
   // ─── Leave Handlers ───────────────────────────────────────────────────────
   const handleApproveLeave = async (id: string) => {
+    const pendingLeave = leaves.find(item => item.id === id);
+    const leaveEmployee = pendingLeave && employees.find(item => item.id === pendingLeave.employeeId);
+    const approvalBalanceError = pendingLeave && leaveEmployee ? leaveBalanceError(pendingLeave, leaveEmployee, leaves, statConfig) : undefined;
+    if (approvalBalanceError) { alert(`Approval blocked: ${approvalBalanceError}`); return; }
     const today = todayStr();
     const approverName = loggedInUser?.username || 'HR Manager';
 
@@ -639,6 +699,19 @@ export default function App() {
           return updated;
         });
       }
+
+      await handleAddNotification({
+        id: `leave-approved-${targetLeave.id}-${Date.now()}`,
+        type: 'leave_approved',
+        title: 'Leave request approved',
+        message: `Your ${targetLeave.leaveType} leave from ${targetLeave.startDate} to ${targetLeave.endDate} has been approved.`,
+        titleUrdu: 'چھٹی کی درخواست منظور ہو گئی',
+        messageUrdu: `آپ کی ${targetLeave.startDate} سے ${targetLeave.endDate} تک کی چھٹی منظور کر دی گئی ہے۔`,
+        targetEmployeeId: targetLeave.employeeId,
+        createdAt: new Date().toISOString(),
+        readBy: [],
+        priority: 'medium'
+      });
     }
 
     try {
@@ -654,6 +727,7 @@ export default function App() {
 
   const handleRejectLeave = async (id: string) => {
     const today = todayStr();
+    const targetLeave = leaves.find(l => l.id === id);
     setLeaves(prev => {
       const updated = prev.map(l =>
         l.id === id ? { ...l, status: 'Rejected', approvedBy: loggedInUser?.username, approvedOn: today } as LeaveRequest : l
@@ -666,9 +740,26 @@ export default function App() {
     } catch (err) {
       console.warn('PostgreSQL leave rejection delayed:');
     }
+    if (targetLeave) {
+      await handleAddNotification({
+        id: `leave-rejected-${targetLeave.id}-${Date.now()}`,
+        type: 'leave_rejected',
+        title: 'Leave request not approved',
+        message: `Your ${targetLeave.leaveType} leave request from ${targetLeave.startDate} to ${targetLeave.endDate} was not approved. Please contact HR if you need more information.`,
+        titleUrdu: 'چھٹی کی درخواست منظور نہیں ہوئی',
+        messageUrdu: `آپ کی ${targetLeave.startDate} سے ${targetLeave.endDate} تک کی چھٹی منظور نہیں ہوئی۔ مزید معلومات کے لیے HR سے رابطہ کریں۔`,
+        targetEmployeeId: targetLeave.employeeId,
+        createdAt: new Date().toISOString(),
+        readBy: [],
+        priority: 'medium'
+      });
+    }
   };
 
   const handleApplyLeave = async (leave: LeaveRequest) => {
+    const applicant = employees.find(item => item.id === leave.employeeId);
+    const balanceError = applicant ? leaveBalanceError(leave, applicant, leaves, statConfig) : undefined;
+    if (balanceError) { alert(balanceError); return; }
     setLeaves(prev => {
       const updated = [...prev, leave];
       privacyStorage.setItem('hr_leaves', JSON.stringify(updated));
@@ -682,43 +773,57 @@ export default function App() {
   };
 
   // ─── Attendance Handlers ──────────────────────────────────────────────────
-  const handleApproveRegularization = async (id: string) => {
+  const reviewContextFor = (attendance: AttendanceLog) => ({
+    actorEmployeeId: currentUserAccount.employeeId, employee: employees.find(item => item.id === attendance.employeeId), users, roles,
+  });
+
+  const handleApproveRegularization = async (id: string, reviewComment = '') => {
     const attendance = attendances.find(item => item.id === id);
-    const reviewError = attendance ? attendanceReviewError(attendance, currentUserAccount.id) : 'Attendance item was not found.';
-    if (reviewError) { alert(reviewError); return; }
+    const reviewError = attendance ? attendanceReviewError(attendance, currentUserAccount.id, reviewContextFor(attendance)) : 'Attendance item was not found.';
+    if (reviewError || !attendance) { alert(reviewError); return; }
+    if (reviewComment.trim().length < 5) { alert('Enter an approval comment describing the evidence reviewed.'); return; }
     const reviewedAt = new Date().toISOString();
     const reviewedBy = currentUserAccount.username;
     const reviewedById = currentUserAccount.id;
+    // Approval confirms the evidence; it must not upgrade a late, half-day or off-site punch to a clean Present.
+    const employee = employees.find(item => item.id === attendance.employeeId);
+    const status: AttendanceLog['status'] = attendance.punchIn
+      ? evaluateAttendanceTimes(attendance.punchIn, attendance.punchOut, employee?.shift, attendance.breaks, attendance.date).status
+      : attendance.status === 'Absent' ? 'Present' : attendance.status;
+    const decision = { status, regularizationApproved: true, reviewedAt, reviewedBy, reviewedById, reviewComment: reviewComment.trim() };
     setAttendances(prev => {
       const updated = prev.map(att =>
-        att.id === id ? { ...att, status: 'Present', regularizationApproved: true, reviewedAt, reviewedBy, reviewedById } as AttendanceLog : att
+        att.id === id ? { ...att, ...decision } as AttendanceLog : att
       );
       privacyStorage.setItem('hr_attendances', JSON.stringify(updated));
       return updated;
     });
     try {
-      await updateDoc(doc(db, 'attendances', id), { status: 'Present', regularizationApproved: true, reviewedAt, reviewedBy, reviewedById });
+      await updateDoc(doc(db, 'attendances', id), decision);
     } catch (err) {
       console.warn('PostgreSQL regularization approval delayed:');
     }
   };
 
-  const handleRejectRegularization = async (id: string) => {
+  const handleRejectRegularization = async (id: string, reviewComment = '') => {
     const attendance = attendances.find(item => item.id === id);
-    const reviewError = attendance ? attendanceReviewError(attendance, currentUserAccount.id) : 'Attendance item was not found.';
-    if (reviewError) { alert(reviewError); return; }
+    const reviewError = attendance ? attendanceReviewError(attendance, currentUserAccount.id, reviewContextFor(attendance)) : 'Attendance item was not found.';
+    if (reviewError || !attendance) { alert(reviewError); return; }
+    if (reviewComment.trim().length < 5) { alert('Enter a rejection comment explaining the decision.'); return; }
     const reviewedAt = new Date().toISOString();
     const reviewedBy = currentUserAccount.username;
     const reviewedById = currentUserAccount.id;
+    // Rejecting a flagged punch (off-site, low-confidence biometric, suspicious GPS) means the day is not credited.
+    const decision = { regularizationApproved: false, reviewedAt, reviewedBy, reviewedById, reviewComment: reviewComment.trim(), ...(attendance.punchIn && { status: 'Absent' as const }) };
     setAttendances(prev => {
       const updated = prev.map(att =>
-        att.id === id ? { ...att, regularizationApproved: false, reviewedAt, reviewedBy, reviewedById } : att
+        att.id === id ? { ...att, ...decision } : att
       );
       privacyStorage.setItem('hr_attendances', JSON.stringify(updated));
       return updated;
     });
     try {
-      await updateDoc(doc(db, 'attendances', id), { regularizationApproved: false, reviewedAt, reviewedBy, reviewedById });
+      await updateDoc(doc(db, 'attendances', id), decision);
     } catch (err) {
       console.warn('PostgreSQL regularization rejection delayed:');
     }
@@ -739,6 +844,10 @@ export default function App() {
       }
     }
     const existingIdx = attendances.findIndex(a => a.employeeId === employeeId && a.date === today);
+    const punchTimestamp = new Date().toISOString();
+    if (existingIdx !== -1 && isDuplicatePunch(attendances[existingIdx].lastPunchTimestamp, Date.parse(punchTimestamp))) {
+      throw new Error('Duplicate punch ignored: this employee already punched within the last two minutes.');
+    }
     const locationEvidence = lat !== undefined && lon !== undefined && locationAccuracyMeters !== undefined && locationCapturedAt
       ? { latitude: lat, longitude: lon, accuracyMeters: locationAccuracyMeters, capturedAt: locationCapturedAt, source: 'device-gps' as const, ...(locationAddress && { address: locationAddress }) }
       : undefined;
@@ -748,13 +857,21 @@ export default function App() {
     if (method === 'Mobile GPS' && locationEvidence) {
       const evidenceError = validateLocationEvidence(locationEvidence);
       if (evidenceError) throw new Error(evidenceError);
+      const sameDay = existingIdx !== -1 ? attendances[existingIdx] : undefined;
+      const travelRisk = impossibleTravel([...(sameDay ? attendanceLocations(sameDay) : []), locationEvidence]
+        .sort((left, right) => Date.parse(left.capturedAt) - Date.parse(right.capturedAt)));
       const employee = employees.find(item => item.id === employeeId);
       const geofence = evaluateBranchGeofence(branches.find(item => item.id === employee?.branchId), locationEvidence);
-      if (geofence.inside) geofenceFields = { geofenceStatus: 'inside', geofenceDistanceMeters: geofence.distanceMeters };
+      if (travelRisk) geofenceFields = {
+        geofenceStatus: 'needs-review', geofenceDistanceMeters: geofence.distanceMeters, locationRisk: travelRisk,
+        regularizationRequested: true, requestedAt: punchTimestamp, regularizationReason: travelRisk,
+      };
+      else if (geofence.inside) geofenceFields = { geofenceStatus: 'inside', geofenceDistanceMeters: geofence.distanceMeters };
       else geofenceFields = {
         geofenceStatus: geofence.configured ? 'authorized-offsite' : 'needs-review',
         geofenceDistanceMeters: geofence.distanceMeters,
         regularizationRequested: true,
+        requestedAt: punchTimestamp,
         regularizationReason: geofence.configured
           ? `Authorized off-site mobile punch (${geofence.distanceMeters} metres from branch); manager review required.`
           : geofence.reason,
@@ -792,7 +909,7 @@ export default function App() {
           checkOutLocation: locationEvidence!,
         };
       }
-      const updatedLog: AttendanceLog = { ...existing, ...geofenceFields, method: 'Mobile GPS', fieldVisits: visits, lastPunchAt: locationCapturedAt, mobileDutyAuthorizationId: mobileAuthorization!.id };
+      const updatedLog: AttendanceLog = { ...existing, ...geofenceFields, method: 'Mobile GPS', fieldVisits: visits, lastPunchAt: locationCapturedAt, lastPunchTimestamp: punchTimestamp, mobileDutyAuthorizationId: mobileAuthorization!.id };
       setAttendances(prev => {
         const updated = prev.map(att => att.id === updatedLog.id ? updatedLog : att);
         privacyStorage.setItem('hr_attendances', JSON.stringify(updated));
@@ -818,6 +935,7 @@ export default function App() {
           punchOut: '',
           outReason: '',
           lastPunchAt: punchIn,
+          lastPunchTimestamp: punchTimestamp,
           method: 'Mobile Kiosk',
           breaks: [
             ...(existing.breaks || []),
@@ -838,12 +956,13 @@ export default function App() {
       if (mobileDetails?.action === 'workday-out' && existing.punchOut) throw new Error('The workday has already been finished.');
       if (mobileDetails?.action === 'workday-out' && existing.fieldVisits?.some(visit => !visit.checkOut)) throw new Error('Check out from the active field visit before finishing the workday.');
       const employee = employees.find(item => item.id === employeeId);
-      const evaluated = evaluateAttendanceTimes(existing.punchIn, punchOut, employee?.shift, existing.breaks);
+      const evaluated = evaluateAttendanceTimes(existing.punchIn, punchOut, employee?.shift, existing.breaks, existing.date);
       const updatedLog: AttendanceLog = {
         ...existing,
         ...(mobileAuthorization && { method: 'Mobile GPS', mobileDutyAuthorizationId: mobileAuthorization.id }),
         punchOut,
         lastPunchAt: punchOut,
+        lastPunchTimestamp: punchTimestamp,
         ...(method === 'Mobile Kiosk' && mobileDetails?.reasonNote && { outReason: mobileDetails.reasonNote }),
         status: evaluated.status,
         overtimeMinutes: evaluated.overtimeMinutes,
@@ -868,13 +987,14 @@ export default function App() {
       if (mobileDetails && mobileDetails.action !== 'workday-in') throw new Error('Start the workday before performing this action.');
       // Punch in — create new log
       const employee = employees.find(item => item.id === employeeId);
-      const status = evaluateAttendanceTimes(punchIn, undefined, employee?.shift).status;
+      const status = evaluateAttendanceTimes(punchIn, undefined, employee?.shift, [], today).status;
       const newLog: AttendanceLog = {
         id: `att-${employeeId}-${Date.now()}`,
         employeeId,
         date: today,
         punchIn,
         lastPunchAt: punchIn,
+        lastPunchTimestamp: punchTimestamp,
         method: method as AttendanceLog['method'],
         status,
         overtimeMinutes: 0,
@@ -897,7 +1017,7 @@ export default function App() {
     }
   };
 
-  const handleAddRegularization = async (employeeId: string, date: string, reason: string) => {
+  const handleAddRegularization = async (employeeId: string, date: string, reason: string, evidenceDocumentIds: string[] = []) => {
     const newRegLog: AttendanceLog = {
       id: `att-reg-${employeeId}-${Date.now()}`,
       employeeId,
@@ -907,7 +1027,9 @@ export default function App() {
       overtimeMinutes: 0,
       regularizationRequested: true,
       regularizationReason: reason,
-      requestedById: currentUserAccount.id
+      requestedById: currentUserAccount.id,
+      requestedAt: new Date().toISOString(),
+      ...(evidenceDocumentIds.length && { evidenceDocumentIds })
     };
     setAttendances(prev => {
       const updated = [...prev, newRegLog];
@@ -935,15 +1057,22 @@ export default function App() {
   };
 
   // ─── Payroll Handler ──────────────────────────────────────────────────────
+  const registerInputs = { employees, leaves, holidays };
+  // Cancelled runs stay for audit but must not feed year-to-date tax, variance checks or arrears.
+  const cancelledRunIds = new Set(payrollRuns.filter(run => run.status === 'Cancelled').map(run => run.id));
+  const effectivePayslips = payrollPayslips.filter(item => !cancelledRunIds.has(item.payrollRunId));
+
   const handleLockAttendancePeriod = async (month: number, year: number) => {
     const id = attendancePeriodId(month, year);
     const existing = attendancePeriods.find(item => item.id === id);
-    if (existing && isAttendancePeriodValid(existing, attendances)) {
-      alert('This attendance period is already locked and its integrity check is valid.');
+    if (existing?.status === 'Locked') {
+      alert(isAttendancePeriodValid(existing, attendances, registerInputs)
+        ? 'This attendance period is already locked and its integrity check is valid.'
+        : 'Attendance, leave, holiday or roster data changed after this register was locked. Reopen the register with a documented reason, review the changes, then lock it again.');
       return;
     }
     try {
-      const period = createAttendancePeriod(attendances, employees, month, year, currentUserAccount.username || currentUserAccount.id);
+      const period = createAttendancePeriod(attendances, employees, leaves, holidays, month, year, currentUserAccount.username || currentUserAccount.id, undefined, existing);
       await setDoc(doc(db, 'attendancePeriods', period.id), cleanData(period));
       setAttendancePeriods(previous => [...previous.filter(item => item.id !== period.id), period]);
       alert(`Attendance register locked. Integrity reference: ${period.integrityHash}`);
@@ -952,8 +1081,21 @@ export default function App() {
     }
   };
 
+  const handleReopenAttendancePeriod = async (month: number, year: number, reason: string) => {
+    const existing = attendancePeriods.find(item => item.id === attendancePeriodId(month, year));
+    if (!existing) { alert('This attendance period has not been locked.'); return; }
+    try {
+      const reopened = reopenAttendancePeriod(existing, reason, currentUserAccount.username || currentUserAccount.id, currentUserAccount.id, payrollRuns);
+      await setDoc(doc(db, 'attendancePeriods', reopened.id), cleanData(reopened));
+      setAttendancePeriods(previous => previous.map(item => item.id === reopened.id ? reopened : item));
+      alert(`Attendance register reopened (version ${reopened.registerVersion || 1}). Corrections are now allowed; lock it again before payroll.`);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Attendance period could not be reopened.');
+    }
+  };
+
   const handleCreatePayrollRun = async (title: string, month: number, year: number) => {
-    if (payrollRuns.some(run => run.periodMonth === month && run.periodYear === year)) {
+    if (payrollRuns.some(run => run.periodMonth === month && run.periodYear === year && run.status !== 'Cancelled')) {
       alert('A payroll run already exists for this period. Open the existing run instead of creating a duplicate.');
       return;
     }
@@ -967,8 +1109,8 @@ export default function App() {
     }
 
     const lockedPeriod = attendancePeriods.find(item => item.id === attendancePeriodId(month, year));
-    if (!isAttendancePeriodValid(lockedPeriod, attendances)) {
-      alert('Payroll refused: lock the attendance register first. If attendance changed after locking, review and lock it again.');
+    if (!lockedPeriod || !isAttendancePeriodValid(lockedPeriod, attendances, registerInputs)) {
+      alert('Payroll refused: lock the attendance register first. If attendance, leave, holiday or roster data changed after locking, reopen, review and lock it again.');
       return;
     }
     const monthPrefix = `${year}-${String(month).padStart(2, '0')}`;
@@ -985,7 +1127,7 @@ export default function App() {
     const runId = `run-${month}-${year}-${Date.now()}`;
 
     const sheets = eligibleEmployees.map(emp => ({
-      ...computePayslipDetails(emp, month, year, attendances, leaves, statConfig, taxSlabs, departments, designations, branches, loanAdvances, wageTypes, holidays, payrollPayslips, payrollAdjustments),
+      ...computePayslipDetails(emp, month, year, attendances, leaves, statConfig, taxSlabs, departments, designations, branches, loanAdvances, wageTypes, holidays, effectivePayslips, payrollAdjustments, lockedPeriod.registerRows),
       id: `${runId}-${emp.id}`,
       payrollRunId: runId
     }));
@@ -995,7 +1137,7 @@ export default function App() {
     const totalNetPay = sheets.reduce((sum, s) => sum + s.netSalary, 0);
     const totalEobiEmployer = sheets.reduce((sum, s) => sum + s.eobiEmployerContribution, 0);
     const totalSocialSecurityEmployer = sheets.reduce((sum, s) => sum + s.pessiEmployerContribution, 0);
-    const preflightIssues = payrollPreflight(employees, sheets, payrollPayslips);
+    const preflightIssues = payrollPreflight(employees, sheets, effectivePayslips, branches, statConfig, wageTypes);
     const preflightCriticalCount = preflightIssues.filter(item => item.severity === 'Critical').length;
     const preflightWarningCount = preflightIssues.filter(item => item.severity === 'Warning').length;
     if (preflightCriticalCount > 0) {
@@ -1025,6 +1167,7 @@ export default function App() {
       auditTrail: [{ action: 'Created', at: new Date().toISOString(), by: currentUserAccount.username, actorId: currentUserAccount.id }],
       attendancePeriodId: lockedPeriod.id,
       attendanceIntegrityHash: lockedPeriod.integrityHash,
+      attendanceRegisterHash: lockedPeriod.registerHash,
       preflightCriticalCount,
       preflightWarningCount,
     };
@@ -1070,10 +1213,10 @@ export default function App() {
     setPayrollAdjustments(previous => previous.map(item => item.id === id ? updated : item));
   };
 
-  const handleRecordBankAdvice = async (runId: string, checksum: string, employeeCount: number, total: number) => {
+  const handleRecordBankAdvice = async (runId: string, checksum: string, employeeCount: number, total: number, profile: PayrollRun['bankAdviceProfile'], batch?: { batchReference: string; controlHash: string; verified: boolean }) => {
     const run = payrollRuns.find(item => item.id === runId);
     if (!run || run.status !== 'Approved') throw new Error('Approve payroll before generating bank advice.');
-    const updated: PayrollRun = { ...run, bankAdviceChecksum: checksum, bankAdviceGeneratedAt: new Date().toISOString(), bankAdviceGeneratedById: currentUserAccount.id, bankAdviceEmployeeCount: employeeCount, bankAdviceTotal: total };
+    const updated: PayrollRun = { ...run, bankAdviceChecksum: checksum, bankAdviceGeneratedAt: new Date().toISOString(), bankAdviceGeneratedById: currentUserAccount.id, bankAdviceEmployeeCount: employeeCount, bankAdviceTotal: total, bankAdviceProfile: profile || 'Generic CSV', ...(batch && { bankAdviceBatchReference: batch.batchReference, bankAdviceControlHash: batch.controlHash, bankAdviceTemplateVerified: batch.verified }) };
     await setDoc(doc(db, 'payrollRuns', runId), cleanData(updated));
     setPayrollRuns(previous => previous.map(item => item.id === runId ? updated : item));
   };
@@ -1087,7 +1230,7 @@ export default function App() {
     if (transitionError) { alert(`Maker-checker control: ${transitionError}`); return; }
     if (nextStatus === 'Approved') {
       const runSheets = payrollPayslips.filter(item => item.payrollRunId === runId);
-      const criticalIssues = payrollPreflight(employees, runSheets, payrollPayslips).filter(item => item.severity === 'Critical');
+      const criticalIssues = payrollPreflight(employees, runSheets, effectivePayslips, branches, statConfig, wageTypes).filter(item => item.severity === 'Critical');
       if (criticalIssues.length) {
         alert(`Approval blocked: ${criticalIssues.length} critical payroll preflight issue(s) remain. ${criticalIssues[0].employeeName}: ${criticalIssues[0].message}`);
         return;
@@ -1114,10 +1257,29 @@ export default function App() {
     });
     await setDoc(doc(db, 'payrollRuns', runId), cleanData(updatedRun));
 
-    if (nextStatus === 'Approved') {
-      const runEmployeeIds = new Set(payrollPayslips.filter(p => p.payrollRunId === runId).map(p => p.employeeId));
+    if (nextStatus === 'Disbursed') {
+      const paidPayslips = payrollPayslips.filter(item => item.payrollRunId === runId);
+      await Promise.all(paidPayslips.map(payslip => handleAddNotification({
+        id: `payroll-disbursed-${runId}-${payslip.employeeId}`,
+        type: 'payroll_processed',
+        title: 'Salary has been disbursed',
+        message: `Your salary for ${run.title} has been disbursed. Check your payslip and bank account for the payment.`,
+        titleUrdu: 'تنخواہ جاری کر دی گئی ہے',
+        messageUrdu: `${run.title} کی آپ کی تنخواہ جاری کر دی گئی ہے۔ ادائیگی کے لیے اپنی پے سلپ اور بینک اکاؤنٹ دیکھیں۔`,
+        targetEmployeeId: payslip.employeeId,
+        createdAt: now,
+        readBy: [],
+        priority: 'high'
+      })));
+    }
+
+    // Loan balances move only when salary is actually paid; an approved run can still be cancelled.
+    if (nextStatus === 'Disbursed') {
+      const runEmployeeIds = new Set(payrollPayslips.filter(p => p.payrollRunId === runId && p.loanRepaymentDeduction > 0).map(p => p.employeeId));
+      const changedLoanIds = new Set<string>();
       const updatedLoans = loanAdvances.map((loan: LoanAdvance) => {
         if (!runEmployeeIds.has(loan.employeeId) || loan.status !== 'Active' || loan.remainingInstallments <= 0) return loan;
+        changedLoanIds.add(loan.id);
         const remainingInstallments = loan.remainingInstallments - 1;
         return {
           ...loan,
@@ -1128,8 +1290,208 @@ export default function App() {
       });
       setLoanAdvances(updatedLoans);
       privacyStorage.setItem('hr_loans', JSON.stringify(updatedLoans));
-      await Promise.all(updatedLoans.map(loan => setDoc(doc(db, 'loanAdvances', loan.id), cleanData(loan))));
+      await Promise.all(updatedLoans.filter(loan => changedLoanIds.has(loan.id)).map(loan => setDoc(doc(db, 'loanAdvances', loan.id), cleanData(loan))));
     }
+  };
+
+  const handleCancelPayrollRun = async (runId: string, reason: string) => {
+    const run = payrollRuns.find(item => item.id === runId);
+    if (!run) return;
+    const cancellationError = payrollCancellationError(run, reason);
+    if (cancellationError) { alert(cancellationError); return; }
+    const now = new Date().toISOString();
+    const cancelledRun: PayrollRun = {
+      ...run, status: 'Cancelled', statusBeforeCancellation: run.status as 'Draft' | 'Approved',
+      cancelledAt: now, cancelledBy: currentUserAccount.username, cancelledById: currentUserAccount.id, cancellationReason: reason.trim(),
+      auditTrail: [...(run.auditTrail || []), { action: 'Cancelled', at: now, by: currentUserAccount.username, actorId: currentUserAccount.id, reason: reason.trim() }],
+    };
+    await setDoc(doc(db, 'payrollRuns', runId), cleanData(cancelledRun));
+    setPayrollRuns(previous => previous.map(item => item.id === runId ? cancelledRun : item));
+    // Release approved adjustments so they flow into the replacement run for the same period.
+    const released = payrollAdjustments.filter(item => item.payrollRunId === runId).map(({ payrollRunId: _released, ...item }) => item as PayrollAdjustment);
+    await Promise.all(released.map(item => setDoc(doc(db, 'payrollAdjustments', item.id), cleanData(item))));
+    const releasedById = new Map(released.map(item => [item.id, item]));
+    setPayrollAdjustments(previous => previous.map(item => releasedById.get(item.id) || item));
+    alert(`Payroll run cancelled. ${released.length} adjustment(s) released. The attendance register can now be reopened or a replacement run created.`);
+  };
+
+  // ─── Escalation of overdue attendance corrections ──────────────────────────
+  // Deterministic notification ids make this idempotent across sessions and reviewers.
+  useEffect(() => {
+    const canEscalate = currentUserAccount.roleId === 'role-admin' || roles.find(role => role.id === currentUserAccount.roleId)?.permissions.includes('manage_attendance');
+    if (!canEscalate) return;
+    const known = new Set(notifications.map(item => item.id));
+    for (const attendance of attendances) {
+      if (!isRegularizationOverdue(attendance)) continue;
+      const employee = employees.find(item => item.id === attendance.employeeId);
+      const manager = lineManagerReviewer({ employee, users, roles });
+      const id = `regularization-overdue-${attendance.id}`;
+      if (known.has(id) || !manager?.employeeId) continue;
+      void handleAddNotification({
+        id, type: 'system', priority: 'high', createdAt: new Date().toISOString(), readBy: [], targetEmployeeId: manager.employeeId,
+        title: 'Attendance correction overdue', message: `${employee?.fullName || 'An employee'}'s attendance correction for ${attendance.date} passed its 3-working-day review deadline and is now escalated to HR.`,
+        titleUrdu: 'حاضری کی درستگی زیر التواء', messageUrdu: `${attendance.date} کی حاضری کی درستگی کی مقررہ مدت گزر گئی ہے اور معاملہ HR کو بھیج دیا گیا ہے۔`,
+      });
+    }
+  }, [attendances, notifications.length, users, roles, currentUserAccount.id]);
+
+  // ─── Employee Lifecycle Handlers ──────────────────────────────────────────
+  const handleCreateLifecycleRequest = async (draft: Omit<LifecycleRequest, 'id' | 'status' | 'createdAt' | 'createdById' | 'createdBy'>) => {
+    const employee = employees.find(item => item.id === draft.employeeId);
+    const error = lifecycleRequestError(draft, employee);
+    if (error) { alert(error); return false; }
+    if (lifecycleRequests.some(item => item.employeeId === draft.employeeId && item.type === draft.type && item.status === 'Pending')) {
+      alert(`A ${draft.type.toLowerCase()} request for this employee is already pending.`);
+      return false;
+    }
+    const request: LifecycleRequest = { ...draft, reason: draft.reason.trim(), id: `life-${draft.employeeId}-${Date.now()}`, status: 'Pending', createdAt: new Date().toISOString(), createdById: currentUserAccount.id, createdBy: currentUserAccount.username };
+    await setDoc(doc(db, 'lifecycleRequests', request.id), cleanData(request));
+    setLifecycleRequests(previous => [...previous, request]);
+    return true;
+  };
+
+  const handleReviewLifecycleRequest = async (id: string, decision: 'Approved' | 'Rejected', reviewComment: string) => {
+    const request = lifecycleRequests.find(item => item.id === id);
+    const employee = request && employees.find(item => item.id === request.employeeId);
+    if (!request || !employee) return;
+    const reviewError = lifecycleReviewError(request, currentUserAccount.id);
+    if (reviewError) { alert(`Maker-checker control: ${reviewError}`); return; }
+    if (reviewComment.trim().length < 5) { alert('Enter a review comment.'); return; }
+    const now = new Date().toISOString();
+    let decided: LifecycleRequest = { ...request, status: decision, reviewedAt: now, reviewedById: currentUserAccount.id, reviewedBy: currentUserAccount.username, reviewComment: reviewComment.trim() };
+    if (decision === 'Approved') {
+      const outcome = applyLifecycleRequest(request, employee, currentUserAccount, now, statConfig, wageTypes);
+      await handleUpdateEmployee(outcome.employee);
+      if (outcome.settlement) { await handleAddGratuitySettlement(outcome.settlement); decided = { ...decided, settlementId: outcome.settlement.id }; }
+      if (outcome.salaryRevision) { await handleAddSalaryRevision(outcome.salaryRevision); decided = { ...decided, salaryRevisionId: outcome.salaryRevision.id }; }
+    }
+    await setDoc(doc(db, 'lifecycleRequests', id), cleanData(decided));
+    setLifecycleRequests(previous => previous.map(item => item.id === id ? decided : item));
+  };
+
+  const handleUpdateOnboarding = async (employeeId: string, item: NonNullable<keyof NonNullable<Employee['onboardingChecklist']>>, done: boolean) => {
+    const employee = employees.find(record => record.id === employeeId);
+    if (!employee) return;
+    const stamp = { done, at: new Date().toISOString(), by: currentUserAccount.username };
+    const updated: Employee = {
+      ...employee,
+      onboardingChecklist: { ...(employee.onboardingChecklist || {}), [item]: stamp },
+      ...(item === 'bankVerified' && (done ? { bankVerifiedAt: stamp.at, bankVerifiedBy: stamp.by } : { bankVerifiedAt: undefined, bankVerifiedBy: undefined })),
+    };
+    await handleUpdateEmployee(updated);
+  };
+
+  // ─── Off-cycle Payroll, Tax Deposits & Payment Exceptions ─────────────────
+  const persistRun = async (run: PayrollRun, sheets: Payslip[]) => {
+    await setDoc(doc(db, 'payrollRuns', run.id), cleanData(run));
+    await Promise.all(sheets.map(sheet => setDoc(doc(db, 'payrollPayslips', sheet.id), cleanData(sheet))));
+    setPayrollRuns(previous => [...previous, run]);
+    setPayrollPayslips(previous => [...previous, ...sheets]);
+  };
+
+  const offCycleRun = (title: string, month: number, year: number, sheets: Payslip[], extra: Partial<PayrollRun>): PayrollRun => {
+    const lastDay = new Date(year, month, 0).getDate();
+    return {
+      id: '', title, periodMonth: month, periodYear: year, status: 'Draft', createdAt: todayStr(),
+      startDate: `${year}-${String(month).padStart(2, '0')}-01`, endDate: `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`,
+      totalGrossPay: sheets.reduce((sum, item) => sum + item.grossSalary, 0), totalDeductions: sheets.reduce((sum, item) => sum + item.totalDeductions, 0),
+      totalNetPay: sheets.reduce((sum, item) => sum + item.netSalary, 0), totalEobiEmployer: 0, totalSocialSecurityEmployer: 0, employeeCount: sheets.length,
+      statutoryConfigId: statConfig.id, statutoryEffectiveFrom: statConfig.effectiveFrom, createdById: currentUserAccount.id,
+      auditTrail: [{ action: 'Created', at: new Date().toISOString(), by: currentUserAccount.username, actorId: currentUserAccount.id }],
+      attendancePeriodId: '', attendanceIntegrityHash: '', preflightCriticalCount: 0, preflightWarningCount: 0, ...extra,
+    };
+  };
+
+  const handleCreateSupplementaryRun = async (month: number, year: number) => {
+    const regular = payrollRuns.find(run => run.periodMonth === month && run.periodYear === year && (run.runType || 'Regular') === 'Regular' && run.status !== 'Cancelled');
+    if (!regular) { alert('Create the regular payroll for this period first; supplementary runs pay items approved after it.'); return; }
+    const directory = { departments, designations, branches };
+    const sheets = employees.flatMap(employee => {
+      const base = effectivePayslips.find(item => item.payrollRunId === regular.id && item.employeeId === employee.id);
+      const sheet = computeSupplementaryPayslip(employee, month, year, payrollAdjustments, base, statConfig, taxSlabs, directory);
+      return sheet ? [sheet] : [];
+    });
+    if (!sheets.length) { alert('No approved, unpaid adjustments exist for this period.'); return; }
+    if (sheets.some(sheet => sheet.netSalary <= 0)) { alert('A supplementary payslip would have zero or negative net pay. Review deductions before running it.'); return; }
+    const runId = `run-supp-${month}-${year}-${Date.now()}`;
+    const run = { ...offCycleRun(`Supplementary payroll - ${month}/${year}`, month, year, sheets, { runType: 'Supplementary', attendancePeriodId: regular.attendancePeriodId, attendanceIntegrityHash: regular.attendanceIntegrityHash, attendanceRegisterHash: regular.attendanceRegisterHash }), id: runId };
+    const linked = sheets.map(sheet => ({ ...sheet, id: `${runId}-${sheet.employeeId}`, payrollRunId: runId }));
+    await persistRun(run, linked);
+    const used = new Set(linked.flatMap(sheet => sheet.payrollAdjustmentIds || []));
+    const assigned = payrollAdjustments.filter(item => used.has(item.id)).map(item => ({ ...item, payrollRunId: runId }));
+    await Promise.all(assigned.map(item => setDoc(doc(db, 'payrollAdjustments', item.id), cleanData(item))));
+    setPayrollAdjustments(previous => previous.map(item => assigned.find(next => next.id === item.id) || item));
+    alert(`Supplementary draft created for ${linked.length} employee(s): net PKR ${run.totalNetPay.toLocaleString()}. Another payroll officer must approve it.`);
+  };
+
+  const handleCreateFinalSettlementRun = async (settlementId: string) => {
+    const settlement = gratuitySettlements.find(item => item.id === settlementId);
+    const employee = settlement && employees.find(item => item.id === settlement.employeeId);
+    if (!settlement || !employee) return;
+    if (payrollRuns.some(run => run.settlementId === settlementId && run.status !== 'Cancelled')) { alert('A payroll run already exists for this settlement.'); return; }
+    try {
+      const sheet = computeFinalSettlementPayslip(employee, settlement, loanAdvances, effectivePayslips, statConfig, taxSlabs, { departments, designations, branches });
+      if (sheet.netSalary <= 0) { alert('Settlement net pay is zero after tax and loan recovery; record the settlement outside payroll.'); return; }
+      const runId = `run-fs-${employee.id}-${Date.now()}`;
+      const run = { ...offCycleRun(`Final settlement - ${employee.fullName}`, sheet.periodMonth!, sheet.periodYear!, [sheet], { runType: 'Final Settlement', settlementId }), id: runId };
+      await persistRun(run, [{ ...sheet, id: `${runId}-${employee.id}`, payrollRunId: runId }]);
+      alert(`Final settlement draft created: gross PKR ${sheet.grossSalary.toLocaleString()}, tax PKR ${sheet.incomeTaxDeduction.toLocaleString()}, loan recovery PKR ${sheet.loanRepaymentDeduction.toLocaleString()}, net PKR ${sheet.netSalary.toLocaleString()}.`);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Final settlement payroll could not be created.');
+    }
+  };
+
+  const handleRetroRecalculate = async (payslipId: string, reason: string, target: { month: number; year: number }) => {
+    const original = payrollPayslips.find(item => item.id === payslipId);
+    const run = original && payrollRuns.find(item => item.id === original.payrollRunId);
+    const employee = original && employees.find(item => item.id === original.employeeId);
+    if (!original || !run || !employee || !original.periodMonth || !original.periodYear) { alert('Choose a paid payslip to recalculate.'); return; }
+    if ((run.runType || 'Regular') !== 'Regular' || (run.status !== 'Approved' && run.status !== 'Disbursed')) { alert('Only processed regular payroll months can be recalculated.'); return; }
+    const register = attendancePeriods.find(item => item.id === run.attendancePeriodId)?.registerRows;
+    // Recompute the month exactly as payroll did, against the same locked register, with today's corrected employee data.
+    const recomputed = computePayslipDetails(employee, original.periodMonth, original.periodYear, attendances, leaves, statConfig, taxSlabs, departments, designations, branches,
+      loanAdvances, wageTypes, holidays, effectivePayslips.filter(item => item.id !== original.id), [], register);
+    try {
+      const result = retroRecalculationAdjustment(original, recomputed, reason, currentUserAccount, target);
+      if (!result.adjustment) { alert('Recalculation matches what was paid; no correction is needed.'); return; }
+      const lines = result.breakdown.map(([label, delta]) => `• ${label}: ${delta > 0 ? '+' : ''}PKR ${delta.toLocaleString()}`).join('\n');
+      if (!window.confirm(`${employee.fullName} — ${original.periodYear}-${String(original.periodMonth).padStart(2, '0')}\n${lines}\n\n${result.adjustment.type} of PKR ${result.adjustment.amount.toLocaleString()} will be raised for ${target.month}/${target.year} and needs approval by another payroll user. Continue?`)) return;
+      await handleCreatePayrollAdjustment(result.adjustment);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Recalculation failed.');
+    }
+  };
+
+  const handleRecordTaxDeposit = async (runId: string, cprNumber: string, amount: number, depositedOn: string) => {
+    const run = payrollRuns.find(item => item.id === runId);
+    if (!run || (run.status !== 'Approved' && run.status !== 'Disbursed')) { alert('Record the FBR deposit only for an approved or disbursed payroll.'); return; }
+    if (!/^[A-Za-z0-9-]{6,40}$/.test(cprNumber.trim()) || !Number.isFinite(amount) || amount < 0 || !/^\d{4}-\d{2}-\d{2}$/.test(depositedOn)) { alert('Enter a valid CPR number, amount and deposit date (YYYY-MM-DD).'); return; }
+    const updated: PayrollRun = { ...run, taxDeposit: { cprNumber: cprNumber.trim().toUpperCase(), amount: Math.round(amount), depositedOn, recordedAt: new Date().toISOString(), recordedById: currentUserAccount.id, recordedBy: currentUserAccount.username } };
+    await setDoc(doc(db, 'payrollRuns', runId), cleanData(updated));
+    setPayrollRuns(previous => previous.map(item => item.id === runId ? updated : item));
+  };
+
+  const handleMarkPaymentFailed = async (payslipId: string, reason: string) => {
+    const sheet = payrollPayslips.find(item => item.id === payslipId);
+    const run = sheet && payrollRuns.find(item => item.id === sheet.payrollRunId);
+    if (!sheet || run?.status !== 'Disbursed') { alert('Only payslips in a disbursed run can be marked as failed payments.'); return; }
+    if (sheet.paymentStatus === 'Failed') return;
+    if (reason.trim().length < 5) { alert('Enter the bank return reason.'); return; }
+    const updated: Payslip = { ...sheet, paymentStatus: 'Failed', paymentFailureReason: reason.trim(), paymentFailedAt: new Date().toISOString(), paymentFailedById: currentUserAccount.id };
+    await setDoc(doc(db, 'payrollPayslips', payslipId), cleanData(updated));
+    setPayrollPayslips(previous => previous.map(item => item.id === payslipId ? updated : item));
+  };
+
+  const handleRecordPaymentRetry = async (payslipIds: string[], reference: string) => {
+    if (!/^[A-Za-z0-9][A-Za-z0-9/_ .-]{2,99}$/.test(reference.trim())) { alert('Enter the bank reference for the retry payment.'); return; }
+    const now = new Date().toISOString();
+    const updates = payrollPayslips.filter(item => payslipIds.includes(item.id) && item.paymentStatus === 'Failed').map(item => {
+      const employee = employees.find(record => record.id === item.employeeId);
+      return { ...item, paymentStatus: 'Retried' as const, paymentRetryReference: reference.trim(), paymentRetriedAt: now, paymentRetriedById: currentUserAccount.id,
+        retryBankName: employee?.bankName, retryBankAccountNumber: employee?.bankAccountNumber, retryIban: employee?.iban };
+    });
+    await Promise.all(updates.map(item => setDoc(doc(db, 'payrollPayslips', item.id), cleanData(item))));
+    setPayrollPayslips(previous => previous.map(item => updates.find(next => next.id === item.id) || item));
   };
 
   // ─── Role & User Handlers ─────────────────────────────────────────────────
@@ -1479,10 +1841,29 @@ export default function App() {
   // ─── Salary Revision Handlers ─────────────────────────────────────────────
   const handleAddSalaryRevision = async (revision: SalaryRevision) => {
     // Draft recommendations never change payroll. Salary changes occur only
-    // after an authorized user explicitly approves the revision.
+    // after a different authorized user explicitly approves the revision.
     const employee = employees.find(e => e.id === revision.employeeId);
-    if (employee && revision.status !== 'Draft') {
-      await handleUpdateEmployee({ ...employee, basicSalary: revision.newSalary });
+    const previous = salaryRevisions.find(item => item.id === revision.id);
+    if (revision.status !== 'Draft') {
+      const approvalError = salaryRevisionApprovalError(previous || { ...revision, status: 'Draft' }, currentUserAccount.id);
+      if (approvalError) { alert(`Maker-checker control: ${approvalError}`); return; }
+      revision = { ...revision, approvedById: currentUserAccount.id, approvedBy: currentUserAccount.username, approvedOn: todayStr() };
+      if (employee) await handleUpdateEmployee({ ...employee, basicSalary: revision.newSalary });
+      // Back-dated revisions owe the difference for payroll months already processed at the old salary.
+      const arrears = salaryRevisionArrears(revision, effectivePayslips, payrollRuns);
+      if (arrears.amount > 0) {
+        const [currentYear, currentMonth] = todayStr().split('-').map(Number);
+        const adjustment: PayrollAdjustment = {
+          id: `adj-arrears-${revision.id}`, employeeId: revision.employeeId, periodMonth: currentMonth, periodYear: currentYear,
+          type: 'Arrears', amount: arrears.amount, taxable: true,
+          reason: `Salary revision arrears effective ${revision.effectiveDate} for ${arrears.months.join(', ')}`.slice(0, 500),
+          status: 'Pending', createdAt: new Date().toISOString(), createdById: currentUserAccount.id, createdBy: currentUserAccount.username,
+        };
+        await handleCreatePayrollAdjustment(adjustment);
+        revision = { ...revision, arrearsAdjustmentId: adjustment.id, arrearsAmount: arrears.amount };
+      }
+    } else if (!previous) {
+      revision = { ...revision, createdById: revision.createdById || currentUserAccount.id, createdBy: revision.createdBy || currentUserAccount.username };
     }
 
     setSalaryRevisions(prev => {
@@ -1801,6 +2182,15 @@ export default function App() {
       onRejectRegularization={handleRejectRegularization}
       onCreatePayrollRun={handleCreatePayrollRun}
       onLockAttendancePeriod={handleLockAttendancePeriod}
+      onReopenAttendancePeriod={handleReopenAttendancePeriod}
+      onCancelPayrollRun={handleCancelPayrollRun}
+      portalGovernance={{
+        statutoryChangeRequests, onReviewStatutoryChange: handleReviewStatutoryChange,
+        lifecycleRequests, onCreateLifecycleRequest: handleCreateLifecycleRequest, onReviewLifecycleRequest: handleReviewLifecycleRequest,
+        onUpdateOnboarding: handleUpdateOnboarding, onCreateSupplementaryRun: handleCreateSupplementaryRun,
+        onCreateFinalSettlementRun: handleCreateFinalSettlementRun, onRecordTaxDeposit: handleRecordTaxDeposit,
+        onMarkPaymentFailed: handleMarkPaymentFailed, onRecordPaymentRetry: handleRecordPaymentRetry, onRetroRecalculate: handleRetroRecalculate,
+      }}
       onUpdatePayrollStatus={handleUpdatePayrollStatus}
       onRecordBankAdvice={handleRecordBankAdvice}
       onSendPayslips={handleSendPayslips}
@@ -1882,7 +2272,7 @@ function LoginScreen({
 }: {
   authReady: boolean;
   authMessage: string;
-  onLogin: (email: string, password: string, mfaChallenge?: string, mfaCode?: string) => Promise<{ mfaChallenge?: string } | void>;
+  onLogin: (email: string, password: string, mfaChallenge?: string, mfaCode?: string, mfaMethod?: 'totp' | 'email', rememberMe?: boolean) => Promise<{ mfaChallenge?: string; mfaMethods?: Array<'totp' | 'email'> } | void>;
   isDatabaseEmpty?: boolean;
   onLaunchSetup?: () => void;
   appName?: string;
@@ -1910,6 +2300,9 @@ function LoginScreen({
   const [showForgotHelp, setShowForgotHelp] = useState(false);
   const [mfaChallenge, setMfaChallenge] = useState('');
   const [mfaCode, setMfaCode] = useState('');
+  const [mfaMethod, setMfaMethod] = useState<'totp' | 'email'>('totp');
+  const [mfaMethods, setMfaMethods] = useState<Array<'totp' | 'email'>>(['totp', 'email']);
+  const [emailCodeSent, setEmailCodeSent] = useState(false);
 
   const handleSubmit = async (e: React.SyntheticEvent) => {
     e.preventDefault();
@@ -1922,14 +2315,34 @@ function LoginScreen({
       } else {
         try { localStorage.removeItem('hr_remembered_email'); } catch {}
       }
-      const result = await onLogin(loginId, password, mfaChallenge || undefined, mfaCode || undefined);
+      const result = await onLogin(loginId, password, mfaChallenge || undefined, mfaCode || undefined, mfaMethod, rememberMe);
       if (result && result.mfaChallenge) {
         setMfaChallenge(result.mfaChallenge);
         setMfaCode('');
+        const availableMethods: Array<'totp' | 'email'> = result.mfaMethods?.length ? result.mfaMethods : ['totp', 'email'];
+        setMfaMethod(availableMethods.includes('totp') ? 'totp' : 'email');
+        setMfaMethods(availableMethods);
+        setEmailCodeSent(false);
         setError('');
       }
     } catch (loginError) {
       setError(loginError instanceof Error ? loginError.message : 'Unable to sign in.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const sendEmailLoginCode = async () => {
+    try {
+      setError('');
+      setIsSubmitting(true);
+      const apiBase = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+      const response = await fetch(`${apiBase}/api/auth/mfa/send-email-login-code`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ challenge: mfaChallenge }) });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Email verification code could not be sent.');
+      setEmailCodeSent(true);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Email verification code could not be sent.');
     } finally {
       setIsSubmitting(false);
     }
@@ -2154,8 +2567,13 @@ function LoginScreen({
                 </div>}
 
                 {mfaChallenge && <div className="space-y-1.5">
-                  <label className="block text-[11px] font-bold text-emerald-400 uppercase tracking-widest">AUTHENTICATOR CODE</label>
-                  <p className="text-xs text-slate-400">Enter the current six-digit code from your authenticator app.</p>
+                  <label className="block text-[11px] font-bold text-emerald-400 uppercase tracking-widest">TWO-FACTOR VERIFICATION</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {mfaMethods.includes('totp') && <button type="button" onClick={() => { setMfaMethod('totp'); setMfaCode(''); setError(''); }} className={`rounded-lg border px-3 py-2 text-xs font-bold ${mfaMethod === 'totp' ? 'border-emerald-400 bg-emerald-500/20 text-emerald-300' : 'border-slate-700 bg-slate-900 text-slate-400'}`}>Authenticator app</button>}
+                    {mfaMethods.includes('email') && <button type="button" onClick={() => { setMfaMethod('email'); setMfaCode(''); setError(''); }} className={`rounded-lg border px-3 py-2 text-xs font-bold ${mfaMethod === 'email' ? 'border-emerald-400 bg-emerald-500/20 text-emerald-300' : 'border-slate-700 bg-slate-900 text-slate-400'}`}>Email verification</button>}
+                  </div>
+                  <p className="text-xs text-slate-400">{mfaMethod === 'totp' ? 'Enter the current six-digit code from your authenticator app.' : 'Request a code at your registered email, then enter it below.'}</p>
+                  {mfaMethod === 'email' && <button type="button" disabled={isSubmitting} onClick={sendEmailLoginCode} className="rounded-lg border border-emerald-500/60 px-3 py-2 text-xs font-bold text-emerald-300 hover:bg-emerald-500/10 disabled:opacity-60">{emailCodeSent ? 'Send a new email code' : 'Send email code'}</button>}
                   <input
                     inputMode="numeric"
                     autoComplete="one-time-code"
@@ -2165,10 +2583,10 @@ function LoginScreen({
                     autoFocus
                     value={mfaCode}
                     onChange={event => setMfaCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
-                    placeholder="000000"
+                    placeholder={mfaMethod === 'email' ? 'Email code' : 'Authenticator code'}
                     className="w-full text-center tracking-[0.5em] text-lg font-mono py-3 bg-slate-950/80 border border-emerald-700/70 rounded-xl text-white placeholder-slate-600 focus:outline-none focus:border-emerald-400"
                   />
-                  <button type="button" onClick={() => { setMfaChallenge(''); setMfaCode(''); setError(''); }} className="text-xs text-slate-400 hover:text-emerald-400 underline">Use a different account</button>
+                  <button type="button" onClick={() => { setMfaChallenge(''); setMfaCode(''); setMfaMethod('totp'); setEmailCodeSent(false); setError(''); }} className="text-xs text-slate-400 hover:text-emerald-400 underline">Use a different account</button>
                 </div>}
 
                 {/* Remember Me Checkbox */}
@@ -2180,17 +2598,18 @@ function LoginScreen({
                       onChange={e => setRememberMe(e.target.checked)}
                       className="w-4 h-4 rounded bg-slate-950 border-slate-800 text-emerald-500 focus:ring-emerald-500/30 focus:ring-offset-0 transition cursor-pointer"
                     />
-                    <span className="text-xs text-slate-300 font-medium">Remember Me</span>
+                    <span className="text-xs text-slate-300 font-medium">Remember me for 5 days</span>
                   </label>
                   <span className="text-[10px] text-slate-500 font-mono flex items-center gap-1">
                     <ShieldCheck className="w-3.5 h-3.5 text-emerald-500/70" /> 256-bit Encrypted
                   </span>
                 </div>
+                {rememberMe && <p className="-mt-1 text-[10px] leading-relaxed text-emerald-300/80">This browser will stay signed in for up to 5 days. You will need to verify again after that, or sooner if you sign out.</p>}
 
                 {/* Primary CTA Submit Button */}
                 <button
                   type="submit"
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || (Boolean(mfaChallenge) && (mfaCode.length !== 6 || (mfaMethod === 'email' && !emailCodeSent)))}
                   className="w-full mt-2 bg-gradient-to-r from-emerald-500 via-green-500 to-emerald-600 hover:from-emerald-400 hover:via-green-400 hover:to-emerald-500 text-slate-950 font-bold py-3.5 rounded-xl shadow-lg shadow-emerald-500/30 hover:shadow-emerald-500/50 hover:scale-[1.01] active:scale-[0.99] transition-all duration-200 text-sm flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed cursor-pointer"
                 >
                   {isSubmitting ? (
@@ -2200,7 +2619,7 @@ function LoginScreen({
                     </>
                   ) : (
                     <>
-                      <span>{mfaChallenge ? 'Verify Authenticator Code' : 'Sign In to System'}</span>
+                      <span>{mfaChallenge ? `Verify ${mfaMethod === 'email' ? 'Email Code' : 'Authenticator Code'}` : 'Sign In to System'}</span>
                       <ArrowRight className="w-4 h-4" />
                     </>
                   )}

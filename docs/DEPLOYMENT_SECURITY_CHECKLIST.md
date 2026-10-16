@@ -30,3 +30,15 @@ The production web process should be started with `npm start` behind an HTTPS re
 - Run `npm run postgres:backup:verify -- /absolute/path/to/file.dump.enc` after each backup or at least weekly.
 - Copy encrypted backups and manifests to a second server or object-storage account.
 - Test restoration quarterly on a separate staging database. Production restore requires `CONFIRM_DATABASE_RESTORE=RESTORE_HR_PAYROLL_DATABASE`.
+
+# MFA rollout and recovery
+
+- Set a unique `MFA_ENCRYPTION_KEY` before enabling authenticator MFA; losing it prevents recovery of enrolled MFA secrets.
+- Configure and test `SMTP_HOST`, `SMTP_USER`, `SMTP_PASS`, and `SMTP_FROM`; users may choose a six-digit email verification code instead of their authenticator-app code during MFA sign-in.
+- Enroll two trusted administrators first, then all payroll and access-control users.
+- Keep `MFA_ENFORCE_PRIVILEGED=false` until every privileged user has confirmed a successful MFA login.
+- Then set `MFA_ENFORCE_PRIVILEGED=true` and restart the service.
+- MFA recovery requires a reason and a different access administrator to approve the request. Approval revokes all sessions for the recovered account.
+# Private employee documents
+
+Set `DOCUMENT_STORAGE_PATH` to a directory outside the web root, for example `/www/hr-payroll-private/documents`. Create it with restrictive permissions for the user that runs the Node service; never place it under `dist`, `public`, or a directory served by Nginx. Employee document uploads accept only PDF, JPEG, and PNG files up to 10 MB and are downloaded only through authenticated, audited API requests.

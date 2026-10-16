@@ -8,9 +8,11 @@ import {
   AttendanceLog, LeaveRequest, StatutoryConfig, TaxSlab, Payslip,
   Role, UserAccount, Holiday, LoanAdvance, SalaryRevision,
   PerformanceReview, CompanyAsset, JobPosting, JobApplication,
-  GratuitySettlement, AppNotification, PayrollAdjustment
+  GratuitySettlement, AppNotification, PayrollAdjustment, AttendanceRegisterRow
 } from '../types';
 import { countScheduledWorkingDays } from './attendanceRules';
+import { registerPayrollSummary } from './attendancePeriod';
+import { establishmentRule, socialSecurityContribution } from './provincialCompliance';
 import type { WageType } from '../types';
 import { resolveWageBasis } from './masterData';
 
@@ -42,9 +44,25 @@ export const DEFAULT_STATUTORY_CONFIG: StatutoryConfig = {
     Punjab: 6,
     Sindh: 6,
     KPK: 6,
-    Balochistan: 6
+    Balochistan: 6,
+    ICT: 6
   },
+  provincialMinimumWages: { Punjab: 37000, Sindh: 37000, KPK: 37000, Balochistan: 37000, ICT: 37000 },
+  provincialSocialSecuritySchemes: { Punjab: 'PESSI', Sindh: 'SESSI', KPK: 'KP ESSI', Balochistan: 'BESSI', ICT: 'Federal / ICT' },
+  statutoryPolicyVersion: 'PK-TY2027-2026-07-01',
   overtimeMultiplier: 2,
+  dailyWagerOvertimeMultiplier: 2,
+  medicalAllowanceExemptPercentOfBasic: 10,
+  surchargeRatePercent: 0,
+  surchargeThresholdAnnual: 10000000,
+  socialSecurityEligibility: 'Capped wage for all',
+  settlementDailyRateDivisor: 30,
+  gratuityMinimumServiceYears: 1,
+  gratuityCountPartYearOverSixMonths: false,
+  gratuityResignationUnderFiveYearsPercent: 100,
+  annualLeaveDaysPerYear: 14,
+  maxLeaveEncashDays: 30,
+  absenceDeductionBasis: 'Calendar Days',
   standardMonthlyHours: 208
 };
 
@@ -414,6 +432,14 @@ export function calculateAnnualTax(annualTaxableIncome: number, slabs: TaxSlab[]
   return Math.round(baseCalculatedTax);
 }
 
+/** Annual liability including the high-income surcharge (s.4AB) when configured for the tax year. */
+export function annualTaxLiability(annualTaxableIncome: number, slabs: TaxSlab[], config?: Pick<StatutoryConfig, 'surchargeRatePercent' | 'surchargeThresholdAnnual'>) {
+  const tax = calculateAnnualTax(annualTaxableIncome, slabs);
+  const rate = Math.max(0, config?.surchargeRatePercent || 0);
+  const surcharge = rate && annualTaxableIncome > (config?.surchargeThresholdAnnual ?? Number.POSITIVE_INFINITY) ? tax * rate / 100 : 0;
+  return { tax: tax + surcharge, surcharge };
+}
+
 export function pakistanTaxYearForPeriod(month: number, year: number): string {
   return String(month >= 7 ? year + 1 : year);
 }
@@ -424,7 +450,8 @@ export function calculateReconciledMonthlyTax(
   month: number,
   year: number,
   slabs: TaxSlab[],
-  historicalPayslips: Payslip[] = []
+  historicalPayslips: Payslip[] = [],
+  config?: Pick<StatutoryConfig, 'surchargeRatePercent' | 'surchargeThresholdAnnual'>
 ) {
   const taxYear = pakistanTaxYearForPeriod(month, year);
   const taxYearStartYear = Number(taxYear) - 1;
@@ -436,11 +463,13 @@ export function calculateReconciledMonthlyTax(
     && `${item.periodYear}-${String(item.periodMonth).padStart(2, '0')}-01` < periodStart);
   const priorEmployerIncome = Math.max(0, employee.priorEmployerTaxableIncome || 0);
   const priorEmployerTax = Math.max(0, employee.priorEmployerTaxDeducted || 0);
-  const currentEmployerIncomeBefore = previous.reduce((sum, item) => sum + item.grossSalary, 0);
+  // Earlier months contribute what was actually taxable (after exemptions, including perquisites), not cash gross.
+  const currentEmployerIncomeBefore = previous.reduce((sum, item) => sum + (item.taxableIncomeThisPeriod ?? item.grossSalary), 0);
   const currentEmployerTaxBefore = previous.reduce((sum, item) => sum + item.incomeTaxDeduction, 0);
   const remainingPeriods = month >= 7 ? 19 - month : 7 - month;
   const projectedAnnualTaxableIncome = priorEmployerIncome + currentEmployerIncomeBefore + grossSalary * remainingPeriods;
-  const projectedAnnualTaxLiability = calculateAnnualTax(projectedAnnualTaxableIncome, slabs);
+  const liability = annualTaxLiability(projectedAnnualTaxableIncome, slabs, config);
+  const projectedAnnualTaxLiability = liability.tax;
   const taxDeductedBeforeCurrentPeriod = priorEmployerTax + currentEmployerTaxBefore;
   const incomeTaxDeduction = Math.max(0, Math.round((projectedAnnualTaxLiability - taxDeductedBeforeCurrentPeriod) / remainingPeriods));
   return {
@@ -449,6 +478,7 @@ export function calculateReconciledMonthlyTax(
     taxDeductedBeforeCurrentPeriod,
     projectedAnnualTaxableIncome,
     projectedAnnualTaxLiability,
+    surchargeAnnual: Math.round(liability.surcharge),
     incomeTaxDeduction,
   };
 }
@@ -573,7 +603,8 @@ export function computePayslipDetails(
   wageTypes: WageType[] = [],
   holidays: Holiday[] = [],
   historicalPayslips: Payslip[] = [],
-  payrollAdjustments: PayrollAdjustment[] = []
+  payrollAdjustments: PayrollAdjustment[] = [],
+  registerRows?: AttendanceRegisterRow[]
 ): Payslip {
   
   // Basic wage context
@@ -584,6 +615,7 @@ export function computePayslipDetails(
   const periodStart = `${year}-${String(month).padStart(2, '0')}-01`;
   const periodEnd = `${year}-${String(month).padStart(2, '0')}-${String(totalDaysInMonth).padStart(2, '0')}`;
   const branch = branches.find(b => b.id === employee.branchId);
+  const siteRule = establishmentRule(statConfigs, branch?.establishmentType);
 
   const overlapDays = (startDate: string, endDate: string): number => {
     const start = new Date(`${startDate > periodStart ? startDate : periodStart}T00:00:00`);
@@ -597,10 +629,14 @@ export function computePayslipDetails(
     a => a.employeeId === employee.id && a.date.startsWith(`${year}-${String(month).padStart(2, '0')}`)
   );
   
-  const presentDays = empAtts.filter(a => a.status === 'Present' || a.status === 'Late').length;
-  const halfDays = empAtts.filter(a => a.status === 'Half Day').length;
+  // A certified register is authoritative: it carries rostered absences (days with no punch),
+  // weekly offs, holidays and pre-joining days that raw attendance logs cannot express.
+  const register = registerRows?.some(row => row.employeeId === employee.id) ? registerPayrollSummary(registerRows, employee.id) : undefined;
+  const presentDays = register ? register.presentDays : empAtts.filter(a => a.status === 'Present' || a.status === 'Late').length;
+  const halfDays = register ? register.halfDays : empAtts.filter(a => a.status === 'Half Day').length;
   const absentAttendanceDates = empAtts.filter(a => a.status === 'Absent').map(a => a.date);
-  const leaveDays = empAtts.filter(a => a.status === 'On Leave').length;
+  const leaveDays = register ? register.paidLeaveDays : empAtts.filter(a => a.status === 'On Leave').length;
+  const notJoinedDays = register?.notJoinedDays || 0;
   
   // Overtime minutes
   const totalOtMinutes = empAtts.reduce((sum, a) => sum + (a.overtimeMinutes || 0), 0);
@@ -614,16 +650,18 @@ export function computePayslipDetails(
          l.startDate <= periodEnd && l.endDate >= periodStart
   );
   
-  const unpaidLeaveDays = empLeaves
+  const unpaidLeaveDays = register ? register.unpaidLeaveDays : empLeaves
     .filter(l => l.leaveType === 'Unpaid')
     .reduce((sum, l) => sum + overlapDays(l.startDate, l.endDate), 0);
-  const explicitAbsentDays = absentAttendanceDates.filter(date =>
+  const explicitAbsentDays = register ? register.absentDays : absentAttendanceDates.filter(date =>
     !empLeaves.some(l => l.leaveType === 'Unpaid' && l.startDate <= date && l.endDate >= date)
   ).length;
-  const paidLeaveDays = empLeaves
+  const paidLeaveDays = register ? register.paidLeaveDays : empLeaves
     .filter(l => l.leaveType !== 'Unpaid')
     .reduce((sum, l) => sum + overlapDays(l.startDate, l.endDate), 0);
   const absentDays = explicitAbsentDays + unpaidLeaveDays;
+  const scheduledWorkingDays = countScheduledWorkingDays(year, month, employee.shift, holidays);
+  const absenceDeductionBasis = statConfigs.absenceDeductionBasis || 'Calendar Days';
   
   // Allowances calculation: For salaried employees, Basic Wage is usually configured as 100% and broken into:
   // Base Wage = 50%
@@ -648,7 +686,7 @@ export function computePayslipDetails(
     
     // Hourly rate derived from 8-hour shift structure
     hourlyRate = baseContractSalary / 8;
-    overtimePay = overtimeHours * hourlyRate * 1.5; // 1.5x OT multiplier for daily wagers
+    overtimePay = overtimeHours * hourlyRate * (siteRule.overtimeMultiplier ?? statConfigs.dailyWagerOvertimeMultiplier ?? statConfigs.overtimeMultiplier ?? 2);
   } else {
     // Check if custom allowances are set on employee record
     const hasCustomAllowances = 
@@ -673,16 +711,20 @@ export function computePayslipDetails(
       medicalAllowance = baseContractSalary * 0.10;
     }
     
-    // Standard calendar day deduction for absences & unpaid leaves
-    const standardDailyDeduction = baseContractSalary / totalDaysInMonth;
-    unpaidLeaveDeduction = absentDays * standardDailyDeduction;
+    // The per-day basis is organizational policy, so it comes from the statutory configuration.
+    // Pre-joining days are prorated on calendar days; under a working-day basis only absences and
+    // unpaid leave on rostered days are deducted, which the register already guarantees.
+    const deductionDivisor = absenceDeductionBasis === 'Scheduled Working Days' ? Math.max(1, scheduledWorkingDays)
+      : absenceDeductionBasis === 'Fixed 30 Days' ? 30 : totalDaysInMonth;
+    unpaidLeaveDeduction = Math.min(baseContractSalary,
+      absentDays * (baseContractSalary / deductionDivisor) + notJoinedDays * (baseContractSalary / totalDaysInMonth));
     
     // Base basic earnings
     basicEarnings = basicComponent;
     
     // Calculate overtime base (basic component / 208 working standard hours per month in Pakistan)
     const otBaseHourly = basicComponent / (statConfigs.standardMonthlyHours || 208);
-    overtimePay = overtimeHours * otBaseHourly * (statConfigs.overtimeMultiplier || 2);
+    overtimePay = overtimeHours * otBaseHourly * (siteRule.overtimeMultiplier ?? statConfigs.overtimeMultiplier ?? 2);
   }
   
   const periodAdjustments = payrollAdjustments.filter(item => item.employeeId === employee.id
@@ -699,17 +741,19 @@ export function computePayslipDetails(
     basicEarnings + houseRentAllowance + conveyanceAllowance + medicalAllowance + otherAllowances + overtimePay - unpaidLeaveDeduction
   );
   const grossSalary = baseGrossSalary + bonusEarnings + commissionEarnings + arrearsEarnings;
-  const taxableGrossSalary = baseGrossSalary + taxableAdjustments;
+  const perquisitesValue = Math.max(0, (employee.perquisiteVehicleMonthly || 0) + (employee.perquisiteAccommodationMonthly || 0) + (employee.perquisiteOtherMonthly || 0));
+  const exemptAllowance = isDailyWager ? 0 : Math.round(Math.min(medicalAllowance, basicEarnings * Math.max(0, statConfigs.medicalAllowanceExemptPercentOfBasic ?? 0) / 100));
+  const taxableGrossSalary = Math.max(0, baseGrossSalary + taxableAdjustments + perquisitesValue - exemptAllowance);
   
   // 1. Income Tax Calculation (FBR)
   let incomeTaxDeduction = 0;
   let taxReconciliation = {
     taxYear: pakistanTaxYearForPeriod(month, year), taxableIncomeYtd: grossSalary,
     taxDeductedBeforeCurrentPeriod: 0, projectedAnnualTaxableIncome: grossSalary * 12,
-    projectedAnnualTaxLiability: 0, incomeTaxDeduction: 0,
+    projectedAnnualTaxLiability: 0, surchargeAnnual: 0, incomeTaxDeduction: 0,
   };
   if (employee.fbrEnabled !== false) {
-    taxReconciliation = calculateReconciledMonthlyTax(employee, taxableGrossSalary, month, year, taxSlabs, historicalPayslips);
+    taxReconciliation = calculateReconciledMonthlyTax(employee, taxableGrossSalary, month, year, taxSlabs, historicalPayslips, statConfigs);
     incomeTaxDeduction = taxReconciliation.incomeTaxDeduction;
   }
   
@@ -726,14 +770,7 @@ export function computePayslipDetails(
   
   // 3. PESSI / SESSI (Provincial Social Security)
   // Employer pays 6% of basic salary capped at maximum threshold (typically capped closely to minimum wage or defined limit, let's say max basic salary of 40,000 for PESSI)
-  let pessiEmployerContribution = 0;
-  const socialSecurityRate = branch?.province
-    ? (statConfigs.provincialSocialSecurityRates?.[branch.province] ?? statConfigs.pessiEmployerRate)
-    : statConfigs.pessiEmployerRate;
-  const pessiWageBase = Math.min(basicEarnings, statConfigs.socialSecurityWageCeiling || 40000);
-  if (employee.socialSecurityNumber || !isDailyWager) {
-    pessiEmployerContribution = Math.round(pessiWageBase * (socialSecurityRate / 100));
-  }
+  const pessiEmployerContribution = socialSecurityContribution(employee, branch?.province, statConfigs, basicEarnings, isDailyWager).amount;
   
   // 4. Provident Fund Deduction
   let providentFundDeduction = 0;
@@ -811,8 +848,15 @@ export function computePayslipDetails(
     providentFundEmployerContribution,
     province: branch?.province,
     paidDays: presentDays + paidLeaveDays + (halfDays * 0.5),
-    scheduledWorkingDays: countScheduledWorkingDays(year, month, employee.shift, holidays),
+    scheduledWorkingDays,
+    notJoinedDays,
+    absenceDeductionBasis,
+    attendanceSource: register ? 'Certified Register' : 'Attendance Logs',
     explicitAbsentDays,
+    taxableIncomeThisPeriod: taxableGrossSalary,
+    perquisitesValue,
+    exemptAllowance,
+    runType: 'Regular',
     statutoryConfigId: statConfigs.id,
     calculationVersion: 'PK-PAYROLL-3.0-YTD',
     periodMonth: month,

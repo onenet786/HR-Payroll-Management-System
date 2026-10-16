@@ -5,14 +5,16 @@
 
 import React, { useState, useMemo } from 'react';
 import { Calculator, X } from 'lucide-react';
-import { GratuitySettlement, Employee, StatutoryConfig } from '../types';
+import { GratuitySettlement, Employee, StatutoryConfig, UserAccount } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
+import { gratuityEntitlement } from '../data/lifecycle';
 
 interface GratuityModuleProps {
   settlements: GratuitySettlement[];
   employees: Employee[];
   statConfig: StatutoryConfig;
   canManage: boolean;
+  currentUserAccount: UserAccount;
   onAddSettlement: (settlement: GratuitySettlement) => void;
   onUpdateSettlement: (settlement: GratuitySettlement) => void;
 }
@@ -36,12 +38,8 @@ function computeYears(joiningDate: string, lastWorkingDate: string) {
   return Math.floor(ms / (1000 * 60 * 60 * 24 * 365.25));
 }
 
-function computeGratuityAmount(basicSalary: number, yearsOfService: number, daysPerYear: number) {
-  // Pakistan formula: (basic / 26) * daysPerYear * years
-  return (basicSalary / 26) * daysPerYear * yearsOfService;
-}
 
-export function GratuityModule({ settlements, employees, statConfig, canManage, onAddSettlement, onUpdateSettlement }: GratuityModuleProps) {
+export function GratuityModule({ settlements, employees, statConfig, canManage, currentUserAccount, onAddSettlement, onUpdateSettlement }: GratuityModuleProps) {
   const [showCalc, setShowCalc] = useState(false);
 
   const [calcForm, setCalcForm] = useState({
@@ -62,15 +60,12 @@ export function GratuityModule({ settlements, employees, statConfig, canManage, 
   }, [selectedEmp, calcForm.lastWorkingDate]);
 
   const basicSalary = selectedEmp?.basicSalary || 0;
-  const dailyRate = basicSalary / 26;
+  const dailyRate = basicSalary / (statConfig.settlementDailyRateDivisor || 30);
 
-  const gratuityAmount = useMemo(() => {
-    // Only eligible after completing 1+ year; reduced for resignation < 5 years per SECP rules
-    if (yearsOfService < 1) return 0;
-    const raw = computeGratuityAmount(basicSalary, yearsOfService, statConfig.gratuityRateDaysPerYear);
-    if (calcForm.separationType === 'Resignation' && yearsOfService < 5) return raw * 0.5;
-    return raw;
-  }, [basicSalary, yearsOfService, statConfig.gratuityRateDaysPerYear, calcForm.separationType]);
+  // Same configurable rule as offboarding and lifecycle approvals, so every settlement path agrees.
+  const gratuityAmount = useMemo(() => selectedEmp
+    ? gratuityEntitlement(basicSalary, selectedEmp.dateOfJoining, calcForm.lastWorkingDate, calcForm.separationType, statConfig).amount
+    : 0, [selectedEmp, basicSalary, calcForm.lastWorkingDate, calcForm.separationType, statConfig]);
 
   const leaveEncashmentAmount = dailyRate * calcForm.encashableLeaveDays;
   const noticePayAmount = dailyRate * calcForm.noticePayDays;
@@ -96,7 +91,9 @@ export function GratuityModule({ settlements, employees, statConfig, canManage, 
       pendingSalaryAmount,
       totalSettlementAmount,
       status: 'Pending',
-      notes: calcForm.notes
+      notes: calcForm.notes,
+      createdAt: new Date().toISOString(),
+      createdById: currentUserAccount.id,
     };
     onAddSettlement(settlement);
     setShowCalc(false);
@@ -174,11 +171,11 @@ export function GratuityModule({ settlements, employees, statConfig, canManage, 
                       {canManage && s.status !== 'Paid' && (
                         <div className="flex gap-1">
                           {s.status === 'Pending' && (
-                            <button onClick={() => onUpdateSettlement({ ...s, status: 'Processed' })}
+                            <button disabled={s.createdById === currentUserAccount.id} title={s.createdById === currentUserAccount.id ? 'Another payroll user must process this settlement.' : 'Process settlement'} onClick={() => onUpdateSettlement({ ...s, status: 'Processed', processedAt: new Date().toISOString(), processedById: currentUserAccount.id })}
                               className="text-[10px] font-bold text-blue-400 bg-blue-500/10 px-2 py-1 rounded-lg hover:bg-blue-500/20 transition">Process</button>
                           )}
                           {s.status === 'Processed' && (
-                            <button onClick={() => onUpdateSettlement({ ...s, status: 'Paid', paidDate: new Date().toISOString().split('T')[0] })}
+                            <button disabled={s.createdById === currentUserAccount.id || s.processedById === currentUserAccount.id} title={s.createdById === currentUserAccount.id ? 'Settlement maker cannot pay it.' : s.processedById === currentUserAccount.id ? 'Settlement processor cannot pay it.' : 'Mark settlement paid'} onClick={() => onUpdateSettlement({ ...s, status: 'Paid', paidDate: new Date().toISOString().split('T')[0], paidById: currentUserAccount.id })}
                               className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded-lg hover:bg-emerald-500/20 transition">Mark Paid</button>
                           )}
                         </div>
@@ -279,11 +276,11 @@ export function GratuityModule({ settlements, employees, statConfig, canManage, 
                   <span className="text-white font-bold">Total Settlement Amount</span>
                   <span className="text-2xl font-bold text-white">{PKR(totalSettlementAmount)}</span>
                 </div>
-                {calcForm.separationType === 'Resignation' && yearsOfService < 5 && yearsOfService >= 1 && (
-                  <div className="text-[10px] text-amber-400 mt-1">* Gratuity reduced to 50% for resignation with less than 5 years of service (per SECP guidelines)</div>
+                {calcForm.separationType === 'Resignation' && yearsOfService < 5 && yearsOfService >= (statConfig.gratuityMinimumServiceYears ?? 1) && (statConfig.gratuityResignationUnderFiveYearsPercent ?? 100) < 100 && (
+                  <div className="text-[10px] text-amber-400 mt-1">* Gratuity paid at {statConfig.gratuityResignationUnderFiveYearsPercent}% for resignation within 5 years of service (company policy setting)</div>
                 )}
-                {yearsOfService < 1 && (
-                  <div className="text-[10px] text-rose-400 mt-1">* Employee is not eligible for gratuity (minimum 1 complete year of service required)</div>
+                {yearsOfService < (statConfig.gratuityMinimumServiceYears ?? 1) && (
+                  <div className="text-[10px] text-rose-400 mt-1">* Employee is not eligible for gratuity (minimum {statConfig.gratuityMinimumServiceYears ?? 1} year(s) of service required)</div>
                 )}
               </div>
 

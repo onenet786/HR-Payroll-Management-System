@@ -21,6 +21,8 @@ const COLLECTION_POLICY = Object.freeze({
   jobPostings: { read: 'signedIn', write: 'manage_employees' }, jobApplications: { read: 'manage_employees', write: 'manage_employees' },
   gratuitySettlements: { read: 'manage_payrollOr:manage_employees', write: 'manage_payrollOr:manage_employees' },
   notifications: { read: 'selfEmployeeOr:manage_employees', write: 'manage_employeesOr:manage_payroll' },
+  statutoryChangeRequests: { read: 'manage_settingsOr:manage_payroll', write: 'manage_settings' },
+  lifecycleRequests: { read: 'manage_employees', write: 'manage_employees' },
 });
 
 const COLLECTION_TO_TABLE = Object.freeze({
@@ -70,6 +72,10 @@ const COLLECTION_TO_TABLE = Object.freeze({
   gratuitySettlements: 'gratuity_settlements',
   gratuity_settlements: 'gratuity_settlements',
   notifications: 'notifications',
+  statutoryChangeRequests: 'statutory_change_requests',
+  statutory_change_requests: 'statutory_change_requests',
+  lifecycleRequests: 'lifecycle_requests',
+  lifecycle_requests: 'lifecycle_requests',
 });
 
 const VALID_TABLES = new Set(Object.values(COLLECTION_TO_TABLE));

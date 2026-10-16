@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { JURISDICTIONS } from '../data/provincialCompliance';
 import { AlertTriangle, Building2, Check, ChevronLeft, ChevronRight, CircleCheck, Landmark, Loader2, Plus, Trash2 } from 'lucide-react';
 import type { Branch, Company, CompanySetupPayload, Department, Designation, Province, StatutoryConfig, TaxSlab } from '../types';
 import { generateMasterCode } from '../data/masterCodes';
@@ -13,7 +14,7 @@ interface Props {
   onSave: (payload: CompanySetupPayload) => Promise<void>;
 }
 
-const provinces: Province[] = ['Punjab', 'Sindh', 'KPK', 'Balochistan'];
+const provinces: Province[] = JURISDICTIONS;
 const uid = (prefix: string) => `${prefix}-${globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2)}`;
 const upper = (value: string) => value.trim().toUpperCase();
 const fieldClass = 'mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100';

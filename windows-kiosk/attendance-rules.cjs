@@ -31,4 +31,14 @@ function evaluateAttendanceTimes(punchIn, punchOut, configuredShift, breaks = []
   return { status, workedMinutes, overtimeMinutes: Math.max(0, workedMinutes - (shift.overtimeAfterMinutes ?? scheduledMinutes)) };
 }
 
-module.exports = { DEFAULT_SHIFT, evaluateAttendanceTimes };
+const LOW_CONFIDENCE_BIOMETRIC_PERCENT = 25;
+
+// Face distances and DigitalPersona dissimilarity scores are both "lower is better" against an acceptance
+// threshold, so strength is how far below the threshold the accepted match landed.
+function biometricMatchEvidence(kind, score, threshold, lowConfidencePercent = LOW_CONFIDENCE_BIOMETRIC_PERCENT) {
+  if (!Number.isFinite(score) || !Number.isFinite(threshold) || threshold <= 0) return null;
+  const strengthPercent = Math.max(0, Math.min(100, Math.round(((threshold - score) / threshold) * 100)));
+  return { kind, score, threshold, strengthPercent, lowConfidence: strengthPercent < lowConfidencePercent };
+}
+
+module.exports = { DEFAULT_SHIFT, LOW_CONFIDENCE_BIOMETRIC_PERCENT, biometricMatchEvidence, evaluateAttendanceTimes };

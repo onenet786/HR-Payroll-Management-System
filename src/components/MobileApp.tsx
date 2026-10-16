@@ -8,7 +8,11 @@ import {
   Scan, ShieldCheck, MapPin, Camera, CameraOff,
   Calendar, FileText, User, Fingerprint, CheckCircle, AlertCircle, Clock
 } from 'lucide-react';
-import { Employee, AttendanceLog, LeaveRequest, Payslip, UserAccount, MobileAttendanceAction, MobilePunchDetails, MobileDutyAuthorization } from '../types';
+import { uploadEmployeeDocument } from '../utils/employeeDocuments';
+import { downloadPayslipPdf } from '../data/payslipPdf';
+import { leaveBalanceError, leaveBalances } from '../data/leavePolicy';
+import type { StatutoryConfig } from '../types';
+import { Employee, AttendanceLog, LeaveRequest, Payslip, PayrollRun, UserAccount, MobileAttendanceAction, MobilePunchDetails, MobileDutyAuthorization } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 import { assessBrowserFaceDetection, createFaceDescriptorFromVideo, findBestFaceMatch, hasFaceEnrollment } from '../utils/faceRecognition';
 import { performActiveLiveness, randomLivenessOrder } from '../utils/faceLiveness';
@@ -20,11 +24,13 @@ interface MobileAppProps {
   leaves: LeaveRequest[];
   onApplyLeave: (leave: LeaveRequest) => void;
   onSimulatePunch: (employeeId: string, punchIn: string, punchOut: string, method: string, lat?: number, lon?: number, locationAccuracyMeters?: number, locationCapturedAt?: string, locationAddress?: string, mobileDetails?: MobilePunchDetails) => void | Promise<void>;
-  onAddRegularization: (employeeId: string, date: string, reason: string) => void;
+  onAddRegularization: (employeeId: string, date: string, reason: string, evidenceDocumentIds?: string[]) => void;
   hideMockPhoneFrame?: boolean;
   loggedInUser?: UserAccount;
   onLogout?: () => void;
   payrollPayslips?: Payslip[];
+  leaveConfig?: Pick<StatutoryConfig, 'leaveEntitlements' | 'annualLeaveDaysPerYear'>;
+  payrollRuns?: PayrollRun[];
 }
 
 type PunchStep = 'preview' | 'done';
@@ -61,9 +67,15 @@ export function MobileApp({
   hideMockPhoneFrame,
   loggedInUser,
   onLogout,
-  payrollPayslips = []
+  payrollPayslips = [],
+  leaveConfig,
+  payrollRuns = []
 }: MobileAppProps) {
   const [mobileTab, setMobileTab] = useState<'home' | 'punch' | 'leave' | 'payslips'>('home');
+  const [selectedPayslipId, setSelectedPayslipId] = useState('');
+  const [payslipLanguage, setPayslipLanguage] = useState<'en' | 'ur'>('en');
+  const [regEvidence, setRegEvidence] = useState<File | null>(null);
+  const [regSubmitting, setRegSubmitting] = useState(false);
   const [waNotice, setWaNotice] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
 
@@ -121,10 +133,38 @@ export function MobileApp({
     : activeVisit ? 'visit-out'
     : isWorkdayActive ? (authorizationAllowsVisits ? 'visit-in' : 'workday-out')
     : null;
-  const myPayslip = currentEmp ? [...payrollPayslips].reverse().find(p => p.employeeId === currentEmp.id) || null : null;
+  const disbursedPayrollRunIds = new Set(payrollRuns.filter(run => run.status === 'Disbursed').map(run => run.id));
+  const myPayslips = currentEmp
+    ? payrollPayslips
+      .filter(payslip => disbursedPayrollRunIds.has(payslip.payrollRunId))
+      .filter(payslip => payslip.employeeId === currentEmp.id)
+      .sort((left, right) => (right.periodYear || 0) - (left.periodYear || 0) || (right.periodMonth || 0) - (left.periodMonth || 0))
+    : [];
+  const myPayslip = myPayslips[0] || null;
+  const selectedPayslip = myPayslips.find(payslip => payslip.id === selectedPayslipId) || myPayslip;
+  const leaveYear = new Date().getFullYear();
+  const myLeaveRequests = leaves
+    .filter(leave => leave.employeeId === currentEmp?.id && leave.startDate.slice(0, 4) === String(leaveYear))
+    .sort((left, right) => right.appliedOn.localeCompare(left.appliedOn));
+  const approvedLeaveDays = myLeaveRequests
+    .filter(leave => leave.status === 'Approved')
+    .reduce((sum, leave) => sum + leave.totalDays, 0);
+  const pendingLeaveDays = myLeaveRequests
+    .filter(leave => leave.status === 'Pending')
+    .reduce((sum, leave) => sum + leave.totalDays, 0);
+  const currentYearBalances = currentEmp ? leaveBalances(currentEmp, leaves, new Date().getFullYear(), leaveConfig) : [];
+  const leaveUsage = (['Casual', 'Sick', 'Annual', 'Unpaid'] as const).map(type => ({
+    type,
+    approved: myLeaveRequests.filter(leave => leave.leaveType === type && leave.status === 'Approved').reduce((sum, leave) => sum + leave.totalDays, 0),
+    pending: myLeaveRequests.filter(leave => leave.leaveType === type && leave.status === 'Pending').reduce((sum, leave) => sum + leave.totalDays, 0),
+    remaining: currentYearBalances.find(balance => balance.type === type)?.remaining,
+  }));
   const payslipPeriod = myPayslip?.periodMonth && myPayslip.periodYear
     ? new Date(myPayslip.periodYear, myPayslip.periodMonth - 1).toLocaleString('en-PK', { month: 'long', year: 'numeric' })
     : 'Latest approved period';
+  const selectedPayslipPeriod = selectedPayslip?.periodMonth && selectedPayslip.periodYear
+    ? new Date(selectedPayslip.periodYear, selectedPayslip.periodMonth - 1).toLocaleString('en-PK', { month: 'long', year: 'numeric' })
+    : 'Payroll period';
 
   useEffect(() => {
     if (!activeMobileDuty && mobileTab === 'punch') setMobileTab('home');
@@ -398,6 +438,8 @@ export function MobileApp({
     const start = new Date(leaveForm.startDate);
     const end = new Date(leaveForm.endDate);
     const totalDays = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / 86400000) + 1);
+    const balanceError = leaveBalanceError({ id: '', employeeId: currentEmp.id, leaveType: leaveForm.leaveType, startDate: leaveForm.startDate, endDate: leaveForm.endDate }, currentEmp, leaves, leaveConfig);
+    if (balanceError) { triggerWaToast(balanceError); return; }
     const request: LeaveRequest = {
       id: 'lv-' + Date.now(),
       employeeId: currentEmp.id,
@@ -414,12 +456,23 @@ export function MobileApp({
     setLeaveForm(p => ({ ...p, reason: '' }));
   };
 
-  const handleApplyRegularization = (e: React.SyntheticEvent) => {
+  const handleApplyRegularization = async (e: React.SyntheticEvent) => {
     e.preventDefault();
-    if (!currentEmp) return;
-    onAddRegularization(currentEmp.id, regForm.date, regForm.reason);
-    triggerWaToast(`📝 Regularization for ${regForm.date} sent to HR approval queue.`);
-    setRegForm(p => ({ ...p, reason: '' }));
+    if (!currentEmp || regSubmitting) return;
+    if (regForm.reason.trim().length < 10) { triggerWaToast('Describe what happened (at least 10 characters).'); return; }
+    setRegSubmitting(true);
+    try {
+      // Evidence (gate pass, client sign-off, travel ticket) lets the line manager decide without chasing paper.
+      const evidenceIds = regEvidence ? [await uploadEmployeeDocument(currentEmp.id, 'attendance-evidence', regEvidence)] : [];
+      onAddRegularization(currentEmp.id, regForm.date, regForm.reason, evidenceIds);
+      triggerWaToast(`📝 Regularization for ${regForm.date} sent to your line manager${evidenceIds.length ? ' with evidence' : ''}.`);
+      setRegForm(p => ({ ...p, reason: '' }));
+      setRegEvidence(null);
+    } catch (error) {
+      triggerWaToast(error instanceof Error ? error.message : 'Evidence upload failed.');
+    } finally {
+      setRegSubmitting(false);
+    }
   };
 
   const timeDisplay = currentTime.toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit', hour12: true });
@@ -513,8 +566,8 @@ export function MobileApp({
             {/* Stats grid */}
             <div className="grid grid-cols-2 gap-2">
               {[
-                { label: 'Monthly Streak', val: '94.2%', sub: 'Excellent', color: 'emerald' },
-                { label: 'Casual Leave', val: '8 / 10', sub: 'Days Left', color: 'blue' }
+                { label: 'Leave Used', val: `${approvedLeaveDays} day${approvedLeaveDays === 1 ? '' : 's'}`, sub: `${leaveYear} approved`, color: 'emerald' },
+                { label: 'Leave Pending', val: `${pendingLeaveDays} day${pendingLeaveDays === 1 ? '' : 's'}`, sub: pendingLeaveDays ? 'Awaiting review' : 'No pending request', color: 'blue' }
               ].map(({ label, val, sub, color }) => (
                 <div key={label} className={`bg-${color}-500/10 border border-${color}-500/20 rounded-2xl p-3`}>
                   <div className="text-[9px] text-slate-400 uppercase tracking-wider font-semibold">{label}</div>
@@ -692,9 +745,12 @@ export function MobileApp({
                       placeholder="Reason for missing punch..."
                       rows={2}
                       className="w-full bg-slate-800 border border-slate-700 text-white text-xs rounded-xl px-3 py-2 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none" />
-                    <button type="submit"
-                      className="w-full bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold py-2 rounded-xl transition">
-                      File Regularization
+                    <label className="block text-[10px] text-slate-400">Evidence (optional: gate pass, client sign-off, ticket — PDF/JPG/PNG, max 10 MB)
+                      <input type="file" accept="application/pdf,image/jpeg,image/png" onChange={e => setRegEvidence(e.target.files?.[0] || null)} className="mt-1 block w-full text-[10px] text-slate-300 file:mr-2 file:rounded-lg file:border-0 file:bg-slate-700 file:px-2 file:py-1 file:text-white" />
+                    </label>
+                    <button type="submit" disabled={regSubmitting}
+                      className="w-full bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold py-2 rounded-xl transition disabled:opacity-50">
+                      {regSubmitting ? 'Uploading…' : 'File Regularization'}
                     </button>
                   </form>
                 </div>
@@ -768,6 +824,14 @@ export function MobileApp({
               <p className="text-[10px] text-slate-400">Submit a leave request for HR approval</p>
             </div>
 
+            <section className="rounded-2xl border border-slate-700/50 bg-slate-800/60 p-3">
+              <div className="flex items-center justify-between"><h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-300">My leave summary</h4><span className="text-[10px] text-slate-500">{leaveYear}</span></div>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                {leaveUsage.map(item => <div key={item.type} className="rounded-xl bg-slate-900/70 p-2"><div className="text-[10px] font-semibold text-slate-300">{item.type}</div>{item.remaining !== undefined && <div className="text-[9px] font-bold text-emerald-300">{item.remaining} left</div>}<div className="mt-1 text-sm font-bold text-emerald-400">{item.approved} <span className="text-[9px] font-normal text-slate-500">approved</span></div>{item.pending > 0 && <div className="text-[9px] text-amber-400">{item.pending} pending</div>}</div>)}
+              </div>
+              {myLeaveRequests.length > 0 && <div className="mt-3 space-y-1 border-t border-slate-700 pt-2">{myLeaveRequests.slice(0, 3).map(leave => <div key={leave.id} className="flex items-center justify-between text-[10px]"><span className="text-slate-400">{leave.leaveType} · {leave.startDate}</span><span className={leave.status === 'Approved' ? 'text-emerald-400' : leave.status === 'Rejected' ? 'text-rose-400' : 'text-amber-400'}>{leave.status} · {leave.totalDays}d</span></div>)}</div>}
+            </section>
+
             <form onSubmit={handleApplyLeaveSubmit} className="space-y-3">
               <div>
                 <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Leave Type</label>
@@ -818,22 +882,31 @@ export function MobileApp({
         {mobileTab === 'payslips' && (
           <div className="p-3 space-y-3">
             <div className="pt-1">
-              <h3 className="font-bold text-white text-sm">My Payslip</h3>
-              <p className="text-[10px] text-slate-400">{payslipPeriod} — {currentEmp?.fullName}</p>
+              <div className="flex items-center justify-between gap-2"><h3 className="font-bold text-white text-sm">{payslipLanguage === 'ur' ? 'میری تنخواہ کی پرچیاں' : 'My Payslips'}</h3><button type="button" onClick={() => setPayslipLanguage(value => value === 'en' ? 'ur' : 'en')} className="rounded-lg border border-slate-600 px-2 py-1 text-[10px] font-bold text-emerald-300">{payslipLanguage === 'en' ? 'اردو' : 'English'}</button></div>
+              <p className="text-[10px] text-slate-400">Private salary history — {currentEmp?.fullName}</p>
             </div>
 
-            {myPayslip ? (
+            {selectedPayslip ? (
+              <>
+              {myPayslips.length > 1 && <label className="block text-[10px] font-bold uppercase tracking-wide text-slate-400">Choose pay period
+                <select value={selectedPayslip.id} onChange={event => setSelectedPayslipId(event.target.value)} className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-semibold text-white outline-none focus:border-emerald-500">
+                  {myPayslips.map(payslip => {
+                    const period = payslip.periodMonth && payslip.periodYear ? new Date(payslip.periodYear, payslip.periodMonth - 1).toLocaleString('en-PK', { month: 'long', year: 'numeric' }) : 'Payroll period';
+                    return <option key={payslip.id} value={payslip.id}>{period} — PKR {payslip.netSalary.toLocaleString()}</option>;
+                  })}
+                </select>
+              </label>}
               <div className="bg-slate-800/60 border border-slate-700/50 rounded-2xl overflow-hidden">
                 <div className="bg-slate-700/60 px-3 py-2 flex justify-between items-center">
-                  <span className="text-[10px] font-bold text-white uppercase tracking-wide">Paycheck Receipt</span>
-                  <span className="text-[9px] text-slate-400 font-mono">{payslipPeriod}</span>
+                  <span dir={payslipLanguage === 'ur' ? 'rtl' : undefined} className="text-[10px] font-bold text-white uppercase tracking-wide">{payslipLanguage === 'ur' ? 'تنخواہ کی پرچی' : 'Paycheck Receipt'}</span>
+                  <span className="text-[9px] text-slate-400 font-mono">{selectedPayslipPeriod}</span>
                 </div>
                 <div className="p-3 space-y-2 font-mono text-[11px]">
                   {[
-                    { label: 'Basic Salary', val: myPayslip.basicEarnings, color: 'text-white', sign: '' },
-                    { label: 'House Rent', val: myPayslip.houseRentAllowance, color: 'text-white', sign: '' },
-                    { label: 'Medical', val: myPayslip.medicalAllowance, color: 'text-white', sign: '' },
-                    ...(myPayslip.overtimePay > 0 ? [{ label: 'Overtime', val: myPayslip.overtimePay, color: 'text-emerald-400', sign: '+' }] : []),
+                    { label: payslipLanguage === 'ur' ? 'بنیادی تنخواہ' : 'Basic Salary', val: selectedPayslip.basicEarnings, color: 'text-white', sign: '' },
+                    { label: payslipLanguage === 'ur' ? 'گھر کرایہ' : 'House Rent', val: selectedPayslip.houseRentAllowance, color: 'text-white', sign: '' },
+                    { label: payslipLanguage === 'ur' ? 'طبی الاؤنس' : 'Medical', val: selectedPayslip.medicalAllowance, color: 'text-white', sign: '' },
+                    ...(selectedPayslip.overtimePay > 0 ? [{ label: payslipLanguage === 'ur' ? 'اوور ٹائم' : 'Overtime', val: selectedPayslip.overtimePay, color: 'text-emerald-400', sign: '+' }] : []),
                   ].map(({ label, val, color, sign }) => (
                     <div key={label} className="flex justify-between">
                       <span className="text-slate-400 font-sans">{label}</span>
@@ -843,21 +916,31 @@ export function MobileApp({
 
                   <div className="border-t border-slate-700 pt-2 space-y-1">
                     <div className="flex justify-between text-rose-400">
-                      <span className="font-sans">FBR Tax</span>
-                      <span>-{myPayslip.incomeTaxDeduction.toLocaleString()} PKR</span>
+                      <span className="font-sans">{payslipLanguage === 'ur' ? 'ایف بی آر ٹیکس' : 'FBR Tax'}</span>
+                      <span>-{selectedPayslip.incomeTaxDeduction.toLocaleString()} PKR</span>
                     </div>
                     <div className="flex justify-between text-rose-400">
-                      <span className="font-sans">EOBI</span>
-                      <span>-{myPayslip.eobiEmployeeDeduction.toLocaleString()} PKR</span>
+                      <span className="font-sans">{payslipLanguage === 'ur' ? 'ای او بی آئی' : 'EOBI'}</span>
+                      <span>-{selectedPayslip.eobiEmployeeDeduction.toLocaleString()} PKR</span>
                     </div>
+                    {([
+                      [payslipLanguage === 'ur' ? 'پراویڈنٹ فنڈ' : 'Provident Fund', selectedPayslip.providentFundDeduction],
+                      [payslipLanguage === 'ur' ? 'قرض کی قسط' : 'Loan Recovery', selectedPayslip.loanRepaymentDeduction],
+                      [payslipLanguage === 'ur' ? 'غیر حاضری کٹوتی' : 'Absence Deduction', selectedPayslip.unpaidLeaveDeduction],
+                      [payslipLanguage === 'ur' ? 'دیگر کٹوتیاں' : 'Other Deductions', selectedPayslip.otherAdjustmentsDeduction || 0],
+                    ] as const).filter(([, amount]) => amount > 0).map(([label, amount]) => (
+                      <div key={label} className="flex justify-between text-rose-400"><span className="font-sans">{label}</span><span>-{amount.toLocaleString()} PKR</span></div>
+                    ))}
                   </div>
 
                   <div className="border-t border-slate-600 pt-2 flex justify-between text-sm font-bold">
-                    <span className="font-sans text-slate-300">Net Take-Home</span>
-                    <span className="text-emerald-400">{myPayslip.netSalary.toLocaleString()} PKR</span>
+                     <span className="font-sans text-slate-300">{payslipLanguage === 'ur' ? 'قابلِ ادائیگی تنخواہ' : 'Net Take-Home'}</span>
+                    <span className="text-emerald-400">{selectedPayslip.netSalary.toLocaleString()} PKR</span>
                   </div>
                 </div>
               </div>
+              <button type="button" onClick={() => downloadPayslipPdf(selectedPayslip, 'Employer')} className="w-full rounded-xl border border-emerald-700 py-2 text-[11px] font-bold text-emerald-300">{payslipLanguage === 'ur' ? 'پی ڈی ایف ڈاؤن لوڈ کریں (انگریزی)' : 'Download PDF'}</button>
+              </>
             ) : (
               <div className="text-center py-10 text-slate-500 text-xs">No payslip data available.</div>
             )}
@@ -868,10 +951,10 @@ export function MobileApp({
       {/* Bottom nav */}
       <div className="bg-slate-800/90 border-t border-slate-700/60 py-2 flex justify-around items-center flex-shrink-0">
         {([
-          { tab: 'home', icon: User, label: 'Home' },
-          { tab: 'punch', icon: Camera, label: 'Attend' },
-          { tab: 'leave', icon: Calendar, label: 'Leave' },
-          { tab: 'payslips', icon: FileText, label: 'Payslip' }
+          { tab: 'home', icon: User, label: payslipLanguage === 'ur' ? 'ہوم' : 'Home' },
+          { tab: 'punch', icon: Camera, label: payslipLanguage === 'ur' ? 'حاضری' : 'Attend' },
+          { tab: 'leave', icon: Calendar, label: payslipLanguage === 'ur' ? 'چھٹی' : 'Leave' },
+          { tab: 'payslips', icon: FileText, label: payslipLanguage === 'ur' ? 'تنخواہ' : 'Payslip' }
         ] as const).filter(item => item.tab !== 'punch' || Boolean(activeMobileDuty)).map(({ tab, icon: Icon, label }) => (
           <button type="button" key={tab} onClick={() => setMobileTab(tab)}
             className={`flex flex-col items-center gap-0.5 px-2 py-1 rounded-xl transition ${mobileTab === tab ? 'text-emerald-400' : 'text-slate-500'}`}>

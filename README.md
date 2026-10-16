@@ -30,3 +30,5 @@ View your app in AI Studio: https://ai.studio/apps/0ab7c3a1-e4ca-49b5-86f4-68838
 - The system operates on a dedicated PostgreSQL server backend. Configure aaPanel with Node.js and PostgreSQL services.
 - Never place database URLs, OAuth client secrets, JWT signing secrets, or third-party private API keys in `VITE_*` variables or frontend code.
 - Always use HTTPS in production with proper reverse proxy and SSL certificates.
+- Enable authenticator MFA for every administrator and payroll/access user, verify a second administrator can approve recovery requests, then set `MFA_ENFORCE_PRIVILEGED=true` and restart the service.
+- MFA recovery uses a maker-checker workflow: the person who submits a reset request cannot approve it. Approval revokes every active session for the recovered account.

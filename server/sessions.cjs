@@ -3,11 +3,11 @@ const crypto = require('node:crypto');
 const tokenHash = token => crypto.createHash('sha256').update(String(token)).digest('hex');
 const userAgentHash = request => crypto.createHash('sha256').update(String(request.get('user-agent') || '')).digest('hex');
 
-async function createSession(userId, request) {
+async function createSession(userId, request, rememberMe = false) {
   const { pool } = require('./db.cjs');
   const token = crypto.randomBytes(32).toString('base64url');
-  const idleMinutes = Math.max(5, Number(process.env.SESSION_IDLE_MINUTES || 30));
-  const absoluteHours = Math.max(1, Number(process.env.SESSION_ABSOLUTE_HOURS || 12));
+  const idleMinutes = rememberMe ? 5 * 24 * 60 : Math.max(5, Number(process.env.SESSION_IDLE_MINUTES || 30));
+  const absoluteHours = rememberMe ? 5 * 24 : Math.max(1, Number(process.env.SESSION_ABSOLUTE_HOURS || 12));
   await pool.query(
     `INSERT INTO auth_sessions(id,user_id,token_hash,idle_expires_at,absolute_expires_at,ip_address,user_agent_hash)
      VALUES($1,$2,$3,now()+($4*interval '1 minute'),now()+($5*interval '1 hour'),$6,$7)`,

@@ -4,7 +4,9 @@
  */
 
 // Pakistan provinces
-export type Province = 'Punjab' | 'Sindh' | 'KPK' | 'Balochistan';
+/** Provinces plus Islamabad Capital Territory, which follows federal labour and social-security law. */
+export type Province = 'Punjab' | 'Sindh' | 'KPK' | 'Balochistan' | 'ICT';
+export type SocialSecurityScheme = 'PESSI' | 'SESSI' | 'KP ESSI' | 'BESSI' | 'Federal / ICT';
 
 // Organization Hierarchy
 export interface Company {
@@ -57,7 +59,19 @@ export interface Branch {
   geofenceLatitude?: number;
   geofenceLongitude?: number;
   geofenceRadiusMeters?: number;
+  establishmentType?: EstablishmentType;
 }
+
+export type EstablishmentType = 'Factory' | 'Shop / Commercial' | 'Industrial / Other';
+
+/** Overrides for one labour-law category (Factories Act vs Shops & Establishments). Blank fields use the global setting. */
+export interface EstablishmentRule {
+  overtimeMultiplier?: number;
+  maxWeeklyOvertimeHours?: number;
+  maxConsecutiveWorkDays?: number;
+  minimumWage?: number;
+}
+export type WorkerCategory = 'Worker' | 'Supervisory' | 'Managerial' | 'Contract' | 'Apprentice';
 
 export interface Department {
   id: string;
@@ -111,6 +125,12 @@ export interface Shift {
   breakMinutes?: number;
   overtimeAfterMinutes?: number;
   workingDays?: number[]; // JavaScript weekdays: 0 Sunday ... 6 Saturday
+  ramadanStartDate?: string; // YYYY-MM-DD, configurable every year
+  ramadanEndDate?: string; // YYYY-MM-DD, inclusive
+  ramadanStartTime?: string;
+  ramadanEndTime?: string;
+  fridayStartTime?: string;
+  fridayEndTime?: string;
 }
 
 // Employee Master Record
@@ -125,6 +145,24 @@ export interface Employee {
   email: string;
   contactNumber: string;
   cnic: string; // CNIC Format: 42101-XXXXXXX-X
+  cnicExpiryDate?: string; // NADRA CNIC expiry (YYYY-MM-DD)
+  contractEndDate?: string; // Fixed-term contract end (YYYY-MM-DD)
+  probationEndDate?: string; // Review/confirmation due date (YYYY-MM-DD)
+  probationConfirmedAt?: string; // Immutable confirmation decision timestamp
+  drivingLicenceExpiryDate?: string;
+  professionalCertificationExpiryDate?: string;
+  workPermitExpiryDate?: string;
+  bankVerifiedAt?: string;
+  bankVerifiedBy?: string;
+  onboardingChecklist?: Partial<Record<OnboardingChecklistItem, { done: boolean; at?: string; by?: string }>>;
+  workerCategory?: WorkerCategory;
+  /** Monthly taxable value of non-cash benefits (Income Tax Ordinance s.13): company car, accommodation, utilities, etc. */
+  perquisiteVehicleMonthly?: number;
+  perquisiteAccommodationMonthly?: number;
+  perquisiteOtherMonthly?: number;
+  separationType?: GratuitySettlement['separationType'];
+  separationDate?: string;
+  separationReason?: string;
   gender: string;
   dateOfBirth: string;
   dateOfJoining: string;
@@ -151,6 +189,8 @@ export interface Employee {
   // Statutory IDs
   eobiNumber?: string;
   socialSecurityNumber?: string;
+  eobiExemptionReason?: string;
+  socialSecurityExemptionReason?: string;
 
   // New onboarding and custom payroll configuration fields
   pictureUrl?: string;
@@ -295,19 +335,61 @@ export interface AttendanceLog {
   reviewedBy?: string;
   reviewedById?: string;
   reviewComment?: string;
+  requestedAt?: string;
+  lastPunchTimestamp?: string;
+  evidenceDocumentIds?: string[];
+  escalatedAt?: string;
+  biometricMatch?: BiometricMatchEvidence;
+  locationRisk?: string;
+}
+
+export interface BiometricMatchEvidence {
+  kind: 'face' | 'fingerprint';
+  score: number;
+  threshold: number;
+  /** 0–100: how far the match distance sits below the acceptance threshold. */
+  strengthPercent: number;
+  lowConfidence: boolean;
 }
 
 export interface AttendancePeriod {
   id: string;
   periodMonth: number;
   periodYear: number;
-  status: 'Locked';
+  status: 'Locked' | 'Reopened';
   lockedAt: string;
   lockedBy: string;
   attendanceCount: number;
   employeeCount: number;
   integrityHash: string;
+  registerHash?: string;
+  registerVersion?: number;
+  registerRows?: AttendanceRegisterRow[];
   exceptionCount: number;
+  reopenedAt?: string;
+  reopenedBy?: string;
+  reopenedById?: string;
+  reopenReason?: string;
+  history?: AttendancePeriodHistoryEvent[];
+}
+
+export interface AttendancePeriodHistoryEvent {
+  action: 'Locked' | 'Reopened';
+  at: string;
+  by: string;
+  registerVersion: number;
+  registerHash?: string;
+  reason?: string;
+}
+
+export type AttendanceRegisterStatus = 'Working Day' | 'Present' | 'Late' | 'Half Day' | 'Paid Leave' | 'Unpaid Leave' | 'Holiday' | 'Weekly Off' | 'Absent' | 'Not Joined' | 'Missing Punch' | 'Pending Review';
+
+export interface AttendanceRegisterRow {
+  employeeId: string;
+  date: string;
+  status: AttendanceRegisterStatus;
+  attendanceId?: string;
+  source?: AttendanceLog['method'] | 'Leave' | 'Holiday' | 'Roster';
 }
 
 // Leave Requests
@@ -361,9 +443,62 @@ export interface StatutoryConfig {
   taxYear?: string;
   socialSecurityWageCeiling?: number;
   provincialSocialSecurityRates?: Partial<Record<Province, number>>;
+  provincialMinimumWages?: Partial<Record<Province, number>>;
+  provincialSocialSecuritySchemes?: Partial<Record<Province, SocialSecurityScheme>>;
+  statutoryPolicyVersion?: string;
   overtimeMultiplier?: number;
+  dailyWagerOvertimeMultiplier?: number;
   standardMonthlyHours?: number;
+  absenceDeductionBasis?: AbsenceDeductionBasis;
+  journalAccounts?: Partial<Record<JournalAccountKey, JournalAccount>>;
+  maxWeeklyOvertimeHours?: number;
+  maxConsecutiveWorkDays?: number;
+  lowConfidenceBiometricPercent?: number;
+  gratuityTaxExemptAmount?: number;
+  changeRequestId?: string;
+  /** Second Schedule Part I cl.139: medical allowance exempt up to this % of basic when free treatment is not provided. */
+  medicalAllowanceExemptPercentOfBasic?: number;
+  surchargeRatePercent?: number;
+  surchargeThresholdAnnual?: number;
+  provincialSocialSecurityCeilings?: Partial<Record<Province, number>>;
+  socialSecurityEligibility?: 'Capped wage for all' | 'Only employees within wage ceiling';
+  socialSecurityExcludedCategories?: WorkerCategory[];
+  settlementDailyRateDivisor?: number;
+  gratuityMinimumServiceYears?: number;
+  gratuityCountPartYearOverSixMonths?: boolean;
+  gratuityResignationUnderFiveYearsPercent?: number;
+  annualLeaveDaysPerYear?: number;
+  maxLeaveEncashDays?: number;
+  /** FBR / EOBI / provincial notification number or official URL backing the current rates. */
+  sourceReference?: string;
+  sourceDocuments?: Array<{ id: string; name: string; uploadedAt: string }>;
+  exportTemplates?: import('./data/exportTemplates').ExportTemplate[];
+  establishmentRules?: Partial<Record<EstablishmentType, EstablishmentRule>>;
+  leaveEntitlements?: Partial<Record<Exclude<LeaveRequest['leaveType'], 'Unpaid'>, number>>;
 }
+
+export type JournalAccountKey = 'salaryExpense' | 'reimbursementExpense' | 'eobiExpense' | 'socialSecurityExpense' | 'providentFundExpense'
+  | 'incomeTaxPayable' | 'eobiPayable' | 'socialSecurityPayable' | 'providentFundPayable' | 'loanRecovery' | 'otherDeductions' | 'bankPayable';
+
+export interface JournalAccount { code: string; name: string }
+
+export interface StatutoryChangeRequest {
+  id: string;
+  status: 'Pending' | 'Approved' | 'Rejected';
+  proposedConfig: StatutoryConfig;
+  proposedTaxSlabs: TaxSlab[];
+  changedFields: string[];
+  sourceReference?: string;
+  createdAt: string;
+  createdById: string;
+  createdBy: string;
+  reviewedAt?: string;
+  reviewedById?: string;
+  reviewedBy?: string;
+  reviewComment?: string;
+}
+
+export type AbsenceDeductionBasis = 'Calendar Days' | 'Scheduled Working Days' | 'Fixed 30 Days';
 
 // Payroll Run Instance
 export interface PayrollRun {
@@ -373,7 +508,7 @@ export interface PayrollRun {
   periodYear: number; // 2026
   startDate: string; // YYYY-MM-DD
   endDate: string; // YYYY-MM-DD
-  status: 'Draft' | 'Approved' | 'Disbursed';
+  status: 'Draft' | 'Approved' | 'Disbursed' | 'Cancelled';
   createdAt: string;
   totalGrossPay: number;
   totalDeductions: number;
@@ -394,6 +529,7 @@ export interface PayrollRun {
   auditTrail?: PayrollAuditEvent[];
   attendancePeriodId: string;
   attendanceIntegrityHash: string;
+  attendanceRegisterHash?: string;
   preflightCriticalCount?: number;
   preflightWarningCount?: number;
   bankAdviceChecksum?: string;
@@ -401,7 +537,31 @@ export interface PayrollRun {
   bankAdviceGeneratedById?: string;
   bankAdviceEmployeeCount?: number;
   bankAdviceTotal?: number;
+  /** Name of the export template used; legacy values were fixed 'review required' labels. */
+  bankAdviceProfile?: string;
+  bankAdviceBatchReference?: string;
+  bankAdviceControlHash?: string;
+  bankAdviceTemplateVerified?: boolean;
   disbursementReference?: string;
+  cancelledAt?: string;
+  cancelledBy?: string;
+  cancelledById?: string;
+  cancellationReason?: string;
+  statusBeforeCancellation?: 'Draft' | 'Approved';
+  runType?: PayrollRunType;
+  settlementId?: string;
+  taxDeposit?: TaxDepositRecord;
+}
+
+export type PayrollRunType = 'Regular' | 'Supplementary' | 'Final Settlement';
+
+export interface TaxDepositRecord {
+  cprNumber: string;
+  amount: number;
+  depositedOn: string;
+  recordedAt: string;
+  recordedById: string;
+  recordedBy: string;
 }
 
 export type PayrollAdjustmentType = 'Bonus' | 'Commission' | 'Arrears' | 'Reimbursement' | 'Deduction' | 'Tax Adjustment';
@@ -426,10 +586,11 @@ export interface PayrollAdjustment {
 }
 
 export interface PayrollAuditEvent {
-  action: 'Created' | 'Approved' | 'Disbursed';
+  action: 'Created' | 'Approved' | 'Disbursed' | 'Cancelled';
   at: string;
   by: string;
   actorId?: string;
+  reason?: string;
 }
 
 // Individual Payslip details calculated under a Payroll Run
@@ -495,6 +656,28 @@ export interface Payslip {
   province?: Province;
   paidDays?: number;
   scheduledWorkingDays?: number;
+  notJoinedDays?: number;
+  absenceDeductionBasis?: AbsenceDeductionBasis;
+  attendanceSource?: 'Certified Register' | 'Attendance Logs';
+  runType?: PayrollRunType;
+  taxableIncomeThisPeriod?: number;
+  perquisitesValue?: number;
+  exemptAllowance?: number;
+  surchargeAnnual?: number;
+  settlementGratuity?: number;
+  settlementLeaveEncashment?: number;
+  settlementNoticePay?: number;
+  settlementPendingSalary?: number;
+  paymentStatus?: 'Paid' | 'Failed' | 'Retried';
+  paymentFailureReason?: string;
+  paymentFailedAt?: string;
+  paymentFailedById?: string;
+  paymentRetryReference?: string;
+  paymentRetriedAt?: string;
+  paymentRetriedById?: string;
+  retryBankName?: string;
+  retryBankAccountNumber?: string;
+  retryIban?: string;
   explicitAbsentDays?: number;
   statutoryConfigId?: string;
   calculationVersion?: string;
@@ -578,6 +761,11 @@ export interface SalaryRevision {
   type: 'Annual Increment' | 'Promotion' | 'Adjustment' | 'Market Correction';
   status?: 'Draft' | 'Approved';
   sourcePerformanceReviewId?: string;
+  createdById?: string;
+  createdBy?: string;
+  approvedById?: string;
+  arrearsAdjustmentId?: string;
+  arrearsAmount?: number;
 }
 
 // ─── Performance Appraisal ────────────────────────────────────────────────────
@@ -692,6 +880,44 @@ export interface GratuitySettlement {
   paidDate?: string;
   status: 'Pending' | 'Processed' | 'Paid';
   notes?: string;
+  createdAt?: string;
+  createdById?: string;
+  processedAt?: string;
+  processedById?: string;
+  paidById?: string;
+  payrollRunId?: string;
+}
+
+// ─── Employee lifecycle ───────────────────────────────────────────────────────
+
+export type OnboardingChecklistItem = 'cnicCopy' | 'appointmentLetter' | 'bankVerified' | 'eobiRegistered' | 'socialSecurityRegistered'
+  | 'ntnCaptured' | 'biometricEnrolled' | 'policyAcknowledged';
+
+export type LifecycleRequestType = 'Probation Confirmation' | 'Probation Extension' | 'Transfer' | 'Promotion' | 'Resignation' | 'Termination';
+
+export interface LifecycleRequest {
+  id: string;
+  employeeId: string;
+  type: LifecycleRequestType;
+  effectiveDate: string;
+  reason: string;
+  status: 'Pending' | 'Approved' | 'Rejected';
+  newBranchId?: string;
+  newDepartmentId?: string;
+  newDesignationId?: string;
+  newBasicSalary?: number;
+  newProbationEndDate?: string;
+  noticeDays?: number;
+  leaveEncashDays?: number;
+  createdAt: string;
+  createdById: string;
+  createdBy: string;
+  reviewedAt?: string;
+  reviewedById?: string;
+  reviewedBy?: string;
+  reviewComment?: string;
+  settlementId?: string;
+  salaryRevisionId?: string;
 }
 
 // ─── In-App Notifications ─────────────────────────────────────────────────────
@@ -701,6 +927,9 @@ export interface AppNotification {
   type: 'leave_approved' | 'leave_rejected' | 'payroll_processed' | 'loan_approved' | 'loan_rejected' | 'asset_assigned' | 'review_due' | 'holiday_reminder' | 'system';
   title: string;
   message: string;
+  /** Optional Urdu copy. Existing English-only notices remain fully compatible. */
+  titleUrdu?: string;
+  messageUrdu?: string;
   targetEmployeeId?: string;   // null = broadcast to all
   createdAt: string;
   readBy: string[];            // array of employeeIds who have read it

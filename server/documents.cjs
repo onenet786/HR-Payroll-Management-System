@@ -47,11 +47,49 @@ function attendanceIntegrityHash(records) {
   return `fnv1a-${(hash >>> 0).toString(16).padStart(8, '0')}`;
 }
 
-async function authorizeWrite(client, name, table, id, identity, existing, next) {
-  const policy = policyFor(name);
-  const employeeId = employeeIdOf(next) || (name === 'employees' || name === 'biometricTemplates' || table === 'employees' || table === 'biometric_templates' ? id : null);
-  if (!policy || !allowed(policy.write, identity, id, employeeId)) return false;
-  if ((name === 'attendancePeriods' || table === 'attendance_periods') && !existing) {
+function attendanceRegisterHash(rows) {
+  const canonical = rows.slice().sort((left, right) => `${left.employeeId}|${left.date}`.localeCompare(`${right.employeeId}|${right.date}`))
+    .map(row => [row.employeeId, row.date, row.status, row.attendanceId || '', row.source || ''].join('|')).join('\n');
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < canonical.length; index += 1) {
+    hash ^= canonical.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `fnv1a-${(hash >>> 0).toString(16).padStart(8, '0')}`;
+}
+
+// JSONB stores object keys in its own order, so stored and submitted documents are compared canonically.
+const canonical = value => Array.isArray(value) ? value.map(canonical)
+  : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().filter(key => value[key] !== undefined).map(key => [key, canonical(value[key])]))
+  : value;
+const sameJson = (left, right) => JSON.stringify(canonical(left)) === JSON.stringify(canonical(right));
+const onlyChanged = (before, after, fields) => [...new Set([...Object.keys(before || {}), ...Object.keys(after || {})])]
+  .every(key => fields.includes(key) || sameJson(before?.[key], after?.[key]));
+const withoutKeys = (value, keys) => Object.fromEntries(Object.entries(value || {}).filter(([key]) => !keys.includes(key)));
+const payslipPaymentFields = ['paymentStatus', 'paymentFailureReason', 'paymentFailedAt', 'paymentFailedById', 'paymentRetryReference', 'paymentRetriedAt', 'paymentRetriedById', 'retryBankName', 'retryBankAccountNumber', 'retryIban'];
+const payslipRedactionFields = ['employeeId', 'employeeName', 'employeeCode', 'cnic', 'bankName', 'bankAccountNumber', 'iban'];
+
+function addWorkingDays(start, days) {
+  const due = new Date(start);
+  let remaining = days;
+  while (remaining > 0) { due.setDate(due.getDate() + 1); if (due.getDay() !== 0) remaining -= 1; }
+  return due;
+}
+
+function impossibleTravel(points) {
+  const sorted = points.filter(point => point && Number.isFinite(Date.parse(point.capturedAt))).sort((a, b) => Date.parse(a.capturedAt) - Date.parse(b.capturedAt));
+  for (let index = 1; index < sorted.length; index += 1) {
+    const km = geoDistanceMeters(sorted[index - 1].latitude, sorted[index - 1].longitude, sorted[index].latitude, sorted[index].longitude) / 1000;
+    const hours = (Date.parse(sorted[index].capturedAt) - Date.parse(sorted[index - 1].capturedAt)) / 3_600_000;
+    if (km > 1 && (hours <= 0 || km / hours > 250)) return `Location moved ${km.toFixed(1)} km in ${Math.max(0, Math.round(hours * 60))} minute(s); possible mock or spoofed GPS.`;
+  }
+  return null;
+}
+
+const payrollRunImmutableFields = ['title', 'periodMonth', 'periodYear', 'startDate', 'endDate', 'createdAt', 'createdById', 'totalGrossPay', 'totalDeductions', 'totalNetPay',
+  'totalEobiEmployer', 'totalSocialSecurityEmployer', 'employeeCount', 'statutoryConfigId', 'approvedAt', 'approvedById', 'bankAdviceChecksum', 'disbursedAt', 'disbursedById', 'disbursementReference'];
+
+async function validLockedRegister(client, id, next) {
     if (next.status !== 'Locked' || !Number.isInteger(next.periodMonth) || !Number.isInteger(next.periodYear)) return false;
     const prefix = `${next.periodYear}-${String(next.periodMonth).padStart(2, '0')}`;
     if (id !== `attendance-period-${prefix}`) return false;
@@ -60,40 +98,119 @@ async function authorizeWrite(client, name, table, id, identity, existing, next)
       [`${prefix}-01`],
     );
     const records = result.rows.map(row => row.data);
-    if (!records.length || next.attendanceCount !== records.length || next.integrityHash !== attendanceIntegrityHash(records)) return false;
+    const rows = Array.isArray(next.registerRows) ? next.registerRows : [];
+    const allowedStatuses = new Set(['Working Day', 'Present', 'Late', 'Half Day', 'Paid Leave', 'Unpaid Leave', 'Holiday', 'Weekly Off', 'Absent', 'Not Joined', 'Missing Punch', 'Pending Review']);
+    const rowKeys = new Set(rows.map(row => `${row?.employeeId}|${row?.date}`));
+    const lastDay = new Date(next.periodYear, next.periodMonth, 0).getDate();
+    const lastDate = `${prefix}-${String(lastDay).padStart(2, '0')}`;
+    const employeeResult = await client.query(`SELECT id, data FROM employees`);
+    const eligibleEmployees = employeeResult.rows.map(row => ({ id: row.id, ...row.data }))
+      .filter(employee => ['Active', 'On Leave'].includes(employee.status) && typeof employee.dateOfJoining === 'string' && employee.dateOfJoining <= lastDate);
+    const expectedKeys = new Set(eligibleEmployees.flatMap(employee => Array.from({ length: lastDay }, (_, offset) => `${employee.id}|${prefix}-${String(offset + 1).padStart(2, '0')}`)));
+    if (!records.length || next.attendanceCount !== records.length || next.integrityHash !== attendanceIntegrityHash(records)
+      || !Number.isInteger(next.registerVersion) || next.registerVersion < 1 || !rows.length
+      || rows.some(row => !safeId(row?.employeeId) || !/^\d{4}-\d{2}-\d{2}$/.test(row?.date || '') || !allowedStatuses.has(row?.status))
+      || rowKeys.size !== rows.length || rows.some(row => row.status === 'Missing Punch' || row.status === 'Pending Review')
+      || rows.length !== expectedKeys.size || rowKeys.size !== expectedKeys.size || [...expectedKeys].some(key => !rowKeys.has(key))
+      || next.registerHash !== attendanceRegisterHash(rows)) return false;
+    return true;
+}
+
+async function authorizeWrite(client, name, table, id, identity, existing, next) {
+  const policy = policyFor(name);
+  const employeeId = employeeIdOf(next) || (name === 'employees' || name === 'biometricTemplates' || table === 'employees' || table === 'biometric_templates' ? id : null);
+  if (!policy || !allowed(policy.write, identity, id, employeeId)) return false;
+  if ((name === 'attendancePeriods' || table === 'attendance_periods') && !existing) {
+    if (!await validLockedRegister(client, id, next)) return false;
+  }
+  if ((name === 'attendancePeriods' || table === 'attendance_periods') && existing) {
+    const previous = existing.data;
+    if (next.periodMonth !== previous.periodMonth || next.periodYear !== previous.periodYear) return false;
+    const historyGrows = Array.isArray(next.history) && next.history.length === (Array.isArray(previous.history) ? previous.history.length : 0) + 1;
+    if (previous.status === 'Locked') {
+      // Reopening is allowed only before any live payroll consumes the register.
+      if (next.status !== 'Reopened' || next.reopenedById !== identity.uid || !next.reopenedAt
+        || typeof next.reopenReason !== 'string' || next.reopenReason.trim().length < 10 || !historyGrows
+        || next.registerHash !== previous.registerHash || next.integrityHash !== previous.integrityHash) return false;
+      const consumers = await client.query(`SELECT 1 FROM payroll_runs WHERE data->>'attendancePeriodId'=$1 AND COALESCE(status, data->>'status')<>'Cancelled' LIMIT 1`, [id]);
+      if (consumers.rowCount) return false;
+    } else if (previous.status === 'Reopened') {
+      if (!await validLockedRegister(client, id, next) || next.registerVersion !== (previous.registerVersion || 1) + 1 || !historyGrows) return false;
+    } else return false;
   }
   if ((name === 'payrollRuns' || table === 'payroll_runs') && !existing) {
     if (next.status !== 'Draft' || next.createdById !== identity.uid || next.approvedAt || next.disbursedAt) return false;
     if (!Number.isInteger(next.periodMonth) || !Number.isInteger(next.periodYear) || next.preflightCriticalCount !== 0) return false;
-    const duplicate = await client.query(
-      `SELECT 1 FROM payroll_runs WHERE data->>'periodYear'=$1 AND data->>'periodMonth'=$2 AND id<>$3 LIMIT 1`,
-      [String(next.periodYear), String(next.periodMonth), id],
-    );
-    if (duplicate.rowCount) return false;
-    if (typeof next.attendancePeriodId !== 'string' || typeof next.attendanceIntegrityHash !== 'string') return false;
-    const locked = await client.query(
-      `SELECT data FROM attendance_periods WHERE id=$1 AND status='Locked' FOR SHARE`,
-      [next.attendancePeriodId],
-    );
-    if (!locked.rows[0] || locked.rows[0].data.integrityHash !== next.attendanceIntegrityHash) return false;
+    const runType = next.runType || 'Regular';
+    if (!['Regular', 'Supplementary', 'Final Settlement'].includes(runType)) return false;
+    if (runType === 'Regular') {
+      const duplicate = await client.query(
+        `SELECT 1 FROM payroll_runs WHERE data->>'periodYear'=$1 AND data->>'periodMonth'=$2 AND id<>$3 AND COALESCE(status, data->>'status')<>'Cancelled' AND COALESCE(data->>'runType','Regular')='Regular' LIMIT 1`,
+        [String(next.periodYear), String(next.periodMonth), id],
+      );
+      if (duplicate.rowCount) return false;
+    }
+    if (runType === 'Final Settlement') {
+      // Separation payroll is driven by an independently processed settlement, not the attendance register.
+      const settlement = await client.query(`SELECT data FROM gratuity_settlements WHERE id=$1 FOR SHARE`, [next.settlementId]);
+      if (settlement.rows[0]?.data?.status !== 'Processed' || next.employeeCount !== 1) return false;
+      const existingRun = await client.query(`SELECT 1 FROM payroll_runs WHERE data->>'settlementId'=$1 AND id<>$2 AND COALESCE(status, data->>'status')<>'Cancelled' LIMIT 1`, [next.settlementId, id]);
+      if (existingRun.rowCount) return false;
+    } else {
+      // Regular and supplementary runs bind to the certified attendance register of their period.
+      if (typeof next.attendancePeriodId !== 'string' || typeof next.attendanceIntegrityHash !== 'string' || typeof next.attendanceRegisterHash !== 'string') return false;
+      const locked = await client.query(
+        `SELECT data FROM attendance_periods WHERE id=$1 AND status='Locked' FOR SHARE`,
+        [next.attendancePeriodId],
+      );
+      if (!locked.rows[0] || locked.rows[0].data.integrityHash !== next.attendanceIntegrityHash || locked.rows[0].data.registerHash !== next.attendanceRegisterHash) return false;
+    }
   }
   if ((name === 'payrollRuns' || table === 'payroll_runs') && existing) {
     const previous = existing.data;
     if (next.createdById !== previous.createdById || next.attendancePeriodId !== previous.attendancePeriodId
-      || next.attendanceIntegrityHash !== previous.attendanceIntegrityHash) return false;
-    if (previous.status === 'Draft') {
+      || next.attendanceIntegrityHash !== previous.attendanceIntegrityHash || next.attendanceRegisterHash !== previous.attendanceRegisterHash) return false;
+    if (next.runType !== previous.runType || next.settlementId !== previous.settlementId) return false;
+    if (['Approved', 'Disbursed'].includes(previous.status) && next.status === previous.status && next.taxDeposit && onlyChanged(previous, next, ['taxDeposit'])) {
+      const deposit = next.taxDeposit;
+      if (deposit.recordedById !== identity.uid || !/^[A-Z0-9-]{6,40}$/.test(String(deposit.cprNumber || '')) || !Number.isFinite(deposit.amount) || deposit.amount < 0
+        || !/^\d{4}-\d{2}-\d{2}$/.test(deposit.depositedOn || '') || !Number.isFinite(Date.parse(deposit.recordedAt))) return false;
+    } else if (next.status === 'Cancelled') {
+      if (!['Draft', 'Approved'].includes(previous.status) || next.statusBeforeCancellation !== previous.status
+        || next.cancelledById !== identity.uid || !Number.isFinite(Date.parse(next.cancelledAt))
+        || typeof next.cancellationReason !== 'string' || next.cancellationReason.trim().length < 10 || next.cancellationReason.length > 500
+        || payrollRunImmutableFields.some(field => !sameJson(next[field], previous[field]))) return false;
+    } else if (previous.status === 'Draft') {
       if (next.status !== 'Approved' || identity.uid === previous.createdById || next.approvedById !== identity.uid || !next.approvedAt) return false;
+      if (previous.runType === 'Final Settlement') {
+        const settlement = await client.query(`SELECT data FROM gratuity_settlements WHERE id=$1 FOR SHARE`, [previous.settlementId]);
+        if (settlement.rows[0]?.data?.status !== 'Processed') return false;
+      } else {
+        const lockedPeriod = await client.query(`SELECT data FROM attendance_periods WHERE id=$1 AND status='Locked' FOR SHARE`, [previous.attendancePeriodId]);
+        if (!lockedPeriod.rows[0] || lockedPeriod.rows[0].data.integrityHash !== previous.attendanceIntegrityHash
+          || lockedPeriod.rows[0].data.registerHash !== previous.attendanceRegisterHash) return false;
+      }
       const payslipResult = await client.query(`SELECT data FROM payroll_payslips WHERE payroll_run_id=$1 OR data->>'payrollRunId'=$1`, [id]);
       if (!payslipResult.rowCount || payslipResult.rowCount !== previous.employeeCount) return false;
       const sheets = payslipResult.rows.map(row => row.data);
       const employeeIds = sheets.map(sheet => sheet.employeeId);
       const employeeResult = await client.query(`SELECT id, data FROM employees WHERE id=ANY($1::varchar[])`, [employeeIds]);
       if (employeeResult.rowCount !== employeeIds.length) return false;
+      const activeCnicOwners = await client.query(`SELECT id, data FROM employees`);
+      const cnicOwnerMap = new Map();
+      for (const row of activeCnicOwners.rows) {
+        const employee = row.data;
+        if (employee?.status === 'Terminated') continue;
+        const cnic = String(employee?.cnic || '').replace(/\D/g, '');
+        if (cnic) cnicOwnerMap.set(cnic, [...(cnicOwnerMap.get(cnic) || []), row.id]);
+      }
       for (const row of employeeResult.rows) {
         const employee = row.data;
         const iban = String(employee.iban || '').replace(/\s/g, '');
         if (!/^\d{5}-\d{7}-\d$/.test(employee.cnic || '') || !String(employee.bankName || '').trim()
-          || !String(employee.bankAccountNumber || '').trim() || (iban && !/^PK\d{2}[A-Z0-9]{20}$/i.test(iban))) return false;
+          || !String(employee.bankAccountNumber || '').trim() || (iban && !/^PK\d{2}[A-Z0-9]{20}$/i.test(iban))
+          || (cnicOwnerMap.get(String(employee.cnic || '').replace(/\D/g, '')) || []).length > 1
+          || ((cnicOwnerMap.get(String(employee.cnic || '').replace(/\D/g, '')) || []).length === 0 && previous.runType !== 'Final Settlement')) return false;
       }
       const totals = sheets.reduce((sum, sheet) => ({
         gross: sum.gross + Number(sheet.grossSalary || 0), deductions: sum.deductions + Number(sheet.totalDeductions || 0), net: sum.net + Number(sheet.netSalary || 0),
@@ -143,6 +260,108 @@ async function authorizeWrite(client, name, table, id, identity, existing, next)
         const run = await client.query(`SELECT data FROM payroll_runs WHERE id=$1 FOR SHARE`, [next.payrollRunId]);
         const runData = run.rows[0]?.data;
         if (!runData || runData.status !== 'Draft' || runData.periodMonth !== previous.periodMonth || runData.periodYear !== previous.periodYear) return false;
+      } else if (previous.status === 'Approved' && previous.payrollRunId) {
+        if (next.status !== 'Approved' || next.payrollRunId || next.reviewedById !== previous.reviewedById || next.reviewedAt !== previous.reviewedAt) return false;
+        const run = await client.query(`SELECT data FROM payroll_runs WHERE id=$1 FOR SHARE`, [previous.payrollRunId]);
+        if (run.rows[0]?.data?.status !== 'Cancelled') return false;
+      } else return false;
+    }
+  }
+  if (name === 'payrollPayslips' || table === 'payroll_payslips') {
+    const runId = next.payrollRunId || existing?.data?.payrollRunId;
+    const runResult = await client.query(`SELECT data FROM payroll_runs WHERE id=$1 FOR SHARE`, [runId]);
+    const run = runResult.rows[0]?.data;
+    if (!run) return false;
+    if (!existing) {
+      if (run.status !== 'Draft') return false;
+    } else if (run.status !== 'Draft') {
+      // Issued payslips are financial records: only payment outcome and privacy redaction may change.
+      const previous = existing.data;
+      if (!onlyChanged(previous, next, [...payslipPaymentFields, ...payslipRedactionFields])) return false;
+      const redacted = payslipRedactionFields.some(field => !sameJson(previous[field], next[field]));
+      if (redacted && (next.employeeName !== '[REDACTED]' || !String(next.employeeId || '').startsWith('deleted-'))) return false;
+      if (next.paymentStatus !== previous.paymentStatus) {
+        if (run.status !== 'Disbursed') return false;
+        if (next.paymentStatus === 'Failed') {
+          if (previous.paymentStatus && previous.paymentStatus !== 'Paid') return false;
+          if (next.paymentFailedById !== identity.uid || typeof next.paymentFailureReason !== 'string' || next.paymentFailureReason.trim().length < 5) return false;
+        } else if (next.paymentStatus === 'Retried') {
+          if (previous.paymentStatus !== 'Failed' || next.paymentRetriedById !== identity.uid
+            || !/^[A-Za-z0-9][A-Za-z0-9\/_ .-]{2,99}$/.test(String(next.paymentRetryReference || ''))) return false;
+        } else return false;
+      }
+    }
+  }
+  if (name === 'statutoryChangeRequests' || table === 'statutory_change_requests') {
+    if (!existing) {
+      if (next.status !== 'Pending' || next.createdById !== identity.uid || next.reviewedById || !next.proposedConfig || !Array.isArray(next.proposedTaxSlabs)) return false;
+    } else {
+      const previous = existing.data;
+      if (previous.status !== 'Pending' || previous.createdById !== next.createdById) return false;
+      if (next.status === 'Pending') {
+        if (identity.uid !== previous.createdById || next.reviewedById) return false;
+      } else if (next.status === 'Approved') {
+        if (identity.uid === previous.createdById || next.reviewedById !== identity.uid || !next.reviewedAt
+          || !sameJson(next.proposedConfig, previous.proposedConfig) || !sameJson(next.proposedTaxSlabs, previous.proposedTaxSlabs)) return false;
+      } else if (next.status === 'Rejected') {
+        if (next.reviewedById !== identity.uid || !next.reviewedAt) return false;
+      } else return false;
+    }
+  }
+  if (name === 'statConfig' || table === 'stat_config' || name === 'taxSlabs' || table === 'tax_slabs') {
+    const any = await client.query(`SELECT 1 FROM ${name === 'statConfig' || table === 'stat_config' ? 'stat_config' : 'tax_slabs'} LIMIT 1`);
+    if (any.rowCount) {
+      // Live rates change only by applying an approved proposal, and only as approved.
+      const request = await client.query(`SELECT data FROM statutory_change_requests WHERE id=$1 AND status='Approved'`, [next.changeRequestId]);
+      const approved = request.rows[0]?.data;
+      if (!approved || approved.reviewedById !== identity.uid) return false;
+      if (name === 'statConfig' || table === 'stat_config') {
+        if (!sameJson(withoutKeys(next, ['changeRequestId', 'updatedAt', 'id']), withoutKeys(approved.proposedConfig, ['changeRequestId', 'updatedAt', 'id']))) return false;
+      } else {
+        const slab = (approved.proposedTaxSlabs || []).find(item => item.id === id);
+        if (!slab || !sameJson(withoutKeys(next, ['changeRequestId', 'id']), withoutKeys(slab, ['changeRequestId', 'id']))) return false;
+      }
+    }
+  }
+  if (name === 'lifecycleRequests' || table === 'lifecycle_requests') {
+    const types = ['Probation Confirmation', 'Probation Extension', 'Transfer', 'Promotion', 'Resignation', 'Termination'];
+    if (!existing) {
+      if (next.status !== 'Pending' || next.createdById !== identity.uid || !safeId(next.employeeId) || !types.includes(next.type)
+        || !/^\d{4}-\d{2}-\d{2}$/.test(next.effectiveDate || '') || typeof next.reason !== 'string' || next.reason.trim().length < 10 || next.reviewedById) return false;
+    } else {
+      const previous = existing.data;
+      const immutable = ['employeeId', 'type', 'effectiveDate', 'reason', 'createdAt', 'createdById', 'newBranchId', 'newDepartmentId', 'newDesignationId', 'newBasicSalary', 'newProbationEndDate', 'noticeDays', 'leaveEncashDays'];
+      if (previous.status !== 'Pending' || immutable.some(field => !sameJson(previous[field], next[field]))
+        || !['Approved', 'Rejected'].includes(next.status) || identity.uid === previous.createdById
+        || next.reviewedById !== identity.uid || !next.reviewedAt) return false;
+    }
+  }
+  if (name === 'salaryRevisions' || table === 'salary_revisions') {
+    if (!existing) {
+      if (next.status !== 'Draft' || (next.createdById && next.createdById !== identity.uid)) return false;
+    } else {
+      const previous = existing.data;
+      if (['employeeId', 'previousSalary', 'newSalary', 'effectiveDate', 'createdById'].some(field => previous[field] !== next[field])) return false;
+      if (previous.status === 'Approved' && next.status !== 'Approved') return false;
+      if (previous.status !== 'Approved' && next.status === 'Approved'
+        && ((previous.createdById && previous.createdById === identity.uid) || next.approvedById !== identity.uid)) return false;
+    }
+  }
+  if (name === 'gratuitySettlements' || table === 'gratuity_settlements') {
+    const numericFields = ['yearsOfService', 'basicSalaryAtSeparation', 'gratuityAmount', 'encashableLeaveDays', 'leaveEncashmentAmount', 'noticePayDays', 'noticePayAmount', 'pendingSalaryDays', 'pendingSalaryAmount', 'totalSettlementAmount'];
+    if (!existing) {
+      if (next.status !== 'Pending' || next.createdById !== identity.uid || !safeId(next.employeeId)
+        || !['Resignation', 'Termination', 'Retirement', 'Death', 'Redundancy'].includes(next.separationType)
+        || !/^\d{4}-\d{2}-\d{2}$/.test(next.lastWorkingDate || '') || !/^\d{4}-\d{2}-\d{2}$/.test(next.separationDate || '')
+        || numericFields.some(field => !Number.isFinite(next[field])) || next.processedById || next.paidById || next.paidDate) return false;
+    } else {
+      const previous = existing.data;
+      const immutable = ['employeeId', 'separationType', 'lastWorkingDate', 'separationDate', 'createdById', 'createdAt', 'notes', ...numericFields];
+      if (immutable.some(field => previous[field] !== next[field])) return false;
+      if (previous.status === 'Pending') {
+        if (next.status !== 'Processed' || identity.uid === previous.createdById || next.processedById !== identity.uid || !next.processedAt || next.paidById || next.paidDate) return false;
+      } else if (previous.status === 'Processed') {
+        if (next.status !== 'Paid' || identity.uid === previous.createdById || identity.uid === previous.processedById || next.paidById !== identity.uid || !/^\d{4}-\d{2}-\d{2}$/.test(next.paidDate || '')) return false;
       } else return false;
     }
   }
@@ -157,6 +376,12 @@ async function authorizeWrite(client, name, table, id, identity, existing, next)
   if ((name === 'attendances' || table === 'attendances') && next.method === 'Mobile GPS') {
     const location = next.punchOutLocation || next.punchInLocation;
     if (!validGpsEvidence(location)) return false;
+    const travel = impossibleTravel([next.punchInLocation, ...(next.fieldVisits || []).flatMap(visit => [visit.checkInLocation, visit.checkOutLocation]), next.punchOutLocation]);
+    if (travel && existing?.data?.regularizationApproved === undefined) {
+      next.locationRisk = travel;
+      next.regularizationRequested = true;
+      next.regularizationReason = next.regularizationReason || travel;
+    }
     const employeeResult = await client.query(`SELECT data FROM employees WHERE id=$1`, [employeeId]);
     const employee = employeeResult.rows[0]?.data;
     if (!employee || typeof employee.branchId !== 'string') return false;
@@ -191,6 +416,17 @@ async function authorizeWrite(client, name, table, id, identity, existing, next)
     if (existing?.data?.requestedById) next.requestedById = existing.data.requestedById;
     if (existing && existing.data.regularizationApproved === undefined && typeof next.regularizationApproved === 'boolean') {
       if (existing.data.requestedById === identity.uid || next.reviewedById !== identity.uid || !next.reviewedAt) return false;
+      if (identity.employeeId && identity.employeeId === existing.data.employeeId) return false;
+      if (typeof next.reviewComment !== 'string' || next.reviewComment.trim().length < 5) return false;
+      // The line manager decides first; HR may decide only after the three-working-day review deadline.
+      const subject = (await client.query(`SELECT data FROM employees WHERE id=$1`, [existing.data.employeeId])).rows[0]?.data;
+      const managerId = subject?.reportingManagerId;
+      if (managerId && managerId !== existing.data.employeeId && identity.employeeId !== managerId) {
+        const managers = await client.query(`SELECT u.data AS user, r.data AS role FROM users u LEFT JOIN roles r ON r.id = u.data->>'roleId' WHERE u.data->>'employeeId'=$1 AND COALESCE(u.data->>'status','Active')='Active'`, [managerId]);
+        const managerCanReview = managers.rows.some(row => row.user?.roleId === 'role-admin' || (row.role?.permissions || []).includes('manage_attendance'));
+        const requested = Date.parse(existing.data.requestedAt || `${existing.data.date}T00:00:00`);
+        if (managerCanReview && Number.isFinite(requested) && addWorkingDays(requested, 3).getTime() > Date.now()) return false;
+      }
     }
     if (existing && existing.data.regularizationApproved !== undefined
       && next.regularizationApproved !== existing.data.regularizationApproved) return false;
@@ -354,6 +590,13 @@ router.delete('/:collection/:id', async (req, res, next) => {
     if (!row) return res.status(204).end();
     const canDelete = policy && (req.identity.roleId === 'role-admin' || allowed(policy.write, req.identity, id, '__not_self__'));
     if (!canDelete || (table === 'attendances' && !req.identity.permissions.has('manage_attendance'))) return res.status(403).json({ error: 'Insufficient permission.' });
+    // Certified registers and payroll history are corrected by reopening or cancellation, never deletion.
+    if (['attendance_periods', 'payroll_runs', 'payroll_payslips', 'statutory_change_requests', 'lifecycle_requests', 'stat_config'].includes(table)) return res.status(403).json({ error: 'Payroll, statutory and approval records are immutable; cancel, reopen or reject them instead.' });
+    if (table === 'tax_slabs') {
+      const latest = await pool.query(`SELECT data FROM statutory_change_requests WHERE status='Approved' AND data->>'reviewedById'=$1 ORDER BY updated_at DESC LIMIT 1`, [req.identity.uid]);
+      const approved = latest.rows[0]?.data;
+      if (!approved || (approved.proposedTaxSlabs || []).some(slab => slab.id === id)) return res.status(403).json({ error: 'Tax slabs can be removed only by applying an approved statutory change.' });
+    }
     await transaction(async client => {
       await client.query(`DELETE FROM ${table} WHERE id=$1`, [id]);
       await client.query(`INSERT INTO hr_audit_log(actor_uid,actor_role_id,action,collection_name,document_id,previous_version,previous_data,correlation_id,source_ip) VALUES($1,$2,'delete',$3,$4,$5,$6::jsonb,$7,$8)`, [req.identity.uid, req.identity.roleId, name, id, row.version, JSON.stringify(row.data), req.correlationId, req.ip]);

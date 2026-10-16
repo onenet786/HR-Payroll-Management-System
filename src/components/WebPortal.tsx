@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import { JURISDICTIONS } from '../data/provincialCompliance';
+import React, { useState, useEffect, useMemo } from 'react';
 import { empAvatarUrl } from '../utils/avatar';
 import {
   Users, Calendar, CreditCard, ShieldCheck, FileText, Download, UserPlus,
@@ -14,6 +15,7 @@ import {
 } from 'lucide-react';
 import {
   Employee, AttendanceLog, AttendancePeriod, LeaveRequest, StatutoryConfig, TaxSlab, PayrollRun, Payslip,
+  StatutoryChangeRequest, LifecycleRequest, OnboardingChecklistItem,
   Role, UserAccount, NewUserAccount, Branch, Department, Designation, Holiday, LoanAdvance, SalaryRevision,
   PerformanceReview, CompanyAsset, JobPosting, JobApplication, GratuitySettlement, AppNotification, Company, CompanySetupPayload, Zone, UcTown, WageType, MobileDutyAuthorization, MobileDutyType, PayrollAdjustment, PayrollAdjustmentType
 } from '../types';
@@ -31,12 +33,29 @@ import { BiometricDeviceModule } from './BiometricDeviceModule';
 import { FirestoreMaintenanceModule } from './FirestoreMaintenanceModule';
 import { CompanySetupModule } from './CompanySetupModule';
 import { MasterDataModule } from './MasterDataModule';
+import { EmployeeDocumentVault } from './EmployeeDocumentVault';
 import { motion, AnimatePresence } from 'motion/react';
 import type { FirestoreSyncStatus } from '../App';
 import { bankAdviceChecksum } from '../data/bankAdvice';
 import { createStatutoryReport, type StatutoryReportKind } from '../data/statutoryReports';
 import { createPayrollJournal } from '../data/accountingJournal';
+import { isRegularizationOverdue, lineManagerReviewer, regularizationDueAt } from '../data/approvalRules';
+import { createPayrollReversalJournal } from '../data/accountingJournal';
+import { complianceAlerts } from '../data/complianceAlerts';
+import { annualLeaveBalance, calculateFinalSettlement } from '../data/lifecycle';
+import { downloadPayslipPdf } from '../data/payslipPdf';
+import { downloadEmployeeDocument } from '../utils/employeeDocuments';
+import { ComplianceAlertsPanel } from './ComplianceAlertsPanel';
+import { EmployeeLifecycleModule } from './EmployeeLifecycleModule';
+import { PaymentExceptionsModal } from './PaymentExceptionsModal';
+import { PayrollReportsPanel } from './PayrollReportsPanel';
+import { StatutoryGovernancePanel } from './StatutoryGovernancePanel';
+import { leaveBalances } from '../data/leavePolicy';
+import { applyUrduInterface } from '../utils/urduInterface';
+import { authenticatedApiRequest as payrollApi } from '../data/postgresStore';
+import { exportTemplatesFor, renderExport, type ExportKind } from '../data/exportTemplates';
 import { authenticatedApiRequest } from '../data/postgresStore';
+import QRCode from 'qrcode';
 
 const PAKISTAN_BANKS = [
   { name: 'Habib Bank Limited (HBL)', code: 'HABB' },
@@ -126,7 +145,18 @@ const getExceptionalCurrentSuffix = (
   return '';
 };
 
-interface WebPortalProps {
+export interface MfaRecoveryRequest {
+  id: string;
+  userId: string;
+  requestedById: string;
+  username: string;
+  email?: string;
+  roleName?: string;
+  reason: string;
+  createdAt: string;
+}
+
+export interface WebPortalProps {
   employees: Employee[];
   attendances: AttendanceLog[];
   mobileDutyAuthorizations: MobileDutyAuthorization[];
@@ -145,12 +175,26 @@ interface WebPortalProps {
   onUpdateTaxSlabs: (slabs: TaxSlab[]) => void;
   onApproveLeave: (id: string) => void;
   onRejectLeave: (id: string) => void;
-  onApproveRegularization: (id: string) => void;
-  onRejectRegularization: (id: string) => void;
+  onApproveRegularization: (id: string, reviewComment: string) => void;
+  onRejectRegularization: (id: string, reviewComment: string) => void;
   onCreatePayrollRun: (title: string, month: number, year: number) => void;
   onLockAttendancePeriod: (month: number, year: number) => void;
+  onReopenAttendancePeriod: (month: number, year: number, reason: string) => void;
   onUpdatePayrollStatus: (runId: string, status: 'Approved' | 'Disbursed', disbursementReference?: string) => void;
-  onRecordBankAdvice: (runId: string, checksum: string, employeeCount: number, total: number) => void | Promise<void>;
+  onCancelPayrollRun: (runId: string, reason: string) => void;
+  statutoryChangeRequests: StatutoryChangeRequest[];
+  onReviewStatutoryChange: (id: string, decision: 'Approved' | 'Rejected', comment: string) => void;
+  lifecycleRequests: LifecycleRequest[];
+  onCreateLifecycleRequest: (draft: Omit<LifecycleRequest, 'id' | 'status' | 'createdAt' | 'createdById' | 'createdBy'>) => Promise<boolean>;
+  onReviewLifecycleRequest: (id: string, decision: 'Approved' | 'Rejected', comment: string) => void;
+  onUpdateOnboarding: (employeeId: string, item: OnboardingChecklistItem, done: boolean) => void;
+  onCreateSupplementaryRun: (month: number, year: number) => void;
+  onCreateFinalSettlementRun: (settlementId: string) => void;
+  onRecordTaxDeposit: (runId: string, cprNumber: string, amount: number, depositedOn: string) => void;
+  onMarkPaymentFailed: (payslipId: string, reason: string) => void;
+  onRecordPaymentRetry: (payslipIds: string[], reference: string) => void;
+  onRetroRecalculate: (payslipId: string, reason: string, target: { month: number; year: number }) => void | Promise<void>;
+  onRecordBankAdvice: (runId: string, checksum: string, employeeCount: number, total: number, profile: PayrollRun['bankAdviceProfile'], batch?: { batchReference: string; controlHash: string; verified: boolean }) => void | Promise<void>;
   onSendPayslips: (runId: string) => Promise<{ sent: number; skipped: number; failed: Array<{ employeeId: string; error: string }> }>;
   onApplyLeave: (leave: LeaveRequest) => void;
   onAddAttendance: (log: AttendanceLog) => void;
@@ -215,7 +259,7 @@ interface WebPortalProps {
   firestoreSyncStatus: FirestoreSyncStatus;
 }
 
-type PortalTab = 'dashboard' | 'employees' | 'attendance' | 'leaves' | 'payroll' | 'settings' | 'company-setup' | 'master-data' | 'access' | 'maintenance' | 'holidays' | 'loans' | 'revisions' | 'performance' | 'assets' | 'recruitment' | 'gratuity' | 'notifications' | 'biometric' | 'help';
+type PortalTab = 'dashboard' | 'lifecycle' | 'employees' | 'attendance' | 'leaves' | 'payroll' | 'settings' | 'company-setup' | 'master-data' | 'access' | 'maintenance' | 'holidays' | 'loans' | 'revisions' | 'performance' | 'assets' | 'recruitment' | 'gratuity' | 'notifications' | 'biometric' | 'help';
 type NavGroupKey = 'people' | 'time' | 'payroll' | 'system';
 
 interface FlowStep {
@@ -238,6 +282,54 @@ const FLOW_STEPS: FlowStep[] = [
   { step: 11, label: '11. Settlement', tab: 'gratuity' },
   { step: 12, label: '12. Dashboard', tab: 'dashboard' },
 ];
+
+const TAB_HEADINGS_UR: Record<PortalTab, string> = {
+  dashboard: 'آج کے اہم کام — پہلے تین صرف ایک منٹ لیتے ہیں۔',
+  settings: 'قانونی شرحیں تمام صوبوں میں ماہانہ پے رول کٹوتیوں کا تعین کرتی ہیں۔',
+  'company-setup': 'کمپنی کی معلومات اور کام کی جگہیں درج کریں۔',
+  'master-data': 'برانچز، شعبے، عہدے، زون اور اجرت کی اقسام ترتیب دیں۔',
+  employees: 'فعال ملازمین کی فہرست اور قانونی تعمیل کا ریکارڈ۔',
+  recruitment: 'بھرتی کا عمل، اسامیاں اور امیدواروں کی درخواستیں۔',
+  performance: 'کارکردگی کا جائزہ، اہداف اور درجہ بندی۔',
+  assets: 'اثاثے واپس ہونے تک ملازمت کا اختتام مکمل نہیں ہوتا۔',
+  holidays: 'سرکاری اور کمپنی کی تعطیلات کا کیلنڈر۔',
+  leaves: 'پے رول سے پہلے چھٹی کی درخواستوں کی منظوری ضروری ہے۔',
+  biometric: 'ہر مقام پر ریڈرز اور رجسٹرڈ ملازمین۔',
+  attendance: 'کون موجود ہے، کن معاملات پر فیصلہ درکار ہے، اور ماہانہ رجسٹر۔',
+  loans: 'قرضوں اور ایڈوانس کی اقساط کی خودکار وصولی۔',
+  revisions: 'منظور شدہ اضافے اور تنخواہ میں ترامیم کی تاریخ۔',
+  payroll: 'مرحلہ 10: ماہانہ تنخواہ، قانونی کٹوتیاں اور ادائیگی۔',
+  gratuity: 'حتمی تصفیہ، گریجویٹی اور کلیئرنس۔',
+  lifecycle: 'تقرری، پروبیشن، تبادلے، ترقی اور علیحدگی — دوسرے صارف کی منظوری کے ساتھ۔',
+  access: 'صارف اکاؤنٹس، کردار اور اختیارات۔',
+  maintenance: 'ڈیٹا بیک اپ اور بحالی۔',
+  notifications: 'سسٹم کی سرگرمی، پے رول یاد دہانیاں اور اہم اطلاعات۔',
+  help: 'تعمیل کی مکمل رہنمائی اور پورٹل گائیڈ۔',
+};
+
+const TAB_HELP_UR: Record<PortalTab, string> = {
+  dashboard: 'اس صفحے کی ہر معلومات انہی ریکارڈز سے آتی ہے جو پے رول استعمال کرتا ہے؛ جو یہاں درست ہے وہی پے رول میں درست ہوگا۔',
+  settings: 'قانونی حدود درست کریں۔ صوبائی کم از کم اجرت، ای او بی آئی اور سوشل سیکیورٹی کی حدیں اگلے پے رول کی کٹوتیاں طے کرتی ہیں۔ ہر تبدیلی دوسرے صارف کی منظوری کے بعد لاگو ہوتی ہے۔',
+  'company-setup': 'پے رول دستاویزات پر کمپنی کا قانونی نام اور رجسٹریشن نمبر چھپتے ہیں، اور ہر مقام کا صوبہ کم از کم اجرت، سوشل سیکیورٹی اور چھٹی کے قواعد طے کرتا ہے۔',
+  'master-data': 'ماسٹر ڈیٹا ملازمین کی شمولیت، حاضری اور پے رول رجسٹر میں استعمال ہونے والی معیاری فہرستیں فراہم کرتا ہے۔',
+  employees: 'ملازمین کے پروفائل، ٹیکس حیثیت، شناختی کارڈ اور بینک ریکارڈ کا انتظام کریں۔ پہلے کمپنی کا ماسٹر ڈیٹا مکمل کریں۔',
+  recruitment: 'اسامیاں شائع کریں، امیدواروں کے مراحل دیکھیں، اور منتخب امیدواروں کو براہِ راست ملازمین کی فہرست میں شامل کریں۔',
+  performance: 'سہ ماہی اور سالانہ کارکردگی کے جائزے، اہداف اور درجہ بندی، جو تنخواہ میں اضافے کی بنیاد بنتے ہیں۔',
+  assets: 'کمپنی کے اثاثے اور ان کے حامل افراد۔ ملازمت ختم ہونے پر یہ اثاثے تصفیہ کی فہرست میں خود شامل ہو جاتے ہیں۔',
+  holidays: 'سرکاری اور اختیاری تعطیلات کام کے دنوں اور ماہانہ حاضری کے حساب میں شامل ہوتی ہیں۔',
+  leaves: 'چھٹی کی درخواستیں نمٹائیں، سالانہ، اتفاقی اور بیماری کی چھٹیوں کا بیلنس دیکھیں، اور پے رول سے پہلے نقد ادائیگی کی اہلیت چیک کریں۔',
+  biometric: 'آلات حاضری درج کرتے ہیں؛ عملہ ویب یا موبائل ایپ سے چہرے کی تصدیق اور جی پی ایس حد بندی کے ساتھ بھی حاضری لگا سکتا ہے۔',
+  attendance: 'پے رول سے پہلے فیصلے درکار ہیں۔ درستگی کی درخواستیں نمٹائیں، پھر ماہانہ رجسٹر کو لاک کریں تاکہ کام کے دن درست شمار ہوں۔',
+  loans: 'کمپنی کے قرضے اور ایڈوانس۔ فعال قسطیں تنخواہ کی ادائیگی پر خودکار طور پر کٹتی ہیں۔',
+  revisions: 'تنخواہ کی تاریخ اور منظور شدہ اضافے۔ ہر ترمیم دوسرے صارف کی منظوری سے لاگو ہوتی ہے؛ ماضی کی تاریخ سے ترمیم پر بقایا جات بنتے ہیں۔',
+  payroll: 'حاضری اور کٹوتیوں کا جائزہ لیں، ٹیکس کا حساب کریں، اور بینک ادائیگی کی فائل تیار کریں۔ تیاری، منظوری اور ادائیگی الگ الگ صارفین کرتے ہیں۔',
+  gratuity: 'اثاثے واپس ہونے تک علیحدگی مکمل نہیں ہوتی۔ حتمی تصفیہ، گریجویٹی اور چھٹیوں کی نقد ادائیگی کا حساب کریں۔',
+  lifecycle: 'ملازمت کی تبدیلیوں کی درخواست دیں؛ ملازم کا ریکارڈ دوسرے مجاز صارف کی منظوری کے بعد بدلتا ہے۔ علیحدگی پر حتمی تصفیہ خود بنتا ہے۔',
+  access: 'کردار (ایڈمن، ایچ آر مینیجر، پے رول آفیسر، آڈیٹر) ترتیب دیں اور ماڈیول کے اختیارات تفویض کریں۔',
+  maintenance: 'سرور کی صحت اور ڈیٹا کی ہم آہنگی چیک کریں، اور بحالی کے لیے بیک اپ محفوظ کریں۔',
+  notifications: 'خودکار اطلاعات، منظوری کی درخواستیں، آلات کی وارننگز اور قانونی آخری تاریخیں۔',
+  help: 'انکم ٹیکس آرڈیننس 2001، ای او بی آئی ایکٹ 1976، صوبائی سوشل سیکیورٹی اور فیکٹریز ایکٹ کی رہنمائی۔',
+};
 
 const TAB_WORKFLOW_META: Record<PortalTab, {
   heading: string;
@@ -341,6 +433,12 @@ const TAB_WORKFLOW_META: Record<PortalTab, {
     guideTitle: 'Guide for Gratuity & Settlement',
     guideContent: 'Step 11 of 12. Offboard exiting personnel with full final settlement calculation including gratuity (30 days basic pay per completed year of service) and unutilized leave encashment.'
   },
+  lifecycle: {
+    heading: 'Onboarding, probation, transfers, promotions and separations with second-user approval.',
+    help: 'Raise lifecycle requests; another authorized user approves them before the employee record changes. Separations create the final settlement automatically.',
+    guideTitle: 'Guide for Employee Lifecycle',
+    guideContent: 'Raise a request, have a different HR user approve it, then complete onboarding items and issue employment or experience letters.'
+  },
   access: {
     heading: 'User access accounts, roles, and administrative permissions.',
     help: 'Configure multi-tier roles (Super Admin, HR Manager, Payroll Officer, Auditor) and assign granular module permissions.',
@@ -413,7 +511,21 @@ export function WebPortal({
   onRejectRegularization,
   onCreatePayrollRun,
   onLockAttendancePeriod,
+  onReopenAttendancePeriod,
   onUpdatePayrollStatus,
+  onCancelPayrollRun,
+  statutoryChangeRequests,
+  onReviewStatutoryChange,
+  lifecycleRequests,
+  onCreateLifecycleRequest,
+  onReviewLifecycleRequest,
+  onUpdateOnboarding,
+  onCreateSupplementaryRun,
+  onCreateFinalSettlementRun,
+  onRecordTaxDeposit,
+  onMarkPaymentFailed,
+  onRecordPaymentRetry,
+  onRetroRecalculate,
   onRecordBankAdvice,
   onSendPayslips,
   onApplyLeave,
@@ -516,7 +628,45 @@ export function WebPortal({
   });
 
   const closeSidebar = () => setSidebarOpen(false);
-  const activeTaxSlabs = taxSlabs && taxSlabs.length > 0 ? taxSlabs : DEFAULT_TAX_SLABS;
+  // Settings edit the pending proposal (maker-checker); payroll always uses the live statConfig/taxSlabs.
+  const pendingStatutoryChange = statutoryChangeRequests.find(item => item.status === 'Pending');
+  const editableStatConfig = pendingStatutoryChange?.proposedConfig || statConfig;
+  const editableTaxSlabs = pendingStatutoryChange?.proposedTaxSlabs || taxSlabs;
+  const activeTaxSlabs = editableTaxSlabs && editableTaxSlabs.length > 0 ? editableTaxSlabs : DEFAULT_TAX_SLABS;
+  const [payslipUrdu, setPayslipUrdu] = useState(false);
+  // English stays the authoritative record; Urdu is offered for navigation and employee-facing documents.
+  const [portalLanguage, setPortalLanguage] = useState<'en' | 'ur'>(() => {
+    try { return window.localStorage.getItem('hr_portal_language') === 'ur' ? 'ur' : 'en'; } catch { return 'en'; }
+  });
+  const togglePortalLanguage = () => setPortalLanguage(previous => {
+    const next = previous === 'en' ? 'ur' : 'en';
+    try { window.localStorage.setItem('hr_portal_language', next); } catch { /* preference is optional */ }
+    setPayslipUrdu(next === 'ur');
+    return next;
+  });
+  const navLabel = (english: string, urdu: string) => portalLanguage === 'ur' ? urdu : english;
+  useEffect(() => {
+    const main = portalLanguage === 'ur' ? document.getElementById('web-main-panel') : null;
+    return main ? applyUrduInterface(main) : undefined;
+  }, [portalLanguage]);
+  const [paymentExceptionRun, setPaymentExceptionRun] = useState<PayrollRun | null>(null);
+  const [alertChannels, setAlertChannels] = useState<{ sms: boolean; whatsapp: boolean }>({ sms: false, whatsapp: false });
+  useEffect(() => {
+    if (activeTab !== 'payroll') return;
+    let active = true;
+    payrollApi('/api/payroll-delivery/channels').then(result => { if (active) setAlertChannels({ sms: Boolean(result.sms), whatsapp: Boolean(result.whatsapp) }); }).catch(() => undefined);
+    return () => { active = false; };
+  }, [activeTab]);
+  const sendSalaryAlerts = async (runId: string, channel: 'sms' | 'whatsapp') => {
+    try {
+      const result = await payrollApi(`/api/payroll-delivery/${encodeURIComponent(runId)}/alerts`, { method: 'POST', body: JSON.stringify({ channel }) }) as { sent: number; skipped: number; failed: Array<{ employeeId: string; error: string }> };
+      const summary = `${result.sent} sent, ${result.skipped} already delivered, ${result.failed.length} failed.`;
+      if (result.failed.length) alert(`${channel === 'sms' ? 'SMS' : 'WhatsApp'} alerts completed with exceptions: ${summary}\n• ${result.failed.slice(0, 8).map(item => `${employees.find(employee => employee.id === item.employeeId)?.fullName || item.employeeId}: ${item.error}`).join('\n• ')}`);
+      else showToast(`${channel === 'sms' ? 'SMS' : 'WhatsApp'} alerts: ${summary}`);
+    } catch (error) { alert(error instanceof Error ? error.message : 'Alerts could not be sent.'); }
+  };
+  const openComplianceAlerts = useMemo(() => complianceAlerts({ employees, attendances, branches, wageTypes, statConfig }), [employees, attendances, branches, wageTypes, statConfig]);
+  const bilingual = (english: string, urdu: string) => payslipUrdu ? `${english} / ${urdu}` : english;
   const updateTaxSlab = (id: string, field: keyof Pick<TaxSlab, 'minIncome' | 'maxIncome' | 'baseTax' | 'percentage'>, value: number) =>
     onUpdateTaxSlabs(activeTaxSlabs.map(slab => slab.id === id ? { ...slab, [field]: value } : slab));
 
@@ -568,7 +718,7 @@ export function WebPortal({
 
   const downloadAccountingJournal = (run: PayrollRun) => {
     try {
-      const journal = createPayrollJournal(run, payrollPayslips);
+      const journal = run.status === 'Cancelled' ? createPayrollReversalJournal(run, payrollPayslips, statConfig) : createPayrollJournal(run, payrollPayslips, statConfig);
       const url = URL.createObjectURL(new Blob([journal.csv], { type: 'text/csv;charset=utf-8' }));
       const link = document.createElement('a');
       link.href = url;
@@ -646,6 +796,7 @@ export function WebPortal({
     if (tab === 'assets') return userPermissions.includes('manage_employees') || userPermissions.includes('manage_settings');
     if (tab === 'recruitment') return userPermissions.includes('manage_employees');
     if (tab === 'gratuity') return userPermissions.includes('manage_payroll');
+    if (tab === 'lifecycle') return userPermissions.includes('manage_employees');
     if (tab === 'notifications') return true;
     if (tab === 'help') return true;
     if (tab === 'biometric') return userPermissions.includes('manage_attendance') || userPermissions.includes('manage_employees');
@@ -670,6 +821,17 @@ export function WebPortal({
     email: '',
     contactNumber: '+923001234567',
     cnic: '42101-1234567-3',
+    cnicExpiryDate: '',
+    drivingLicenceExpiryDate: '',
+    professionalCertificationExpiryDate: '',
+    workPermitExpiryDate: '',
+    workerCategory: 'Worker',
+    perquisiteVehicleMonthly: '',
+    perquisiteAccommodationMonthly: '',
+    perquisiteOtherMonthly: '',
+    contractEndDate: '',
+    probationEndDate: '',
+    probationConfirmed: false,
     gender: 'Male',
     dateOfBirth: '1995-01-01',
     branchId: 'b1',
@@ -681,6 +843,7 @@ export function WebPortal({
     wageType: 'Salaried' as string,
     basicSalary: 85000,
     shiftStartTime: '09:00', shiftEndTime: '17:00', shiftGraceMinutes: 15, shiftHalfDayMinutes: 120, shiftBreakMinutes: 0,
+    ramadanStartDate: '', ramadanEndDate: '', ramadanStartTime: '09:00', ramadanEndTime: '15:00', fridayStartTime: '', fridayEndTime: '',
     providentFundOptIn: true,
     providentFundRate: 5.0,
     gratuityOptIn: true,
@@ -689,6 +852,8 @@ export function WebPortal({
     iban: 'PK42HABB0012345678901234',
     eobiNumber: '1090123000',
     socialSecurityNumber: 'SS-42-000111',
+    eobiExemptionReason: '', socialSecurityExemptionReason: '',
+    ntn: '',
     // Custom onboarding fields
     pictureUrl: '',
     isZoneInCharge: false,
@@ -712,6 +877,17 @@ export function WebPortal({
     email: '',
     contactNumber: '+923001234567',
     cnic: '',
+    cnicExpiryDate: '',
+    drivingLicenceExpiryDate: '',
+    professionalCertificationExpiryDate: '',
+    workPermitExpiryDate: '',
+    workerCategory: 'Worker',
+    perquisiteVehicleMonthly: '',
+    perquisiteAccommodationMonthly: '',
+    perquisiteOtherMonthly: '',
+    contractEndDate: '',
+    probationEndDate: '',
+    probationConfirmed: false,
     gender: 'Male',
     dateOfBirth: '1995-01-01',
     branchId: 'b1',
@@ -723,6 +899,7 @@ export function WebPortal({
     wageType: 'Salaried' as string,
     basicSalary: 85000,
     shiftStartTime: '09:00', shiftEndTime: '17:00', shiftGraceMinutes: 15, shiftHalfDayMinutes: 120, shiftBreakMinutes: 0,
+    ramadanStartDate: '', ramadanEndDate: '', ramadanStartTime: '09:00', ramadanEndTime: '15:00', fridayStartTime: '', fridayEndTime: '',
     providentFundOptIn: true,
     providentFundRate: 5.0,
     gratuityOptIn: true,
@@ -731,6 +908,8 @@ export function WebPortal({
     iban: '',
     eobiNumber: '',
     socialSecurityNumber: '',
+    eobiExemptionReason: '', socialSecurityExemptionReason: '',
+    ntn: '',
     pictureUrl: '',
     isZoneInCharge: false,
     zoneInChargeName: '',
@@ -751,6 +930,26 @@ export function WebPortal({
   const [newEmpTakeHome, setNewEmpTakeHome] = useState(false);
   const [editEmpTakeHome, setEditEmpTakeHome] = useState(false);
   const [viewImageModal, setViewImageModal] = useState<{ open: boolean; url: string; title: string; subtitle?: string } | null>(null);
+  const [documentVaultEmployee, setDocumentVaultEmployee] = useState<Employee | null>(null);
+  const [bankAdviceProfile, setBankAdviceProfile] = useState<string>('tpl-generic-csv');
+  const [bankValueDate, setBankValueDate] = useState(new Date().toISOString().slice(0, 10));
+  const bankTemplates = exportTemplatesFor(statConfig, 'Bank Advice');
+  const selectedBankTemplate = bankTemplates.find(item => item.id === bankAdviceProfile) || bankTemplates[0];
+  const batchReferenceFor = (run: PayrollRun) => `${run.periodYear}${String(run.periodMonth).padStart(2, '0')}${run.id.replace(/[^A-Za-z0-9]/g, '').slice(-6).toUpperCase()}`;
+  const downloadText = (content: string, filename: string) => {
+    const url = URL.createObjectURL(new Blob([content], { type: filename.endsWith('.csv') ? 'text/csv;charset=utf-8' : 'text/plain;charset=utf-8' }));
+    const link = document.createElement('a'); link.href = url; link.download = filename; link.click(); URL.revokeObjectURL(url);
+  };
+  const downloadTemplateReturn = (kind: Exclude<ExportKind, 'Bank Advice'>, run: PayrollRun) => {
+    const templates = exportTemplatesFor(statConfig, kind);
+    const template = templates.find(item => item.verified) || templates[0];
+    if (!template) { alert(`Configure a ${kind} template in Statutory Config first.`); return; }
+    const result = renderExport(template, payrollPayslips, { run, companyName: companyLegalName, valueDate: run.endDate, batchReference: batchReferenceFor(run), employees });
+    if (result.errors.length) { alert(`${kind} file blocked — ${result.errors.length} problem(s):\n• ${result.errors.slice(0, 10).join('\n• ')}`); return; }
+    downloadText(result.content, result.filename);
+    if (result.warnings.length) alert(result.warnings.join('\n'));
+    else showToast(`${kind}: ${result.recordCount} rows, PKR ${result.totalAmount.toLocaleString()}`);
+  };
 
   const now = new Date();
   const [payrollMonth, setPayrollMonth] = useState(now.getMonth() + 1);
@@ -760,14 +959,163 @@ export function WebPortal({
   const [adjustmentAmount, setAdjustmentAmount] = useState('');
   const [adjustmentTaxable, setAdjustmentTaxable] = useState(true);
   const [adjustmentReason, setAdjustmentReason] = useState('');
-  const [mfaEnrollment, setMfaEnrollment] = useState<{ enrollmentId: string; secret: string; issuer: string; account: string } | null>(null);
+  const [mfaEnrollment, setMfaEnrollment] = useState<{ enrollmentId: string; secret: string; issuer: string; account: string; otpauthUri: string } | null>(null);
+  const [mfaSetupChoice, setMfaSetupChoice] = useState<'choose' | 'totp' | 'email' | null>(null);
+  const [emailMfaEnrollment, setEmailMfaEnrollment] = useState<{ enrollmentId: string; email: string } | null>(null);
+  const [mfaQrCode, setMfaQrCode] = useState('');
   const [mfaEnrollmentCode, setMfaEnrollmentCode] = useState('');
+  const [mfaEmailCode, setMfaEmailCode] = useState('');
+  const [mfaEnabledLocally, setMfaEnabledLocally] = useState(false);
+  const [mfaEnrollmentError, setMfaEnrollmentError] = useState('');
+  const [showMfaRecoveryForm, setShowMfaRecoveryForm] = useState(false);
+  const [mfaRecoveryReason, setMfaRecoveryReason] = useState('');
+  const [mfaRecoveryError, setMfaRecoveryError] = useState('');
+  const [mfaRecoverySubmitting, setMfaRecoverySubmitting] = useState(false);
+  const [adminRecoveryTargetId, setAdminRecoveryTargetId] = useState('');
+  const [adminRecoveryReason, setAdminRecoveryReason] = useState('');
+  const [mfaRecoveryRequests, setMfaRecoveryRequests] = useState<MfaRecoveryRequest[]>([]);
+  const [mfaRecoveryRequestsLoading, setMfaRecoveryRequestsLoading] = useState(false);
+  const [reviewingMfaRecoveryId, setReviewingMfaRecoveryId] = useState<string | null>(null);
 
   // Settlement manual additions for offboarding
   const [settlementLeavesEncash, setSettlementLeavesEncash] = useState(10);
+  const [settlementType, setSettlementType] = useState<GratuitySettlement['separationType']>('Resignation');
+  const [settlementDate, setSettlementDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [settlementNoticeDays, setSettlementNoticeDays] = useState(0);
+  const [settlementReason, setSettlementReason] = useState('');
 
   // System country settings (defaulting to Pakistan)
   const selectedCountry = 'Pakistan';
+
+  useEffect(() => {
+    setMfaEnabledLocally(Boolean(currentUserAccount.mfaEnabled));
+  }, [currentUserAccount.id, currentUserAccount.mfaEnabled]);
+
+  const mfaEnabled = Boolean(currentUserAccount.mfaEnabled || mfaEnabledLocally);
+  const mfaRequiredForRole = userPermissions.some(permission =>
+    ['manage_access', 'manage_payroll'].includes(permission)
+  );
+  const canManageMfaRecovery = userPermissions.includes('manage_access');
+
+  const beginMfaEnrollment = async () => {
+    try {
+      setMfaEnrollmentError('');
+      setMfaSetupChoice('totp');
+      const enrollment = await authenticatedApiRequest('/api/auth/mfa/enroll', { method: 'POST', body: '{}' });
+      const qrCode = await QRCode.toDataURL(enrollment.otpauthUri, {
+        errorCorrectionLevel: 'M',
+        margin: 1,
+        width: 224,
+        color: { dark: '#0f172a', light: '#ffffff' }
+      });
+      setMfaEnrollment(enrollment);
+      setMfaQrCode(qrCode);
+      setMfaEnrollmentCode('');
+    } catch (error) {
+      setMfaQrCode('');
+      setMfaEnrollmentError(error instanceof Error ? error.message : 'MFA enrollment could not start.');
+    }
+  };
+
+  const beginEmailMfaEnrollment = async () => {
+    try {
+      setMfaEnrollmentError('');
+      setMfaSetupChoice('email');
+      const enrollment = await authenticatedApiRequest('/api/auth/mfa/email-enroll/request', { method: 'POST', body: '{}' });
+      setEmailMfaEnrollment(enrollment);
+      setMfaEmailCode('');
+    } catch (error) {
+      setMfaSetupChoice(null);
+      setMfaEnrollmentError(error instanceof Error ? error.message : 'Email MFA enrollment could not start.');
+    }
+  };
+
+  const confirmMfaEnrollment = async () => {
+    if (!mfaEnrollment) return;
+    try {
+      setMfaEnrollmentError('');
+      await authenticatedApiRequest('/api/auth/mfa/confirm', {
+        method: 'POST',
+        body: JSON.stringify({ enrollmentId: mfaEnrollment.enrollmentId, code: mfaEnrollmentCode })
+      });
+      setMfaEnabledLocally(true);
+      setMfaEnrollment(null);
+      setMfaQrCode('');
+      setMfaEnrollmentCode('');
+      showToast('Authenticator MFA is enabled. Other sessions for this account were revoked.');
+    } catch (error) {
+      setMfaEnrollmentError(error instanceof Error ? error.message : 'Authenticator code could not be verified.');
+    }
+  };
+
+  const confirmEmailMfaEnrollment = async () => {
+    if (!emailMfaEnrollment) return;
+    try {
+      setMfaEnrollmentError('');
+      await authenticatedApiRequest('/api/auth/mfa/email-enroll/confirm', { method: 'POST', body: JSON.stringify({ enrollmentId: emailMfaEnrollment.enrollmentId, code: mfaEmailCode }) });
+      setMfaEnabledLocally(true); setEmailMfaEnrollment(null); setMfaSetupChoice(null); setMfaEmailCode('');
+      showToast('Email MFA is enabled. Other sessions for this account were revoked.');
+    } catch (error) { setMfaEnrollmentError(error instanceof Error ? error.message : 'Email code could not be verified.'); }
+  };
+
+  const reviewMfaRecoveryRequest = async (requestId: string, decision: 'Approved' | 'Rejected') => {
+    try {
+      setReviewingMfaRecoveryId(requestId);
+      await authenticatedApiRequest(`/api/auth/mfa/recovery-request/${encodeURIComponent(requestId)}/resolve`, {
+        method: 'POST',
+        body: JSON.stringify({ decision })
+      });
+      setMfaRecoveryRequests(current => current.filter(request => request.id !== requestId));
+      showToast(`MFA recovery request ${decision.toLowerCase()}.`);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'MFA recovery request could not be reviewed.');
+    } finally {
+      setReviewingMfaRecoveryId(null);
+    }
+  };
+
+  const submitMfaRecoveryRequest = async (userId?: string, requestedReason?: string) => {
+    const reason = (requestedReason ?? mfaRecoveryReason).trim();
+    if (reason.length < 10) {
+      setMfaRecoveryError('Please provide a short reason (at least 10 characters) so an administrator can verify your request.');
+      return;
+    }
+    try {
+      setMfaRecoveryError('');
+      setMfaRecoverySubmitting(true);
+      await authenticatedApiRequest('/api/auth/mfa/recovery-request', { method: 'POST', body: JSON.stringify({ reason, ...(userId ? { userId } : {}) }) });
+      setMfaRecoveryReason('');
+      setShowMfaRecoveryForm(false);
+      setAdminRecoveryReason('');
+      setAdminRecoveryTargetId('');
+      showToast('MFA recovery request sent for administrator review.');
+    } catch (error) {
+      setMfaRecoveryError(error instanceof Error ? error.message : 'MFA recovery request could not be sent.');
+    } finally {
+      setMfaRecoverySubmitting(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab !== 'access' || !canManageMfaRecovery) return;
+    let cancelled = false;
+    setMfaRecoveryRequestsLoading(true);
+    authenticatedApiRequest('/api/auth/mfa/recovery-requests')
+      .then((response: Array<Record<string, unknown>> | { requests?: Array<Record<string, unknown>> }) => {
+        const requests = Array.isArray(response) ? response : response.requests || [];
+        if (!cancelled) setMfaRecoveryRequests(requests.map(request => ({
+          id: String(request.id), userId: String(request.userId), requestedById: String(request.requestedById), username: String(request.userName || request.userId), email: request.email ? String(request.email) : undefined,
+          roleName: request.roleName ? String(request.roleName) : undefined, reason: String(request.reason), createdAt: String(request.requestedAt || ''),
+        })));
+      })
+      .catch(() => {
+        if (!cancelled) setMfaRecoveryRequests([]);
+      })
+      .finally(() => {
+        if (!cancelled) setMfaRecoveryRequestsLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [activeTab, canManageMfaRecovery]);
 
   // Local state copies of branches, departments, designations
   const [localBranches, setLocalBranches] = useState(branches);
@@ -1094,6 +1442,101 @@ export function WebPortal({
   
   const pendingLeavesCount = leaves.filter(l => l.status === 'Pending').length;
   const pendingRegularizationsCount = attendances.filter(a => a.regularizationRequested && !a.regularizationApproved).length;
+  const pendingPayrollAdjustmentsCount = payrollAdjustments.filter(item => item.status === 'Pending').length;
+  const approvalInbox = [
+    ...leaves.filter(item => item.status === 'Pending').map(item => ({
+      id: `leave-${item.id}`, tab: 'leave', type: 'Leave request', date: item.appliedOn || item.startDate,
+      employee: employees.find(employee => employee.id === item.employeeId)?.fullName || 'Employee',
+      detail: `${item.leaveType} · ${item.totalDays} day${item.totalDays === 1 ? '' : 's'}`,
+    })),
+    ...attendances.filter(item => item.regularizationRequested && item.regularizationApproved === undefined).map(item => ({
+      id: `attendance-${item.id}`, tab: 'attendance', type: 'Attendance correction', date: item.date,
+      employee: employees.find(employee => employee.id === item.employeeId)?.fullName || 'Employee',
+      detail: item.regularizationReason || 'Attendance regularization',
+    })),
+    ...payrollAdjustments.filter(item => item.status === 'Pending').map(item => ({
+      id: `payroll-${item.id}`, tab: 'payroll', type: 'Payroll adjustment', date: item.createdAt.slice(0, 10),
+      employee: employees.find(employee => employee.id === item.employeeId)?.fullName || 'Employee',
+      detail: `${item.type} · PKR ${item.amount.toLocaleString()}`,
+    })),
+  ].map(item => ({ ...item, ageDays: Math.max(0, Math.floor((Date.now() - new Date(`${item.date}T00:00:00`).getTime()) / 86_400_000)) }))
+    .sort((left, right) => right.ageDays - left.ageDays);
+  const overdueApprovalCount = approvalInbox.filter(item => item.ageDays >= 2).length;
+  const cnicCompliance = employees
+    .filter(employee => employee.status === 'Active')
+    .map(employee => {
+      const expiry = employee.cnicExpiryDate;
+      if (!expiry) return { employee, expiry, state: 'missing' as const, days: null };
+      const days = Math.ceil((new Date(`${expiry}T00:00:00`).getTime() - new Date(`${todayStr}T00:00:00`).getTime()) / 86_400_000);
+      return { employee, expiry, state: days < 0 ? 'expired' as const : days <= 90 ? 'due' as const : 'valid' as const, days };
+    });
+  const cnicActionItems = cnicCompliance.filter(item => item.state !== 'valid');
+  const lifecycleActionItems = employees.filter(employee => employee.status === 'Active').flatMap(employee => {
+    const actionItems: { employee: Employee; kind: 'Contract' | 'Probation'; due: string; days: number; overdue: boolean }[] = [];
+    for (const [kind, due] of [['Contract', employee.contractEndDate], ['Probation', employee.probationConfirmedAt ? undefined : employee.probationEndDate]] as const) {
+      if (!due) continue;
+      const days = Math.ceil((new Date(`${due}T00:00:00`).getTime() - new Date(`${todayStr}T00:00:00`).getTime()) / 86_400_000);
+      if (days <= 60) actionItems.push({ employee, kind, due, days, overdue: days < 0 });
+    }
+    return actionItems;
+  }).sort((left, right) => left.days - right.days);
+  const normalizeComplianceIdentity = (value?: string) => (value || '').replace(/[^a-z0-9]/gi, '').toUpperCase();
+  const activeEmployees = employees.filter(employee => employee.status !== 'Terminated');
+  const duplicateIdentityGroups = [
+    ...Array.from(activeEmployees.reduce((groups, employee) => {
+      const value = normalizeComplianceIdentity(employee.cnic);
+      if (value) groups.set(value, [...(groups.get(value) || []), employee]);
+      return groups;
+    }, new Map<string, Employee[]>()).values())
+      .filter(group => group.length > 1)
+      .map(group => ({ type: 'CNIC' as const, employees: group })),
+    ...Array.from(activeEmployees.reduce((groups, employee) => {
+      const value = normalizeComplianceIdentity(employee.iban) || `${normalizeComplianceIdentity(employee.bankName)}:${normalizeComplianceIdentity(employee.bankAccountNumber)}`;
+      if (value !== ':') groups.set(value, [...(groups.get(value) || []), employee]);
+      return groups;
+    }, new Map<string, Employee[]>()).values())
+      .filter(group => group.length > 1)
+      .map(group => ({ type: 'Bank account' as const, employees: group })),
+  ];
+  const payrollReleaseQueue = [...payrollRuns]
+    .sort((left, right) => (right.periodYear - left.periodYear) || (right.periodMonth - left.periodMonth) || right.createdAt.localeCompare(left.createdAt))
+    .slice(0, 6)
+    .map(run => {
+      if (run.status === 'Cancelled') return { run, label: 'Cancelled', detail: run.cancellationReason || 'Cancelled before payment.', tone: 'slate' as const };
+      if (run.status === 'Disbursed') return { run, label: 'Disbursed', detail: `Bank reference: ${run.disbursementReference || 'recorded'}`, tone: 'emerald' as const };
+      if (run.status === 'Approved' && run.bankAdviceChecksum) return { run, label: 'Ready to disburse', detail: 'Bank advice generated; enter bank reference after payment.', tone: 'blue' as const };
+      if (run.status === 'Approved') return { run, label: 'Bank advice required', detail: 'Generate and verify the bank advice before payment.', tone: 'amber' as const };
+      return { run, label: 'Awaiting approval', detail: run.preflightCriticalCount ? `${run.preflightCriticalCount} critical preflight issue(s)` : 'Independent payroll approval is required.', tone: run.preflightCriticalCount ? 'rose' as const : 'slate' as const };
+    });
+  const attendanceExceptionQueue = todayPunches
+    .filter(item => item.status === 'Late' || item.status === 'Half Day' || item.status === 'Absent' || Boolean(item.regularizationRequested && !item.regularizationApproved))
+    .map(item => {
+      const employee = employees.find(record => record.id === item.employeeId);
+      const needsReview = Boolean(item.regularizationRequested && !item.regularizationApproved);
+      const label = needsReview ? 'Correction requested' : item.status;
+      return { item, employee: employee?.fullName || 'Employee', label, needsReview };
+    });
+  const complianceAttendanceAlerts = [
+    ...attendances.filter(item => item.overtimeMinutes > 240).map(item => ({
+      id: `overtime-${item.id}`, type: 'Excess overtime', tone: 'amber' as const,
+      employee: employees.find(employee => employee.id === item.employeeId)?.fullName || 'Employee',
+      detail: `${Math.round(item.overtimeMinutes / 60 * 10) / 10} overtime hour(s) on ${item.date}; operational review threshold is 4 hours/day.`,
+    })),
+    ...attendances.filter(item => item.method === 'Manual' && item.regularizationApproved !== true).map(item => ({
+      id: `manual-${item.id}`, type: 'Manual attendance', tone: 'rose' as const,
+      employee: employees.find(employee => employee.id === item.employeeId)?.fullName || 'Employee',
+      detail: `Manual record on ${item.date} is awaiting independent approval.`,
+    })),
+    ...employees.filter(employee => employee.status === 'Active').flatMap(employee => {
+      const activeDays = new Set(attendances.filter(item => item.employeeId === employee.id && ['Present', 'Late', 'Half Day'].includes(item.status)).map(item => item.date));
+      for (let offset = 0; offset <= 24; offset += 1) {
+        const end = new Date(`${todayStr}T00:00:00`); end.setDate(end.getDate() - offset);
+        const range = Array.from({ length: 7 }, (_, index) => { const day = new Date(end); day.setDate(day.getDate() - index); return day.toISOString().slice(0, 10); });
+        if (range.every(date => activeDays.has(date))) return [{ id: `rest-${employee.id}-${range[0]}`, type: 'Weekly rest', tone: 'rose' as const, employee: employee.fullName, detail: `Seven consecutive attendance days ending ${range[0]}; verify statutory rest-day entitlement.` }];
+      }
+      return [];
+    }),
+  ].sort((left, right) => left.type.localeCompare(right.type));
 
   // Compute live payroll estimation
   const totalSalaries = employees.reduce((sum, emp) => {
@@ -1141,6 +1584,17 @@ export function WebPortal({
       email: newEmpForm.email,
       contactNumber: newEmpForm.contactNumber,
       cnic: newEmpForm.cnic,
+      cnicExpiryDate: newEmpForm.cnicExpiryDate || undefined,
+      drivingLicenceExpiryDate: newEmpForm.drivingLicenceExpiryDate || undefined,
+      professionalCertificationExpiryDate: newEmpForm.professionalCertificationExpiryDate || undefined,
+      workPermitExpiryDate: newEmpForm.workPermitExpiryDate || undefined,
+      workerCategory: (newEmpForm.workerCategory || 'Worker') as Employee['workerCategory'],
+      perquisiteVehicleMonthly: Number(newEmpForm.perquisiteVehicleMonthly) || undefined,
+      perquisiteAccommodationMonthly: Number(newEmpForm.perquisiteAccommodationMonthly) || undefined,
+      perquisiteOtherMonthly: Number(newEmpForm.perquisiteOtherMonthly) || undefined,
+      contractEndDate: newEmpForm.contractEndDate || undefined,
+      probationEndDate: newEmpForm.probationEndDate || undefined,
+      probationConfirmedAt: newEmpForm.probationConfirmed ? new Date().toISOString() : undefined,
       gender: newEmpForm.gender,
       dateOfBirth: newEmpForm.dateOfBirth,
       dateOfJoining: todayStr,
@@ -1148,7 +1602,7 @@ export function WebPortal({
       wageTypeId: selectedWageType?.id,
       wageType: selectedWageType?.name ?? newEmpForm.wageType,
       basicSalary: Number(newEmpForm.basicSalary),
-      shift: { id: 'employee-shift', name: 'Employee Shift', startTime: newEmpForm.shiftStartTime, endTime: newEmpForm.shiftEndTime, graceMinutes: Number(newEmpForm.shiftGraceMinutes), halfDayMinutes: Number(newEmpForm.shiftHalfDayMinutes), overtimeMultiplier: statConfig.overtimeMultiplier || 2, breakMinutes: Number(newEmpForm.shiftBreakMinutes), workingDays: [1, 2, 3, 4, 5, 6] },
+      shift: { id: 'employee-shift', name: 'Employee Shift', startTime: newEmpForm.shiftStartTime, endTime: newEmpForm.shiftEndTime, graceMinutes: Number(newEmpForm.shiftGraceMinutes), halfDayMinutes: Number(newEmpForm.shiftHalfDayMinutes), overtimeMultiplier: statConfig.overtimeMultiplier || 2, breakMinutes: Number(newEmpForm.shiftBreakMinutes), workingDays: [1, 2, 3, 4, 5, 6], ramadanStartDate: newEmpForm.ramadanStartDate || undefined, ramadanEndDate: newEmpForm.ramadanEndDate || undefined, ramadanStartTime: newEmpForm.ramadanStartTime || undefined, ramadanEndTime: newEmpForm.ramadanEndTime || undefined, fridayStartTime: newEmpForm.fridayStartTime || undefined, fridayEndTime: newEmpForm.fridayEndTime || undefined },
       providentFundOptIn: newEmpForm.providentFundOptIn,
       providentFundRate: Number(newEmpForm.providentFundRate),
       gratuityOptIn: newEmpForm.gratuityOptIn,
@@ -1158,6 +1612,9 @@ export function WebPortal({
       iban: newEmpForm.iban,
       eobiNumber: newEmpForm.eobiNumber,
       socialSecurityNumber: newEmpForm.socialSecurityNumber,
+      eobiExemptionReason: newEmpForm.eobiExemptionReason || undefined,
+      socialSecurityExemptionReason: newEmpForm.socialSecurityExemptionReason || undefined,
+      ntn: newEmpForm.ntn || undefined,
       // Custom onboarding properties
       pictureUrl: newEmpForm.pictureUrl,
       isZoneInCharge: newEmpForm.isZoneInCharge,
@@ -1186,6 +1643,17 @@ export function WebPortal({
       email: '',
       contactNumber: '+923001234567',
       cnic: '42101-1234567-3',
+      cnicExpiryDate: '',
+      drivingLicenceExpiryDate: '',
+      professionalCertificationExpiryDate: '',
+      workPermitExpiryDate: '',
+      workerCategory: 'Worker',
+      perquisiteVehicleMonthly: '',
+      perquisiteAccommodationMonthly: '',
+      perquisiteOtherMonthly: '',
+      contractEndDate: '',
+      probationEndDate: '',
+      probationConfirmed: false,
       gender: 'Male',
       dateOfBirth: '1995-01-01',
       branchId: 'b1',
@@ -1197,6 +1665,7 @@ export function WebPortal({
       wageType: 'Salaried',
       basicSalary: 85000,
       shiftStartTime: '09:00', shiftEndTime: '17:00', shiftGraceMinutes: 15, shiftHalfDayMinutes: 120, shiftBreakMinutes: 0,
+      ramadanStartDate: '', ramadanEndDate: '', ramadanStartTime: '09:00', ramadanEndTime: '15:00', fridayStartTime: '', fridayEndTime: '',
       providentFundOptIn: true,
       providentFundRate: 5.0,
       gratuityOptIn: true,
@@ -1205,6 +1674,8 @@ export function WebPortal({
       iban: 'PK42HABB0012345678901234',
       eobiNumber: '1090123000',
       socialSecurityNumber: 'SS-42-000111',
+      eobiExemptionReason: '', socialSecurityExemptionReason: '',
+      ntn: '',
       pictureUrl: '',
       isZoneInCharge: false,
       zoneInChargeName: '',
@@ -1269,12 +1740,23 @@ export function WebPortal({
       email: editEmpForm.email,
       contactNumber: editEmpForm.contactNumber,
       cnic: editEmpForm.cnic,
+      cnicExpiryDate: editEmpForm.cnicExpiryDate || undefined,
+      drivingLicenceExpiryDate: editEmpForm.drivingLicenceExpiryDate || undefined,
+      professionalCertificationExpiryDate: editEmpForm.professionalCertificationExpiryDate || undefined,
+      workPermitExpiryDate: editEmpForm.workPermitExpiryDate || undefined,
+      workerCategory: (editEmpForm.workerCategory || 'Worker') as Employee['workerCategory'],
+      perquisiteVehicleMonthly: Number(editEmpForm.perquisiteVehicleMonthly) || undefined,
+      perquisiteAccommodationMonthly: Number(editEmpForm.perquisiteAccommodationMonthly) || undefined,
+      perquisiteOtherMonthly: Number(editEmpForm.perquisiteOtherMonthly) || undefined,
+      contractEndDate: editEmpForm.contractEndDate || undefined,
+      probationEndDate: editEmpForm.probationEndDate || undefined,
+      probationConfirmedAt: editEmpForm.probationConfirmed ? (editingEmployee.probationConfirmedAt || new Date().toISOString()) : undefined,
       gender: editEmpForm.gender,
       dateOfBirth: editEmpForm.dateOfBirth,
       wageTypeId: selectedWageType?.id,
       wageType: selectedWageType?.name ?? editEmpForm.wageType,
       basicSalary: Number(editEmpForm.basicSalary),
-      shift: { id: editingEmployee.shift?.id || 'employee-shift', name: editingEmployee.shift?.name || 'Employee Shift', startTime: editEmpForm.shiftStartTime, endTime: editEmpForm.shiftEndTime, graceMinutes: Number(editEmpForm.shiftGraceMinutes), halfDayMinutes: Number(editEmpForm.shiftHalfDayMinutes), overtimeMultiplier: editingEmployee.shift?.overtimeMultiplier || statConfig.overtimeMultiplier || 2, breakMinutes: Number(editEmpForm.shiftBreakMinutes), workingDays: editingEmployee.shift?.workingDays || [1, 2, 3, 4, 5, 6] },
+      shift: { id: editingEmployee.shift?.id || 'employee-shift', name: editingEmployee.shift?.name || 'Employee Shift', startTime: editEmpForm.shiftStartTime, endTime: editEmpForm.shiftEndTime, graceMinutes: Number(editEmpForm.shiftGraceMinutes), halfDayMinutes: Number(editEmpForm.shiftHalfDayMinutes), overtimeMultiplier: editingEmployee.shift?.overtimeMultiplier || statConfig.overtimeMultiplier || 2, breakMinutes: Number(editEmpForm.shiftBreakMinutes), workingDays: editingEmployee.shift?.workingDays || [1, 2, 3, 4, 5, 6], ramadanStartDate: editEmpForm.ramadanStartDate || undefined, ramadanEndDate: editEmpForm.ramadanEndDate || undefined, ramadanStartTime: editEmpForm.ramadanStartTime || undefined, ramadanEndTime: editEmpForm.ramadanEndTime || undefined, fridayStartTime: editEmpForm.fridayStartTime || undefined, fridayEndTime: editEmpForm.fridayEndTime || undefined },
       providentFundOptIn: editEmpForm.providentFundOptIn,
       providentFundRate: Number(editEmpForm.providentFundRate),
       gratuityOptIn: editEmpForm.gratuityOptIn,
@@ -1283,6 +1765,9 @@ export function WebPortal({
       iban: editEmpForm.iban,
       eobiNumber: editEmpForm.eobiNumber,
       socialSecurityNumber: editEmpForm.socialSecurityNumber,
+      eobiExemptionReason: editEmpForm.eobiExemptionReason || undefined,
+      socialSecurityExemptionReason: editEmpForm.socialSecurityExemptionReason || undefined,
+      ntn: editEmpForm.ntn || undefined,
       // Custom onboarding properties
       pictureUrl: editEmpForm.pictureUrl,
       isZoneInCharge: editEmpForm.isZoneInCharge,
@@ -1340,6 +1825,17 @@ export function WebPortal({
       email: emp.email,
       contactNumber: formatPakMobileNumber(emp.contactNumber || ''),
       cnic: emp.cnic,
+      cnicExpiryDate: emp.cnicExpiryDate || '',
+      drivingLicenceExpiryDate: emp.drivingLicenceExpiryDate || '',
+      professionalCertificationExpiryDate: emp.professionalCertificationExpiryDate || '',
+      workPermitExpiryDate: emp.workPermitExpiryDate || '',
+      workerCategory: emp.workerCategory || 'Worker',
+      perquisiteVehicleMonthly: emp.perquisiteVehicleMonthly ? String(emp.perquisiteVehicleMonthly) : '',
+      perquisiteAccommodationMonthly: emp.perquisiteAccommodationMonthly ? String(emp.perquisiteAccommodationMonthly) : '',
+      perquisiteOtherMonthly: emp.perquisiteOtherMonthly ? String(emp.perquisiteOtherMonthly) : '',
+      contractEndDate: emp.contractEndDate || '',
+      probationEndDate: emp.probationEndDate || '',
+      probationConfirmed: Boolean(emp.probationConfirmedAt),
       gender: emp.gender,
       dateOfBirth: emp.dateOfBirth,
       branchId: resolvedBranchId,
@@ -1355,6 +1851,12 @@ export function WebPortal({
       shiftGraceMinutes: emp.shift?.graceMinutes ?? 15,
       shiftHalfDayMinutes: emp.shift?.halfDayMinutes ?? 120,
       shiftBreakMinutes: emp.shift?.breakMinutes ?? 0,
+      ramadanStartDate: emp.shift?.ramadanStartDate || '',
+      ramadanEndDate: emp.shift?.ramadanEndDate || '',
+      ramadanStartTime: emp.shift?.ramadanStartTime || '09:00',
+      ramadanEndTime: emp.shift?.ramadanEndTime || '15:00',
+      fridayStartTime: emp.shift?.fridayStartTime || '',
+      fridayEndTime: emp.shift?.fridayEndTime || '',
       providentFundOptIn: emp.providentFundOptIn,
       providentFundRate: emp.providentFundRate,
       gratuityOptIn: emp.gratuityOptIn,
@@ -1363,6 +1865,9 @@ export function WebPortal({
       iban: emp.iban,
       eobiNumber: emp.eobiNumber || '',
       socialSecurityNumber: emp.socialSecurityNumber || '',
+      eobiExemptionReason: emp.eobiExemptionReason || '',
+      socialSecurityExemptionReason: emp.socialSecurityExemptionReason || '',
+      ntn: emp.ntn || '',
       pictureUrl: emp.pictureUrl || '',
       isZoneInCharge: emp.isZoneInCharge || false,
       zoneInChargeName: emp.zoneInChargeName || '',
@@ -1482,29 +1987,24 @@ export function WebPortal({
     setEditEmpForm(previous => ({ ...previous, branchId: update.branchId, departmentId: update.departmentId, designationId: update.designationId }));
   };
 
-  const executeOffboarding = () => {
+  const executeOffboarding = async () => {
     if (!showOffboardModal) return;
-    const updated = {
-      ...showOffboardModal,
-      status: 'Terminated' as const
-    };
-    onUpdateEmployee(updated);
-    
-    // Calculate final settlement amount
-    const completedYears = 3; // mock completed scale
-    const baseBasic = resolveWageBasis(showOffboardModal, wageTypes) === 'Daily' ? showOffboardModal.basicSalary * 26 : showOffboardModal.basicSalary;
-    const gratuityCalculated = showOffboardModal.gratuityOptIn 
-      ? Math.round((baseBasic / 30) * statConfig.gratuityRateDaysPerYear * completedYears)
-      : 0;
-    const leaveEncashAmount = Math.round((baseBasic / 30) * settlementLeavesEncash);
-    const finalSettlementAmount = gratuityCalculated + leaveEncashAmount;
-
-    alert(`Offboarding complete for ${showOffboardModal.fullName}!\n` + 
-          `- status updated to Exited\n` +
-          `- Gratuity entitlement calculated (${completedYears} years service): PKR ${gratuityCalculated.toLocaleString()}\n` +
-          `- Leave Encashment calculated (${settlementLeavesEncash} days): PKR ${leaveEncashAmount.toLocaleString()}\n` +
-          `- Total Final Net Settlement to disburse: PKR ${finalSettlementAmount.toLocaleString()}`);
-
+    if (!settlementDate || !settlementReason.trim()) { alert('Enter the effective separation date and reason before finalizing the exit.'); return; }
+    // Separation is maker-checker controlled: this raises a request; a second user approves it in Employee Lifecycle,
+    // which then terminates the record and creates the settlement.
+    const preview = calculateFinalSettlement(showOffboardModal, settlementType, settlementDate, settlementLeavesEncash, settlementNoticeDays, statConfig, wageTypes);
+    const created = await onCreateLifecycleRequest({
+      employeeId: showOffboardModal.id, type: settlementType === 'Termination' ? 'Termination' : 'Resignation', effectiveDate: settlementDate,
+      reason: settlementType === 'Termination' || settlementType === 'Resignation' ? settlementReason.trim() : `${settlementType}: ${settlementReason.trim()}`,
+      noticeDays: settlementNoticeDays, leaveEncashDays: settlementLeavesEncash,
+    });
+    if (!created) return;
+    alert(`Separation request for ${showOffboardModal.fullName} submitted for approval.\n`
+      + `- Gratuity (${preview.yearsOfService} completed years): PKR ${preview.gratuityAmount.toLocaleString()}\n`
+      + `- Leave encashment (${preview.encashableLeaveDays} days): PKR ${preview.leaveEncashmentAmount.toLocaleString()}\n`
+      + `- Notice pay: PKR ${preview.noticePayAmount.toLocaleString()}\n`
+      + `- Estimated settlement: PKR ${preview.totalSettlementAmount.toLocaleString()}\n`
+      + 'The employee stays active until another authorized user approves the request in Employee Lifecycle.');
     setShowOffboardModal(null);
   };
 
@@ -1697,7 +2197,8 @@ export function WebPortal({
             </button>
           </div>
 
-          <div className="flex-1 overflow-y-auto px-1 pb-4 space-y-1" aria-label="HR portal navigation">
+          <div className="flex-1 overflow-y-auto px-1 pb-4 space-y-1" aria-label="HR portal navigation" dir={portalLanguage === 'ur' ? 'rtl' : undefined}>
+            <button type="button" onClick={togglePortalLanguage} className="mx-2 mb-2 w-[calc(100%-1rem)] rounded-lg border border-slate-700 py-1.5 text-[11px] font-bold text-emerald-300 hover:bg-slate-800">{portalLanguage === 'ur' ? 'English' : 'اردو'}</button>
             {/* Dashboard */}
             {hasPermission('dashboard') && (
               <button
@@ -1705,19 +2206,19 @@ export function WebPortal({
                 onClick={() => navigateFromSidebar('dashboard')}
                 className={`side-item ${activeTab === 'dashboard' ? 'on' : ''}`}
               >
-                <span>Operations Dashboard</span>
+                <span>{navLabel('Operations Dashboard', 'آپریشنز ڈیش بورڈ')}</span>
               </button>
             )}
 
             {/* Section: SET UP (DO ONCE) */}
-            <div className="sec"><span>SET UP (DO ONCE)</span></div>
+            <div className="sec"><span>{navLabel('SET UP (DO ONCE)', 'ابتدائی ترتیب')}</span></div>
             {hasPermission('settings') && (
               <button
                 type="button"
                 onClick={() => navigateFromSidebar('settings')}
                 className={`side-item ${activeTab === 'settings' ? 'on' : ''}`}
               >
-                <span>1. Statutory Config</span>
+                <span>{navLabel('1. Statutory Config', '1. قانونی ترتیبات')}</span>
                 {(!statConfig?.minimumWage || !statConfig?.taxYear || !taxSlabs || taxSlabs.length === 0) && (
                   <span className="n" style={{ background: '#B91C1C', color: '#fff' }}>fix</span>
                 )}
@@ -1729,7 +2230,7 @@ export function WebPortal({
                 onClick={() => navigateFromSidebar('company-setup')}
                 className={`side-item ${activeTab === 'company-setup' ? 'on' : ''}`}
               >
-                <span>2. Company &amp; Master Data</span>
+                <span>{navLabel('2. Company & Master Data', '2. کمپنی اور ماسٹر ڈیٹا')}</span>
                 {(!primaryCompany?.ntn && !primaryCompany?.taxRegistrationNumber) && (
                   <span className="n" style={{ background: '#B91C1C', color: '#fff' }}>fix</span>
                 )}
@@ -1737,14 +2238,14 @@ export function WebPortal({
             )}
 
             {/* Section: PEOPLE */}
-            <div className="sec"><span>PEOPLE</span></div>
+            <div className="sec"><span>{navLabel('PEOPLE', 'افراد')}</span></div>
             {hasPermission('employees') && (
               <button
                 type="button"
                 onClick={() => navigateFromSidebar('employees')}
                 className={`side-item ${activeTab === 'employees' ? 'on' : ''}`}
               >
-                <span>3. Employee Directory</span>
+                <span>{navLabel('3. Employee Directory', '3. ملازمین کی فہرست')}</span>
               </button>
             )}
             {hasPermission('recruitment') && (
@@ -1753,7 +2254,7 @@ export function WebPortal({
                 onClick={() => navigateFromSidebar('recruitment')}
                 className={`side-item ${activeTab === 'recruitment' ? 'on' : ''}`}
               >
-                <span>Recruitment</span>
+                <span>{navLabel('Recruitment', 'بھرتی')}</span>
                 {jobPostings.filter(j => j.status === 'Open').length > 0 && (
                   <span className="tag">{jobPostings.filter(j => j.status === 'Open').length}</span>
                 )}
@@ -1765,7 +2266,7 @@ export function WebPortal({
                 onClick={() => navigateFromSidebar('performance')}
                 className={`side-item ${activeTab === 'performance' ? 'on' : ''}`}
               >
-                <span>Performance</span>
+                <span>{navLabel('Performance', 'کارکردگی')}</span>
               </button>
             )}
             {hasPermission('assets') && (
@@ -1774,7 +2275,7 @@ export function WebPortal({
                 onClick={() => navigateFromSidebar('assets')}
                 className={`side-item ${activeTab === 'assets' ? 'on' : ''}`}
               >
-                <span>Asset Management</span>
+                <span>{navLabel('Asset Management', 'اثاثہ جات')}</span>
                 {companyAssets.length > 0 && (
                   <span className="n">{companyAssets.length}</span>
                 )}
@@ -1782,14 +2283,14 @@ export function WebPortal({
             )}
 
             {/* Section: TIME */}
-            <div className="sec"><span>TIME</span></div>
+            <div className="sec"><span>{navLabel('TIME', 'وقت')}</span></div>
             {hasPermission('holidays') && (
               <button
                 type="button"
                 onClick={() => navigateFromSidebar('holidays')}
                 className={`side-item ${activeTab === 'holidays' ? 'on' : ''}`}
               >
-                <span>4. Holiday Calendar</span>
+                <span>{navLabel('4. Holiday Calendar', '4. تعطیلات کا کیلنڈر')}</span>
               </button>
             )}
             {hasPermission('leaves') && (
@@ -1798,7 +2299,7 @@ export function WebPortal({
                 onClick={() => navigateFromSidebar('leaves')}
                 className={`side-item ${activeTab === 'leaves' ? 'on' : ''}`}
               >
-                <span>5. Leave Management</span>
+                <span>{navLabel('5. Leave Management', '5. چھٹیوں کا انتظام')}</span>
                 {pendingLeavesCount > 0 && (
                   <span className="n">{pendingLeavesCount}</span>
                 )}
@@ -1810,7 +2311,7 @@ export function WebPortal({
                 onClick={() => navigateFromSidebar('biometric')}
                 className={`side-item ${activeTab === 'biometric' ? 'on' : ''}`}
               >
-                <span>6. Biometric Devices</span>
+                <span>{navLabel('6. Biometric Devices', '6. بایومیٹرک آلات')}</span>
               </button>
             )}
             {hasPermission('attendance') && (
@@ -1819,7 +2320,7 @@ export function WebPortal({
                 onClick={() => navigateFromSidebar('attendance')}
                 className={`side-item ${activeTab === 'attendance' ? 'on' : ''}`}
               >
-                <span>7. Attendance</span>
+                <span>{navLabel('7. Attendance', '7. حاضری')}</span>
                 {pendingRegularizationsCount > 0 && (
                   <span className="n">{pendingRegularizationsCount}</span>
                 )}
@@ -1827,14 +2328,14 @@ export function WebPortal({
             )}
 
             {/* Section: PAYROLL */}
-            <div className="sec"><span>PAYROLL</span></div>
+            <div className="sec"><span>{navLabel('PAYROLL', 'پے رول')}</span></div>
             {hasPermission('loans') && (
               <button
                 type="button"
                 onClick={() => navigateFromSidebar('loans')}
                 className={`side-item ${activeTab === 'loans' ? 'on' : ''}`}
               >
-                <span>8. Loans &amp; Advances</span>
+                <span>{navLabel('8. Loans & Advances', '8. قرضے اور ایڈوانس')}</span>
                 {loanAdvances.filter(l => l.status === 'Pending').length > 0 && (
                   <span className="n">{loanAdvances.filter(l => l.status === 'Pending').length}</span>
                 )}
@@ -1846,7 +2347,7 @@ export function WebPortal({
                 onClick={() => navigateFromSidebar('revisions')}
                 className={`side-item ${activeTab === 'revisions' ? 'on' : ''}`}
               >
-                <span>9. Salary Revisions</span>
+                <span>{navLabel('9. Salary Revisions', '9. تنخواہ میں ترمیم')}</span>
               </button>
             )}
             {hasPermission('payroll') && (
@@ -1855,7 +2356,7 @@ export function WebPortal({
                 onClick={() => navigateFromSidebar('payroll')}
                 className={`side-item ${activeTab === 'payroll' ? 'on' : ''}`}
               >
-                <span>10. Payroll Processing</span>
+                <span>{navLabel('10. Payroll Processing', '10. پے رول')}</span>
               </button>
             )}
             {hasPermission('gratuity') && (
@@ -1864,19 +2365,29 @@ export function WebPortal({
                 onClick={() => navigateFromSidebar('gratuity')}
                 className={`side-item ${activeTab === 'gratuity' ? 'on' : ''}`}
               >
-                <span>11. Gratuity &amp; Settlement</span>
+                <span>{navLabel('11. Gratuity & Settlement', '11. گریجویٹی اور تصفیہ')}</span>
+              </button>
+            )}
+
+            {hasPermission('lifecycle') && (
+              <button
+                type="button"
+                onClick={() => navigateFromSidebar('lifecycle')}
+                className={`side-item ${activeTab === 'lifecycle' ? 'on' : ''}`}
+              >
+                <span>{navLabel('12. Employee Lifecycle', '12. ملازمت کا دورانیہ')}{lifecycleRequests.some(item => item.status === 'Pending') ? ` (${lifecycleRequests.filter(item => item.status === 'Pending').length})` : ''}</span>
               </button>
             )}
 
             {/* Section: SYSTEM */}
-            <div className="sec"><span>SYSTEM</span></div>
+            <div className="sec"><span>{navLabel('SYSTEM', 'سسٹم')}</span></div>
             {hasPermission('maintenance') && (
               <button
                 type="button"
                 onClick={() => navigateFromSidebar('maintenance')}
                 className={`side-item ${activeTab === 'maintenance' ? 'on' : ''}`}
               >
-                <span>Data Backup</span>
+                <span>{navLabel('Data Backup', 'ڈیٹا بیک اپ')}</span>
               </button>
             )}
             {hasPermission('access') && (
@@ -1885,7 +2396,7 @@ export function WebPortal({
                 onClick={() => navigateFromSidebar('access')}
                 className={`side-item ${activeTab === 'access' ? 'on' : ''}`}
               >
-                <span>User Management</span>
+                <span>{navLabel('User Management', 'صارفین کا انتظام')}</span>
               </button>
             )}
             {hasPermission('master-data') && (
@@ -1894,18 +2405,18 @@ export function WebPortal({
                 onClick={() => navigateFromSidebar('master-data')}
                 className={`side-item ${activeTab === 'master-data' ? 'on' : ''}`}
               >
-                <span>Master Data</span>
+                <span>{navLabel('Master Data', 'ماسٹر ڈیٹا')}</span>
               </button>
             )}
 
             {/* Section: HELP */}
-            <div className="sec"><span>HELP</span></div>
+            <div className="sec"><span>{navLabel('HELP', 'مدد')}</span></div>
             <button
               type="button"
               onClick={() => setShowGuideModal(true)}
               className="side-item"
             >
-              <span>❓ Guide for this page</span>
+              <span>{navLabel('❓ Guide for this page', '❓ اس صفحے کی رہنمائی')}</span>
             </button>
           </div>
         </nav>
@@ -1960,13 +2471,70 @@ export function WebPortal({
                 })}
               </div>
 
+              <section aria-labelledby="my-security-title" className={`mb-4 overflow-hidden rounded-xl border shadow-sm ${mfaEnabled ? 'border-emerald-200 bg-emerald-50/70' : 'border-amber-200 bg-amber-50/70'}`}>
+                <div className="flex flex-col gap-4 p-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="flex min-w-0 items-start gap-3">
+                    <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border ${mfaEnabled ? 'border-emerald-200 bg-emerald-100 text-emerald-700' : 'border-amber-200 bg-amber-100 text-amber-700'}`}>
+                      <ShieldCheck className="h-5 w-5" aria-hidden="true" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h2 id="my-security-title" className="text-sm font-bold text-slate-900">My Security</h2>
+                        <span className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${mfaEnabled ? 'bg-emerald-700 text-white' : 'bg-amber-200 text-amber-950'}`}>
+                          {mfaEnabled ? 'Protected' : 'Action needed'}
+                        </span>
+                        <span className="rounded border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-600">{currentUserRole?.name || 'User'}</span>
+                        {!mfaEnabled && <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${mfaRequiredForRole ? 'bg-rose-100 text-rose-800' : 'bg-slate-200 text-slate-700'}`}>{mfaRequiredForRole ? 'Required for this role' : 'Recommended'}</span>}
+                      </div>
+                      <p className={`mt-1 text-xs ${mfaEnabled ? 'text-emerald-900' : 'text-amber-950'}`}>
+                        {mfaEnabled
+                          ? 'MFA protection is active for this account.'
+                          : mfaRequiredForRole
+                            ? 'This account can access sensitive people, payroll, or system data. Set up MFA now.'
+                            : 'Set up MFA to protect your account if your password is ever exposed.'}
+                      </p>
+                      <p className="mt-1 text-[11px] text-slate-600">Session policy: signed out after 30 minutes of inactivity, or 12 hours maximum.</p>
+                    </div>
+                  </div>
+                  {!mfaEnabled && !mfaSetupChoice && <button type="button" onClick={() => setMfaSetupChoice('choose')} className="shrink-0 rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2">Set up MFA</button>}
+                </div>
+                {!mfaEnabled && mfaSetupChoice === 'choose' && <div className="border-t border-amber-200 bg-white/85 p-4"><h3 className="text-sm font-bold text-slate-900">Choose your MFA method</h3><p className="mt-1 text-xs text-slate-600">Select one method. Only the selected method will be required when you sign in.</p><div className="mt-3 grid gap-3 sm:grid-cols-2"><button type="button" onClick={beginMfaEnrollment} className="rounded-xl border border-slate-300 bg-white p-4 text-left hover:border-emerald-500"><b className="text-sm text-slate-900">Authenticator app</b><span className="mt-1 block text-xs text-slate-600">Use a QR code with Google or Microsoft Authenticator, Authy, or another compatible app.</span></button><button type="button" onClick={beginEmailMfaEnrollment} className="rounded-xl border border-slate-300 bg-white p-4 text-left hover:border-emerald-500"><b className="text-sm text-slate-900">Email verification</b><span className="mt-1 block text-xs text-slate-600">Receive a one-time code at your registered email address for each sign-in.</span></button></div><button type="button" onClick={() => setMfaSetupChoice(null)} className="mt-3 text-xs font-semibold text-slate-600 underline">Cancel</button></div>}
+                {mfaEnrollment && <div className="border-t border-amber-200 bg-white/85 p-4">
+                  <div className="grid gap-4 lg:grid-cols-[auto_minmax(0,1fr)_auto] lg:items-end">
+                    {mfaQrCode && <div className="rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
+                      <img src={mfaQrCode} width={224} height={224} alt="Scan this QR code with your authenticator app to add your HR Payroll account" className="h-40 w-40" />
+                      <p className="mt-1 max-w-40 text-center text-[10px] font-medium text-slate-500">Scan with your authenticator app</p>
+                    </div>}
+                    <div>
+                      <h3 className="text-xs font-bold text-slate-900">Connect your authenticator app</h3>
+                      <p className="mt-1 text-xs text-slate-600">Scan the QR code in Google Authenticator, Microsoft Authenticator, Authy, or a compatible app. Use the manual secret only if scanning is unavailable. <strong className="text-rose-700">Never share codes or this secret.</strong></p>
+                      <output aria-label="Authenticator setup secret" className="mt-3 block break-all rounded-lg bg-slate-950 p-3 font-mono text-[11px] leading-relaxed text-emerald-300">
+                        Issuer: {mfaEnrollment.issuer}<br />Account: {mfaEnrollment.account}<br />Secret: {mfaEnrollment.secret}
+                      </output>
+                    </div>
+                    <div className="flex flex-col gap-2 sm:flex-row lg:flex-col">
+                      <label className="sr-only" htmlFor="my-security-mfa-code">Six-digit authenticator code</label>
+                      <input id="my-security-mfa-code" aria-describedby="mfa-code-help" value={mfaEnrollmentCode} onChange={event => setMfaEnrollmentCode(event.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" autoComplete="one-time-code" maxLength={6} placeholder="Authenticator code" className="w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm tracking-[0.2em] outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 lg:w-40" />
+                      <span id="mfa-code-help" className="sr-only">Enter the current six-digit code shown by your authenticator app.</span>
+                      <button type="button" disabled={mfaEnrollmentCode.length !== 6} onClick={confirmMfaEnrollment} className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-bold text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50">Confirm MFA</button>
+                      <button type="button" onClick={() => { setMfaEnrollment(null); setMfaQrCode(''); setMfaEnrollmentCode(''); setMfaSetupChoice(null); setMfaEnrollmentError(''); }} className="rounded-lg px-3 py-2 text-xs font-semibold text-slate-600 underline hover:text-slate-900">Cancel</button>
+                    </div>
+                  </div>
+                  {mfaEnrollmentError && <p role="alert" className="mt-3 text-xs font-medium text-rose-700">{mfaEnrollmentError}</p>}
+                </div>}
+                {emailMfaEnrollment && <div className="border-t border-amber-200 bg-white/85 p-4"><div className="max-w-xl space-y-3"><h3 className="text-sm font-bold text-slate-900">Confirm email MFA</h3><p className="text-xs text-slate-600">A six-digit setup code was sent to <strong>{emailMfaEnrollment.email}</strong>. Enter it to enable email verification as your MFA method.</p><input value={mfaEmailCode} onChange={event => setMfaEmailCode(event.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" autoComplete="one-time-code" maxLength={6} placeholder="Email verification code" className="w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm tracking-[0.2em]" /><div className="flex gap-2"><button type="button" disabled={mfaEmailCode.length !== 6} onClick={confirmEmailMfaEnrollment} className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-bold text-white disabled:opacity-50">Confirm email MFA</button><button type="button" onClick={() => { setEmailMfaEnrollment(null); setMfaEmailCode(''); setMfaSetupChoice(null); setMfaEnrollmentError(''); }} className="px-2 text-xs font-semibold text-slate-600 underline">Cancel</button></div></div>{mfaEnrollmentError && <p role="alert" className="mt-3 text-xs font-medium text-rose-700">{mfaEnrollmentError}</p>}</div>}
+                {mfaEnabled && <div className="border-t border-emerald-200 bg-white/70 p-4">
+                  {!showMfaRecoveryForm ? <button type="button" onClick={() => setShowMfaRecoveryForm(true)} className="text-xs font-semibold text-slate-700 underline hover:text-rose-700">Lost or replacing your authenticator device? Request a controlled MFA reset.</button> : <div className="max-w-xl space-y-2"><label className="block text-xs font-bold text-slate-800">MFA recovery reason</label><textarea value={mfaRecoveryReason} onChange={event => setMfaRecoveryReason(event.target.value)} maxLength={500} rows={2} placeholder="Describe how your identity can be independently verified." className="w-full rounded-lg border border-slate-300 p-2 text-xs" /><div className="flex gap-2"><button type="button" disabled={mfaRecoverySubmitting} onClick={() => submitMfaRecoveryRequest()} className="rounded-lg bg-rose-700 px-3 py-2 text-xs font-bold text-white disabled:opacity-50">Submit recovery request</button><button type="button" onClick={() => { setShowMfaRecoveryForm(false); setMfaRecoveryError(''); }} className="px-2 text-xs font-semibold text-slate-600 underline">Cancel</button></div>{mfaRecoveryError && <p role="alert" className="text-xs font-medium text-rose-700">{mfaRecoveryError}</p>}</div>}
+                </div>}
+              </section>
+
               {/* Contextual Help Banner for Current View */}
               {TAB_WORKFLOW_META[activeTab] && (
                 <div className="help-banner">
                   <div className="ic">💡</div>
                   <div>
-                    <b>{TAB_WORKFLOW_META[activeTab].heading}</b>
-                    <span>{TAB_WORKFLOW_META[activeTab].help}</span>
+                    <b dir={portalLanguage === 'ur' ? 'rtl' : undefined}>{portalLanguage === 'ur' ? TAB_HEADINGS_UR[activeTab] : TAB_WORKFLOW_META[activeTab].heading}</b>
+                    <span dir={portalLanguage === 'ur' ? 'rtl' : undefined}>{portalLanguage === 'ur' ? TAB_HELP_UR[activeTab] : TAB_WORKFLOW_META[activeTab].help}</span>
                   </div>
                 </div>
               )}
@@ -1980,13 +2548,15 @@ export function WebPortal({
                     <div className="space-y-0">
                       <h2 className="text-sm font-bold tracking-tight">Assalam-o-Alaikum!</h2>
                       <p className="text-emerald-100 text-[10px] max-w-xl">
-                        Welcome to the {companyDisplayName} corporate portal. Today is <strong>June 17, 2026</strong>.
+                        Welcome to the {companyDisplayName} corporate portal. Today is <strong>{new Date().toLocaleDateString('en-PK', { day: 'numeric', month: 'long', year: 'numeric' })}</strong>.
                       </p>
                     </div>
                     <div className="mt-1.5 md:mt-0 flex space-x-1.5 bg-emerald-900/40 py-0.5 px-2 rounded border border-emerald-500/20 font-mono text-[10px]">
                       <span>Current Zone: PK (GMT+5)</span>
                     </div>
                   </div>
+
+                  <ComplianceAlertsPanel alerts={openComplianceAlerts} onOpenEmployees={() => setActiveTab('employees')} />
 
                   {/* Operations Metrics */}
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -2015,8 +2585,8 @@ export function WebPortal({
                     <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
                       <div className="space-y-1">
                         <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Pending Tasks</p>
-                        <h3 className="text-2xl font-bold text-slate-900">{(pendingLeavesCount + pendingRegularizationsCount)}</h3>
-                        <p className="text-[11px] text-amber-500 font-semibold">{pendingLeavesCount} Leaves, {pendingRegularizationsCount} Regularizations</p>
+                        <h3 className="text-2xl font-bold text-slate-900">{approvalInbox.length}</h3>
+                        <p className="text-[11px] text-amber-500 font-semibold">{overdueApprovalCount ? `${overdueApprovalCount} overdue · ` : ''}{pendingLeavesCount} leaves, {pendingRegularizationsCount} corrections, {pendingPayrollAdjustmentsCount} payroll</p>
                       </div>
                       <div className="w-12 h-12 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center">
                         <AlertTriangle className="w-6 h-6" />
@@ -2076,45 +2646,9 @@ export function WebPortal({
                     </div>
 
                     <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
-                      <h3 className="font-bold text-sm text-slate-900 uppercase tracking-wide">Recent Pending Leaves</h3>
-                      
-                      <div className="space-y-3">
-                        {leaves.filter(l => l.status === 'Pending').length === 0 ? (
-                          <p className="text-xs text-slate-400 text-center py-6">No pending leaves remaining to review.</p>
-                        ) : (
-                          leaves.filter(l => l.status === 'Pending').slice(0, 3).map(lv => {
-                            const emp = employees.find(e => e.id === lv.employeeId) || employees.find(e => e.fullName.toLowerCase().includes('aqeel'));
-                            return (
-                              <div key={lv.id} className="p-3 bg-amber-50/50 border border-amber-205/55 rounded-lg space-y-2 text-xs">
-                                <div className="flex justify-between font-bold">
-                                  <span className="text-slate-800">{emp?.fullName || 'Employee'}</span>
-                                  <span className="text-amber-700 bg-amber-100 px-2 py-0.5 rounded font-mono">{lv.leaveType}</span>
-                                </div>
-                                <p className="text-slate-505 italic">"{lv.reason}"</p>
-                                <p className="text-[10px] text-slate-400">Period: {lv.startDate} to {lv.endDate} ({lv.totalDays} Days)</p>
-                                
-                                <div className="flex space-x-2 pt-1.5 border-t border-slate-200/50 justify-end">
-                                  {userPermissions.includes('manage_leaves') && (
-                                    <>
-                                      <button 
-                                        onClick={() => onRejectLeave(lv.id)}
-                                        className="px-2 py-1 border border-slate-300 hover:bg-slate-100 rounded text-slate-700 font-medium"
-                                      >
-                                        Reject
-                                      </button>
-                                      <button 
-                                        onClick={() => onApproveLeave(lv.id)}
-                                        className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded font-medium shadow-xs"
-                                      >
-                                        Approve
-                                      </button>
-                                    </>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })
-                        )}
+                      <div className="flex items-start justify-between gap-3"><div><h3 className="font-bold text-sm text-slate-900 uppercase tracking-wide">Manager Approval Inbox</h3><p className="mt-1 text-[11px] text-slate-500">Leave, attendance, and payroll items awaiting review.</p></div>{overdueApprovalCount > 0 && <span className="rounded bg-rose-100 px-2 py-1 text-[10px] font-bold text-rose-800">{overdueApprovalCount} overdue</span>}</div>
+                      <div className="space-y-2">
+                        {approvalInbox.length === 0 ? <p className="py-6 text-center text-xs text-slate-400">No approvals need review.</p> : approvalInbox.slice(0, 5).map(item => <div key={item.id} className={`rounded-lg border p-3 text-xs ${item.ageDays >= 2 ? 'border-rose-200 bg-rose-50/60' : 'border-slate-100 bg-slate-50'}`}><div className="flex items-start justify-between gap-2"><div className="min-w-0"><p className="font-bold text-slate-800">{item.employee}</p><p className="mt-0.5 text-[10px] font-semibold text-slate-500">{item.type}</p><p className="mt-1 truncate text-slate-600">{item.detail}</p></div><button type="button" onClick={() => setActiveTab(item.tab as typeof activeTab)} className="shrink-0 font-bold text-emerald-700 underline">Review</button></div><p className={`mt-2 text-[10px] font-medium ${item.ageDays >= 2 ? 'text-rose-700' : 'text-slate-400'}`}>{item.ageDays === 0 ? 'Received today' : `${item.ageDays} day${item.ageDays === 1 ? '' : 's'} waiting`}</p></div>)}
                       </div>
                     </div>
 
@@ -2238,6 +2772,12 @@ export function WebPortal({
                                     </span>
                                   </td>
                                   <td className="px-6 py-4 whitespace-nowrap text-right space-x-2">
+                                    <button
+                                      onClick={() => setDocumentVaultEmployee(emp)}
+                                      className="text-xs font-semibold px-2.5 py-1 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded border border-emerald-200 transition cursor-pointer"
+                                    >
+                                      Documents
+                                    </button>
                                     <button 
                                       onClick={() => openEditEmployee(emp)}
                                       className="text-xs font-semibold px-2.5 py-1 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded border border-indigo-200 transition cursor-pointer"
@@ -2248,7 +2788,7 @@ export function WebPortal({
                                       <button 
                                         onClick={() => {
                                           setShowOffboardModal(emp);
-                                          setSettlementLeavesEncash(12);
+                                          setSettlementLeavesEncash(Math.min(statConfig.maxLeaveEncashDays ?? 30, annualLeaveBalance(emp, leaves, todayStr, statConfig)));
                                         }}
                                         className="text-xs font-semibold px-2.5 py-1 bg-rose-50 text-rose-700 hover:bg-rose-100 rounded border border-rose-200 transition cursor-pointer"
                                       >
@@ -2516,13 +3056,19 @@ export function WebPortal({
                                       <span>{emp?.fullName}</span>
                                       <span className="text-slate-500 font-mono">{att.date}</span>
                                     </div>
-                                    <p className="text-slate-600"><strong>Requested Status:</strong> Present &amp; Regularized</p>
+                                    <p className="text-slate-600"><strong>Requested Status:</strong> {att.punchIn ? 'Re-evaluated against shift on approval' : 'Present & Regularized'}</p>
+                                    {(() => { const manager = lineManagerReviewer({ employee: emp, users, roles }); return manager && <p className="text-slate-500">Line manager: <strong>{manager.username}</strong>{isRegularizationOverdue(att) ? ' — escalated, HR may decide' : ''}</p>; })()}
+                                    {(att.evidenceDocumentIds || []).length > 0 && <div className="flex flex-wrap gap-2">{att.evidenceDocumentIds!.map((id, index) => <button key={id} type="button" onClick={() => downloadEmployeeDocument(id, `attendance-evidence-${att.date}-${index + 1}`).catch(error => alert(error instanceof Error ? error.message : 'Download failed.'))} className="rounded border border-amber-300 bg-amber-50 px-2 py-0.5 font-semibold text-amber-800">Evidence {index + 1}</button>)}</div>}
+                                    {att.biometricMatch && <p className="text-slate-500">{att.biometricMatch.kind === 'face' ? 'Face' : 'Fingerprint'} match strength: <strong>{att.biometricMatch.strengthPercent}%</strong></p>}
+                                    {att.requestedAt && <p className={isRegularizationOverdue(att) ? 'font-bold text-rose-700' : 'text-slate-500'}>
+                                      {isRegularizationOverdue(att) ? 'OVERDUE — escalate to department head. ' : ''}Review due by {new Date(regularizationDueAt(att.requestedAt)!).toLocaleDateString('en-PK')}
+                                    </p>}
                                     <p className="text-slate-550 italic bg-amber-50/50 p-2 rounded">
                                       "Reason: {att.regularizationReason || 'Forgot card contact error'}"
                                     </p>
                                     <div className="flex justify-end space-x-2 pt-2 border-t border-slate-100">
                                       <button 
-                                        onClick={() => onRejectRegularization(att.id)}
+                                        onClick={() => { const comment = window.prompt('Reason for declining this attendance correction:')?.trim(); if (comment) onRejectRegularization(att.id, comment); }}
                                         disabled={att.requestedById === currentUserAccount.id}
                                         title={att.requestedById === currentUserAccount.id ? 'The requester cannot review their own attendance adjustment.' : 'Decline request'}
                                         className="px-2.5 py-1 text-slate-600 border border-slate-355 hover:bg-slate-100 rounded disabled:cursor-not-allowed disabled:opacity-40"
@@ -2530,7 +3076,7 @@ export function WebPortal({
                                         Decline
                                       </button>
                                       <button 
-                                        onClick={() => onApproveRegularization(att.id)}
+                                        onClick={() => { const comment = window.prompt('Approval comment — evidence reviewed (e.g. gate log, manager confirmation):')?.trim(); if (comment) onApproveRegularization(att.id, comment); }}
                                         disabled={att.requestedById === currentUserAccount.id}
                                         title={att.requestedById === currentUserAccount.id ? 'The requester cannot approve their own attendance adjustment.' : 'Approve request'}
                                         className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded font-bold shadow-xs flex items-center disabled:cursor-not-allowed disabled:opacity-40"
@@ -3090,6 +3636,10 @@ export function WebPortal({
                                     <span className="font-bold bg-slate-100 text-slate-700 px-2 py-0.5 rounded font-mono">
                                       {lv.leaveType}
                                     </span>
+                                    {emp && lv.status === 'Pending' && lv.leaveType !== 'Unpaid' && (() => {
+                                      const balance = leaveBalances(emp, leaves, Number(lv.startDate.slice(0, 4)), statConfig, lv.id).find(item => item.type === lv.leaveType);
+                                      return balance && <div className={`mt-1 text-[10px] font-semibold ${balance.remaining < lv.totalDays ? 'text-rose-700' : 'text-slate-500'}`}>{balance.remaining} of {balance.entitled} day(s) left</div>;
+                                    })()}
                                   </td>
                                   <td className="px-6 py-4 whitespace-nowrap font-mono text-xs text-slate-600">
                                     {lv.startDate} to {lv.endDate}
@@ -3381,12 +3931,21 @@ export function WebPortal({
                         {Array.from({ length: 12 }, (_, i) => <option key={i + 1} value={i + 1}>{new Date(2000, i).toLocaleString('en-PK', { month: 'long' })}</option>)}
                       </select>
                       <input aria-label="Payroll year" type="number" min="2020" max="2100" value={payrollYear} onChange={e => setPayrollYear(Number(e.target.value))} className="w-24 border border-slate-300 rounded-lg px-2 py-2 text-xs bg-white text-slate-800" />
-                      <button
-                        onClick={() => onLockAttendancePeriod(payrollMonth, payrollYear)}
-                        className="bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs px-3 py-2 rounded-lg shadow transition"
-                      >
-                        {attendancePeriods.some(item => item.periodMonth === payrollMonth && item.periodYear === payrollYear) ? 'Re-lock Register' : 'Lock Register'}
-                      </button>
+                      {attendancePeriods.find(item => item.periodMonth === payrollMonth && item.periodYear === payrollYear)?.status === 'Locked' ? (
+                        <button
+                          onClick={() => { const reason = window.prompt('Reason for reopening the certified attendance register (min 10 characters):')?.trim(); if (reason) onReopenAttendancePeriod(payrollMonth, payrollYear, reason); }}
+                          className="bg-amber-700 hover:bg-amber-800 text-white font-bold text-xs px-3 py-2 rounded-lg shadow transition"
+                        >
+                          Reopen Register (v{attendancePeriods.find(item => item.periodMonth === payrollMonth && item.periodYear === payrollYear)?.registerVersion || 1})
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => onLockAttendancePeriod(payrollMonth, payrollYear)}
+                          className="bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs px-3 py-2 rounded-lg shadow transition"
+                        >
+                          {attendancePeriods.some(item => item.periodMonth === payrollMonth && item.periodYear === payrollYear) ? 'Lock Corrected Register' : 'Lock Register'}
+                        </button>
+                      )}
                       <button 
                         onClick={() => onCreatePayrollRun(`Payroll - ${new Date(payrollYear, payrollMonth - 1).toLocaleString('en-PK', { month: 'long', year: 'numeric' })}`, payrollMonth, payrollYear)}
                         className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3 py-2 rounded-lg flex items-center space-x-1 shadow transition"
@@ -3395,6 +3954,24 @@ export function WebPortal({
                       </button>
                     </div>
                   </div>
+
+                  <PayrollReportsPanel
+                    employees={employees}
+                    payrollRuns={payrollRuns}
+                    payrollPayslips={payrollPayslips}
+                    gratuitySettlements={gratuitySettlements}
+                    statConfig={statConfig}
+                    wageTypes={wageTypes}
+                    company={primaryCompany}
+                    periodMonth={payrollMonth}
+                    periodYear={payrollYear}
+                    onCreateSupplementaryRun={onCreateSupplementaryRun}
+                    onCreateFinalSettlementRun={onCreateFinalSettlementRun}
+                    onRecordTaxDeposit={onRecordTaxDeposit}
+                    currentUser={currentUserAccount}
+                    onCreatePayrollAdjustment={onCreatePayrollAdjustment}
+                    onRetroRecalculate={onRetroRecalculate}
+                  />
 
                   <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-4">
                     <div>
@@ -3472,8 +4049,8 @@ export function WebPortal({
                           return (
                             <div key={run.id} className="p-3.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100/50 transition cursor-pointer text-xs space-y-1.5">
                               <div className="flex justify-between items-center">
-                                <span className="font-bold text-slate-900">{run.title}</span>
-                                <span className="bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.5 rounded text-[10px]">
+                                <span className="font-bold text-slate-900">{run.title}{run.runType && run.runType !== 'Regular' && <span className="ml-1 rounded bg-indigo-100 px-1 py-0.5 text-[9px] font-bold uppercase text-indigo-800">{run.runType}</span>}</span>
+                                <span className={`${run.status === 'Cancelled' ? 'bg-rose-100 text-rose-800' : 'bg-emerald-100 text-emerald-800'} font-bold px-1.5 py-0.5 rounded text-[10px]`}>
                                   {run.status}
                                 </span>
                               </div>
@@ -3488,9 +4065,12 @@ export function WebPortal({
                                 <span>PKR {run.totalNetPay.toLocaleString()}</span>
                               </div>
                               {(run.preflightWarningCount || 0) > 0 && <div className="rounded bg-amber-50 px-2 py-1 text-amber-800 font-semibold">{run.preflightWarningCount} material pay variance warning(s)</div>}
+                              {run.status === 'Cancelled' && <div className="rounded bg-rose-50 px-2 py-1 text-rose-800">Cancelled by {run.cancelledBy} on {run.cancelledAt?.slice(0, 10)}: {run.cancellationReason}</div>}
+                              {run.status === 'Cancelled' && run.statusBeforeCancellation === 'Approved' && <button type="button" onClick={() => downloadAccountingJournal(run)} className="text-[10px] font-semibold text-rose-700 hover:underline">Reversal journal CSV</button>}
+                              {run.taxDeposit && <div className="text-[10px] text-slate-500">FBR deposit CPR {run.taxDeposit.cprNumber} · PKR {run.taxDeposit.amount.toLocaleString()} on {run.taxDeposit.depositedOn}</div>}
                               
                               <div className="border-t border-slate-200 pt-2 flex justify-between space-x-1.5 text-[11px]">
-                                <button disabled={run.status === 'Draft'} title={run.status === 'Draft' ? 'Approve payroll before generating bank advice.' : 'Generate bank advice'}
+                                <button disabled={run.status === 'Draft' || run.status === 'Cancelled'} title={run.status === 'Draft' ? 'Approve payroll before generating bank advice.' : run.status === 'Cancelled' ? 'Cancelled runs cannot be paid.' : 'Generate bank advice'}
                                   onClick={() => setShowBankFileModal(run)}
                                   className="text-emerald-750 hover:underline flex items-center disabled:text-slate-400 disabled:no-underline disabled:cursor-not-allowed"
                                 >
@@ -3498,13 +4078,20 @@ export function WebPortal({
                                 </button>
                                 {run.status === 'Draft' && <button disabled={run.createdById === currentUserAccount.id} title={run.createdById === currentUserAccount.id ? 'Prepared by you; another payroll officer must approve.' : 'Approve payroll'} onClick={() => onUpdatePayrollStatus(run.id, 'Approved')} className="text-blue-700 hover:underline disabled:cursor-not-allowed disabled:text-slate-400 disabled:no-underline">Approve</button>}
                                 {run.status === 'Approved' && <button disabled={run.approvedById === currentUserAccount.id || !run.bankAdviceChecksum} title={run.approvedById === currentUserAccount.id ? 'Approved by you; another authorized user must disburse.' : !run.bankAdviceChecksum ? 'Generate and download bank advice first.' : 'Mark payroll disbursed'} onClick={() => { const reference = window.prompt('Enter the bank transaction/reference number shown by your bank:')?.trim(); if (reference) onUpdatePayrollStatus(run.id, 'Disbursed', reference); }} className="text-emerald-700 hover:underline disabled:cursor-not-allowed disabled:text-slate-400 disabled:no-underline">Mark Disbursed</button>}
+                                {(run.status === 'Draft' || run.status === 'Approved') && <button type="button" onClick={() => { const reason = window.prompt('Reason for cancelling this payroll run (min 10 characters). Payslips are kept for audit:')?.trim(); if (reason) onCancelPayrollRun(run.id, reason); }} className="text-rose-700 hover:underline">Cancel Run</button>}
                               </div>
-                              {run.status !== 'Draft' && <div className="flex flex-wrap gap-x-3 gap-y-1 border-t border-slate-200 pt-2 text-[10px] font-semibold">
+                              {run.status !== 'Draft' && run.status !== 'Cancelled' && <div className="flex flex-wrap gap-x-3 gap-y-1 border-t border-slate-200 pt-2 text-[10px] font-semibold">
                                 <button type="button" onClick={() => downloadStatutoryReport('FBR', run)} className="text-indigo-700 hover:underline">FBR withholding CSV</button>
                                 <button type="button" onClick={() => downloadStatutoryReport('EOBI', run)} className="text-indigo-700 hover:underline">EOBI return CSV</button>
-                                <button type="button" onClick={() => downloadStatutoryReport('SOCIAL_SECURITY', run)} className="text-indigo-700 hover:underline">PESSI/SESSI CSV</button>
+                                <button type="button" onClick={() => downloadStatutoryReport('SOCIAL_SECURITY', run)} className="text-indigo-700 hover:underline">Provincial social-security CSV</button>
+                                <button type="button" onClick={() => downloadTemplateReturn('EOBI Return', run)} className="text-indigo-700 hover:underline">EOBI upload file</button>
+                                <button type="button" onClick={() => downloadTemplateReturn('Social Security Return', run)} className="text-indigo-700 hover:underline">Social-security upload file</button>
+                                {run.bankAdviceBatchReference && <span className="text-slate-500">Bank batch {run.bankAdviceBatchReference} · control {run.bankAdviceControlHash}{run.bankAdviceTemplateVerified ? '' : ' (unverified template)'}</span>}
                                 <button type="button" onClick={() => downloadAccountingJournal(run)} className="text-indigo-700 hover:underline">Accounting journal CSV</button>
-                                <button type="button" onClick={async () => { try { const result = await onSendPayslips(run.id); const message = `${result.sent} sent, ${result.skipped} already delivered, ${result.failed.length} failed.`; if (result.failed.length) alert(`Payslip delivery completed with exceptions: ${message}`); else showToast(`Payslip delivery: ${message}`); } catch (error) { alert(error instanceof Error ? error.message : 'Payslips could not be sent.'); } }} className="text-indigo-700 hover:underline">Email payslips</button>
+                                {run.status === 'Disbursed' && <button type="button" onClick={() => setPaymentExceptionRun(run)} className="text-rose-700 hover:underline">Payment exceptions{payrollPayslips.some(item => item.payrollRunId === run.id && item.paymentStatus === 'Failed') ? ' (open)' : ''}</button>}
+                                {run.status === 'Disbursed' && <button type="button" onClick={async () => { try { const result = await onSendPayslips(run.id); const message = `${result.sent} sent, ${result.skipped} already delivered, ${result.failed.length} failed.`; if (result.failed.length) alert(`Payslip delivery completed with exceptions: ${message}`); else showToast(`Payslip delivery: ${message}`); } catch (error) { alert(error instanceof Error ? error.message : 'Payslips could not be sent.'); } }} className="text-indigo-700 hover:underline">Email payslips</button>}
+                                {run.status === 'Disbursed' && <button type="button" disabled={!alertChannels.sms} title={alertChannels.sms ? 'Text employees that salary was processed (no amounts)' : 'SMS provider not configured on the server'} onClick={() => sendSalaryAlerts(run.id, 'sms')} className="text-indigo-700 hover:underline disabled:cursor-not-allowed disabled:text-slate-400 disabled:no-underline">SMS alert</button>}
+                                {run.status === 'Disbursed' && <button type="button" disabled={!alertChannels.whatsapp} title={alertChannels.whatsapp ? 'WhatsApp employees that salary was processed (no amounts)' : 'WhatsApp provider not configured on the server'} onClick={() => sendSalaryAlerts(run.id, 'whatsapp')} className="text-indigo-700 hover:underline disabled:cursor-not-allowed disabled:text-slate-400 disabled:no-underline">WhatsApp alert</button>}
                               </div>}
                             </div>
                           );
@@ -3588,6 +4175,14 @@ export function WebPortal({
               {/* TAB 6: SYSTEM SLABS & STATUTORY SETTINGS */}
               {activeTab === 'settings' && (
                 <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
+                  <StatutoryGovernancePanel
+                    editableConfig={editableStatConfig}
+                    pendingRequest={pendingStatutoryChange}
+                    recentDecisions={statutoryChangeRequests.filter(item => item.status !== 'Pending').sort((a, b) => (b.reviewedAt || '').localeCompare(a.reviewedAt || ''))}
+                    currentUserId={currentUserAccount.id}
+                    onUpdateStatConfig={onUpdateStatConfig}
+                    onReviewStatutoryChange={onReviewStatutoryChange}
+                  />
                   
                   <div className="flex justify-between items-center">
                     <div>
@@ -3605,7 +4200,7 @@ export function WebPortal({
                           <h3 className="font-bold text-slate-800 text-xs uppercase tracking-wide font-mono flex items-center gap-2">
                             <span>Current FBR Income Tax Slabs Table</span>
                             <span className="bg-emerald-100 text-emerald-800 text-[10px] font-semibold px-2 py-0.5 rounded-full">
-                              Finance Act {statConfig.taxYear || '2024–2025'}
+                              Finance Act {editableStatConfig.taxYear || '2024–2025'}
                             </span>
                           </h3>
                           <p className="text-[11px] text-slate-500 mt-0.5">First Schedule, Part I, Division I, Clause (2) - Salaried Individuals</p>
@@ -3633,7 +4228,7 @@ export function WebPortal({
                       </div>
                       
                       <div className="space-y-3">
-                        {((taxSlabs && taxSlabs.length > 0) ? taxSlabs : DEFAULT_TAX_SLABS).map((slab, idx) => (
+                        {((editableTaxSlabs && editableTaxSlabs.length > 0) ? editableTaxSlabs : DEFAULT_TAX_SLABS).map((slab, idx) => (
                           <div key={slab.id || `slab-${idx}`} className="flex space-x-3 items-center bg-slate-50 p-2.5 rounded-lg text-xs font-mono hover:bg-slate-100/80 transition-colors">
                             <span className="font-bold text-slate-500 w-16">Slab #{idx + 1}</span>
                             <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-2">
@@ -3679,8 +4274,8 @@ export function WebPortal({
                         <div>
                           <label className="block text-xs font-semibold text-slate-700 uppercase tracking-widest mb-1.5">Tax year / effective date:</label>
                           <div className="grid grid-cols-2 gap-2">
-                            <input aria-label="FBR tax year" value={statConfig.taxYear || ''} onChange={e => onUpdateStatConfig({ ...statConfig, taxYear: e.target.value, updatedAt: new Date().toISOString() })} placeholder="2027" className="w-full text-xs font-mono p-2 border border-slate-300 rounded" />
-                            <input aria-label="Statutory effective from" type="date" value={statConfig.effectiveFrom || ''} onChange={e => onUpdateStatConfig({ ...statConfig, effectiveFrom: e.target.value, updatedAt: new Date().toISOString() })} className="w-full text-xs font-mono p-2 border border-slate-300 rounded" />
+                            <input aria-label="FBR tax year" value={editableStatConfig.taxYear || ''} onChange={e => onUpdateStatConfig({ ...editableStatConfig, taxYear: e.target.value, updatedAt: new Date().toISOString() })} placeholder="2027" className="w-full text-xs font-mono p-2 border border-slate-300 rounded" />
+                            <input aria-label="Statutory effective from" type="date" value={editableStatConfig.effectiveFrom || ''} onChange={e => onUpdateStatConfig({ ...editableStatConfig, effectiveFrom: e.target.value, updatedAt: new Date().toISOString() })} className="w-full text-xs font-mono p-2 border border-slate-300 rounded" />
                           </div>
                         </div>
 
@@ -3702,8 +4297,8 @@ export function WebPortal({
                           <input
                             type="number"
                             aria-label="Government Minimum Wage (PKR)"
-                            value={statConfig.minimumWage}
-                            onChange={(e) => onUpdateStatConfig({ ...statConfig, minimumWage: Number(e.target.value) })}
+                            value={editableStatConfig.minimumWage}
+                            onChange={(e) => onUpdateStatConfig({ ...editableStatConfig, minimumWage: Number(e.target.value) })}
                             className="w-full text-xs font-mono p-2 border border-slate-300 rounded focus:ring-1 focus:ring-emerald-500 focus:outline-none"
                           />
                           <span className="text-[10px] text-slate-400">EOBI calculations are mathematically bound to 1% employee / 5% employer of this constant.</span>
@@ -3712,13 +4307,31 @@ export function WebPortal({
                         <div>
                           <label className="block text-xs font-semibold text-slate-700 uppercase tracking-widest mb-1.5">Provincial social security employer %:</label>
                           <div className="grid grid-cols-2 gap-2">
-                            {(['Punjab', 'Sindh', 'KPK', 'Balochistan'] as const).map(province => <label key={province} className="text-[10px] text-slate-500">{province}<input type="number" min="0" step="0.01" value={statConfig.provincialSocialSecurityRates?.[province] ?? statConfig.pessiEmployerRate} onChange={e => onUpdateStatConfig({ ...statConfig, provincialSocialSecurityRates: { ...statConfig.provincialSocialSecurityRates, [province]: Number(e.target.value) }, updatedAt: new Date().toISOString() })} className="mt-1 w-full text-xs font-mono p-2 border border-slate-300 rounded" /></label>)}
+                            {JURISDICTIONS.map(province => <label key={province} className="text-[10px] text-slate-500">{province}<input type="number" min="0" step="0.01" value={editableStatConfig.provincialSocialSecurityRates?.[province] ?? editableStatConfig.pessiEmployerRate} onChange={e => onUpdateStatConfig({ ...editableStatConfig, provincialSocialSecurityRates: { ...editableStatConfig.provincialSocialSecurityRates, [province]: Number(e.target.value) }, updatedAt: new Date().toISOString() })} className="mt-1 w-full text-xs font-mono p-2 border border-slate-300 rounded" /></label>)}
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-700 uppercase tracking-widest mb-1.5">Absence deduction basis (salaried):</label>
+                          <select aria-label="Absence deduction basis" value={editableStatConfig.absenceDeductionBasis || 'Calendar Days'} onChange={e => onUpdateStatConfig({ ...editableStatConfig, absenceDeductionBasis: e.target.value as NonNullable<StatutoryConfig['absenceDeductionBasis']>, updatedAt: new Date().toISOString() })} className="w-full text-xs p-2 border border-slate-300 rounded bg-white">
+                            <option value="Calendar Days">Monthly salary ÷ calendar days</option>
+                            <option value="Scheduled Working Days">Monthly salary ÷ rostered working days</option>
+                            <option value="Fixed 30 Days">Monthly salary ÷ 30</option>
+                          </select>
+                          <span className="text-[10px] text-slate-400">Organization policy; confirm against your appointment letters and applicable standing orders.</span>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-700 uppercase tracking-widest mb-1.5">Overtime multiplier (salaried / daily wagers):</label>
+                          <div className="grid grid-cols-2 gap-2">
+                            <input aria-label="Salaried overtime multiplier" type="number" min="1" step="0.25" value={editableStatConfig.overtimeMultiplier ?? 2} onChange={e => onUpdateStatConfig({ ...editableStatConfig, overtimeMultiplier: Number(e.target.value), updatedAt: new Date().toISOString() })} className="w-full text-xs font-mono p-2 border border-slate-300 rounded" />
+                            <input aria-label="Daily wager overtime multiplier" type="number" min="1" step="0.25" value={editableStatConfig.dailyWagerOvertimeMultiplier ?? editableStatConfig.overtimeMultiplier ?? 2} onChange={e => onUpdateStatConfig({ ...editableStatConfig, dailyWagerOvertimeMultiplier: Number(e.target.value), updatedAt: new Date().toISOString() })} className="w-full text-xs font-mono p-2 border border-slate-300 rounded" />
                           </div>
                         </div>
 
                         <div>
                           <label className="block text-xs font-semibold text-slate-700 uppercase tracking-widest mb-1.5">Social security wage ceiling (PKR):</label>
-                          <input type="number" value={statConfig.socialSecurityWageCeiling || 0} onChange={e => onUpdateStatConfig({ ...statConfig, socialSecurityWageCeiling: Number(e.target.value), updatedAt: new Date().toISOString() })} className="w-full text-xs font-mono p-2 border border-slate-300 rounded" />
+                          <input type="number" value={editableStatConfig.socialSecurityWageCeiling || 0} onChange={e => onUpdateStatConfig({ ...editableStatConfig, socialSecurityWageCeiling: Number(e.target.value), updatedAt: new Date().toISOString() })} className="w-full text-xs font-mono p-2 border border-slate-300 rounded" />
                         </div>
 
                         <div>
@@ -3728,8 +4341,8 @@ export function WebPortal({
                             aria-label="Gratuity Entitlement Rate (annual days)"
                             min="1"
                             max="365"
-                            value={statConfig.gratuityRateDaysPerYear}
-                            onChange={(e) => onUpdateStatConfig({ ...statConfig, gratuityRateDaysPerYear: Number(e.target.value) })}
+                            value={editableStatConfig.gratuityRateDaysPerYear}
+                            onChange={(e) => onUpdateStatConfig({ ...editableStatConfig, gratuityRateDaysPerYear: Number(e.target.value) })}
                             className="w-full text-xs font-mono p-2 border border-slate-300 rounded focus:ring-1 focus:ring-emerald-500 focus:outline-none"
                           />
                           <span className="text-[10px] text-slate-400">Days of basic salary earned per completed year of employment on exit clearance.</span>
@@ -3738,6 +4351,122 @@ export function WebPortal({
                     </div>
 
                   </div>
+
+                  <section className={`rounded-xl border p-5 shadow-sm ${cnicActionItems.length ? 'border-amber-200 bg-amber-50/50' : 'border-emerald-200 bg-emerald-50/50'}`} aria-labelledby="cnic-compliance-title">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <h3 id="cnic-compliance-title" className="text-sm font-bold text-slate-900">CNIC Compliance Watch</h3>
+                        <p className="mt-1 text-xs text-slate-600">NADRA identity expiry tracking for active employees. Review records within 90 days of expiry.</p>
+                      </div>
+                      <button type="button" onClick={() => setActiveTab('employees')} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-50">Review employee records</button>
+                    </div>
+                    {cnicActionItems.length === 0 ? (
+                      <p className="mt-4 text-sm font-semibold text-emerald-800">All active employee CNIC records are current and more than 90 days from expiry.</p>
+                    ) : (
+                      <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                        {cnicActionItems.slice(0, 6).map(({ employee, expiry, state, days }) => (
+                          <div key={employee.id} className={`rounded-lg border bg-white p-3 text-xs ${state === 'expired' ? 'border-rose-200' : 'border-amber-200'}`}>
+                            <p className="font-bold text-slate-900">{employee.fullName}</p>
+                            <p className={`mt-1 font-semibold ${state === 'expired' ? 'text-rose-700' : 'text-amber-800'}`}>
+                              {state === 'missing' ? 'Expiry date not recorded' : state === 'expired' ? `Expired ${Math.abs(days || 0)} day(s) ago` : `Expires in ${days} day(s)`}
+                            </p>
+                            <p className="mt-1 font-mono text-[10px] text-slate-500">{expiry || 'Add expiry date in employee profile'}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {cnicActionItems.length > 6 && <p className="mt-3 text-xs font-medium text-slate-600">+ {cnicActionItems.length - 6} more employee record(s) need attention.</p>}
+                  </section>
+
+                  <section className={`rounded-xl border p-5 shadow-sm ${lifecycleActionItems.length ? 'border-amber-200 bg-amber-50/50' : 'border-emerald-200 bg-emerald-50/50'}`} aria-labelledby="lifecycle-watch-title">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <h3 id="lifecycle-watch-title" className="text-sm font-bold text-slate-900">Contract &amp; Probation Watch</h3>
+                        <p className="mt-1 text-xs text-slate-600">Review fixed-term contracts within 60 days and record each probation decision by its due date.</p>
+                      </div>
+                      <button type="button" onClick={() => setActiveTab('employees')} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-50">Open employee records</button>
+                    </div>
+                    {lifecycleActionItems.length === 0 ? <p className="mt-4 text-sm font-semibold text-emerald-800">No upcoming contract or unconfirmed probation actions are recorded.</p> : <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                      {lifecycleActionItems.slice(0, 6).map(item => <div key={`${item.kind}-${item.employee.id}`} className={`rounded-lg border bg-white p-3 text-xs ${item.overdue ? 'border-rose-200' : 'border-amber-200'}`}>
+                        <p className={`font-bold ${item.overdue ? 'text-rose-800' : 'text-amber-800'}`}>{item.kind} {item.overdue ? 'overdue' : 'due soon'}</p>
+                        <p className="mt-1 font-semibold text-slate-900">{item.employee.fullName}</p>
+                        <p className="mt-1 text-[10px] text-slate-500">{item.due} · {item.overdue ? `${Math.abs(item.days)} day(s) overdue` : `${item.days} day(s) remaining`}</p>
+                      </div>)}
+                    </div>}
+                    {lifecycleActionItems.length > 6 && <p className="mt-3 text-xs font-medium text-slate-600">+ {lifecycleActionItems.length - 6} more employee lifecycle action(s) need attention.</p>}
+                  </section>
+
+                  <section className={`rounded-xl border p-5 shadow-sm ${duplicateIdentityGroups.length ? 'border-rose-200 bg-rose-50/50' : 'border-emerald-200 bg-emerald-50/50'}`} aria-labelledby="identity-payment-title">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <h3 id="identity-payment-title" className="text-sm font-bold text-slate-900">Identity &amp; Payment Collision Watch</h3>
+                        <p className="mt-1 text-xs text-slate-600">Duplicate CNICs block payroll. Shared payment accounts need an approver’s documented confirmation.</p>
+                      </div>
+                      <button type="button" onClick={() => setActiveTab('employees')} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-50">Review employee records</button>
+                    </div>
+                    {duplicateIdentityGroups.length === 0 ? (
+                      <p className="mt-4 text-sm font-semibold text-emerald-800">No duplicate active CNICs or payment accounts were found.</p>
+                    ) : (
+                      <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                        {duplicateIdentityGroups.slice(0, 6).map((group, index) => (
+                          <div key={`${group.type}-${index}`} className={`rounded-lg border bg-white p-3 text-xs ${group.type === 'CNIC' ? 'border-rose-200' : 'border-amber-200'}`}>
+                            <p className={`font-bold ${group.type === 'CNIC' ? 'text-rose-800' : 'text-amber-800'}`}>{group.type === 'CNIC' ? 'Duplicate CNIC — payroll block' : 'Shared payment account — review'}</p>
+                            <p className="mt-1 font-semibold text-slate-900">{group.employees.map(employee => employee.fullName).join(' · ')}</p>
+                            <p className="mt-1 text-[10px] text-slate-500">{group.employees.map(employee => employee.employeeCode).join(' · ')}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {duplicateIdentityGroups.length > 6 && <p className="mt-3 text-xs font-medium text-slate-600">+ {duplicateIdentityGroups.length - 6} more collision(s) require review.</p>}
+                  </section>
+
+                  <section className={`rounded-xl border p-5 shadow-sm ${complianceAttendanceAlerts.length ? 'border-amber-200 bg-amber-50/50' : 'border-emerald-200 bg-emerald-50/50'}`} aria-labelledby="attendance-compliance-title">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <h3 id="attendance-compliance-title" className="text-sm font-bold text-slate-900">Attendance Compliance Alerts</h3>
+                        <p className="mt-1 text-xs text-slate-600">Flags overtime above four hours/day, manual records lacking approval, and seven consecutive recorded workdays.</p>
+                      </div>
+                      <button type="button" onClick={() => setActiveTab('attendance')} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-50">Review attendance</button>
+                    </div>
+                    {complianceAttendanceAlerts.length === 0 ? <p className="mt-4 text-sm font-semibold text-emerald-800">No attendance compliance risks are currently detected.</p> : <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                      {complianceAttendanceAlerts.slice(0, 6).map(alert => <div key={alert.id} className={`rounded-lg border bg-white p-3 text-xs ${alert.tone === 'rose' ? 'border-rose-200' : 'border-amber-200'}`}>
+                        <p className={`font-bold ${alert.tone === 'rose' ? 'text-rose-800' : 'text-amber-800'}`}>{alert.type}</p>
+                        <p className="mt-1 font-semibold text-slate-900">{alert.employee}</p>
+                        <p className="mt-1 text-[10px] leading-relaxed text-slate-500">{alert.detail}</p>
+                      </div>)}
+                    </div>}
+                    {complianceAttendanceAlerts.length > 6 && <p className="mt-3 text-xs font-medium text-slate-600">+ {complianceAttendanceAlerts.length - 6} more attendance risk(s) need attention.</p>}
+                  </section>
+
+                  <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm" aria-labelledby="payroll-release-title">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <h3 id="payroll-release-title" className="text-sm font-bold text-slate-900">Payroll Release Control</h3>
+                        <p className="mt-1 text-xs text-slate-600">Maker-checker progress from draft payroll through verified bank disbursement.</p>
+                      </div>
+                      <button type="button" onClick={() => setActiveTab('payroll')} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-50">Open payroll processing</button>
+                    </div>
+                    {payrollReleaseQueue.length === 0 ? <p className="py-6 text-center text-xs text-slate-400">No payroll runs have been created yet.</p> : <div className="mt-4 grid gap-2 lg:grid-cols-2 xl:grid-cols-3">
+                      {payrollReleaseQueue.map(({ run, label, detail, tone }) => {
+                        const toneClass = tone === 'emerald' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : tone === 'blue' ? 'border-blue-200 bg-blue-50 text-blue-800' : tone === 'amber' ? 'border-amber-200 bg-amber-50 text-amber-800' : tone === 'rose' ? 'border-rose-200 bg-rose-50 text-rose-800' : 'border-slate-200 bg-slate-50 text-slate-700';
+                        return <div key={run.id} className="rounded-lg border border-slate-200 p-3"><div className="flex items-start justify-between gap-2"><div className="min-w-0"><p className="truncate text-xs font-bold text-slate-900">{run.title}</p><p className="mt-1 text-[10px] text-slate-500">PKR {run.totalNetPay.toLocaleString()} · {run.employeeCount || 0} employees</p></div><span className={`shrink-0 rounded px-2 py-1 text-[10px] font-bold ${toneClass}`}>{label}</span></div><p className="mt-3 text-[11px] leading-relaxed text-slate-600">{detail}</p></div>;
+                      })}
+                    </div>}
+                  </section>
+
+                  <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm" aria-labelledby="attendance-exceptions-title">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <h3 id="attendance-exceptions-title" className="text-sm font-bold text-slate-900">Today’s Attendance Exceptions</h3>
+                        <p className="mt-1 text-xs text-slate-600">Late arrivals, absences, half days, and employee correction requests recorded today.</p>
+                      </div>
+                      <button type="button" onClick={() => setActiveTab('attendance')} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-50">Open attendance register</button>
+                    </div>
+                    {attendanceExceptionQueue.length === 0 ? <p className="py-6 text-center text-xs font-medium text-emerald-700">No recorded attendance exceptions today.</p> : <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                      {attendanceExceptionQueue.slice(0, 9).map(({ item, employee, label, needsReview }) => <div key={item.id} className={`rounded-lg border p-3 ${needsReview || item.status === 'Absent' ? 'border-rose-200 bg-rose-50/60' : item.status === 'Late' ? 'border-amber-200 bg-amber-50/60' : 'border-blue-200 bg-blue-50/60'}`}><div className="flex items-start justify-between gap-2"><p className="text-xs font-bold text-slate-900">{employee}</p><span className="rounded bg-white/80 px-2 py-1 text-[10px] font-bold text-slate-700">{label}</span></div><p className="mt-2 text-[11px] text-slate-600">{item.punchIn ? `In ${item.punchIn}` : 'No punch-in'}{item.punchOut ? ` · Out ${item.punchOut}` : ''}</p>{item.regularizationReason && <p className="mt-1 truncate text-[10px] text-slate-500">{item.regularizationReason}</p>}</div>)}
+                    </div>}
+                    {attendanceExceptionQueue.length > 9 && <p className="mt-3 text-xs font-medium text-slate-600">+ {attendanceExceptionQueue.length - 9} more exception(s) in the attendance register.</p>}
+                  </section>
 
                 </motion.div>
               )}
@@ -3753,17 +4482,41 @@ export function WebPortal({
                     </div>
                   </div>
 
-                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-xs text-emerald-950">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div><strong>Authenticator MFA</strong><p className="mt-1 text-emerald-800">Protect this {currentUserRole?.name || 'user'} account with a time-based code. Payroll and administrator accounts should enable it.</p></div>
-                      {currentUserAccount.mfaEnabled ? <span className="rounded bg-emerald-700 px-3 py-1.5 font-bold text-white">MFA enabled</span> : <button type="button" onClick={async () => { try { const enrollment = await authenticatedApiRequest('/api/auth/mfa/enroll', { method: 'POST', body: '{}' }); setMfaEnrollment(enrollment); setMfaEnrollmentCode(''); } catch (error) { alert(error instanceof Error ? error.message : 'MFA enrollment could not start.'); } }} className="rounded bg-emerald-700 px-3 py-1.5 font-bold text-white hover:bg-emerald-800">Set up MFA</button>}
+                  <section aria-labelledby="mfa-recovery-requests-title" className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <h3 id="mfa-recovery-requests-title" className="text-xs font-bold uppercase tracking-wide text-slate-800">MFA recovery requests</h3>
+                        <p className="mt-1 text-xs text-slate-500">Approve only after verifying the employee identity through an independent channel.</p>
+                      </div>
+                      <span className={`rounded px-2 py-1 text-[10px] font-bold ${mfaRecoveryRequests.length ? 'bg-rose-100 text-rose-800' : 'bg-slate-100 text-slate-600'}`}>{mfaRecoveryRequests.length} pending</span>
                     </div>
-                    {mfaEnrollment && <div className="mt-3 rounded-lg border border-emerald-200 bg-white p-3 space-y-2">
-                      <p>Add this account manually in Google Authenticator, Microsoft Authenticator, Authy, or a compatible app:</p>
-                      <div className="font-mono text-[11px] break-all rounded bg-slate-950 p-2 text-emerald-300">Issuer: {mfaEnrollment.issuer}<br />Account: {mfaEnrollment.account}<br />Secret: {mfaEnrollment.secret}</div>
-                      <div className="flex flex-wrap gap-2"><input aria-label="Authenticator verification code" value={mfaEnrollmentCode} onChange={event => setMfaEnrollmentCode(event.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" maxLength={6} placeholder="6-digit code" className="rounded border border-slate-300 px-2 py-1.5 font-mono" /><button type="button" onClick={async () => { try { await authenticatedApiRequest('/api/auth/mfa/confirm', { method: 'POST', body: JSON.stringify({ enrollmentId: mfaEnrollment.enrollmentId, code: mfaEnrollmentCode }) }); setMfaEnrollment(null); alert('Authenticator MFA is enabled. Other sessions for this account were revoked.'); } catch (error) { alert(error instanceof Error ? error.message : 'Authenticator code could not be verified.'); } }} className="rounded bg-slate-900 px-3 py-1.5 font-bold text-white">Confirm MFA</button><button type="button" onClick={() => setMfaEnrollment(null)} className="px-2 py-1.5 text-slate-600 underline">Cancel</button></div>
-                    </div>}
-                  </div>
+                    <div className="mt-3 grid gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto]">
+                      <select aria-label="User needing MFA recovery" value={adminRecoveryTargetId} onChange={event => setAdminRecoveryTargetId(event.target.value)} className="rounded border border-slate-300 bg-white px-2 py-1.5 text-xs"><option value="">Select user for recovery</option>{users.filter(user => user.mfaEnabled).map(user => <option key={user.id} value={user.id}>{user.username}</option>)}</select>
+                      <input aria-label="Administrator recovery reason" value={adminRecoveryReason} onChange={event => setAdminRecoveryReason(event.target.value)} maxLength={500} placeholder="Identity-verification reason" className="rounded border border-slate-300 px-2 py-1.5 text-xs" />
+                      <button type="button" disabled={!adminRecoveryTargetId || adminRecoveryReason.trim().length < 10 || mfaRecoverySubmitting} onClick={() => submitMfaRecoveryRequest(adminRecoveryTargetId, adminRecoveryReason)} className="rounded bg-amber-700 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50">Request reset</button>
+                    </div>
+                    {mfaRecoveryRequests.length === 0 ? (
+                      <div className="mt-3 rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-center text-xs text-slate-500">No MFA recovery requests need review.</div>
+                    ) : (
+                      <div className="mt-3 divide-y divide-slate-100 rounded-lg border border-slate-200">
+                        {mfaRecoveryRequests.map(request => {
+                          const age = new Date(request.createdAt).toLocaleString();
+                          const isReviewing = reviewingMfaRecoveryId === request.id;
+                          return <div key={request.id} className="flex flex-col gap-3 p-3 text-xs lg:flex-row lg:items-center lg:justify-between">
+                            <div className="min-w-0">
+                              <div className="font-bold text-slate-900">{request.username} <span className="font-normal text-slate-500">{request.roleName ? `â€¢ ${request.roleName}` : ''}</span></div>
+                              <p className="mt-1 break-words text-slate-600"><span className="font-semibold text-slate-700">Reason:</span> {request.reason}</p>
+                              <p className="mt-1 text-[10px] text-slate-400">Requested {Number.isNaN(new Date(request.createdAt).getTime()) ? 'recently' : age}{request.email ? ` â€¢ ${request.email}` : ''}</p>
+                            </div>
+                            <div className="flex shrink-0 gap-2">
+                              <button type="button" disabled={isReviewing || request.requestedById === currentUserAccount.id} title={request.requestedById === currentUserAccount.id ? 'The requester cannot approve their own reset.' : 'Approve MFA reset'} onClick={() => reviewMfaRecoveryRequest(request.id, 'Approved')} className="rounded-lg bg-emerald-700 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50">Approve</button>
+                              <button type="button" disabled={isReviewing || request.requestedById === currentUserAccount.id} onClick={() => reviewMfaRecoveryRequest(request.id, 'Rejected')} className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-[11px] font-bold text-rose-800 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50">Reject</button>
+                            </div>
+                          </div>;
+                        })}
+                      </div>
+                    )}
+                  </section>
 
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                     
@@ -4191,8 +4944,28 @@ export function WebPortal({
                     employees={employees}
                     statConfig={statConfig}
                     canManage={userPermissions.includes('manage_payroll')}
+                    currentUserAccount={currentUserAccount}
                     onAddSettlement={onAddGratuitySettlement}
                     onUpdateSettlement={onUpdateGratuitySettlement}
+                  />
+                </motion.div>
+              )}
+
+              {activeTab === 'lifecycle' && (
+                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+                  <EmployeeLifecycleModule
+                    employees={employees}
+                    branches={branches}
+                    departments={departments}
+                    designations={designations}
+                    companies={companies}
+                    lifecycleRequests={lifecycleRequests}
+                    currentUserId={currentUserAccount.id}
+                    onCreate={onCreateLifecycleRequest}
+                    onReview={onReviewLifecycleRequest}
+                    onUpdateOnboarding={onUpdateOnboarding}
+                    leaves={leaves}
+                    statConfig={statConfig}
                   />
                 </motion.div>
               )}
@@ -4330,6 +5103,49 @@ export function WebPortal({
                       />
                     </div>
                     <div>
+                      <label className="block font-bold mb-1 text-slate-700 text-xs">CNIC Expiry (NADRA):</label>
+                      <input type="date" aria-label="CNIC Expiry Date" value={newEmpForm.cnicExpiryDate} onChange={e => setNewEmpForm({ ...newEmpForm, cnicExpiryDate: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none" />
+                    </div>
+                    <div>
+                      <label className="block font-bold mb-1 text-slate-700 text-xs">Contract End (if fixed-term):</label>
+                      <input type="date" aria-label="Contract End Date" value={newEmpForm.contractEndDate} onChange={e => setNewEmpForm({ ...newEmpForm, contractEndDate: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none" />
+                    </div>
+                    <div>
+                      <label className="block font-bold mb-1 text-slate-700 text-xs">Probation Review Due:</label>
+                      <input type="date" aria-label="Probation Review Due Date" value={newEmpForm.probationEndDate} onChange={e => setNewEmpForm({ ...newEmpForm, probationEndDate: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none" />
+                      <label className="mt-2 flex items-center gap-2 text-[11px] font-semibold text-slate-600"><input type="checkbox" checked={newEmpForm.probationConfirmed} onChange={e => setNewEmpForm({ ...newEmpForm, probationConfirmed: e.target.checked })} className="accent-emerald-600" />Probation decision recorded</label>
+                    </div>
+                    <div>
+                      <label className="block font-bold mb-1 text-slate-700 text-xs">Driving Licence Expiry:</label>
+                      <input type="date" aria-label="Driving Licence Expiry" value={newEmpForm.drivingLicenceExpiryDate} onChange={e => setNewEmpForm({ ...newEmpForm, drivingLicenceExpiryDate: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none" />
+                    </div>
+                    <div>
+                      <label className="block font-bold mb-1 text-slate-700 text-xs">Certification Expiry:</label>
+                      <input type="date" aria-label="Certification Expiry" value={newEmpForm.professionalCertificationExpiryDate} onChange={e => setNewEmpForm({ ...newEmpForm, professionalCertificationExpiryDate: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none" />
+                    </div>
+                    <div>
+                      <label className="block font-bold mb-1 text-slate-700 text-xs">Work Permit / Visa Expiry:</label>
+                      <input type="date" aria-label="Work Permit / Visa Expiry" value={newEmpForm.workPermitExpiryDate} onChange={e => setNewEmpForm({ ...newEmpForm, workPermitExpiryDate: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none" />
+                    </div>
+                    <div>
+                      <label className="block font-bold mb-1 text-slate-700 text-xs">Worker Category:</label>
+                      <select aria-label="Worker Category" value={newEmpForm.workerCategory} onChange={e => setNewEmpForm({ ...newEmpForm, workerCategory: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none bg-white">
+                        {['Worker', 'Supervisory', 'Managerial', 'Contract', 'Apprentice'].map(category => <option key={category}>{category}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block font-bold mb-1 text-slate-700 text-xs">Vehicle Perquisite (PKR / month, taxable):</label>
+                      <input type="number" min="0" aria-label="Vehicle Perquisite" value={newEmpForm.perquisiteVehicleMonthly} onChange={e => setNewEmpForm({ ...newEmpForm, perquisiteVehicleMonthly: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none" />
+                    </div>
+                    <div>
+                      <label className="block font-bold mb-1 text-slate-700 text-xs">Accommodation Perquisite (PKR / month, taxable):</label>
+                      <input type="number" min="0" aria-label="Accommodation Perquisite" value={newEmpForm.perquisiteAccommodationMonthly} onChange={e => setNewEmpForm({ ...newEmpForm, perquisiteAccommodationMonthly: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none" />
+                    </div>
+                    <div>
+                      <label className="block font-bold mb-1 text-slate-700 text-xs">Other Perquisites (PKR / month, taxable):</label>
+                      <input type="number" min="0" aria-label="Other Perquisites" value={newEmpForm.perquisiteOtherMonthly} onChange={e => setNewEmpForm({ ...newEmpForm, perquisiteOtherMonthly: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none" />
+                    </div>
+                    <div>
                       <label className="block font-bold mb-1 text-slate-700 text-xs">Shift Start:</label>
                       <input type="time" aria-label="Shift Start" value={newEmpForm.shiftStartTime} onChange={e => setNewEmpForm({ ...newEmpForm, shiftStartTime: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs" />
                     </div>
@@ -4344,6 +5160,11 @@ export function WebPortal({
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 text-xs">Break Minutes:</label>
                       <input type="number" min="0" max="240" aria-label="Shift Break Minutes" value={newEmpForm.shiftBreakMinutes} onChange={e => setNewEmpForm({ ...newEmpForm, shiftBreakMinutes: Number(e.target.value) })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs" />
+                    </div>
+                    <div className="sm:col-span-2 lg:col-span-4 rounded-lg border border-emerald-100 bg-emerald-50/60 p-3">
+                      <p className="mb-2 text-[11px] font-bold text-emerald-800">Ramadan shift override <span className="font-normal text-emerald-700">(optional; dates must be set each year)</span></p>
+                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4"><label className="text-[10px] font-bold text-slate-600">Start<input type="date" aria-label="Ramadan Start Date" value={newEmpForm.ramadanStartDate} onChange={e => setNewEmpForm({ ...newEmpForm, ramadanStartDate: e.target.value })} className="mt-1 h-8 w-full rounded border border-slate-300 px-2 text-xs" /></label><label className="text-[10px] font-bold text-slate-600">End<input type="date" aria-label="Ramadan End Date" value={newEmpForm.ramadanEndDate} onChange={e => setNewEmpForm({ ...newEmpForm, ramadanEndDate: e.target.value })} className="mt-1 h-8 w-full rounded border border-slate-300 px-2 text-xs" /></label><label className="text-[10px] font-bold text-slate-600">Start time<input type="time" aria-label="Ramadan Shift Start" value={newEmpForm.ramadanStartTime} onChange={e => setNewEmpForm({ ...newEmpForm, ramadanStartTime: e.target.value })} className="mt-1 h-8 w-full rounded border border-slate-300 px-2 text-xs" /></label><label className="text-[10px] font-bold text-slate-600">End time<input type="time" aria-label="Ramadan Shift End" value={newEmpForm.ramadanEndTime} onChange={e => setNewEmpForm({ ...newEmpForm, ramadanEndTime: e.target.value })} className="mt-1 h-8 w-full rounded border border-slate-300 px-2 text-xs" /></label></div>
+                      <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4"><p className="col-span-2 text-[10px] font-bold text-emerald-800">Friday / Jumu’ah override (optional)</p><label className="text-[10px] font-bold text-slate-600">Start<input type="time" aria-label="Friday Shift Start" value={newEmpForm.fridayStartTime} onChange={e => setNewEmpForm({ ...newEmpForm, fridayStartTime: e.target.value })} className="mt-1 h-8 w-full rounded border border-slate-300 px-2 text-xs" /></label><label className="text-[10px] font-bold text-slate-600">End<input type="time" aria-label="Friday Shift End" value={newEmpForm.fridayEndTime} onChange={e => setNewEmpForm({ ...newEmpForm, fridayEndTime: e.target.value })} className="mt-1 h-8 w-full rounded border border-slate-300 px-2 text-xs" /></label></div>
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 text-xs">Prior Employer Taxable Income:</label>
@@ -4898,7 +5719,7 @@ export function WebPortal({
                           className="w-full h-8 px-2.5 border border-slate-300 rounded-lg font-mono text-xs bg-white focus:ring-1 focus:ring-emerald-500"
                         />
                       ) : (
-                        <div className="h-8 text-[11px] text-slate-400 italic flex items-center">EOBI Disabled</div>
+                        <input type="text" aria-label="EOBI Exemption Reason" placeholder="Required EOBI exemption reason" value={newEmpForm.eobiExemptionReason} onChange={(e) => setNewEmpForm({ ...newEmpForm, eobiExemptionReason: e.target.value })} className="w-full h-8 px-2.5 border border-amber-300 rounded-lg text-xs bg-white focus:ring-1 focus:ring-emerald-500" />
                       )}
                     </div>
 
@@ -4921,6 +5742,8 @@ export function WebPortal({
                         onChange={(e) => setNewEmpForm({ ...newEmpForm, socialSecurityNumber: e.target.value })}
                         className="w-full h-8 px-2.5 border border-slate-300 rounded-lg font-mono text-xs bg-white focus:ring-1 focus:ring-emerald-500"
                       />
+                      {newEmpForm.fbrEnabled && <input type="text" aria-label="Employee NTN" placeholder="Employee NTN (if registered)" value={newEmpForm.ntn} onChange={(e) => setNewEmpForm({ ...newEmpForm, ntn: e.target.value })} className="w-full h-8 px-2.5 border border-slate-300 rounded-lg font-mono text-xs bg-white focus:ring-1 focus:ring-emerald-500" />}
+                      {!newEmpForm.socialSecurityNumber && <input type="text" aria-label="Social Security Exemption Reason" placeholder="Required exemption reason if unregistered" value={newEmpForm.socialSecurityExemptionReason} onChange={(e) => setNewEmpForm({ ...newEmpForm, socialSecurityExemptionReason: e.target.value })} className="w-full h-8 px-2.5 border border-amber-300 rounded-lg text-xs bg-white focus:ring-1 focus:ring-emerald-500" />}
                     </div>
 
                     <div className="bg-slate-50/80 p-3 rounded-xl border border-slate-200 flex flex-col justify-center space-y-2 h-full">
@@ -5061,6 +5884,49 @@ export function WebPortal({
                       />
                     </div>
                     <div>
+                      <label className="block font-bold mb-1 text-slate-700 text-xs">CNIC Expiry (NADRA):</label>
+                      <input type="date" aria-label="Edit CNIC Expiry Date" value={editEmpForm.cnicExpiryDate} onChange={e => setEditEmpForm({ ...editEmpForm, cnicExpiryDate: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none" />
+                    </div>
+                    <div>
+                      <label className="block font-bold mb-1 text-slate-700 text-xs">Contract End (if fixed-term):</label>
+                      <input type="date" aria-label="Edit Contract End Date" value={editEmpForm.contractEndDate} onChange={e => setEditEmpForm({ ...editEmpForm, contractEndDate: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none" />
+                    </div>
+                    <div>
+                      <label className="block font-bold mb-1 text-slate-700 text-xs">Probation Review Due:</label>
+                      <input type="date" aria-label="Edit Probation Review Due Date" value={editEmpForm.probationEndDate} onChange={e => setEditEmpForm({ ...editEmpForm, probationEndDate: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none" />
+                      <label className="mt-2 flex items-center gap-2 text-[11px] font-semibold text-slate-600"><input type="checkbox" checked={editEmpForm.probationConfirmed} onChange={e => setEditEmpForm({ ...editEmpForm, probationConfirmed: e.target.checked })} className="accent-indigo-600" />Probation decision recorded</label>
+                    </div>
+                    <div>
+                      <label className="block font-bold mb-1 text-slate-700 text-xs">Driving Licence Expiry:</label>
+                      <input type="date" aria-label="Edit Driving Licence Expiry" value={editEmpForm.drivingLicenceExpiryDate} onChange={e => setEditEmpForm({ ...editEmpForm, drivingLicenceExpiryDate: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none" />
+                    </div>
+                    <div>
+                      <label className="block font-bold mb-1 text-slate-700 text-xs">Certification Expiry:</label>
+                      <input type="date" aria-label="Edit Certification Expiry" value={editEmpForm.professionalCertificationExpiryDate} onChange={e => setEditEmpForm({ ...editEmpForm, professionalCertificationExpiryDate: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none" />
+                    </div>
+                    <div>
+                      <label className="block font-bold mb-1 text-slate-700 text-xs">Work Permit / Visa Expiry:</label>
+                      <input type="date" aria-label="Edit Work Permit / Visa Expiry" value={editEmpForm.workPermitExpiryDate} onChange={e => setEditEmpForm({ ...editEmpForm, workPermitExpiryDate: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none" />
+                    </div>
+                    <div>
+                      <label className="block font-bold mb-1 text-slate-700 text-xs">Worker Category:</label>
+                      <select aria-label="Edit Worker Category" value={editEmpForm.workerCategory} onChange={e => setEditEmpForm({ ...editEmpForm, workerCategory: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none bg-white">
+                        {['Worker', 'Supervisory', 'Managerial', 'Contract', 'Apprentice'].map(category => <option key={category}>{category}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block font-bold mb-1 text-slate-700 text-xs">Vehicle Perquisite (PKR / month, taxable):</label>
+                      <input type="number" min="0" aria-label="Edit Vehicle Perquisite" value={editEmpForm.perquisiteVehicleMonthly} onChange={e => setEditEmpForm({ ...editEmpForm, perquisiteVehicleMonthly: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none" />
+                    </div>
+                    <div>
+                      <label className="block font-bold mb-1 text-slate-700 text-xs">Accommodation Perquisite (PKR / month, taxable):</label>
+                      <input type="number" min="0" aria-label="Edit Accommodation Perquisite" value={editEmpForm.perquisiteAccommodationMonthly} onChange={e => setEditEmpForm({ ...editEmpForm, perquisiteAccommodationMonthly: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none" />
+                    </div>
+                    <div>
+                      <label className="block font-bold mb-1 text-slate-700 text-xs">Other Perquisites (PKR / month, taxable):</label>
+                      <input type="number" min="0" aria-label="Edit Other Perquisites" value={editEmpForm.perquisiteOtherMonthly} onChange={e => setEditEmpForm({ ...editEmpForm, perquisiteOtherMonthly: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none" />
+                    </div>
+                    <div>
                       <label className="block font-bold mb-1 text-slate-700 text-xs">Shift Start:</label>
                       <input type="time" aria-label="Edit Shift Start" value={editEmpForm.shiftStartTime} onChange={e => setEditEmpForm({ ...editEmpForm, shiftStartTime: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs" />
                     </div>
@@ -5075,6 +5941,11 @@ export function WebPortal({
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 text-xs">Break Minutes:</label>
                       <input type="number" min="0" max="240" aria-label="Edit Shift Break Minutes" value={editEmpForm.shiftBreakMinutes} onChange={e => setEditEmpForm({ ...editEmpForm, shiftBreakMinutes: Number(e.target.value) })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs" />
+                    </div>
+                    <div className="sm:col-span-2 lg:col-span-4 rounded-lg border border-indigo-100 bg-indigo-50/60 p-3">
+                      <p className="mb-2 text-[11px] font-bold text-indigo-800">Ramadan shift override <span className="font-normal text-indigo-700">(optional; dates must be set each year)</span></p>
+                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4"><label className="text-[10px] font-bold text-slate-600">Start<input type="date" aria-label="Edit Ramadan Start Date" value={editEmpForm.ramadanStartDate} onChange={e => setEditEmpForm({ ...editEmpForm, ramadanStartDate: e.target.value })} className="mt-1 h-8 w-full rounded border border-slate-300 px-2 text-xs" /></label><label className="text-[10px] font-bold text-slate-600">End<input type="date" aria-label="Edit Ramadan End Date" value={editEmpForm.ramadanEndDate} onChange={e => setEditEmpForm({ ...editEmpForm, ramadanEndDate: e.target.value })} className="mt-1 h-8 w-full rounded border border-slate-300 px-2 text-xs" /></label><label className="text-[10px] font-bold text-slate-600">Start time<input type="time" aria-label="Edit Ramadan Shift Start" value={editEmpForm.ramadanStartTime} onChange={e => setEditEmpForm({ ...editEmpForm, ramadanStartTime: e.target.value })} className="mt-1 h-8 w-full rounded border border-slate-300 px-2 text-xs" /></label><label className="text-[10px] font-bold text-slate-600">End time<input type="time" aria-label="Edit Ramadan Shift End" value={editEmpForm.ramadanEndTime} onChange={e => setEditEmpForm({ ...editEmpForm, ramadanEndTime: e.target.value })} className="mt-1 h-8 w-full rounded border border-slate-300 px-2 text-xs" /></label></div>
+                      <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4"><p className="col-span-2 text-[10px] font-bold text-indigo-800">Friday / Jumu’ah override (optional)</p><label className="text-[10px] font-bold text-slate-600">Start<input type="time" aria-label="Edit Friday Shift Start" value={editEmpForm.fridayStartTime} onChange={e => setEditEmpForm({ ...editEmpForm, fridayStartTime: e.target.value })} className="mt-1 h-8 w-full rounded border border-slate-300 px-2 text-xs" /></label><label className="text-[10px] font-bold text-slate-600">End<input type="time" aria-label="Edit Friday Shift End" value={editEmpForm.fridayEndTime} onChange={e => setEditEmpForm({ ...editEmpForm, fridayEndTime: e.target.value })} className="mt-1 h-8 w-full rounded border border-slate-300 px-2 text-xs" /></label></div>
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 text-xs">Prior Employer Taxable Income:</label>
@@ -5641,7 +6512,7 @@ export function WebPortal({
                           className="w-full h-8 px-2.5 border border-slate-300 rounded-lg font-mono text-xs bg-white focus:ring-1 focus:ring-indigo-500"
                         />
                       ) : (
-                        <div className="h-8 text-[11px] text-slate-400 italic flex items-center">EOBI Disabled</div>
+                        <input type="text" aria-label="Edit EOBI Exemption Reason" placeholder="Required EOBI exemption reason" value={editEmpForm.eobiExemptionReason} onChange={(e) => setEditEmpForm({ ...editEmpForm, eobiExemptionReason: e.target.value })} className="w-full h-8 px-2.5 border border-amber-300 rounded-lg text-xs bg-white focus:ring-1 focus:ring-indigo-500" />
                       )}
                     </div>
 
@@ -5664,6 +6535,8 @@ export function WebPortal({
                         onChange={(e) => setEditEmpForm({ ...editEmpForm, socialSecurityNumber: e.target.value })}
                         className="w-full h-8 px-2.5 border border-slate-300 rounded-lg font-mono text-xs bg-white focus:ring-1 focus:ring-indigo-500"
                       />
+                      {editEmpForm.fbrEnabled && <input type="text" aria-label="Edit Employee NTN" placeholder="Employee NTN (if registered)" value={editEmpForm.ntn} onChange={(e) => setEditEmpForm({ ...editEmpForm, ntn: e.target.value })} className="w-full h-8 px-2.5 border border-slate-300 rounded-lg font-mono text-xs bg-white focus:ring-1 focus:ring-indigo-500" />}
+                      {!editEmpForm.socialSecurityNumber && <input type="text" aria-label="Edit Social Security Exemption Reason" placeholder="Required exemption reason if unregistered" value={editEmpForm.socialSecurityExemptionReason} onChange={(e) => setEditEmpForm({ ...editEmpForm, socialSecurityExemptionReason: e.target.value })} className="w-full h-8 px-2.5 border border-amber-300 rounded-lg text-xs bg-white focus:ring-1 focus:ring-indigo-500" />}
                     </div>
 
                     <div className="bg-slate-50/80 p-3 rounded-xl border border-slate-200 flex flex-col justify-center space-y-2 h-full">
@@ -5763,6 +6636,20 @@ export function WebPortal({
                 </div>
 
                 <div className="space-y-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <label className="block font-bold text-slate-700">Separation type:
+                      <select value={settlementType} onChange={event => setSettlementType(event.target.value as GratuitySettlement['separationType'])} className="mt-1 w-full rounded border border-slate-300 p-2 font-normal"><option>Resignation</option><option>Termination</option><option>Retirement</option><option>Death</option><option>Redundancy</option></select>
+                    </label>
+                    <label className="block font-bold text-slate-700">Effective / last working date:
+                      <input type="date" value={settlementDate} onChange={event => setSettlementDate(event.target.value)} className="mt-1 w-full rounded border border-slate-300 p-2 font-normal" />
+                    </label>
+                  </div>
+                  <label className="block font-bold text-slate-700">Separation reason / approval note:
+                    <textarea value={settlementReason} onChange={event => setSettlementReason(event.target.value)} rows={2} placeholder="Required for audit and final settlement" className="mt-1 w-full rounded border border-slate-300 p-2 font-normal" />
+                  </label>
+                  <label className="block font-bold text-slate-700">Notice pay days:
+                    <input type="number" min="0" max="180" value={settlementNoticeDays} onChange={event => setSettlementNoticeDays(Number(event.target.value))} className="mt-1 w-full rounded border border-slate-300 p-2 font-mono font-normal" />
+                  </label>
                   <div>
                     <label htmlFor="encashable-leaves" className="block font-bold text-slate-700 mb-1">Encashable Leaves (Days):</label>
                     <input 
@@ -5782,12 +6669,13 @@ export function WebPortal({
                     
                     {(() => {
                       const baseBasic = resolveWageBasis(showOffboardModal, wageTypes) === 'Daily' ? showOffboardModal.basicSalary * 26 : showOffboardModal.basicSalary;
-                      const completedYears = 3; // mock scale
+                      const completedYears = Math.max(0, Math.floor((new Date(`${settlementDate}T00:00:00`).getTime() - new Date(`${showOffboardModal.dateOfJoining}T00:00:00`).getTime()) / (365.2425 * 86_400_000)));
                       const gratuityCalculated = showOffboardModal.gratuityOptIn 
                         ? Math.round((baseBasic / 30) * statConfig.gratuityRateDaysPerYear * completedYears)
                         : 0;
                       const leaveEncashAmount = Math.round((baseBasic / 30) * settlementLeavesEncash);
-                      const totalSettlement = gratuityCalculated + leaveEncashAmount;
+                      const noticePayAmount = Math.round((baseBasic / 30) * settlementNoticeDays);
+                      const totalSettlement = gratuityCalculated + leaveEncashAmount + noticePayAmount;
 
                       return (
                         <div className="space-y-1.5 text-slate-700">
@@ -5798,6 +6686,10 @@ export function WebPortal({
                           <div className="flex justify-between">
                             <span>Leave Encashment Amount ({settlementLeavesEncash} days):</span>
                             <span className="font-mono font-bold">PKR {leaveEncashAmount.toLocaleString()}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Notice Pay ({settlementNoticeDays} days):</span>
+                            <span className="font-mono font-bold">PKR {noticePayAmount.toLocaleString()}</span>
                           </div>
                           <div className="flex justify-between border-t border-rose-200/60 pt-1.5 font-bold text-slate-900 text-xs">
                             <span className="text-rose-900">Total Final Settlement:</span>
@@ -5833,6 +6725,17 @@ export function WebPortal({
 
       {/* MODAL 2: DETAILED PAYSLIP DOWNLOAD WINDOW */}
       <AnimatePresence>
+        {paymentExceptionRun && (
+          <PaymentExceptionsModal
+            run={paymentExceptionRun}
+            payslips={payrollPayslips}
+            employees={employees}
+            onClose={() => setPaymentExceptionRun(null)}
+            onMarkFailed={onMarkPaymentFailed}
+            onRecordRetry={onRecordPaymentRetry}
+          />
+        )}
+
         {showPayslipModal && (
           <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
             <motion.div 
@@ -5897,7 +6800,7 @@ export function WebPortal({
                         
                         <div className="space-y-1 font-mono text-[11px]">
                           <div className="flex justify-between">
-                            <span className="text-slate-500">Basic Pay:</span>
+                            <span className="text-slate-500">{bilingual('Basic Pay:', 'بنیادی تنخواہ')}</span>
                             <span className="text-slate-900 font-bold">{showPayslipModal.basicEarnings.toLocaleString()} PKR</span>
                           </div>
                           <div className="flex justify-between">
@@ -5933,7 +6836,7 @@ export function WebPortal({
                         
                         <div className="space-y-1 font-mono text-[11px]">
                           <div className="flex justify-between items-center mb-1">
-                            <span className="text-slate-500">FBR Income Tax:</span>
+                            <span className="text-slate-500">{bilingual('FBR Income Tax:', 'انکم ٹیکس')}</span>
                             <div className="flex items-center space-x-1">
                               <span className={`px-1 py-0.5 rounded text-[8px] font-bold ${payslipEmp?.fbrEnabled !== false ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-850'}`}>
                                 {payslipEmp?.fbrEnabled !== false ? 'FBR: Active' : 'FBR: Exempt'}
@@ -5956,7 +6859,7 @@ export function WebPortal({
                             </div>
                           ))}
                           <div className="flex justify-between items-center">
-                            <span className="text-slate-500">EOBI Employee:</span>
+                            <span className="text-slate-500">{bilingual('EOBI Employee:', 'ای او بی آئی')}</span>
                             <div className="flex items-center space-x-1">
                               <span className={`px-1 py-0.5 rounded text-[8px] font-bold ${payslipEmp?.eobiEnabled !== false ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-850'}`}>
                                 {payslipEmp?.eobiEnabled !== false ? 'EOBI: Active' : 'EOBI: Exempt'}
@@ -5972,7 +6875,7 @@ export function WebPortal({
                           )}
                           {showPayslipModal.unpaidLeaveDeduction > 0 && (
                             <div className="flex justify-between">
-                              <span className="text-slate-500">Unpaid Leaves:</span>
+                              <span className="text-slate-500">{bilingual('Unpaid Leaves:', 'بلا تنخواہ چھٹیاں')}</span>
                               <span className="text-rose-700">-{showPayslipModal.unpaidLeaveDeduction.toLocaleString()} PKR</span>
                             </div>
                           )}
@@ -5988,33 +6891,37 @@ export function WebPortal({
                 {/* Subtotals & Net Pay */}
                 <div className="border-t border-slate-200 mt-4 pt-4 space-y-2 select-none">
                   <div className="flex justify-between font-mono text-xs">
-                    <span className="text-slate-500">Calculated Gross:</span>
+                    <span className="text-slate-500">{bilingual('Calculated Gross:', 'کل تنخواہ')}</span>
                     <span className="text-slate-800 font-bold">{showPayslipModal.grossSalary.toLocaleString()} PKR</span>
                   </div>
                   <div className="flex justify-between font-mono text-xs text-rose-800">
-                    <span>Total Deducted:</span>
+                    <span>{bilingual('Total Deducted:', 'کل کٹوتی')}</span>
                     <span>-{showPayslipModal.totalDeductions.toLocaleString()} PKR</span>
                   </div>
                   <div className="flex justify-between bg-emerald-50 text-emerald-900 font-bold p-3.5 rounded-lg text-lg border border-emerald-100 shadow-inner">
-                    <span>Net Take-home pay:</span>
+                    <span>{bilingual('Net Take-home pay:', 'قابلِ ادائیگی تنخواہ')}</span>
                     <span className="font-mono">{showPayslipModal.netSalary.toLocaleString()} PKR</span>
                   </div>
                 </div>
 
                 {/* Audit & declaration compliance footnote */}
                 <div className="bg-slate-50 p-2.5 rounded-lg text-[10px] text-slate-400 font-serif leading-relaxed mt-4 border-t">
-                  * Generated by {companyLegalName} under the Shops &amp; Establishments Ordinance. Salary disbursed directly via automated HBL bulk online bank advice file. Fully compliant values.
+                  * Generated by {companyLegalName} under the Shops &amp; Establishments Ordinance. Salary disbursed via bank advice file. Statutory values are calculated from the configured rate tables and should be reconciled with FBR, EOBI and provincial filings.
                 </div>
 
               </div>
 
               <div className="px-6 py-4 bg-slate-50 border-t flex justify-between items-center">
-                <button
-                  onClick={() => setShowPayslipModal(null)}
-                  className="text-slate-500 hover:text-slate-700 text-xs font-semibold px-4 py-2 rounded border border-slate-300 hover:bg-slate-100 transition"
-                >
-                  Close
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setShowPayslipModal(null)}
+                    className="text-slate-500 hover:text-slate-700 text-xs font-semibold px-4 py-2 rounded border border-slate-300 hover:bg-slate-100 transition"
+                  >
+                    Close
+                  </button>
+                  <button type="button" onClick={() => setPayslipUrdu(value => !value)} className="rounded border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100">{payslipUrdu ? 'English only' : 'English + اردو'}</button>
+                  <button type="button" onClick={() => downloadPayslipPdf(showPayslipModal, companyLegalName)} className="flex items-center gap-1 rounded border border-emerald-300 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-50"><Download size={13} />PDF</button>
+                </div>
                 <button
                   onClick={() => {
                     const style = document.createElement('style');
@@ -6082,6 +6989,18 @@ export function WebPortal({
                   </div>
                 </div>
 
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                  <label className="block text-[11px] font-bold text-amber-950">Bank file template</label>
+                  <select aria-label="Bank file template" value={selectedBankTemplate?.id || ''} onChange={event => setBankAdviceProfile(event.target.value)} className="mt-1 h-9 w-full rounded border border-amber-300 bg-white px-2 text-xs text-slate-900">
+                    {bankTemplates.map(item => <option key={item.id} value={item.id}>{item.verified ? '✓ Verified — ' : '⚠ Not verified — '}{item.name}</option>)}
+                  </select>
+                  <label className="mt-2 block text-[11px] font-bold text-amber-950">Value date
+                    <input type="date" value={bankValueDate} onChange={event => setBankValueDate(event.target.value)} className="mt-1 h-9 w-full rounded border border-amber-300 bg-white px-2 text-xs text-slate-900" />
+                  </label>
+                  {selectedBankTemplate && <p className="mt-2 text-[10px] text-amber-900">Batch {batchReferenceFor(showBankFileModal)} · debit account {selectedBankTemplate.debitAccount || 'not set'} · spec: {selectedBankTemplate.specReference || 'not recorded'}</p>}
+                  <p className="mt-2 text-[10px] leading-relaxed text-amber-900">This application does not claim this generic file is accepted by a bank. Upload only after your bank confirms the corporate file specification and finance validates a test batch.</p>
+                </div>
+
                 <div className="overflow-y-auto max-h-60 border border-slate-200 rounded-lg">
                   <table className="min-w-full text-[11px] text-left font-mono divide-y divide-slate-100">
                     <thead className="bg-slate-50 sticky top-0 text-slate-500 font-semibold">
@@ -6116,31 +7035,30 @@ export function WebPortal({
                 <button 
                   onClick={async () => {
                     const rows = payrollPayslips.filter(p => p.payrollRunId === showBankFileModal.id);
-                    const csvCell = (value: string | number | undefined) => `"${String(value ?? '').replace(/"/g, '""')}"`;
-                    const csv = [
-                      ['Employee Code', 'Beneficiary Name', 'Bank', 'IBAN', 'Account Number', 'Net Amount PKR'].map(csvCell).join(','),
-                      ...rows.map(p => [p.employeeCode, p.employeeName, p.bankName, p.iban, p.bankAccountNumber, p.netSalary].map(csvCell).join(','))
-                    ].join('\r\n');
+                    if (!selectedBankTemplate) { alert('Configure a bank file template in Statutory Config first.'); return; }
+                    const invalidRows = rows.filter(p => !/^PK\d{2}[A-Z0-9]{20}$/i.test((p.iban || '').replace(/\s/g, '')) || !Number.isFinite(p.netSalary) || p.netSalary <= 0);
+                    if (invalidRows.length) { alert(`Export blocked: ${invalidRows.length} beneficiary row(s) have an invalid Pakistan IBAN or non-positive amount.`); return; }
+                    const batchReference = batchReferenceFor(showBankFileModal);
+                    const file = renderExport(selectedBankTemplate, rows, { run: showBankFileModal, companyName: companyLegalName, valueDate: bankValueDate, batchReference, employees });
+                    if (file.errors.length) { alert(`Bank file blocked — ${file.errors.length} problem(s):\n• ${file.errors.slice(0, 10).join('\n• ')}`); return; }
+                    if (!selectedBankTemplate.verified && !window.confirm(`${file.warnings.join(' ')}\n\nDownload anyway for a test batch?`)) return;
                     const checksum = await bankAdviceChecksum(rows);
-                    await onRecordBankAdvice(showBankFileModal.id, checksum, rows.length, rows.reduce((sum, row) => sum + row.netSalary, 0));
-                    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
-                    const link = document.createElement('a');
-                    link.href = url;
-                    link.download = `bank-advice-${showBankFileModal.periodYear}-${String(showBankFileModal.periodMonth).padStart(2, '0')}.csv`;
-                    link.click();
-                    URL.revokeObjectURL(url);
+                    await onRecordBankAdvice(showBankFileModal.id, checksum, rows.length, rows.reduce((sum, row) => sum + row.netSalary, 0), selectedBankTemplate.name, { batchReference, controlHash: file.controlHash, verified: Boolean(selectedBankTemplate.verified) });
+                    downloadText(file.content, file.filename);
                     setShowBankFileModal(null);
-                    showToast(`Bank advice generated · SHA-256 ${checksum.slice(0, 12)}…`);
+                    showToast(`Bank file generated · ${file.recordCount} rows · PKR ${file.totalAmount.toLocaleString()} · control ${file.controlHash}`);
                   }}
                   className="bg-slate-900 text-white font-semibold text-xs px-4 py-2 rounded-lg"
                 >
-                  Download Bank Advice Flat File (Excel/CSV)
+                  Download bank file
                 </button>
               </div>
             </motion.div>
           </div>
         )}
       </AnimatePresence>
+
+      {documentVaultEmployee && <EmployeeDocumentVault employee={documentVaultEmployee} canManage={hasPermission('employees')} onClose={() => setDocumentVaultEmployee(null)} />}
 
       {/* MODAL 4: ADD ATTENDANCE LOG */}
       <AnimatePresence>

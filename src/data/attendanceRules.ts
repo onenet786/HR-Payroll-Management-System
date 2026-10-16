@@ -21,26 +21,35 @@ export const completedBreakMinutes = (breaks: AttendanceBreak[] = []): number =>
   return start === undefined || end === undefined ? total : total + elapsedMinutes(start, end);
 }, 0);
 
-export function evaluateAttendanceTimes(punchIn: string | undefined, punchOut: string | undefined, shift: Shift = DEFAULT_SHIFT, breaks: AttendanceBreak[] = []): Pick<AttendanceLog, 'status' | 'overtimeMinutes'> & { workedMinutes: number } {
-  const start = timeMinutes(shift.startTime) ?? 540;
-  const end = timeMinutes(shift.endTime) ?? 1020;
+export function effectiveShiftForDate(shift: Shift = DEFAULT_SHIFT, workDate?: string): Shift {
+  const inRamadan = Boolean(workDate && shift.ramadanStartDate && shift.ramadanEndDate && workDate >= shift.ramadanStartDate && workDate <= shift.ramadanEndDate);
+  const date = workDate ? new Date(`${workDate}T00:00:00`) : undefined;
+  const isFriday = date?.getDay() === 5;
+  const base = inRamadan ? { ...shift, startTime: shift.ramadanStartTime || shift.startTime, endTime: shift.ramadanEndTime || shift.endTime } : shift;
+  return isFriday ? { ...base, startTime: shift.fridayStartTime || base.startTime, endTime: shift.fridayEndTime || base.endTime } : base;
+}
+
+export function evaluateAttendanceTimes(punchIn: string | undefined, punchOut: string | undefined, shift: Shift = DEFAULT_SHIFT, breaks: AttendanceBreak[] = [], workDate?: string): Pick<AttendanceLog, 'status' | 'overtimeMinutes'> & { workedMinutes: number } {
+  const effectiveShift = effectiveShiftForDate(shift, workDate);
+  const start = timeMinutes(effectiveShift.startTime) ?? 540;
+  const end = timeMinutes(effectiveShift.endTime) ?? 1020;
   const input = timeMinutes(punchIn);
   const output = timeMinutes(punchOut);
   if (input === undefined) return { status: 'Absent', overtimeMinutes: 0, workedMinutes: 0 };
 
   const lateBy = elapsedMinutes(start, input);
   const isPlausiblyEarly = lateBy > 720;
-  const status: AttendanceLog['status'] = isPlausiblyEarly || lateBy <= shift.graceMinutes
+  const status: AttendanceLog['status'] = isPlausiblyEarly || lateBy <= effectiveShift.graceMinutes
     ? 'Present'
-    : lateBy >= shift.halfDayMinutes ? 'Half Day' : 'Late';
+    : lateBy >= effectiveShift.halfDayMinutes ? 'Half Day' : 'Late';
   if (output === undefined) return { status, overtimeMinutes: 0, workedMinutes: 0 };
 
   const grossWorked = elapsedMinutes(input, output);
   const recordedBreaks = completedBreakMinutes(breaks);
-  const breakDeduction = Math.max(recordedBreaks, shift.breakMinutes || 0);
+  const breakDeduction = Math.max(recordedBreaks, effectiveShift.breakMinutes || 0);
   const workedMinutes = Math.max(0, grossWorked - breakDeduction);
-  const scheduledMinutes = elapsedMinutes(start, end) - (shift.breakMinutes || 0);
-  const overtimeThreshold = shift.overtimeAfterMinutes ?? scheduledMinutes;
+  const scheduledMinutes = elapsedMinutes(start, end) - (effectiveShift.breakMinutes || 0);
+  const overtimeThreshold = effectiveShift.overtimeAfterMinutes ?? scheduledMinutes;
   return { status, workedMinutes, overtimeMinutes: Math.max(0, workedMinutes - overtimeThreshold) };
 }
 
@@ -55,4 +64,11 @@ export function countScheduledWorkingDays(year: number, month: number, shift: Sh
     if (workingDays.has(date.getDay()) && !holidayDates.has(iso)) total += 1;
   }
   return total;
+}
+
+export const DUPLICATE_PUNCH_WINDOW_MS = 2 * 60_000;
+
+export function isDuplicatePunch(lastPunchTimestamp: string | undefined, now = Date.now(), windowMs = DUPLICATE_PUNCH_WINDOW_MS): boolean {
+  const last = lastPunchTimestamp ? Date.parse(lastPunchTimestamp) : NaN;
+  return Number.isFinite(last) && now >= last && now - last < windowMs;
 }

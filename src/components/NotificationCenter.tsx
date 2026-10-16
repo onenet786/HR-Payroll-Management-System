@@ -59,6 +59,8 @@ export function NotificationCenter({
     type: 'system' as AppNotification['type'],
     title: '',
     message: '',
+    titleUrdu: '',
+    messageUrdu: '',
     targetEmployeeId: '',
     priority: 'medium' as AppNotification['priority']
   });
@@ -84,6 +86,8 @@ export function NotificationCenter({
       type: form.type,
       title: form.title,
       message: form.message,
+      titleUrdu: form.titleUrdu.trim() || undefined,
+      messageUrdu: form.messageUrdu.trim() || undefined,
       targetEmployeeId: form.targetEmployeeId || undefined,
       createdAt: new Date().toISOString(),
       readBy: [],
@@ -91,7 +95,7 @@ export function NotificationCenter({
     };
     onAddNotification(n);
     setShowForm(false);
-    setForm({ type: 'system', title: '', message: '', targetEmployeeId: '', priority: 'medium' });
+    setForm({ type: 'system', title: '', message: '', titleUrdu: '', messageUrdu: '', targetEmployeeId: '', priority: 'medium' });
   };
 
   const getEmpName = (id?: string) => id ? (employees.find(e => e.id === id)?.fullName || id) : 'All Employees';
@@ -271,6 +275,12 @@ export function NotificationCenter({
                       {!read && <span className="w-2 h-2 rounded-full bg-emerald-600 flex-shrink-0" />}
                     </div>
                     <p className="text-xs text-slate-700 mt-1.5 leading-relaxed font-normal">{n.message}</p>
+                    {(n.titleUrdu || n.messageUrdu) && (
+                      <div className="mt-2 rounded-lg border border-emerald-100 bg-emerald-50/60 px-3 py-2 text-right" dir="rtl" lang="ur">
+                        {n.titleUrdu && <p className="text-xs font-bold text-emerald-950">{n.titleUrdu}</p>}
+                        {n.messageUrdu && <p className="mt-0.5 text-xs leading-relaxed text-emerald-900">{n.messageUrdu}</p>}
+                      </div>
+                    )}
                     <div className="flex items-center gap-3 mt-2 text-[11px] text-slate-500">
                       <span>{timeAgo(n.createdAt)}</span>
                       {n.targetEmployeeId && (
@@ -432,6 +442,35 @@ export function NotificationCenter({
                     placeholder="Notification message..."
                     className="w-full bg-white border border-slate-300 text-slate-900 placeholder:text-slate-400 text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 shadow-2xs resize-none"
                   />
+                </div>
+
+                <div className="border-t border-slate-100 pt-3 space-y-3">
+                  <p className="text-[11px] font-bold text-emerald-800 uppercase tracking-wider">Urdu copy (optional)</p>
+                  <div>
+                    <label htmlFor="notif-title-urdu" className="block text-[11px] font-bold text-slate-700 mb-1">Urdu title</label>
+                    <input
+                      id="notif-title-urdu"
+                      dir="rtl"
+                      lang="ur"
+                      value={form.titleUrdu}
+                      onChange={e => setForm(p => ({ ...p, titleUrdu: e.target.value }))}
+                      placeholder="اطلاع کا عنوان"
+                      className="w-full bg-white border border-slate-300 text-slate-900 placeholder:text-slate-400 text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 shadow-2xs"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="notif-message-urdu" className="block text-[11px] font-bold text-slate-700 mb-1">Urdu message</label>
+                    <textarea
+                      id="notif-message-urdu"
+                      dir="rtl"
+                      lang="ur"
+                      value={form.messageUrdu}
+                      onChange={e => setForm(p => ({ ...p, messageUrdu: e.target.value }))}
+                      rows={3}
+                      placeholder="اطلاع کا پیغام"
+                      className="w-full bg-white border border-slate-300 text-slate-900 placeholder:text-slate-400 text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 shadow-2xs resize-none"
+                    />
+                  </div>
                 </div>
               </div>
 

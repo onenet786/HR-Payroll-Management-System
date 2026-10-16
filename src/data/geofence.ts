@@ -1,4 +1,4 @@
-import type { AttendanceLocation, Branch } from '../types';
+import type { AttendanceLocation, AttendanceLog, Branch } from '../types';
 
 export type GeofenceResult = { configured: boolean; inside: boolean; distanceMeters?: number; reason?: string };
 
@@ -29,4 +29,29 @@ export function evaluateBranchGeofence(branch: Branch | undefined, location: Att
   }
   const distance = distanceMeters(location.latitude, location.longitude, branch.geofenceLatitude!, branch.geofenceLongitude!);
   return { configured: true, inside: distance <= branch.geofenceRadiusMeters!, distanceMeters: distance };
+}
+
+export const MAX_PLAUSIBLE_SPEED_KMH = 250;
+
+export function attendanceLocations(log: Pick<AttendanceLog, 'punchInLocation' | 'punchOutLocation' | 'fieldVisits'>): AttendanceLocation[] {
+  return [
+    log.punchInLocation,
+    ...(log.fieldVisits || []).flatMap(visit => [visit.checkInLocation, visit.checkOutLocation]),
+    log.punchOutLocation,
+  ].filter((item): item is AttendanceLocation => Boolean(item && Number.isFinite(Date.parse(item.capturedAt))))
+    .sort((left, right) => Date.parse(left.capturedAt) - Date.parse(right.capturedAt));
+}
+
+// Spoofing apps commonly "teleport" between captures; travel faster than a road vehicle is a review signal.
+export function impossibleTravel(points: AttendanceLocation[], maxSpeedKmh = MAX_PLAUSIBLE_SPEED_KMH): string | undefined {
+  for (let index = 1; index < points.length; index += 1) {
+    const previous = points[index - 1];
+    const current = points[index];
+    const hours = (Date.parse(current.capturedAt) - Date.parse(previous.capturedAt)) / 3_600_000;
+    const km = distanceMeters(previous.latitude, previous.longitude, current.latitude, current.longitude) / 1000;
+    if (km > 1 && (hours <= 0 || km / hours > maxSpeedKmh)) {
+      return `Location moved ${km.toFixed(1)} km in ${Math.max(0, Math.round(hours * 60))} minute(s); possible mock or spoofed GPS.`;
+    }
+  }
+  return undefined;
 }

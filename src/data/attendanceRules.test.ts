@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { countScheduledWorkingDays, evaluateAttendanceTimes } from './attendanceRules';
+import { countScheduledWorkingDays, effectiveShiftForDate, evaluateAttendanceTimes } from './attendanceRules';
 import type { Shift } from '../types';
 
 const day: Shift = { id: 'd', name: 'Day', startTime: '09:00', endTime: '17:00', graceMinutes: 15, halfDayMinutes: 120, overtimeMultiplier: 2, breakMinutes: 60, workingDays: [1,2,3,4,5,6] };
@@ -24,4 +24,18 @@ test('overnight shifts cross midnight without producing negative time', () => {
 test('scheduled days exclude weekly rest days and holidays', () => {
   const total = countScheduledWorkingDays(2026, 10, day, [{ id: 'h', name: 'Holiday', date: '2026-10-03', type: 'Public', isRecurring: false }]);
   assert.equal(total, 26);
+});
+
+test('uses configured Ramadan hours only inside the configured date range', () => {
+  const ramadan = { ...day, ramadanStartDate: '2026-02-18', ramadanEndDate: '2026-03-19', ramadanStartTime: '08:30', ramadanEndTime: '15:30' };
+  assert.equal(effectiveShiftForDate(ramadan, '2026-03-01').startTime, '08:30');
+  assert.equal(effectiveShiftForDate(ramadan, '2026-04-01').startTime, '09:00');
+  assert.equal(evaluateAttendanceTimes('09:10:00', undefined, ramadan, [], '2026-03-01').status, 'Late');
+  assert.equal(evaluateAttendanceTimes('09:10:00', undefined, ramadan, [], '2026-04-01').status, 'Present');
+});
+
+test('uses a Friday shift override without changing weekday or Ramadan schedules', () => {
+  const friday = { ...day, fridayStartTime: '10:00', fridayEndTime: '16:00' };
+  assert.equal(effectiveShiftForDate(friday, '2026-10-16').startTime, '10:00');
+  assert.equal(effectiveShiftForDate(friday, '2026-10-15').startTime, '09:00');
 });

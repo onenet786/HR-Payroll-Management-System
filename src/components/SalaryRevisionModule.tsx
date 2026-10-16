@@ -11,7 +11,7 @@ import { motion, AnimatePresence } from 'motion/react';
 interface SalaryRevisionModuleProps {
   salaryRevisions: SalaryRevision[];
   employees: Employee[];
-  currentUserAccount: { username: string };
+  currentUserAccount: { id: string; username: string };
   onAddSalaryRevision: (revision: SalaryRevision) => void;
 }
 
@@ -50,10 +50,12 @@ export function SalaryRevisionModule({ salaryRevisions, employees, currentUserAc
       incrementPercentage: parseFloat(incrementPct.toFixed(2)),
       effectiveDate: form.effectiveDate,
       reason: form.reason.trim(),
-      approvedBy: currentUserAccount.username,
-      approvedOn: new Date().toISOString().split('T')[0],
+      approvedBy: '',
+      approvedOn: '',
       type: form.type,
-      status: 'Approved'
+      status: 'Draft',
+      createdById: currentUserAccount.id,
+      createdBy: currentUserAccount.username
     };
     onAddSalaryRevision(revision);
     setShowForm(false);
@@ -199,8 +201,10 @@ export function SalaryRevisionModule({ salaryRevisions, employees, currentUserAc
               <div className="mt-3 flex items-center justify-between">
                 <div className="flex gap-4 text-xs text-slate-400">
                   <span>Effective: <span className="text-slate-300 font-semibold">{revision.effectiveDate}</span></span>
-                  <span>Approved by: <span className="text-slate-300">{revision.approvedBy}</span></span>
-                  <span>On: <span className="text-slate-300">{revision.approvedOn}</span></span>
+                  {revision.createdBy && <span>Prepared by: <span className="text-slate-300">{revision.createdBy}</span></span>}
+                  {revision.status !== 'Draft' && <span>Approved by: <span className="text-slate-300">{revision.approvedBy}</span></span>}
+                  {revision.status !== 'Draft' && <span>On: <span className="text-slate-300">{revision.approvedOn}</span></span>}
+                  {Boolean(revision.arrearsAmount) && <span>Arrears: <span className="text-amber-300">PKR {revision.arrearsAmount!.toLocaleString()} (pending payroll review)</span></span>}
                 </div>
                 <div className="text-right">
                   <span className="text-sm font-bold text-emerald-400">+{revision.incrementPercentage.toFixed(1)}%</span>
@@ -208,8 +212,8 @@ export function SalaryRevisionModule({ salaryRevisions, employees, currentUserAc
                 </div>
               </div>
               {revision.status === 'Draft' && <div className="mt-3 flex items-center justify-between rounded-xl border border-amber-500/30 bg-amber-500/10 p-3">
-                <p className="text-xs text-amber-200">Performance recommendation only. Approving will update the employee salary and future payroll.</p>
-                <button type="button" onClick={() => onAddSalaryRevision({ ...revision, status: 'Approved', approvedBy: currentUserAccount.username, approvedOn: new Date().toISOString().split('T')[0] })} className="ml-4 shrink-0 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white">Approve &amp; Apply</button>
+                <p className="text-xs text-amber-200">{revision.sourcePerformanceReviewId ? 'Performance recommendation only.' : 'Awaiting independent approval.'} Approving updates the employee salary; back-dated revisions raise an arrears adjustment for months already processed.</p>
+                <button type="button" disabled={revision.createdById === currentUserAccount.id} title={revision.createdById === currentUserAccount.id ? 'Prepared by you; another authorized user must approve.' : 'Approve and apply'} onClick={() => onAddSalaryRevision({ ...revision, status: 'Approved', approvedBy: currentUserAccount.username, approvedOn: new Date().toISOString().split('T')[0] })} className="ml-4 shrink-0 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-40">Approve &amp; Apply</button>
               </div>}
             </div>
           ))
@@ -303,7 +307,7 @@ export function SalaryRevisionModule({ salaryRevisions, employees, currentUserAc
                 <button onClick={handleSave}
                   disabled={!form.newSalary || form.newSalary <= 0 || !form.reason.trim()}
                   className="flex-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-sm font-bold py-2.5 rounded-xl transition">
-                  Apply Revision & Update Salary
+                  Submit Revision for Approval
                 </button>
               </div>
             </motion.div>

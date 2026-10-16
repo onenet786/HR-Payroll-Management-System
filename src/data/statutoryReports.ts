@@ -1,4 +1,5 @@
 import type { Employee, PayrollRun, Payslip } from '../types';
+import type { Province } from '../types';
 
 export type StatutoryReportKind = 'FBR' | 'EOBI' | 'SOCIAL_SECURITY';
 
@@ -16,6 +17,7 @@ const safeCsvCell = (value: string | number | undefined) => {
   return `"${text.replace(/"/g, '""')}"`;
 };
 const row = (values: Array<string | number | undefined>) => values.map(safeCsvCell).join(',');
+const socialSecurityScheme = (province?: Province | string) => ({ Punjab: 'PESSI', Sindh: 'SESSI', KPK: 'KP ESSI', Balochistan: 'BESSI', ICT: 'Federal / ICT' }[province || ''] || 'Province review required');
 
 export function createStatutoryReport(kind: StatutoryReportKind, run: PayrollRun, payslips: Payslip[], employees: Employee[]): StatutoryReport {
   if (run.status === 'Draft') throw new Error('Approve payroll before generating statutory returns.');
@@ -42,11 +44,12 @@ export function createStatutoryReport(kind: StatutoryReportKind, run: PayrollRun
     });
     total = sheets.reduce((sum, sheet) => sum + sheet.eobiEmployeeDeduction + sheet.eobiEmployerContribution, 0);
   } else {
-    headers = ['Period', 'Province', 'Employee Code', 'Employee Name', 'CNIC', 'Social Security Number', 'Contributory Wage PKR', 'Employer Contribution PKR'];
+    headers = ['Period', 'Province', 'Social Security Scheme', 'Employee Code', 'Employee Name', 'CNIC', 'Social Security Number', 'Contributory Wage PKR', 'Employer Contribution PKR'];
     rows = sheets.map(sheet => {
       const person = employee(sheet.employeeId);
-      if (sheet.pessiEmployerContribution > 0 && !person?.socialSecurityNumber) warnings.push(`${sheet.employeeCode}: social-security number missing`);
-      return [period, sheet.province, sheet.employeeCode, sheet.employeeName, sheet.cnic, person?.socialSecurityNumber, sheet.basicEarnings, sheet.pessiEmployerContribution];
+      const scheme = socialSecurityScheme(sheet.province);
+      if (sheet.pessiEmployerContribution > 0 && !person?.socialSecurityNumber && !person?.socialSecurityExemptionReason) warnings.push(`${sheet.employeeCode}: ${scheme} number or documented exemption reason missing`);
+      return [period, sheet.province, scheme, sheet.employeeCode, sheet.employeeName, sheet.cnic, person?.socialSecurityNumber, sheet.basicEarnings, sheet.pessiEmployerContribution];
     });
     total = sheets.reduce((sum, sheet) => sum + sheet.pessiEmployerContribution, 0);
   }

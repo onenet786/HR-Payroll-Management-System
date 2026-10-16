@@ -6,7 +6,7 @@
 import { useEffect, useState } from 'react';
 import { Layers, ShieldCheck, Briefcase, Info } from 'lucide-react';
 import './DeviceEmulator.css';
-import { WebPortal } from './WebPortal';
+import { WebPortal, type WebPortalProps } from './WebPortal';
 import { KioskTerminal } from './KioskTerminal';
 import { MobileApp } from './MobileApp';
 import type { FirestoreSyncStatus } from '../App';
@@ -36,16 +36,19 @@ interface DeviceEmulatorProps {
   onUpdateTaxSlabs: (slabs: TaxSlab[]) => void;
   onApproveLeave: (id: string) => void;
   onRejectLeave: (id: string) => void;
-  onApproveRegularization: (id: string) => void;
-  onRejectRegularization: (id: string) => void;
+  onApproveRegularization: (id: string, reviewComment: string) => void;
+  onRejectRegularization: (id: string, reviewComment: string) => void;
   onCreatePayrollRun: (title: string, month: number, year: number) => void;
   onLockAttendancePeriod: (month: number, year: number) => void;
+  onReopenAttendancePeriod: (month: number, year: number, reason: string) => void;
+  onCancelPayrollRun: (runId: string, reason: string) => void;
+  portalGovernance: Pick<WebPortalProps, 'statutoryChangeRequests' | 'onReviewStatutoryChange' | 'lifecycleRequests' | 'onCreateLifecycleRequest' | 'onReviewLifecycleRequest' | 'onUpdateOnboarding' | 'onCreateSupplementaryRun' | 'onCreateFinalSettlementRun' | 'onRecordTaxDeposit' | 'onMarkPaymentFailed' | 'onRecordPaymentRetry' | 'onRetroRecalculate'>;
   onUpdatePayrollStatus: (runId: string, status: 'Approved' | 'Disbursed', disbursementReference?: string) => void;
-  onRecordBankAdvice: (runId: string, checksum: string, employeeCount: number, total: number) => void | Promise<void>;
+  onRecordBankAdvice: (runId: string, checksum: string, employeeCount: number, total: number, profile: PayrollRun['bankAdviceProfile'], batch?: { batchReference: string; controlHash: string; verified: boolean }) => void | Promise<void>;
   onSendPayslips: (runId: string) => Promise<{ sent: number; skipped: number; failed: Array<{ employeeId: string; error: string }> }>;
   onSimulatePunch: (employeeId: string, punchIn: string, punchOut: string, method: string, lat?: number, lon?: number, locationAccuracyMeters?: number, locationCapturedAt?: string, locationAddress?: string) => void | Promise<void>;
   onApplyLeave: (leave: LeaveRequest) => void;
-  onAddRegularization: (employeeId: string, date: string, reason: string) => void;
+  onAddRegularization: (employeeId: string, date: string, reason: string, evidenceDocumentIds?: string[]) => void;
   onAddAttendance: (log: AttendanceLog) => void;
   branches: Branch[];
   companies: Company[];
@@ -130,6 +133,9 @@ export function DeviceEmulator({
   onRejectRegularization,
   onCreatePayrollRun,
   onLockAttendancePeriod,
+  onReopenAttendancePeriod,
+  onCancelPayrollRun,
+  portalGovernance,
   onUpdatePayrollStatus,
   onRecordBankAdvice,
   onSendPayslips,
@@ -255,6 +261,7 @@ export function DeviceEmulator({
   if (isNativeMobileEmployee) {
     return (
       <MobileApp
+        leaveConfig={statConfig}
         employees={employees}
         attendances={attendances}
         mobileDutyAuthorizations={mobileDutyAuthorizations}
@@ -266,6 +273,7 @@ export function DeviceEmulator({
         loggedInUser={loggedInUser}
         onLogout={onLogout}
         payrollPayslips={payrollPayslips}
+        payrollRuns={payrollRuns}
       />
     );
   }
@@ -307,6 +315,9 @@ export function DeviceEmulator({
               onRejectRegularization={onRejectRegularization}
               onCreatePayrollRun={onCreatePayrollRun}
               onLockAttendancePeriod={onLockAttendancePeriod}
+              onReopenAttendancePeriod={onReopenAttendancePeriod}
+              onCancelPayrollRun={onCancelPayrollRun}
+              {...portalGovernance}
               onUpdatePayrollStatus={onUpdatePayrollStatus}
               onRecordBankAdvice={onRecordBankAdvice}
               onSendPayslips={onSendPayslips}
