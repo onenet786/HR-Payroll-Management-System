@@ -2166,9 +2166,8 @@ function openSettings() {
   const st = kioskState.syncTarget;
   if (st) {
     el.stSyncInfo.textContent = [
+      `Kiosk version: ${kioskState.appVersion || 'unknown'}`,
       `Portal: ${st.portalUrl}`,
-      `Project: ${st.projectId}`,
-      `Database: ${st.databaseId}`,
       `Collections: ${(st.collections || []).join(', ')}`,
       `Store: ${kioskState.storePath || '—'}`,
     ].join('\n');

@@ -26,7 +26,7 @@
     "windows:build": "npm run build && electron-builder --win",
     "prekiosk:run": "node scripts/sync-face-models.cjs",
     "kiosk:run": "electron windows-kiosk/main.cjs",
-    "prekiosk:build": "node scripts/sync-face-models.cjs",
+    "prekiosk:build": "node scripts/sync-face-models.cjs && node scripts/bump-kiosk-version.cjs",
     "kiosk:build": "node scripts/electron-builder-retry.cjs --config windows-kiosk/electron-builder.json --win"
   },
   "build": {

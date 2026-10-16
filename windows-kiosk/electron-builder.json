@@ -3,7 +3,8 @@
   "productName": "Bin Ishaq Attendance Kiosk",
   "icon": "assets/icon.png",
   "extraMetadata": {
-    "main": "windows-kiosk/main.cjs"
+    "main": "windows-kiosk/main.cjs",
+    "version": "1.0.1"
   },
   "directories": {
     "output": "dist-kiosk"
@@ -40,11 +41,15 @@
     "target": [
       {
         "target": "nsis",
-        "arch": ["x64"]
+        "arch": [
+          "x64"
+        ]
       },
       {
         "target": "portable",
-        "arch": ["x64"]
+        "arch": [
+          "x64"
+        ]
       }
     ]
   },
@@ -53,6 +58,7 @@
     "perMachine": false,
     "allowToChangeInstallationDirectory": true,
     "createDesktopShortcut": true,
-    "createStartMenuShortcut": true
+    "createStartMenuShortcut": true,
+    "include": "windows-kiosk/installer.nsh"
   }
 }

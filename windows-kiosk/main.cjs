@@ -950,6 +950,7 @@ ipcMain.handle('kiosk:get-state', async () => {
     },
     platform: process.platform,
     deviceRegistration: publicDeviceRegistration(),
+    appVersion: app.getVersion(),
     bridgeRunning: await isBridgePortOpen(),
   };
 });
