@@ -8,36 +8,70 @@ import {
   AttendanceLog, LeaveRequest, StatutoryConfig, TaxSlab, Payslip,
   Role, UserAccount, Holiday, LoanAdvance, SalaryRevision,
   PerformanceReview, CompanyAsset, JobPosting, JobApplication,
-  GratuitySettlement, AppNotification
+  GratuitySettlement, AppNotification, PayrollAdjustment, AttendanceRegisterRow
 } from '../types';
+import { countScheduledWorkingDays } from './attendanceRules';
+import { registerPayrollSummary } from './attendancePeriod';
+import { establishmentRule, socialSecurityContribution } from './provincialCompliance';
+import type { WageType } from '../types';
+import { resolveWageBasis } from './masterData';
 
-// Default FBR Income Tax Slabs for Salaried Individuals (Annual)
+// Official FBR Income Tax Slabs for Salaried Individuals (Annual)
+// Enacted under Finance Act, 2024 / First Schedule, Part I, Division I, Clause (2) of the Income Tax Ordinance, 2001
 export const DEFAULT_TAX_SLABS: TaxSlab[] = [
-  { id: 't1', minIncome: 0, maxIncome: 600000, baseTax: 0, percentage: 0 },
-  { id: 't2', minIncome: 600000, maxIncome: 1200000, baseTax: 0, percentage: 5 },
-  { id: 't3', minIncome: 1200000, maxIncome: 2200000, baseTax: 30000, percentage: 15 },
-  { id: 't4', minIncome: 2200000, maxIncome: 3200000, baseTax: 180000, percentage: 25 },
-  { id: 't5', minIncome: 3200000, maxIncome: 4100000, baseTax: 430000, percentage: 30 },
-  { id: 't6', minIncome: 4100000, maxIncome: 99999999, baseTax: 700000, percentage: 35 }
+  { id: 'fbr-slab-1', minIncome: 0, maxIncome: 600000, baseTax: 0, percentage: 0 },
+  { id: 'fbr-slab-2', minIncome: 600000, maxIncome: 1200000, baseTax: 0, percentage: 5 },
+  { id: 'fbr-slab-3', minIncome: 1200000, maxIncome: 2200000, baseTax: 30000, percentage: 15 },
+  { id: 'fbr-slab-4', minIncome: 2200000, maxIncome: 3200000, baseTax: 180000, percentage: 25 },
+  { id: 'fbr-slab-5', minIncome: 3200000, maxIncome: 4100000, baseTax: 430000, percentage: 30 },
+  { id: 'fbr-slab-6', minIncome: 4100000, maxIncome: 999999999, baseTax: 700000, percentage: 35 }
 ];
 
 // Default Pakistan Statutory Config
 export const DEFAULT_STATUTORY_CONFIG: StatutoryConfig = {
-  id: 'stat-pk-default',
+  id: 'stat-pk-2026-27',
   minimumWage: 37000, // PKR per month as of recent notices
   eobiEmployerRate: 5, // 5% of minimum wage (PKR 1,850)
   eobiEmployeeRate: 1, // 1% of minimum wage (PKR 370)
   pessiEmployerRate: 6, // 6% of basic salary (or capped wage)
   gratuityRateDaysPerYear: 30, // 30 days basic pay per year on final settlement
   providentFundMaxEmployeeContribution: 10,
-  updatedAt: '2026-06-17'
+  updatedAt: '2026-07-01',
+  effectiveFrom: '2026-07-01',
+  taxYear: '2027',
+  socialSecurityWageCeiling: 40000,
+  provincialSocialSecurityRates: {
+    Punjab: 6,
+    Sindh: 6,
+    KPK: 6,
+    Balochistan: 6,
+    ICT: 6
+  },
+  provincialMinimumWages: { Punjab: 37000, Sindh: 37000, KPK: 37000, Balochistan: 37000, ICT: 37000 },
+  provincialSocialSecuritySchemes: { Punjab: 'PESSI', Sindh: 'SESSI', KPK: 'KP ESSI', Balochistan: 'BESSI', ICT: 'Federal / ICT' },
+  statutoryPolicyVersion: 'PK-TY2027-2026-07-01',
+  overtimeMultiplier: 2,
+  dailyWagerOvertimeMultiplier: 2,
+  medicalAllowanceExemptPercentOfBasic: 10,
+  surchargeRatePercent: 0,
+  surchargeThresholdAnnual: 10000000,
+  socialSecurityEligibility: 'Capped wage for all',
+  settlementDailyRateDivisor: 30,
+  gratuityMinimumServiceYears: 1,
+  gratuityCountPartYearOverSixMonths: false,
+  gratuityResignationUnderFiveYearsPercent: 100,
+  annualLeaveDaysPerYear: 14,
+  maxLeaveEncashDays: 30,
+  absenceDeductionBasis: 'Calendar Days',
+  standardMonthlyHours: 208
 };
 
 // Default Organization Seeding
 export const DEFAULT_COMPANIES: Company[] = [
   {
     id: 'c1',
-    name: 'Bin Ishaq Logistics Ltd.',
+    name: 'OneNet Solutions Pk.',
+    legalName: 'OneNet Solutions Pk.',
     industry: 'Trading & Services',
     taxRegistrationNumber: 'NTN-4567891-2',
     eobiRegistrationNumber: 'EOBI- Karachi-987654',
@@ -90,7 +124,7 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
     employeeCode: 'IND-KHI-001',
     fullName: 'Ali Raza Khan',
     email: 'ali.raza@induslog.com',
-    contactNumber: '0300-1234567',
+    contactNumber: '+923001234567',
     cnic: '42101-1234567-3',
     gender: 'Male',
     dateOfBirth: '1992-04-12',
@@ -107,7 +141,7 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
     iban: 'PK42HABB0012345678901234',
     eobiNumber: '1090123456',
     socialSecurityNumber: 'SS-42-998877',
-    pictureUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=200',
+    pictureUrl: '',
     isZoneInCharge: true,
     zone: 'East Zone',
     ucTown: 'UC-2 Clifton Town',
@@ -123,7 +157,7 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
     employeeCode: 'IND-KHI-002',
     fullName: 'Sara Ahmed',
     email: 'sara.ahmed@induslog.com',
-    contactNumber: '0321-7654321',
+    contactNumber: '+923217654321',
     cnic: '42201-9876543-2',
     gender: 'Female',
     dateOfBirth: '1989-08-25',
@@ -140,7 +174,7 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
     iban: 'PK12MEZN0099021234567',
     eobiNumber: '1090123499',
     socialSecurityNumber: 'SS-42-991122',
-    pictureUrl: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=200',
+    pictureUrl: '',
     isZoneInCharge: false,
     zoneInChargeName: 'Ali Raza Khan',
     zone: 'East Zone',
@@ -157,7 +191,7 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
     employeeCode: 'IND-LHR-003',
     fullName: 'Muhammad Usman',
     email: 'usman.m@induslog.com',
-    contactNumber: '0333-3112233',
+    contactNumber: '+923333112233',
     cnic: '35202-1234561-1',
     gender: 'Male',
     dateOfBirth: '1991-01-05',
@@ -174,7 +208,7 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
     iban: 'PK52ALFH004455889901',
     eobiNumber: '3590558899',
     socialSecurityNumber: 'SS-35-123456',
-    pictureUrl: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?auto=format&fit=crop&q=80&w=200',
+    pictureUrl: '',
     isZoneInCharge: true,
     zone: 'West Zone',
     ucTown: 'UC-9 Gulberg Town',
@@ -190,7 +224,7 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
     employeeCode: 'IND-LHR-004',
     fullName: 'Tariq Mahmood',
     email: 'tariq.m@induslog.com',
-    contactNumber: '0312-9988776',
+    contactNumber: '+923129988776',
     cnic: '35103-5143219-5',
     gender: 'Male',
     dateOfBirth: '1985-06-15',
@@ -207,7 +241,7 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
     iban: 'PK86NBPA009876123456',
     eobiNumber: '3590443322',
     socialSecurityNumber: 'SS-35-987654',
-    pictureUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=200',
+    pictureUrl: '',
     isZoneInCharge: false,
     zoneInChargeName: 'Muhammad Usman',
     zone: 'West Zone',
@@ -228,7 +262,7 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
     employeeCode: 'IND-LHR-WS01',
     fullName: 'Kamran Bashir',
     email: 'kamran.dispatch@induslog.com',
-    contactNumber: '0345-4455667',
+    contactNumber: '+923454455667',
     cnic: '35201-9988221-7',
     gender: 'Male',
     dateOfBirth: '1995-12-01',
@@ -245,7 +279,7 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
     iban: 'PK24JAZZ03454455667',
     eobiNumber: '',
     socialSecurityNumber: '',
-    pictureUrl: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=200',
+    pictureUrl: '',
     isZoneInCharge: false,
     zoneInChargeName: 'Muhammad Usman',
     zone: 'West Zone',
@@ -259,10 +293,10 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
     branchId: 'b1',
     departmentId: 'd1',
     designationId: 'ds1',
-    employeeCode: 'BINISHAQ-IT-00002',
+    employeeCode: 'ONENET-IT-00002',
     fullName: 'Aqeel Ur Rehman',
     email: 'aaqueel@gmail.com',
-    contactNumber: '0300-1234567',
+    contactNumber: '+923001234567',
     cnic: '35201-1599874-1',
     gender: 'Male',
     dateOfBirth: '1990-05-15',
@@ -279,7 +313,7 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
     iban: 'PK42ASCB0012345678901234',
     eobiNumber: '1090123000',
     socialSecurityNumber: 'SS-42-000111',
-    pictureUrl: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&q=80&w=200',
+    pictureUrl: '',
     isZoneInCharge: false,
     zoneInChargeName: 'Ali Raza Khan',
     zone: 'East Zone',
@@ -368,23 +402,189 @@ export const DEFAULT_ATTENDANCES: AttendanceLog[] = [
 ];
 
 // Helper to calculate realistic Pakistan income tax (FBR annualised salaried individuals)
-export function calculateAnnualTax(annualTaxableIncome: number, slabs: TaxSlab[] = DEFAULT_TAX_SLABS): number {
-  if (annualTaxableIncome <= 600000) return 0;
+export function calculateAnnualTax(annualTaxableIncome: number, slabs: TaxSlab[]): number {
+  if (!annualTaxableIncome || annualTaxableIncome <= 600000) return 0;
+  const effectiveSlabs = Array.isArray(slabs) && slabs.length > 0 ? slabs : DEFAULT_TAX_SLABS;
   
   // Find matching slab
-  const matchingSlab = slabs.find(
-    s => annualTaxableIncome >= s.minIncome && annualTaxableIncome < s.maxIncome
+  const matchingSlab = effectiveSlabs.find(
+    s => s && typeof s.minIncome === 'number' && annualTaxableIncome > s.minIncome && annualTaxableIncome <= (s.maxIncome ?? Infinity)
+  ) || effectiveSlabs.find(
+    s => s && typeof s.minIncome === 'number' && annualTaxableIncome >= s.minIncome && annualTaxableIncome < (s.maxIncome ?? Infinity)
   );
   
+  let baseCalculatedTax = 0;
   if (!matchingSlab) {
     // If somehow not found, go to highest
-    const highest = slabs[slabs.length - 1];
-    const excess = annualTaxableIncome - highest.minIncome;
-    return highest.baseTax + (excess * highest.percentage) / 100;
+    const highest = effectiveSlabs[effectiveSlabs.length - 1] || DEFAULT_TAX_SLABS[DEFAULT_TAX_SLABS.length - 1];
+    const excess = annualTaxableIncome - (highest?.minIncome ?? 4100000);
+    baseCalculatedTax = (highest?.baseTax ?? 700000) + (excess * (highest?.percentage ?? 35)) / 100;
+  } else {
+    const excess = annualTaxableIncome - (matchingSlab.minIncome ?? 0);
+    baseCalculatedTax = (matchingSlab.baseTax ?? 0) + (excess * (matchingSlab.percentage ?? 0)) / 100;
   }
-  
-  const excess = annualTaxableIncome - matchingSlab.minIncome;
-  return matchingSlab.baseTax + (excess * matchingSlab.percentage) / 100;
+
+  // Section 4AB: 10% Surcharge on income exceeding Rs. 10 million (PKR 10,000,000)
+  if (annualTaxableIncome > 10000000) {
+    baseCalculatedTax += baseCalculatedTax * 0.10;
+  }
+
+  return Math.round(baseCalculatedTax);
+}
+
+/** Annual liability including the high-income surcharge (s.4AB) when configured for the tax year. */
+export function annualTaxLiability(annualTaxableIncome: number, slabs: TaxSlab[], config?: Pick<StatutoryConfig, 'surchargeRatePercent' | 'surchargeThresholdAnnual'>) {
+  const tax = calculateAnnualTax(annualTaxableIncome, slabs);
+  const rate = Math.max(0, config?.surchargeRatePercent || 0);
+  const surcharge = rate && annualTaxableIncome > (config?.surchargeThresholdAnnual ?? Number.POSITIVE_INFINITY) ? tax * rate / 100 : 0;
+  return { tax: tax + surcharge, surcharge };
+}
+
+export function pakistanTaxYearForPeriod(month: number, year: number): string {
+  return String(month >= 7 ? year + 1 : year);
+}
+
+export function calculateReconciledMonthlyTax(
+  employee: Employee,
+  grossSalary: number,
+  month: number,
+  year: number,
+  slabs: TaxSlab[],
+  historicalPayslips: Payslip[] = [],
+  config?: Pick<StatutoryConfig, 'surchargeRatePercent' | 'surchargeThresholdAnnual'>
+) {
+  const taxYear = pakistanTaxYearForPeriod(month, year);
+  const taxYearStartYear = Number(taxYear) - 1;
+  const taxYearStart = `${taxYearStartYear}-07-01`;
+  const periodStart = `${year}-${String(month).padStart(2, '0')}-01`;
+  const previous = historicalPayslips.filter(item => item.employeeId === employee.id
+    && item.periodMonth && item.periodYear
+    && `${item.periodYear}-${String(item.periodMonth).padStart(2, '0')}-01` >= taxYearStart
+    && `${item.periodYear}-${String(item.periodMonth).padStart(2, '0')}-01` < periodStart);
+  const priorEmployerIncome = Math.max(0, employee.priorEmployerTaxableIncome || 0);
+  const priorEmployerTax = Math.max(0, employee.priorEmployerTaxDeducted || 0);
+  // Earlier months contribute what was actually taxable (after exemptions, including perquisites), not cash gross.
+  const currentEmployerIncomeBefore = previous.reduce((sum, item) => sum + (item.taxableIncomeThisPeriod ?? item.grossSalary), 0);
+  const currentEmployerTaxBefore = previous.reduce((sum, item) => sum + item.incomeTaxDeduction, 0);
+  const remainingPeriods = month >= 7 ? 19 - month : 7 - month;
+  const projectedAnnualTaxableIncome = priorEmployerIncome + currentEmployerIncomeBefore + grossSalary * remainingPeriods;
+  const liability = annualTaxLiability(projectedAnnualTaxableIncome, slabs, config);
+  const projectedAnnualTaxLiability = liability.tax;
+  const taxDeductedBeforeCurrentPeriod = priorEmployerTax + currentEmployerTaxBefore;
+  const incomeTaxDeduction = Math.max(0, Math.round((projectedAnnualTaxLiability - taxDeductedBeforeCurrentPeriod) / remainingPeriods));
+  return {
+    taxYear,
+    taxableIncomeYtd: priorEmployerIncome + currentEmployerIncomeBefore + grossSalary,
+    taxDeductedBeforeCurrentPeriod,
+    projectedAnnualTaxableIncome,
+    projectedAnnualTaxLiability,
+    surchargeAnnual: Math.round(liability.surcharge),
+    incomeTaxDeduction,
+  };
+}
+
+/**
+ * Reverse calculate Gross Contract Salary from target Net Take-Home pay
+ * accounting for progressive FBR income tax and statutory EOBI employee deduction.
+ */
+export function calculateGrossFromTakeHome(
+  targetNet: number,
+  slabs: TaxSlab[] = DEFAULT_TAX_SLABS,
+  minimumWage = 37000,
+  eobiEmployeeRate = 1
+): { gross: number; monthlyTax: number; eobi: number; net: number } {
+  if (!targetNet || targetNet <= 0) return { gross: 0, monthlyTax: 0, eobi: 0, net: 0 };
+  const eobi = Math.round(minimumWage * (eobiEmployeeRate / 100));
+
+  let low = targetNet;
+  let high = targetNet * 2 + 50000;
+  let bestGross = targetNet;
+
+  for (let i = 0; i < 40; i++) {
+    const mid = (low + high) / 2;
+    const annualTax = calculateAnnualTax(mid * 12, slabs);
+    const mTax = annualTax / 12;
+    const computedNet = mid - mTax - eobi;
+
+    if (Math.abs(computedNet - targetNet) < 0.5) {
+      bestGross = Math.round(mid);
+      break;
+    }
+    if (computedNet < targetNet) {
+      low = mid;
+    } else {
+      high = mid;
+      bestGross = Math.round(mid);
+    }
+  }
+
+  const annualTax = calculateAnnualTax(bestGross * 12, slabs);
+  const monthlyTax = Math.round(annualTax / 12);
+  const net = bestGross - monthlyTax - eobi;
+  return { gross: bestGross, monthlyTax, eobi, net };
+}
+
+/**
+ * Segregate salary package according to standard Pakistan FBR / market practices:
+ * - Basic Wage: 50%
+ * - House Rent Allowance: 30% (standard 45% of basic / 30% of gross)
+ * - Conveyance Allowance: 10%
+ * - Medical Allowance: 10% (FBR Clause 139 exempts medical allowance up to 10% of basic)
+ */
+export function calculateFbrSalarySplit(
+  amount: number,
+  isTakeHome: boolean,
+  slabs: TaxSlab[] = DEFAULT_TAX_SLABS,
+  minimumWage = 37000
+) {
+  if (!amount || amount <= 0) {
+    return {
+      targetAmount: 0,
+      isTakeHome,
+      grossSalary: 0,
+      basicWage: 0,
+      houseRentAllowance: 0,
+      conveyanceAllowance: 0,
+      medicalAllowance: 0,
+      otherAllowances: 0,
+      monthlyTax: 0,
+      eobiDeduction: 0,
+      netTakeHome: 0,
+    };
+  }
+
+  let gross = amount;
+  let monthlyTax = 0;
+  let eobiDeduction = Math.round(minimumWage * 0.01);
+
+  if (isTakeHome) {
+    const rev = calculateGrossFromTakeHome(amount, slabs, minimumWage);
+    gross = rev.gross;
+    monthlyTax = rev.monthlyTax;
+    eobiDeduction = rev.eobi;
+  } else {
+    monthlyTax = Math.round(calculateAnnualTax(gross * 12, slabs) / 12);
+  }
+
+  const basicWage = Math.round(gross * 0.50);
+  const houseRentAllowance = Math.round(gross * 0.30);
+  const conveyanceAllowance = Math.round(gross * 0.10);
+  const medicalAllowance = Math.round(gross * 0.10);
+  const netTakeHome = gross - monthlyTax - eobiDeduction;
+
+  return {
+    targetAmount: amount,
+    isTakeHome,
+    grossSalary: gross,
+    basicWage,
+    houseRentAllowance,
+    conveyanceAllowance,
+    medicalAllowance,
+    otherAllowances: 0,
+    monthlyTax,
+    eobiDeduction,
+    netTakeHome,
+  };
 }
 
 // Function to calculate exact Pakistan Statutory & gross-to-net payslip details
@@ -394,29 +594,49 @@ export function computePayslipDetails(
   year: number,
   attendances: AttendanceLog[],
   leaves: LeaveRequest[],
-  statConfigs: StatutoryConfig = DEFAULT_STATUTORY_CONFIG,
-  taxSlabs: TaxSlab[] = DEFAULT_TAX_SLABS,
-  departments: Department[] = DEFAULT_DEPARTMENTS,
-  designations: Designation[] = DEFAULT_DESIGNATIONS,
-  branches: Branch[] = DEFAULT_BRANCHES,
-  loanAdvances: LoanAdvance[] = []
+  statConfigs: StatutoryConfig,
+  taxSlabs: TaxSlab[],
+  departments: Department[],
+  designations: Designation[],
+  branches: Branch[],
+  loanAdvances: LoanAdvance[] = [],
+  wageTypes: WageType[] = [],
+  holidays: Holiday[] = [],
+  historicalPayslips: Payslip[] = [],
+  payrollAdjustments: PayrollAdjustment[] = [],
+  registerRows?: AttendanceRegisterRow[]
 ): Payslip {
   
   // Basic wage context
-  const isDailyWager = employee.wageType === 'Daily Wager';
+  const isDailyWager = resolveWageBasis(employee, wageTypes) === 'Daily';
   
   // Determine date boundaries
   const totalDaysInMonth = new Date(year, month, 0).getDate();
+  const periodStart = `${year}-${String(month).padStart(2, '0')}-01`;
+  const periodEnd = `${year}-${String(month).padStart(2, '0')}-${String(totalDaysInMonth).padStart(2, '0')}`;
+  const branch = branches.find(b => b.id === employee.branchId);
+  const siteRule = establishmentRule(statConfigs, branch?.establishmentType);
+
+  const overlapDays = (startDate: string, endDate: string): number => {
+    const start = new Date(`${startDate > periodStart ? startDate : periodStart}T00:00:00`);
+    const end = new Date(`${endDate < periodEnd ? endDate : periodEnd}T00:00:00`);
+    if (end < start) return 0;
+    return Math.floor((end.getTime() - start.getTime()) / 86400000) + 1;
+  };
   
   // Count relevant days
   const empAtts = attendances.filter(
     a => a.employeeId === employee.id && a.date.startsWith(`${year}-${String(month).padStart(2, '0')}`)
   );
   
-  const presentDays = empAtts.filter(a => a.status === 'Present' || a.status === 'Late').length;
-  const halfDays = empAtts.filter(a => a.status === 'Half Day').length;
-  const absentDays = empAtts.filter(a => a.status === 'Absent').length;
-  const leaveDays = empAtts.filter(a => a.status === 'On Leave').length;
+  // A certified register is authoritative: it carries rostered absences (days with no punch),
+  // weekly offs, holidays and pre-joining days that raw attendance logs cannot express.
+  const register = registerRows?.some(row => row.employeeId === employee.id) ? registerPayrollSummary(registerRows, employee.id) : undefined;
+  const presentDays = register ? register.presentDays : empAtts.filter(a => a.status === 'Present' || a.status === 'Late').length;
+  const halfDays = register ? register.halfDays : empAtts.filter(a => a.status === 'Half Day').length;
+  const absentAttendanceDates = empAtts.filter(a => a.status === 'Absent').map(a => a.date);
+  const leaveDays = register ? register.paidLeaveDays : empAtts.filter(a => a.status === 'On Leave').length;
+  const notJoinedDays = register?.notJoinedDays || 0;
   
   // Overtime minutes
   const totalOtMinutes = empAtts.reduce((sum, a) => sum + (a.overtimeMinutes || 0), 0);
@@ -426,13 +646,22 @@ export function computePayslipDetails(
   // Filter approved leaves for this month
   const empLeaves = leaves.filter(
     l => l.employeeId === employee.id && 
-         l.status === 'Approved' && 
-         l.startDate.startsWith(`${year}-${String(month).padStart(2, '0')}`)
+         l.status === 'Approved' &&
+         l.startDate <= periodEnd && l.endDate >= periodStart
   );
   
-  const unpaidLeaveDays = empLeaves
+  const unpaidLeaveDays = register ? register.unpaidLeaveDays : empLeaves
     .filter(l => l.leaveType === 'Unpaid')
-    .reduce((sum, l) => sum + l.totalDays, 0);
+    .reduce((sum, l) => sum + overlapDays(l.startDate, l.endDate), 0);
+  const explicitAbsentDays = register ? register.absentDays : absentAttendanceDates.filter(date =>
+    !empLeaves.some(l => l.leaveType === 'Unpaid' && l.startDate <= date && l.endDate >= date)
+  ).length;
+  const paidLeaveDays = register ? register.paidLeaveDays : empLeaves
+    .filter(l => l.leaveType !== 'Unpaid')
+    .reduce((sum, l) => sum + overlapDays(l.startDate, l.endDate), 0);
+  const absentDays = explicitAbsentDays + unpaidLeaveDays;
+  const scheduledWorkingDays = countScheduledWorkingDays(year, month, employee.shift, holidays);
+  const absenceDeductionBasis = statConfigs.absenceDeductionBasis || 'Calendar Days';
   
   // Allowances calculation: For salaried employees, Basic Wage is usually configured as 100% and broken into:
   // Base Wage = 50%
@@ -452,12 +681,12 @@ export function computePayslipDetails(
   
   if (isDailyWager) {
     // Daily wager gets paid for actual days present + (half days * 0.5)
-    const effectiveDaysPaid = presentDays + (halfDays * 0.5);
+    const effectiveDaysPaid = presentDays + (halfDays * 0.5) + paidLeaveDays;
     basicEarnings = effectiveDaysPaid * baseContractSalary;
     
     // Hourly rate derived from 8-hour shift structure
     hourlyRate = baseContractSalary / 8;
-    overtimePay = overtimeHours * hourlyRate * 1.5; // 1.5x OT multiplier for daily wagers
+    overtimePay = overtimeHours * hourlyRate * (siteRule.overtimeMultiplier ?? statConfigs.dailyWagerOvertimeMultiplier ?? statConfigs.overtimeMultiplier ?? 2);
   } else {
     // Check if custom allowances are set on employee record
     const hasCustomAllowances = 
@@ -482,28 +711,50 @@ export function computePayslipDetails(
       medicalAllowance = baseContractSalary * 0.10;
     }
     
-    // Standard calendar day deduction for absences & unpaid leaves
-    const standardDailyDeduction = baseContractSalary / totalDaysInMonth;
-    unpaidLeaveDeduction = unpaidLeaveDays * standardDailyDeduction;
+    // The per-day basis is organizational policy, so it comes from the statutory configuration.
+    // Pre-joining days are prorated on calendar days; under a working-day basis only absences and
+    // unpaid leave on rostered days are deducted, which the register already guarantees.
+    const deductionDivisor = absenceDeductionBasis === 'Scheduled Working Days' ? Math.max(1, scheduledWorkingDays)
+      : absenceDeductionBasis === 'Fixed 30 Days' ? 30 : totalDaysInMonth;
+    unpaidLeaveDeduction = Math.min(baseContractSalary,
+      absentDays * (baseContractSalary / deductionDivisor) + notJoinedDays * (baseContractSalary / totalDaysInMonth));
     
     // Base basic earnings
     basicEarnings = basicComponent;
     
     // Calculate overtime base (basic component / 208 working standard hours per month in Pakistan)
-    const otBaseHourly = basicComponent / 208;
-    overtimePay = overtimeHours * otBaseHourly * 2.0; // 2x double OT rate standard in Punjab/Sindh Shops & Establishments
+    const otBaseHourly = basicComponent / (statConfigs.standardMonthlyHours || 208);
+    overtimePay = overtimeHours * otBaseHourly * (siteRule.overtimeMultiplier ?? statConfigs.overtimeMultiplier ?? 2);
   }
   
-  const grossSalary = Math.round(
+  const periodAdjustments = payrollAdjustments.filter(item => item.employeeId === employee.id
+    && item.periodMonth === month && item.periodYear === year && item.status === 'Approved' && !item.payrollRunId);
+  const adjustmentTotal = (type: PayrollAdjustment['type']) => periodAdjustments.filter(item => item.type === type).reduce((sum, item) => sum + item.amount, 0);
+  const bonusEarnings = adjustmentTotal('Bonus');
+  const commissionEarnings = adjustmentTotal('Commission');
+  const arrearsEarnings = adjustmentTotal('Arrears');
+  const reimbursements = adjustmentTotal('Reimbursement');
+  const otherAdjustmentsDeduction = adjustmentTotal('Deduction');
+  const manualTaxAdjustment = adjustmentTotal('Tax Adjustment');
+  const taxableAdjustments = periodAdjustments.filter(item => item.taxable && !['Deduction', 'Tax Adjustment', 'Reimbursement'].includes(item.type)).reduce((sum, item) => sum + item.amount, 0);
+  const baseGrossSalary = Math.round(
     basicEarnings + houseRentAllowance + conveyanceAllowance + medicalAllowance + otherAllowances + overtimePay - unpaidLeaveDeduction
   );
+  const grossSalary = baseGrossSalary + bonusEarnings + commissionEarnings + arrearsEarnings;
+  const perquisitesValue = Math.max(0, (employee.perquisiteVehicleMonthly || 0) + (employee.perquisiteAccommodationMonthly || 0) + (employee.perquisiteOtherMonthly || 0));
+  const exemptAllowance = isDailyWager ? 0 : Math.round(Math.min(medicalAllowance, basicEarnings * Math.max(0, statConfigs.medicalAllowanceExemptPercentOfBasic ?? 0) / 100));
+  const taxableGrossSalary = Math.max(0, baseGrossSalary + taxableAdjustments + perquisitesValue - exemptAllowance);
   
   // 1. Income Tax Calculation (FBR)
   let incomeTaxDeduction = 0;
+  let taxReconciliation = {
+    taxYear: pakistanTaxYearForPeriod(month, year), taxableIncomeYtd: grossSalary,
+    taxDeductedBeforeCurrentPeriod: 0, projectedAnnualTaxableIncome: grossSalary * 12,
+    projectedAnnualTaxLiability: 0, surchargeAnnual: 0, incomeTaxDeduction: 0,
+  };
   if (employee.fbrEnabled !== false) {
-    const estimatedAnnualGross = grossSalary * 12;
-    const annualTax = calculateAnnualTax(estimatedAnnualGross, taxSlabs);
-    incomeTaxDeduction = Math.round(annualTax / 12);
+    taxReconciliation = calculateReconciledMonthlyTax(employee, taxableGrossSalary, month, year, taxSlabs, historicalPayslips, statConfigs);
+    incomeTaxDeduction = taxReconciliation.incomeTaxDeduction;
   }
   
   // 2. EOBI Calculation (Employees' Old-Age Benefits Institution)
@@ -519,11 +770,7 @@ export function computePayslipDetails(
   
   // 3. PESSI / SESSI (Provincial Social Security)
   // Employer pays 6% of basic salary capped at maximum threshold (typically capped closely to minimum wage or defined limit, let's say max basic salary of 40,000 for PESSI)
-  let pessiEmployerContribution = 0;
-  const pessiWageBase = Math.min(basicEarnings, 40000); 
-  if (employee.socialSecurityNumber || !isDailyWager) {
-    pessiEmployerContribution = Math.round(pessiWageBase * (statConfigs.pessiEmployerRate / 100));
-  }
+  const pessiEmployerContribution = socialSecurityContribution(employee, branch?.province, statConfigs, basicEarnings, isDailyWager).amount;
   
   // 4. Provident Fund Deduction
   let providentFundDeduction = 0;
@@ -540,15 +787,15 @@ export function computePayslipDetails(
   const loanRepaymentDeduction = activeLoans.reduce((sum, l) => sum + l.monthlyInstallment, 0);
 
   const totalDeductions = Math.round(
-    incomeTaxDeduction + eobiEmployeeDeduction + providentFundDeduction + loanRepaymentDeduction
+    incomeTaxDeduction + manualTaxAdjustment + eobiEmployeeDeduction + providentFundDeduction + loanRepaymentDeduction + otherAdjustmentsDeduction
   );
 
-  const netSalary = Math.max(0, grossSalary - totalDeductions);
+  const netSalary = Math.max(0, grossSalary + reimbursements - totalDeductions);
 
   // Resolve names via lookup
   const departmentName = departments.find(d => d.id === employee.departmentId)?.name || 'Unknown Dept';
   const designationTitle = designations.find(d => d.id === employee.designationId)?.title || 'Unknown Title';
-  const branchName = branches.find(b => b.id === employee.branchId)?.name || 'Unknown Branch';
+  const branchName = branch?.name || 'Unknown Branch';
 
   return {
     id: `pay-${employee.id}-${month}-${year}`,
@@ -560,6 +807,9 @@ export function computePayslipDetails(
     departmentName,
     designationTitle,
     branchName,
+    bankName: employee.bankName,
+    bankAccountNumber: employee.bankAccountNumber,
+    iban: employee.iban,
     
     totalDaysInMonth,
     daysPresent: presentDays,
@@ -574,9 +824,17 @@ export function computePayslipDetails(
     conveyanceAllowance: Math.round(conveyanceAllowance),
     medicalAllowance: Math.round(medicalAllowance),
     otherAllowances,
+    bonusEarnings,
+    commissionEarnings,
+    arrearsEarnings,
+    reimbursements,
+    otherAdjustmentsDeduction,
+    manualTaxAdjustment,
+    payrollAdjustmentIds: periodAdjustments.map(item => item.id),
     grossSalary,
     
     incomeTaxDeduction,
+    ...taxReconciliation,
     eobiEmployeeDeduction,
     pessiEmployeeDeduction: 0, // usually paid 100% by employer in Pak
     providentFundDeduction,
@@ -587,7 +845,22 @@ export function computePayslipDetails(
     
     eobiEmployerContribution,
     pessiEmployerContribution,
-    providentFundEmployerContribution
+    providentFundEmployerContribution,
+    province: branch?.province,
+    paidDays: presentDays + paidLeaveDays + (halfDays * 0.5),
+    scheduledWorkingDays,
+    notJoinedDays,
+    absenceDeductionBasis,
+    attendanceSource: register ? 'Certified Register' : 'Attendance Logs',
+    explicitAbsentDays,
+    taxableIncomeThisPeriod: taxableGrossSalary,
+    perquisitesValue,
+    exemptAllowance,
+    runType: 'Regular',
+    statutoryConfigId: statConfigs.id,
+    calculationVersion: 'PK-PAYROLL-3.0-YTD',
+    periodMonth: month,
+    periodYear: year
   };
 }
 
@@ -596,13 +869,13 @@ export const DEFAULT_ROLES: Role[] = [
     id: 'role-admin',
     name: 'Super Admin',
     description: 'Full administrative control of the system, including access permissions and roles.',
-    permissions: ['view_dashboard', 'manage_employees', 'manage_attendance', 'manage_leaves', 'manage_payroll', 'manage_settings', 'manage_access']
+    permissions: ['view_dashboard', 'manage_employees', 'manage_attendance', 'manage_mobile_duty', 'manage_leaves', 'manage_payroll', 'manage_settings', 'manage_access']
   },
   {
     id: 'role-hr',
     name: 'HR Manager',
     description: 'Manages employee directories, leaves, and attendance records.',
-    permissions: ['view_dashboard', 'manage_employees', 'manage_attendance', 'manage_leaves']
+    permissions: ['view_dashboard', 'manage_employees', 'manage_attendance', 'manage_mobile_duty', 'manage_leaves']
   },
   {
     id: 'role-payroll',
@@ -624,51 +897,8 @@ export const DEFAULT_ROLES: Role[] = [
   }
 ];
 
-export const DEFAULT_USERS: UserAccount[] = [
-  {
-    id: 'usr-1',
-    username: 'admin',
-    email: 'admin@binishaq.com',
-    roleId: 'role-admin',
-    status: 'Active',
-    password: 'admin123'
-  },
-  {
-    id: 'usr-2',
-    username: 'sara.hr',
-    email: 'sara.ahmed@induslog.com',
-    roleId: 'role-hr',
-    employeeId: 'emp2',
-    status: 'Active',
-    password: 'sara123'
-  },
-  {
-    id: 'usr-3',
-    username: 'usman.payroll',
-    email: 'usman.m@induslog.com',
-    roleId: 'role-payroll',
-    employeeId: 'emp3',
-    status: 'Active',
-    password: 'usman123'
-  },
-  {
-    id: 'usr-4',
-    username: 'ali.raza',
-    email: 'ali.raza@induslog.com',
-    roleId: 'role-employee',
-    employeeId: 'emp1',
-    status: 'Active',
-    password: 'ali123'
-  },
-  {
-    id: 'usr-kiosk',
-    username: 'kiosk',
-    email: 'kiosk@binishaq.com',
-    roleId: 'role-kiosk',
-    status: 'Active',
-    password: 'kiosk123'
-  }
-];
+// Accounts are created through the initial administrator setup flow; never seed credentials.
+export const DEFAULT_USERS: UserAccount[] = [];
 
 // Pakistan Public Holidays 2026
 export const DEFAULT_HOLIDAYS: Holiday[] = [
@@ -684,7 +914,7 @@ export const DEFAULT_HOLIDAYS: Holiday[] = [
   { id: 'hol-10', name: 'Independence Day', date: '2026-08-14', type: 'Public', isRecurring: true, description: 'Pakistan Independence Day' },
   { id: 'hol-11', name: 'Iqbal Day', date: '2026-11-09', type: 'Public', isRecurring: true, description: 'Allama Iqbal birthday' },
   { id: 'hol-12', name: 'Quaid-e-Azam Day', date: '2026-12-25', type: 'Public', isRecurring: true, description: 'Birthday of Quaid-e-Azam Muhammad Ali Jinnah' },
-  { id: 'hol-c1', name: 'Company Foundation Day', date: '2026-07-15', type: 'Company', isRecurring: true, description: 'Bin Ishaq Logistics annual foundation celebration' }
+  { id: 'hol-c1', name: 'Company Foundation Day', date: '2026-07-15', type: 'Company', isRecurring: true, description: 'Annual company foundation celebration' }
 ];
 
 // Sample Loan & Advance Records
@@ -860,7 +1090,7 @@ export const DEFAULT_JOB_POSTINGS: JobPosting[] = [
     vacancies: 2, experienceRequired: '3-5 years', qualificationRequired: 'BS Computer Science or equivalent',
     salaryRange: 'PKR 150,000 – 200,000', jobType: 'Full Time',
     postedDate: '2026-06-01', closingDate: '2026-06-30', status: 'Open',
-    description: 'We are looking for experienced React developers to join our growing IT team. Candidates must have hands-on experience with TypeScript, Firebase, and modern CI/CD workflows.'
+    description: 'We are looking for experienced React developers to join our growing IT team. Candidates must have hands-on experience with TypeScript, PostgreSQL, and modern CI/CD workflows.'
   },
   {
     id: 'job-002', title: 'Logistics Coordinator', departmentId: 'd3', branchId: 'b2',
@@ -885,7 +1115,7 @@ export const DEFAULT_JOB_APPLICATIONS: JobApplication[] = [
     applicantEmail: 'fahad.iqbal@gmail.com', applicantPhone: '0321-9988776',
     cnic: '42101-8877665-1', currentSalary: 110000, expectedSalary: 175000,
     appliedDate: '2026-06-05', stage: 'Interviewed',
-    interviewDate: '2026-06-15', interviewNotes: 'Strong React skills. Needs Firebase deepening. Recommended for round 2.'
+    interviewDate: '2026-06-15', interviewNotes: 'Strong React skills. Needs PostgreSQL deepening. Recommended for round 2.'
   },
   {
     id: 'app-002', jobPostingId: 'job-001', applicantName: 'Zainab Malik',

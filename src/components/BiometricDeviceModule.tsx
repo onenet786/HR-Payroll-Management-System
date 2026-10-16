@@ -15,6 +15,7 @@ import './BiometricDeviceModule.css';
 import {
   FACE_MATCH_MARGIN,
   FACE_MATCH_THRESHOLD,
+  FACE_VERIFY_THRESHOLD,
   type FaceDescriptor,
   assessBrowserFaceDetection,
   assessFaceFrame,
@@ -23,9 +24,7 @@ import {
   getFaceDescriptors,
   hasFaceEnrollment,
 } from '../utils/faceRecognition';
-
-// ── Types ──────────────────────────────────────────────────────────────────────
-
+import { performActiveLiveness, randomLivenessOrder, type LivenessDirection } from '../utils/faceLiveness';
 type WsStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 type CaptureState = 'idle' | 'scanning' | 'captured' | 'error';
 type TabId = 'test' | 'enroll' | 'attendance';
@@ -152,6 +151,9 @@ export function BiometricDeviceModule({
   const [faceCameraReady, setFaceCameraReady] = useState(false);
   const [faceMsg, setFaceMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const [recognizedFaceMatch, setRecognizedFaceMatch] = useState<{ employee: Employee; score: number; margin: number } | null>(null);
+  const [livenessPhase, setLivenessPhase] = useState(-1);
+  const [livenessOrder, setLivenessOrder] = useState<[LivenessDirection, LivenessDirection]>(['left', 'right']);
+  const [livenessBusy, setLivenessBusy] = useState(false);
 
   // ── Attendance state ─────────────────────────────────────────────────────────
   const [attEmpId, setAttEmpId] = useState(employees[0]?.id || '');
@@ -167,8 +169,8 @@ export function BiometricDeviceModule({
   // ── WebSocket message handler ─────────────────────────────────────────────────
   const handleMsg = useCallback((raw: string) => {
     let msg: Record<string, unknown>;
-    try { msg = JSON.parse(raw); } catch { log('← ' + raw.slice(0, 80)); return; }
-    log('← ' + JSON.stringify(msg).slice(0, 80));
+    try { msg = JSON.parse(raw); } catch { log('← Unparseable device response [REDACTED]'); return; }
+    log(`← Biometric device event: ${String(msg?.type || msg?.action || 'response')}`);
 
     // Device list
     if (msg.status === 'DeviceList' || Array.isArray(msg.devices)) {
@@ -178,7 +180,7 @@ export function BiometricDeviceModule({
         const d = devList[0];
         setDeviceDiagnostics([]);
         setDevice({ sn: d.sn || d.id || 'BIO-DEVICE-001', type: d.type || d.name || 'Fingerprint Reader' });
-        log(`✓ Found: ${d.type || d.name || 'Fingerprint Reader'} (SN: ${d.sn || d.id})`);
+        log(`✓ Found fingerprint reader (serial [REDACTED])`);
       } else {
         setDevice(null);
         setDeviceDiagnostics(diagnostics);
@@ -208,7 +210,7 @@ export function BiometricDeviceModule({
     // Errors
     if (msg.status === 'Error' || msg.error) {
       setCaptureState('error');
-      log(`✗ Device error: ${msg.error || msg.message || msg.status}`);
+      log('✗ Device error [REDACTED]');
     }
   }, [captureState, captureQuality, log]);
 
@@ -220,14 +222,14 @@ export function BiometricDeviceModule({
         setWsStatus('connected');
         setIsSimMode(false);
         setIsWebHID(false);
-        log(`✓ Connected to ${url} — querying device list...`);
+        log('✓ Connected to local biometric bridge.');
         ws.send(JSON.stringify({ action: 'GetDeviceList' }));
       };
       ws.onmessage = e => handleMsg(e.data);
       ws.onerror = () => {
         const nextUrl = fallbacks[0];
         if (nextUrl) {
-          log(`✗ ${url} failed — trying ${nextUrl}...`);
+          log('✗ Local biometric bridge connection failed; trying fallback.');
           connectWs(nextUrl, fallbacks.slice(1));
         } else {
           setWsStatus('error');
@@ -242,7 +244,7 @@ export function BiometricDeviceModule({
       wsRef.current = ws;
     } catch (e) {
       setWsStatus('error');
-      log('WebSocket API unavailable: ' + e);
+        log('WebSocket API unavailable.');
     }
   }, [handleMsg, log]);
 
@@ -353,11 +355,11 @@ export function BiometricDeviceModule({
       log('Requesting USB HID access (select DigitalPersona U.are.U 4500 or SecuGen Hamster Pro if visible)...');
       const allDevices: any[] = await hidApi.getDevices();
       if (allDevices.length > 0) {
-        log(`→ Previously granted HID devices: ${allDevices.map((d: any) => `${d.productName || 'Unknown'} (0x${(d.vendorId as number).toString(16).toUpperCase().padStart(4,'0')}:0x${(d.productId as number).toString(16).toUpperCase().padStart(4,'0')})`).join(', ')}`);
+        log(`→ Previously granted HID devices: ${allDevices.length} device(s) [REDACTED]`);
       }
       let devList: any[] = allDevices.filter(isSupportedFingerprintDevice);
       if (devList.length > 0) {
-        log(`→ Reusing granted fingerprint reader: ${devList[0].productName || 'Fingerprint Reader'}`);
+        log('→ Reusing granted fingerprint reader [REDACTED]');
       } else {
         log('→ No granted supported fingerprint reader found. Opening the full HID device chooser...');
         devList = await hidApi.requestDevice({
@@ -390,7 +392,7 @@ export function BiometricDeviceModule({
           ],
           endpoint: `${hid.productName || 'HID device'} (${formatUsbId(hid.vendorId)}:${formatUsbId(hid.productId)})`,
         });
-        log(`✗ Ignored non-reader HID device: ${hid.productName || 'Unknown'} (${formatUsbId(hid.vendorId)}:${formatUsbId(hid.productId)})`);
+        log('✗ Ignored non-reader HID device [REDACTED]');
         return;
       }
       if (!hid.opened) {
@@ -407,7 +409,7 @@ export function BiometricDeviceModule({
             ],
             endpoint: 'USB HID / WebHID',
           });
-          log(`✗ Fingerprint reader was selected but could not be opened: ${e?.message || e}`);
+          log('✗ Fingerprint reader could not be opened.');
           return;
         }
       }
@@ -419,7 +421,7 @@ export function BiometricDeviceModule({
       const vendorId = formatUsbId(hid.vendorId as number);
       const productId = formatUsbId(hid.productId as number);
       setDevice({ sn: hid.serialNumber || `BIO-${vendorId}${productId}`, type: productName });
-      log(`✓ WebHID connected: ${productName} (${vendorId}:${productId})`);
+      log('✓ WebHID connected: device [REDACTED]');
       log(`→ HID collections: ${JSON.stringify(hid.collections?.map((c: any) => ({ usagePage: c.usagePage, usage: c.usage, reportIds: c.reportIds })) || [])}`);
       hid.addEventListener('inputreport', (event: any) => {
         const bytes = new Uint8Array(event.data.buffer || event.data);
@@ -438,7 +440,7 @@ export function BiometricDeviceModule({
         ],
         endpoint: 'USB HID / WebHID',
       });
-      log(`✗ WebHID error: ${e?.message || e}`);
+      log('✗ WebHID error [REDACTED]');
     }
   }, [webHIDSupported, handleHIDInputReport, log]);
 
@@ -467,7 +469,7 @@ export function BiometricDeviceModule({
         setCapturedTemplate(tmpl);
         setCaptureQuality(capped);
         setCaptureState('captured');
-        log(`[SIM] Capture complete. Quality: ${capped}. Template: ${tmpl.slice(0, 16)}...`);
+        log(`[SIM] Capture complete. Quality: ${capped}. Template: [REDACTED]`);
       }
     }, 140);
   }, [log]);
@@ -504,7 +506,7 @@ export function BiometricDeviceModule({
           try {
             await webHIDRef.current.sendReport(outputReports[0], new Uint8Array([0x01]));
           } catch (e: any) {
-            log(`⚠ HID capture trigger was ignored: ${e?.message || e}`);
+            log('⚠ HID capture trigger was ignored [REDACTED]');
           }
         } else {
           log('→ No HID output report exposed; waiting for sensor input report.');
@@ -577,13 +579,12 @@ export function BiometricDeviceModule({
     const updated: Employee = { ...emp, fingerprintTemplates: enrollSamples };
     try {
       await onUpdateEmployee(updated);
-      setEnrollMsg({ type: 'ok', text: `✓ ${enrollSamples.length} fingerprint samples enrolled for ${emp.fullName} and saved to Firestore.` });
-      log(`✓ Enrollment saved: ${emp.fullName} (${enrollSamples.length} templates)`);
+      setEnrollMsg({ type: 'ok', text: `✓ ${enrollSamples.length} fingerprint samples enrolled for ${emp.fullName} and saved to Database.` });
+      log(`✓ Enrollment saved: [REDACTED] (${enrollSamples.length} templates)`);
       setTimeout(() => setEnrollMsg(null), 4000);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown Firestore error';
-      setEnrollMsg({ type: 'err', text: `Enrollment captured, but Firestore rejected the save: ${message}` });
-      log(`✗ Enrollment save failed: ${message}`);
+    } catch {
+      setEnrollMsg({ type: 'err', text: 'Enrollment captured, but the secure save failed.' });
+      log('✗ Enrollment save failed [REDACTED]');
     }
   };
 
@@ -609,11 +610,10 @@ export function BiometricDeviceModule({
       await onUpdateEmployee(updated);
       resetEnrollment();
       setEnrollMsg({ type: 'ok', text: `Removed saved fingerprint samples for ${emp.fullName}. You can enroll new samples now.` });
-      log(`Fingerprint enrollment removed: ${emp.fullName}`);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown Firestore error';
-      setEnrollMsg({ type: 'err', text: `Could not remove fingerprint samples: ${message}` });
-      log(`Fingerprint enrollment remove failed: ${message}`);
+      log('Fingerprint enrollment removed: [REDACTED]');
+    } catch {
+      setEnrollMsg({ type: 'err', text: 'Could not remove fingerprint samples.' });
+      log('Fingerprint enrollment remove failed [REDACTED]');
     }
   };
 
@@ -630,11 +630,10 @@ export function BiometricDeviceModule({
       await onUpdateEmployee(updated);
       setRecognizedFaceMatch(null);
       setFaceMsg({ type: 'ok', text: `Removed saved face profiles for ${emp.fullName}. Save a new face when ready.` });
-      log(`Camera face enrollment removed: ${emp.fullName}`);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown Firestore error';
-      setFaceMsg({ type: 'err', text: `Could not remove face profiles: ${message}` });
-      log(`Camera face remove failed: ${message}`);
+      log('Camera face enrollment removed: [REDACTED]');
+    } catch {
+      setFaceMsg({ type: 'err', text: 'Could not remove face profiles.' });
+      log('Camera face remove failed [REDACTED]');
     }
   };
 
@@ -656,12 +655,11 @@ export function BiometricDeviceModule({
       setRecognizedFaceMatch(null);
       setFaceMsg({ type: 'ok', text: `Removed all saved biometrics for ${emp.fullName}.` });
       setEnrollMsg({ type: 'ok', text: `Removed all saved biometrics for ${emp.fullName}. You can enroll fresh samples now.` });
-      log(`All biometric enrollments removed: ${emp.fullName}`);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown Firestore error';
-      setEnrollMsg({ type: 'err', text: `Could not remove biometrics: ${message}` });
-      setFaceMsg({ type: 'err', text: `Could not remove biometrics: ${message}` });
-      log(`Biometric remove failed: ${message}`);
+      log('All biometric enrollments removed: [REDACTED]');
+    } catch {
+      setEnrollMsg({ type: 'err', text: 'Could not remove biometrics.' });
+      setFaceMsg({ type: 'err', text: 'Could not remove biometrics.' });
+      log('Biometric remove failed [REDACTED]');
     }
   };
 
@@ -672,6 +670,8 @@ export function BiometricDeviceModule({
     }
     if (faceVideoRef.current) faceVideoRef.current.srcObject = null;
     setFaceCameraReady(false);
+    setLivenessPhase(-1);
+    setLivenessBusy(false);
   }, []);
 
   const startFaceCamera = useCallback(async () => {
@@ -689,7 +689,7 @@ export function BiometricDeviceModule({
       setFaceCameraReady(true);
     } catch (error) {
       setFaceCameraReady(false);
-      setFaceMsg({ type: 'err', text: error instanceof Error ? error.message : 'Camera access failed.' });
+      setFaceMsg({ type: 'err', text: 'Camera access failed. Check permission and try again.' });
     }
   }, []);
 
@@ -701,10 +701,23 @@ export function BiometricDeviceModule({
       return;
     }
     try {
+      setLivenessBusy(true);
+      setLivenessPhase(0);
+      const order = randomLivenessOrder();
+      setLivenessOrder(order);
+      const live = await performActiveLiveness(faceVideoRef.current, order, (message, phase) => {
+        setLivenessPhase(phase);
+        setFaceMsg({ type: 'ok', text: message });
+      });
+      if (!live.ok || !live.summary) {
+        setFaceMsg({ type: 'err', text: live.message });
+        return;
+      }
       const samples: FaceDescriptor[] = [];
-      setFaceMsg({ type: 'ok', text: `Capturing 3 camera face samples for ${emp.fullName}. Keep the face steady inside the oval.` });
+      const SAMPLE_COUNT = 5;
+      setFaceMsg({ type: 'ok', text: `Capturing ${SAMPLE_COUNT} face samples for ${emp.fullName}. Keep the face steady inside the oval.` });
 
-      for (let i = 0; i < 3; i += 1) {
+      for (let i = 0; i < SAMPLE_COUNT; i += 1) {
         const browserFace = await assessBrowserFaceDetection(faceVideoRef.current);
         if (browserFace !== null) {
           if (!browserFace.ok) {
@@ -719,22 +732,63 @@ export function BiometricDeviceModule({
           }
         }
 
-        samples.push(createFaceDescriptorFromVideo(faceVideoRef.current, `admin-webcam-${i + 1}`));
-        if (i < 2) await wait(350);
+        const descriptor = await createFaceDescriptorFromVideo(faceVideoRef.current, `admin-webcam-${i + 1}`);
+        samples.push({
+          ...descriptor,
+          liveness: {
+            method: 'active-turn-v1',
+            verifiedAt: new Date().toISOString(),
+            summary: {
+              order: live.summary.order,
+              durationMs: live.summary.durationMs,
+              frameCounts: live.summary.frameCounts,
+              maxLeftYaw: live.summary.maxLeftYaw,
+              maxRightYaw: live.summary.maxRightYaw,
+              maxCenterDrift: live.summary.maxCenterDrift,
+              maxScaleChange: live.summary.maxScaleChange,
+            },
+          },
+        });
+        if (i < SAMPLE_COUNT - 1) await wait(300);
+      }
+
+      // Every sample must be the same person; a different face or a badly turned head during capture is rejected.
+      let widest = 0;
+      for (let a = 0; a < samples.length; a += 1) for (let b = a + 1; b < samples.length; b += 1) widest = Math.max(widest, compareFaceDescriptors(samples[a], samples[b]));
+      if (widest > 0.4) {
+        setFaceMsg({ type: 'err', text: `The ${SAMPLE_COUNT} samples did not agree (spread ${widest.toFixed(2)}). Only ${emp.fullName} should be in front of the camera; keep still with even light and try again.` });
+        return;
+      }
+
+      // Prevent duplicate enrollment: no sample may match another enrolled employee.
+      const otherEnrolled = employees.filter(e => e.id !== emp.id && hasFaceEnrollment(e));
+      for (const other of otherEnrolled) {
+        for (const desc of getFaceDescriptors(other)) {
+          const score = Math.min(...samples.map(sample => compareFaceDescriptors(sample, desc)));
+          if (Number.isFinite(score) && score <= FACE_MATCH_THRESHOLD) {
+            setFaceMsg({
+              type: 'err',
+              text: `This face matches already enrolled employee ${other.fullName} (${other.employeeCode}) [distance ${score.toFixed(3)}]. To prevent identity confusion, duplicate face enrollments are prohibited.`,
+            });
+            log(`Duplicate face enrollment blocked: matches ${other.fullName} score=${score.toFixed(3)}`);
+            return;
+          }
+        }
       }
 
       const updated: Employee = {
         ...emp,
-        faceDescriptors: [...samples, ...(emp.faceDescriptors || [])].slice(0, 5),
+        faceDescriptors: samples,
       };
       await onUpdateEmployee(updated);
       setRecognizedFaceMatch(null);
-      setFaceMsg({ type: 'ok', text: `3 camera face samples saved for ${emp.fullName}. Click Verify Face to test this enrollment.` });
-      log(`Camera face enrollment saved: ${emp.fullName} (3 samples)`);
+      setFaceMsg({ type: 'ok', text: `${SAMPLE_COUNT} face samples saved for ${emp.fullName}. Click Verify Face to test this enrollment.` });
+      log(`Camera face enrollment saved: [REDACTED] (${SAMPLE_COUNT} samples)`);
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown camera enrollment error';
-      setFaceMsg({ type: 'err', text: message });
-      log(`Camera enrollment failed: ${message}`);
+      setFaceMsg({ type: 'err', text: error instanceof Error ? error.message : 'Camera enrollment failed.' });
+      log('Camera enrollment failed [REDACTED]');
+    } finally {
+      setLivenessBusy(false);
     }
   };
 
@@ -752,6 +806,14 @@ export function BiometricDeviceModule({
     }
 
     try {
+      setLivenessBusy(true);
+      const order = randomLivenessOrder();
+      setLivenessOrder(order);
+      const live = await performActiveLiveness(faceVideoRef.current, order, (message, phase) => {
+        setLivenessPhase(phase);
+        setFaceMsg({ type: 'ok', text: message });
+      });
+      if (!live.ok) { setFaceMsg({ type: 'err', text: live.message }); return; }
       const browserFace = await assessBrowserFaceDetection(faceVideoRef.current);
       if (browserFace !== null) {
         if (!browserFace.ok) {
@@ -766,54 +828,77 @@ export function BiometricDeviceModule({
         }
       }
 
-      const probe = createFaceDescriptorFromVideo(faceVideoRef.current, 'admin-verify');
-      let bestEmployee: Employee | null = null;
-      let bestScore = Number.POSITIVE_INFINITY;
-      let secondScore = Number.POSITIVE_INFINITY;
-      let secondEmployee: Employee | null = null;
+      const probe = await createFaceDescriptorFromVideo(faceVideoRef.current, 'admin-verify');
+      const selectedEmp = employees.find(e => e.id === enrollEmpId);
+      const isTargeted = Boolean(selectedEmp && hasFaceEnrollment(selectedEmp));
+      const verifyThreshold = isTargeted ? FACE_VERIFY_THRESHOLD : FACE_MATCH_THRESHOLD;
 
-      for (const candidate of enrolledEmployees) {
-        for (const descriptor of getFaceDescriptors(candidate)) {
-          const score = compareFaceDescriptors(probe, descriptor);
-          if (!Number.isFinite(score)) continue;
-          if (score < bestScore) {
-            if (bestEmployee && bestEmployee.id !== candidate.id) {
-              secondScore = bestScore;
-              secondEmployee = bestEmployee;
+      const scoredCandidates = enrolledEmployees
+        .map(candidate => {
+          let minScore = Number.POSITIVE_INFINITY;
+          for (const descriptor of getFaceDescriptors(candidate)) {
+            const score = compareFaceDescriptors(probe, descriptor);
+            if (Number.isFinite(score) && score < minScore) {
+              minScore = score;
             }
-            bestScore = score;
-            bestEmployee = candidate;
-          } else if (bestEmployee?.id !== candidate.id && score < secondScore) {
-            secondScore = score;
-            secondEmployee = candidate;
           }
-        }
-      }
+          return { employee: candidate, score: minScore };
+        })
+        .filter(item => Number.isFinite(item.score))
+        .sort((a, b) => a.score - b.score);
 
-      if (!bestEmployee || !Number.isFinite(bestScore)) {
+      if (!scoredCandidates.length) {
         setFaceMsg({ type: 'err', text: 'Saved camera profiles are invalid. Save Face again.' });
         return;
       }
 
-      const margin = secondEmployee && Number.isFinite(secondScore) ? secondScore - bestScore : Number.POSITIVE_INFINITY;
-      if (secondEmployee && margin < FACE_MATCH_MARGIN) {
-        setFaceMsg({ type: 'err', text: `Face match is not unique enough. Best is ${bestEmployee.fullName}, close to ${secondEmployee.fullName}. Score ${bestScore.toFixed(3)}, margin ${margin.toFixed(3)}.` });
-        log(`Camera face recognition ambiguous: best=${bestEmployee.fullName} second=${secondEmployee.fullName} score=${bestScore.toFixed(3)} margin=${margin.toFixed(3)}`);
+      const best = scoredCandidates[0];
+      const second = scoredCandidates[1] || null;
+
+      // If verifying for the selected employee specifically:
+      if (selectedEmp && isTargeted) {
+        const selectedMatch = scoredCandidates.find(c => c.employee.id === selectedEmp.id);
+        if (!selectedMatch || selectedMatch.score > verifyThreshold) {
+          const actualScore = selectedMatch ? selectedMatch.score.toFixed(3) : 'N/A';
+          setFaceMsg({ type: 'err', text: `Face did not match selected employee ${selectedEmp.fullName}. Score ${actualScore} is too high (required ${verifyThreshold.toFixed(3)} or lower). Re-save face centered with good lighting.` });
+          log(`Camera face verification failed for ${selectedEmp.fullName}: score=${actualScore}`);
+          return;
+        }
+
+        const margin = second && second.employee.id !== selectedEmp.id ? second.score - selectedMatch.score : Number.POSITIVE_INFINITY;
+        setRecognizedFaceMatch({ employee: selectedEmp, score: selectedMatch.score, margin });
+        if (second && second.employee.id !== selectedEmp.id && second.score <= verifyThreshold && margin < FACE_MATCH_MARGIN) {
+          setFaceMsg({ type: 'ok', text: `Face verified for ${selectedEmp.fullName} (${selectedEmp.employeeCode}) [Score: ${selectedMatch.score.toFixed(3)}]. Note: Profile ${second.employee.fullName} also has a similar face enrollment.` });
+        } else {
+          setFaceMsg({ type: 'ok', text: `Face verified: ${selectedEmp.fullName} (${selectedEmp.employeeCode}). Match score ${selectedMatch.score.toFixed(3)} (Passed).` });
+        }
+        log(`Camera face verified: ${selectedEmp.fullName}, score=${selectedMatch.score.toFixed(3)}`);
         return;
       }
 
-      if (bestScore <= FACE_MATCH_THRESHOLD) {
-        setRecognizedFaceMatch({ employee: bestEmployee, score: bestScore, margin });
-        setFaceMsg({ type: 'ok', text: `Face recognized: ${bestEmployee.fullName} (${bestEmployee.employeeCode}). Match score ${bestScore.toFixed(3)}.` });
-        log(`Camera face recognized: ${bestEmployee.fullName} score=${bestScore.toFixed(3)}`);
-      } else {
-        setFaceMsg({ type: 'err', text: `Not verified. Score ${bestScore.toFixed(3)} is too high. Re-save with full face centered and even light.` });
-        log(`Camera face recognition failed: best=${bestEmployee.fullName} score=${bestScore.toFixed(3)}`);
+      // 1-to-N search across entire directory:
+      if (best.score > verifyThreshold) {
+        setFaceMsg({ type: 'err', text: `Not verified. Score ${best.score.toFixed(3)} is too high (required ${verifyThreshold.toFixed(3)} or lower). Re-save with full face centered and even light.` });
+        log(`Camera face recognition failed: score=${best.score.toFixed(3)}`);
+        return;
       }
+
+      const margin = second ? second.score - best.score : Number.POSITIVE_INFINITY;
+      if (second && Number.isFinite(second.score) && margin < FACE_MATCH_MARGIN) {
+        setFaceMsg({ type: 'err', text: `Face match is ambiguous between ${best.employee.fullName} and ${second.employee.fullName}. Best score ${best.score.toFixed(3)}, margin ${margin.toFixed(3)}.` });
+        log(`Camera face recognition ambiguous: score=${best.score.toFixed(3)} margin=${margin.toFixed(3)}`);
+        return;
+      }
+
+      setRecognizedFaceMatch({ employee: best.employee, score: best.score, margin });
+      setFaceMsg({ type: 'ok', text: `Face recognized: ${best.employee.fullName} (${best.employee.employeeCode}). Match score ${best.score.toFixed(3)}.` });
+      log(`Camera face recognized: [REDACTED], score=${best.score.toFixed(3)}`);
+
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown camera verification error';
-      setFaceMsg({ type: 'err', text: message });
-      log(`Camera verification failed: ${message}`);
+      setFaceMsg({ type: 'err', text: error instanceof Error ? error.message : 'Camera verification failed.' });
+      log('Camera verification failed [REDACTED]');
+    } finally {
+      setLivenessBusy(false);
     }
   };
 
@@ -847,7 +932,7 @@ export function BiometricDeviceModule({
     if (!hasTemplates) {
       setAttResult('failed');
       setAttSummary(`${emp.fullName} has no enrolled fingerprints. Go to Enroll tab first.`);
-      log(`✗ ${emp.fullName} — not enrolled`);
+      log('✗ [REDACTED] — not enrolled');
       return;
     }
 
@@ -873,7 +958,7 @@ export function BiometricDeviceModule({
 
     setAttResult('verified');
     setAttSummary(`${emp.fullName} — ${isCheckIn ? 'Check-In' : 'Check-Out'} at ${timeStr} (quality: ${captureQuality}%)`);
-    log(`✓ ${emp.fullName} ${isCheckIn ? 'IN' : 'OUT'} at ${timeStr}`);
+    log(`✓ [REDACTED] ${isCheckIn ? 'IN' : 'OUT'} at ${timeStr}`);
 
     setTimeout(() => {
       setAttResult(null);
@@ -1175,13 +1260,14 @@ export function BiometricDeviceModule({
 
           {/* ───────────── TAB 2: ENROLL ───────────── */}
           {activeTab === 'enroll' && (
-            <div className="grid md:grid-cols-2 gap-6">
-              {/* Left: Enrollment workflow */}
-              <div className="space-y-4">
+            <div className="space-y-6">
+              <div className="grid md:grid-cols-2 gap-6">
+                {/* Left: Enrollment workflow */}
+                <div className="space-y-4">
                 <div>
                   <h3 className="font-bold text-slate-800 text-sm">Enroll Employee Biometrics</h3>
                   <p className="text-xs text-slate-500 mt-1">
-                    Capture fingerprint samples and a camera face profile. All samples are stored in Firestore under the employee record.
+                    Capture fingerprint samples and a camera face profile. All samples are stored in Database under the employee record.
                   </p>
                 </div>
 
@@ -1206,7 +1292,7 @@ export function BiometricDeviceModule({
                 {(() => {
                   const emp = employees.find(e => e.id === enrollEmpId);
                   const fingerprintCount = emp?.fingerprintTemplates?.length || 0;
-                  const faceCount = emp?.faceDescriptors?.length || 0;
+                  const faceCount = emp ? getFaceDescriptors(emp).length : 0;
                   const hasAnySaved = fingerprintCount > 0 || faceCount > 0 || enrollSamples.length > 0;
                   return (
                     <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2">
@@ -1338,147 +1424,6 @@ export function BiometricDeviceModule({
                     </button>
                   )}
                 </div>
-
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 space-y-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <h4 className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
-                        <Camera className="w-4 h-4 text-blue-600" />
-                        Enroll Camera Face
-                      </h4>
-                      <p className="text-xs text-slate-500 mt-1">
-                        Save 3 camera face samples for better kiosk recognition.
-                      </p>
-                    </div>
-                    {(() => {
-                      const emp = employees.find(e => e.id === enrollEmpId);
-                      return (
-                        <span className={`text-[10px] font-bold rounded-full px-2 py-0.5 ${emp && hasFaceEnrollment(emp) ? 'bg-blue-100 text-blue-700' : 'bg-slate-200 text-slate-500'}`}>
-                          {emp && hasFaceEnrollment(emp) ? 'Face enrolled' : 'No face'}
-                        </span>
-                      );
-                    })()}
-                  </div>
-
-                  <div className="grid grid-cols-1 lg:grid-cols-[16rem_minmax(0,1fr)] gap-3 items-start">
-                  <div className="relative w-64 h-64 mx-auto lg:mx-0 rounded-xl overflow-hidden bg-slate-950 border border-slate-300 flex items-center justify-center">
-                    <video ref={faceVideoRef} className="w-full h-full object-cover scale-x-[-1]" playsInline muted />
-                    {!faceCameraReady && (
-                      <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-500 text-xs bg-slate-950">
-                        <VideoOff className="w-8 h-8 mb-2 text-slate-600" />
-                        Camera idle
-                      </div>
-                    )}
-                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                      <div className="relative w-40 h-52 rounded-[50%] border-2 border-blue-400 shadow-[0_0_0_999px_rgba(2,6,23,0.36)]">
-                        <div className="absolute -top-1 left-1/2 h-2 w-10 -translate-x-1/2 rounded-full bg-blue-300"></div>
-                        <div className="absolute top-16 left-1/2 h-px w-24 -translate-x-1/2 bg-blue-300/80"></div>
-                        <div className="absolute bottom-10 left-1/2 h-px w-14 -translate-x-1/2 bg-blue-300/70"></div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                  {faceMsg && (
-                    <div className={`text-xs rounded-xl px-3 py-2 border ${
-                      faceMsg.type === 'ok'
-                        ? 'bg-blue-50 border-blue-200 text-blue-800'
-                        : 'bg-rose-50 border-rose-200 text-rose-800'
-                    }`}>
-                      {faceMsg.text}
-                    </div>
-                  )}
-
-                  {recognizedFaceMatch ? (
-                    <div className="hidden rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-600">Recognized Employee</p>
-                          <p className="mt-0.5 text-sm font-black text-emerald-900">{recognizedFaceMatch.employee.fullName}</p>
-                          <p className="font-mono text-[11px] text-emerald-700">{recognizedFaceMatch.employee.employeeCode}</p>
-                        </div>
-                        <span className="rounded-full bg-emerald-600 px-2 py-1 text-[10px] font-bold text-white">
-                          {recognizedFaceMatch.employee.status}
-                        </span>
-                      </div>
-                      <div className="mt-3 grid grid-cols-2 gap-2">
-                        <div className="rounded-lg bg-white/70 px-2 py-1.5">
-                          <p className="text-[9px] font-bold uppercase text-emerald-600">Department</p>
-                          <p className="font-semibold">{recognizedFaceMatch.employee.departmentId || 'Not set'}</p>
-                        </div>
-                        <div className="rounded-lg bg-white/70 px-2 py-1.5">
-                          <p className="text-[9px] font-bold uppercase text-emerald-600">Designation</p>
-                          <p className="font-semibold">{recognizedFaceMatch.employee.designationId || 'Not set'}</p>
-                        </div>
-                        <div className="rounded-lg bg-white/70 px-2 py-1.5">
-                          <p className="text-[9px] font-bold uppercase text-emerald-600">Branch</p>
-                          <p className="font-semibold">{recognizedFaceMatch.employee.branchId || 'Not set'}</p>
-                        </div>
-                        <div className="rounded-lg bg-white/70 px-2 py-1.5">
-                          <p className="text-[9px] font-bold uppercase text-emerald-600">Match</p>
-                          <p className="font-semibold">
-                            Score {recognizedFaceMatch.score.toFixed(3)}
-                            {Number.isFinite(recognizedFaceMatch.margin) ? ` · Margin ${recognizedFaceMatch.margin.toFixed(3)}` : ''}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="mt-2 flex flex-wrap gap-1.5">
-                        <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
-                          {(recognizedFaceMatch.employee.fingerprintTemplates?.length || 0)} fingerprint sample{(recognizedFaceMatch.employee.fingerprintTemplates?.length || 0) === 1 ? '' : 's'}
-                        </span>
-                        <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-700">
-                          {getFaceDescriptors(recognizedFaceMatch.employee).length} face profile{getFaceDescriptors(recognizedFaceMatch.employee).length === 1 ? '' : 's'}
-                        </span>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="hidden rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-500">
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Recognized Employee</p>
-                      <p className="mt-1 font-semibold text-slate-700">No employee recognized yet.</p>
-                      <p className="mt-1">Keep the full face inside the oval, then click Verify Face.</p>
-                    </div>
-                  )}
-                  </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
-                    <button
-                      type="button"
-                      onClick={faceCameraReady ? stopFaceCamera : startFaceCamera}
-                      className="flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-900 text-white text-sm font-bold py-2.5 rounded-xl transition"
-                    >
-                      {faceCameraReady ? <VideoOff className="w-4 h-4" /> : <Camera className="w-4 h-4" />}
-                      {faceCameraReady ? 'Stop Camera' : 'Start Camera'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleSaveFaceEnrollment}
-                      disabled={!faceCameraReady}
-                      className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm font-bold py-2.5 rounded-xl transition"
-                    >
-                      <Database className="w-4 h-4" />
-                      Save 3 Faces
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleVerifyFaceEnrollment}
-                      disabled={!faceCameraReady}
-                      className="flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white text-sm font-bold py-2.5 rounded-xl transition"
-                    >
-                      <CheckCircle className="w-4 h-4" />
-                      Verify Face
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleClearFaceEnrollment}
-                      disabled={!employees.find(e => e.id === enrollEmpId)?.faceDescriptors?.length}
-                      className="flex items-center justify-center gap-2 bg-rose-600 hover:bg-rose-700 disabled:opacity-40 text-white text-sm font-bold py-2.5 rounded-xl transition"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                      Remove
-                    </button>
-                  </div>
-                </div>
               </div>
 
               {/* Right: Enrolled employees list */}
@@ -1486,55 +1431,6 @@ export function BiometricDeviceModule({
                 <h4 className="text-xs font-bold text-slate-700 uppercase tracking-widest">
                   Biometric Employees ({enrolledCount}/{employees.length})
                 </h4>
-                {recognizedFaceMatch ? (
-                  <div className="hidden rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-600">Recognized Employee</p>
-                        <p className="mt-0.5 text-sm font-black text-emerald-900">{recognizedFaceMatch.employee.fullName}</p>
-                        <p className="font-mono text-[11px] text-emerald-700">{recognizedFaceMatch.employee.employeeCode}</p>
-                      </div>
-                      <span className="rounded-full bg-emerald-600 px-2 py-1 text-[10px] font-bold text-white">
-                        {recognizedFaceMatch.employee.status}
-                      </span>
-                    </div>
-                    <div className="mt-3 grid grid-cols-2 gap-2">
-                      <div className="rounded-lg bg-white/70 px-2 py-1.5">
-                        <p className="text-[9px] font-bold uppercase text-emerald-600">Department</p>
-                        <p className="font-semibold">{recognizedFaceMatch.employee.departmentId || 'Not set'}</p>
-                      </div>
-                      <div className="rounded-lg bg-white/70 px-2 py-1.5">
-                        <p className="text-[9px] font-bold uppercase text-emerald-600">Designation</p>
-                        <p className="font-semibold">{recognizedFaceMatch.employee.designationId || 'Not set'}</p>
-                      </div>
-                      <div className="rounded-lg bg-white/70 px-2 py-1.5">
-                        <p className="text-[9px] font-bold uppercase text-emerald-600">Branch</p>
-                        <p className="font-semibold">{recognizedFaceMatch.employee.branchId || 'Not set'}</p>
-                      </div>
-                      <div className="rounded-lg bg-white/70 px-2 py-1.5">
-                        <p className="text-[9px] font-bold uppercase text-emerald-600">Match</p>
-                        <p className="font-semibold">
-                          Score {recognizedFaceMatch.score.toFixed(3)}
-                          {Number.isFinite(recognizedFaceMatch.margin) ? ` · Margin ${recognizedFaceMatch.margin.toFixed(3)}` : ''}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
-                        {(recognizedFaceMatch.employee.fingerprintTemplates?.length || 0)} fingerprint sample{(recognizedFaceMatch.employee.fingerprintTemplates?.length || 0) === 1 ? '' : 's'}
-                      </span>
-                      <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-700">
-                        {getFaceDescriptors(recognizedFaceMatch.employee).length} face profile{getFaceDescriptors(recognizedFaceMatch.employee).length === 1 ? '' : 's'}
-                      </span>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="hidden rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-500">
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Recognized Employee</p>
-                    <p className="mt-1 font-semibold text-slate-700">No employee recognized yet.</p>
-                    <p className="mt-1">Keep the full face inside the oval, then click Verify Face.</p>
-                  </div>
-                )}
                 <div className="space-y-1.5 max-h-80 overflow-y-auto pr-1">
                   {employees
                     .filter(e => e.status === 'Active')
@@ -1582,58 +1478,176 @@ export function BiometricDeviceModule({
                       );
                     })}
                 </div>
-                {recognizedFaceMatch ? (
-                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-600">Recognized Employee</p>
-                        <p className="mt-0.5 text-sm font-black text-emerald-900">{recognizedFaceMatch.employee.fullName}</p>
-                        <p className="font-mono text-[11px] text-emerald-700">{recognizedFaceMatch.employee.employeeCode}</p>
-                      </div>
-                      <span className="rounded-full bg-emerald-600 px-2 py-1 text-[10px] font-bold text-white">
-                        {recognizedFaceMatch.employee.status}
-                      </span>
-                    </div>
-                    <div className="mt-3 grid grid-cols-2 gap-2">
-                      <div className="rounded-lg bg-white/70 px-2 py-1.5">
-                        <p className="text-[9px] font-bold uppercase text-emerald-600">Department</p>
-                        <p className="font-semibold">{recognizedFaceMatch.employee.departmentId || 'Not set'}</p>
-                      </div>
-                      <div className="rounded-lg bg-white/70 px-2 py-1.5">
-                        <p className="text-[9px] font-bold uppercase text-emerald-600">Designation</p>
-                        <p className="font-semibold">{recognizedFaceMatch.employee.designationId || 'Not set'}</p>
-                      </div>
-                      <div className="rounded-lg bg-white/70 px-2 py-1.5">
-                        <p className="text-[9px] font-bold uppercase text-emerald-600">Branch</p>
-                        <p className="font-semibold">{recognizedFaceMatch.employee.branchId || 'Not set'}</p>
-                      </div>
-                      <div className="rounded-lg bg-white/70 px-2 py-1.5">
-                        <p className="text-[9px] font-bold uppercase text-emerald-600">Match</p>
-                        <p className="font-semibold">
-                          Score {recognizedFaceMatch.score.toFixed(3)}
-                          {Number.isFinite(recognizedFaceMatch.margin) ? ` · Margin ${recognizedFaceMatch.margin.toFixed(3)}` : ''}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
-                        {(recognizedFaceMatch.employee.fingerprintTemplates?.length || 0)} fingerprint sample{(recognizedFaceMatch.employee.fingerprintTemplates?.length || 0) === 1 ? '' : 's'}
-                      </span>
-                      <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-700">
-                        {getFaceDescriptors(recognizedFaceMatch.employee).length} face profile{getFaceDescriptors(recognizedFaceMatch.employee).length === 1 ? '' : 's'}
-                      </span>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-500">
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Recognized Employee</p>
-                    <p className="mt-1 font-semibold text-slate-700">No employee recognized yet.</p>
-                    <p className="mt-1">Keep the full face inside the oval, then click Verify Face.</p>
-                  </div>
-                )}
               </div>
             </div>
-          )}
+
+            {/* ── Kiosk-Matched Camera Face Enrollment Card ── */}
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:p-5 space-y-4 shadow-sm">
+              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+                <div>
+                  <h4 className="font-bold text-slate-800 text-sm sm:text-base flex items-center gap-2">
+                    <Camera className="w-4 h-4 text-blue-600" />
+                    Enroll Camera Face (Kiosk Optimized)
+                  </h4>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Save 3 camera face samples for kiosk recognition with active liveness verification.
+                  </p>
+                </div>
+                {(() => {
+                  const emp = employees.find(e => e.id === enrollEmpId);
+                  return (
+                    <div className="flex items-center gap-2">
+                      {emp && (
+                        <span className="text-xs font-semibold text-slate-600">
+                          {emp.fullName} ({emp.employeeCode})
+                        </span>
+                      )}
+                      <span className={`text-[10px] font-bold rounded-full px-2.5 py-1 ${emp && hasFaceEnrollment(emp) ? 'bg-emerald-100 text-emerald-800' : emp?.faceDescriptors?.length ? 'bg-amber-100 text-amber-800' : 'bg-slate-200 text-slate-600'}`}>
+                        {emp && hasFaceEnrollment(emp) ? 'Secure face enrolled' : emp?.faceDescriptors?.length ? 'Re-enrollment required' : 'No face'}
+                      </span>
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {/* Kiosk Camera Box (4:3 aspect ratio, max 640px) */}
+              <div className="enroll-camera-box">
+                <video ref={faceVideoRef} className="w-full h-full object-cover scale-x-[-1]" playsInline muted />
+                {!faceCameraReady && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-500 text-xs bg-slate-950/90 pointer-events-none">
+                    <VideoOff className="w-12 h-12 mb-2 text-slate-600" />
+                    <span className="font-semibold text-slate-400">Camera preview idle</span>
+                  </div>
+                )}
+                <div className="enroll-cam-hud">
+                  <div className="enroll-cam-source-badge">
+                    {faceCameraReady ? 'Webcam' : 'Camera Off'}
+                  </div>
+                  <div className="enroll-cam-face-guide"></div>
+                  <div className="enroll-cam-status">
+                    <span className={`w-2 h-2 rounded-full ${faceCameraReady ? (livenessBusy ? 'bg-amber-400 animate-ping' : 'bg-emerald-400 animate-pulse') : 'bg-slate-500'}`} />
+                    <span>
+                      {!faceCameraReady
+                        ? 'Camera is not showing a live frame yet. Click Start Camera.'
+                        : livenessBusy
+                        ? (faceMsg?.text || (livenessPhase === 0 ? 'Center face inside oval' : livenessPhase === 1 ? `Turn head ${livenessOrder[0].toUpperCase()}` : livenessPhase === 2 ? 'Return to center' : livenessPhase === 3 ? `Turn head ${livenessOrder[1].toUpperCase()}` : 'Return to center'))
+                        : 'Keep face centered inside the oval guide'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Liveness Rail (Matching Kiosk) */}
+              <div className="enroll-liveness-rail" aria-live="assertive">
+                <div className="enroll-liveness-kicker">ACTIVE LIVENESS · PHOTO REPLAY PROTECTION</div>
+                <div className="enroll-liveness-action">
+                  {livenessBusy
+                    ? (faceMsg?.text || (livenessPhase === 0 ? 'Center your face inside the oval' : livenessPhase === 1 ? `Turn your head ${livenessOrder[0].toUpperCase()}` : livenessPhase === 2 ? 'Return to center' : livenessPhase === 3 ? `Turn your head ${livenessOrder[1].toUpperCase()}` : 'Return to center'))
+                    : 'Look at the camera, then start the live face check'}
+                </div>
+                <div className="enroll-liveness-steps">
+                  {['Center', livenessOrder[0] === 'left' ? 'Left' : 'Right', 'Center', livenessOrder[1] === 'left' ? 'Left' : 'Right', 'Verified'].map((label, index) => {
+                    let stateClass = '';
+                    if (livenessPhase > index) stateClass = 'done';
+                    else if (livenessBusy && livenessPhase === index) stateClass = 'current';
+                    return (
+                      <span key={`${label}-${index}`} className={stateClass}>
+                        {label}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Message Alerts */}
+              {faceMsg && !livenessBusy && (
+                <div className={`w-full max-w-[640px] mx-auto text-xs rounded-xl px-4 py-2.5 border ${
+                  faceMsg.type === 'ok'
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                    : 'bg-rose-50 border-rose-200 text-rose-800'
+                }`}>
+                  {faceMsg.text}
+                </div>
+              )}
+
+              {/* Recognized Face Match Details */}
+              {recognizedFaceMatch && (
+                <div className="w-full max-w-[640px] mx-auto rounded-xl border border-emerald-300 bg-emerald-50 p-4 text-xs text-emerald-900 shadow-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-600">Recognized Employee</p>
+                      <p className="mt-0.5 text-base font-black text-emerald-950">{recognizedFaceMatch.employee.fullName}</p>
+                      <p className="font-mono text-[11px] text-emerald-700">{recognizedFaceMatch.employee.employeeCode}</p>
+                    </div>
+                    <span className="rounded-full bg-emerald-600 px-2.5 py-1 text-[10px] font-bold text-white shadow-sm">
+                      {recognizedFaceMatch.employee.status}
+                    </span>
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    <div className="rounded-lg bg-white/80 border border-emerald-100 px-2 py-1.5">
+                      <p className="text-[9px] font-bold uppercase text-emerald-600">Department</p>
+                      <p className="font-semibold text-slate-800 truncate">{recognizedFaceMatch.employee.departmentId || 'Not set'}</p>
+                    </div>
+                    <div className="rounded-lg bg-white/80 border border-emerald-100 px-2 py-1.5">
+                      <p className="text-[9px] font-bold uppercase text-emerald-600">Designation</p>
+                      <p className="font-semibold text-slate-800 truncate">{recognizedFaceMatch.employee.designationId || 'Not set'}</p>
+                    </div>
+                    <div className="rounded-lg bg-white/80 border border-emerald-100 px-2 py-1.5">
+                      <p className="text-[9px] font-bold uppercase text-emerald-600">Branch</p>
+                      <p className="font-semibold text-slate-800 truncate">{recognizedFaceMatch.employee.branchId || 'Not set'}</p>
+                    </div>
+                    <div className="rounded-lg bg-white/80 border border-emerald-100 px-2 py-1.5">
+                      <p className="text-[9px] font-bold uppercase text-emerald-600">Match Score</p>
+                      <p className="font-semibold text-slate-800">
+                        {recognizedFaceMatch.score.toFixed(3)}
+                        {Number.isFinite(recognizedFaceMatch.margin) ? ` (Δ${recognizedFaceMatch.margin.toFixed(2)})` : ''}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div className="w-full max-w-[640px] mx-auto grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                <button
+                  type="button"
+                  onClick={faceCameraReady ? stopFaceCamera : startFaceCamera}
+                  className="flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-900 text-white text-sm font-bold py-2.5 rounded-xl transition shadow-sm"
+                >
+                  {faceCameraReady ? <VideoOff className="w-4 h-4" /> : <Camera className="w-4 h-4" />}
+                  {faceCameraReady ? 'Stop Camera' : 'Start Camera'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveFaceEnrollment}
+                  disabled={!faceCameraReady || livenessBusy}
+                  className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm font-bold py-2.5 rounded-xl transition shadow-sm"
+                >
+                  <Database className="w-4 h-4" />
+                  Save 3 Faces
+                </button>
+                <button
+                  type="button"
+                  onClick={handleVerifyFaceEnrollment}
+                  disabled={!faceCameraReady || livenessBusy}
+                  className="flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white text-sm font-bold py-2.5 rounded-xl transition shadow-sm"
+                >
+                  <CheckCircle className="w-4 h-4" />
+                  Verify Face
+                </button>
+                <button
+                  type="button"
+                  onClick={handleClearFaceEnrollment}
+                  disabled={!employees.find(e => e.id === enrollEmpId)?.faceDescriptors?.length}
+                  className="flex items-center justify-center gap-2 bg-rose-600 hover:bg-rose-700 disabled:opacity-40 text-white text-sm font-bold py-2.5 rounded-xl transition shadow-sm"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Remove Face
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
           {/* ───────────── TAB 3: ATTENDANCE ───────────── */}
           {activeTab === 'attendance' && (
@@ -1643,7 +1657,7 @@ export function BiometricDeviceModule({
                 <div>
                   <h3 className="font-bold text-slate-800 text-sm">Mark Attendance</h3>
                   <p className="text-xs text-slate-500 mt-1">
-                    Select the employee, then scan their enrolled finger. Attendance is marked in Firestore immediately upon successful verification.
+                    Select the employee, then scan their enrolled finger. Attendance is marked in Database immediately upon successful verification.
                   </p>
                 </div>
 

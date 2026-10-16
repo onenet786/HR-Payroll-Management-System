@@ -4,6 +4,12 @@
 
 # Run and deploy your AI Studio app
 
+Pakistan payroll operations and annual statutory-update guidance: [PAKISTAN_PAYROLL_GUIDE.md](PAKISTAN_PAYROLL_GUIDE.md).
+
+Personal-data inventory, storage destinations, external transfers, deletion behavior, and remaining privacy requirements: [docs/PRIVACY_DATA_FLOW.md](docs/PRIVACY_DATA_FLOW.md).
+
+Pre-deployment pass/fail security gate: [docs/DEPLOYMENT_SECURITY_CHECKLIST.md](docs/DEPLOYMENT_SECURITY_CHECKLIST.md).
+
 This contains everything you need to run your app locally.
 
 View your app in AI Studio: https://ai.studio/apps/0ab7c3a1-e4ca-49b5-86f4-6883897b9163
@@ -15,6 +21,14 @@ View your app in AI Studio: https://ai.studio/apps/0ab7c3a1-e4ca-49b5-86f4-68838
 
 1. Install dependencies:
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
+2. Copy `.env.example` to `.env.local` and fill in the required values. Keep database passwords, server secrets, and privileged keys server-side without a `VITE_` prefix.
 3. Run the app:
    `npm run dev`
+
+## Deployment security requirements
+
+- The system operates on a dedicated PostgreSQL server backend. Configure aaPanel with Node.js and PostgreSQL services.
+- Never place database URLs, OAuth client secrets, JWT signing secrets, or third-party private API keys in `VITE_*` variables or frontend code.
+- Always use HTTPS in production with proper reverse proxy and SSL certificates.
+- Enable authenticator MFA for every administrator and payroll/access user, verify a second administrator can approve recovery requests, then set `MFA_ENFORCE_PRIVILEGED=true` and restart the service.
+- MFA recovery uses a maker-checker workflow: the person who submits a reset request cannot approve it. Approval revokes every active session for the recovered account.

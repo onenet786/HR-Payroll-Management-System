@@ -1,10 +1,18 @@
 import { Employee } from '../types';
+import { isValidLivenessAttestation, selectBestFace } from './faceLiveness';
+import { detectFaceGeometry } from './faceLandmarker';
+import { computeFaceEmbedding, type FaceBox } from './faceEmbedding';
 
 export interface FaceDescriptor {
-  version: 1 | 2;
+  version: 1 | 2 | 3 | 4;
   vector: number[];
   capturedAt: string;
   source?: string;
+  liveness?: {
+    method: 'active-turn-v1';
+    verifiedAt: string;
+    summary: { order: ['left' | 'right', 'left' | 'right']; durationMs: number; frameCounts: [number, number, number, number, number]; maxLeftYaw: number; maxRightYaw: number; maxCenterDrift: number; maxScaleChange: number };
+  };
 }
 
 export interface FaceMatch {
@@ -20,18 +28,22 @@ export interface FaceFrameQuality {
   message: string;
 }
 
-const GRID_W = 16;
-const GRID_H = 20;
-const V2_LENGTH = GRID_W * GRID_H * 4;
-export const FACE_MATCH_THRESHOLD = 0.18;
-export const FACE_MATCH_MARGIN = 0.04;
+// Identity embeddings (version 4): 128 numbers from face-api; Euclidean distance between two faces.
+// The same person is typically below ~0.40 and different people above ~0.55.
+export const FACE_DESCRIPTOR_VERSION = 4;
+export const FACE_DESCRIPTOR_LENGTH = 128;
+export const FACE_MATCH_THRESHOLD = 0.45; // identify without an employee code
+export const FACE_VERIFY_THRESHOLD = 0.5; // confirm one named employee
+export const FACE_MATCH_MARGIN = 0.06; // runner-up employee must be at least this much further away
+export const FACE_STRONG_DISTANCE = 0.25; // distance that counts as a 100% match
 
 export function getFaceDescriptors(employee: Employee): FaceDescriptor[] {
   const values = employee.faceDescriptors || [];
   return values.filter(item =>
-    item.version === 2 &&
+    item.version === FACE_DESCRIPTOR_VERSION &&
     Array.isArray(item.vector) &&
-    item.vector.length === V2_LENGTH
+    item.vector.length === FACE_DESCRIPTOR_LENGTH &&
+    isValidLivenessAttestation(item.liveness)
   );
 }
 
@@ -39,90 +51,36 @@ export function hasFaceEnrollment(employee: Employee): boolean {
   return getFaceDescriptors(employee).length > 0;
 }
 
-export function createFaceDescriptorFromVideo(video: HTMLVideoElement, source = 'camera'): FaceDescriptor {
-  const canvas = document.createElement('canvas');
-  canvas.width = GRID_W;
-  canvas.height = GRID_H;
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  if (!ctx) throw new Error('Camera descriptor canvas is unavailable.');
+/** Identity embedding for the face inside `cropBox` (or the most prominent face). Throws if no clear face is visible. */
+export async function createFaceDescriptorFromVideo(
+  video: HTMLVideoElement,
+  source = 'camera',
+  cropBox?: FaceBox
+): Promise<FaceDescriptor> {
   if (!video.videoWidth || !video.videoHeight) throw new Error('Camera is not ready yet.');
-
-  ctx.drawImage(video, 0, 0, GRID_W, GRID_H);
-  const image = ctx.getImageData(0, 0, GRID_W, GRID_H).data;
-  const luma: number[] = [];
-
-  for (let i = 0; i < image.length; i += 4) {
-    const r = image[i] / 255;
-    const g = image[i + 1] / 255;
-    const b = image[i + 2] / 255;
-    luma.push(0.299 * r + 0.587 * g + 0.114 * b);
-  }
-
-  const mean = luma.reduce((sum, value) => sum + value, 0) / luma.length;
-  const vector: number[] = [];
-
-  for (let y = 0; y < GRID_H; y++) {
-    for (let x = 0; x < GRID_W; x++) {
-      const idx = y * GRID_W + x;
-      const base = idx * 4;
-      const r = image[base] / 255;
-      const g = image[base + 1] / 255;
-      const b = image[base + 2] / 255;
-      const lum = luma[idx] - mean;
-      const gx = x > 0 && x < GRID_W - 1 ? luma[idx + 1] - luma[idx - 1] : 0;
-      const gy = y > 0 && y < GRID_H - 1 ? luma[idx + GRID_W] - luma[idx - GRID_W] : 0;
-
-      vector.push(
-        Number(lum.toFixed(4)),
-        Number((r - g).toFixed(4)),
-        Number((b - (r + g) / 2).toFixed(4)),
-        Number(Math.sqrt(gx * gx + gy * gy).toFixed(4))
-      );
-    }
-  }
-
-  return {
-    version: 2,
-    vector,
-    capturedAt: new Date().toISOString(),
-    source,
-  };
+  const vector = await computeFaceEmbedding(video, cropBox);
+  return { version: FACE_DESCRIPTOR_VERSION, vector, capturedAt: new Date().toISOString(), source };
 }
 
 export async function assessBrowserFaceDetection(video: HTMLVideoElement): Promise<FaceFrameQuality | null> {
-  const Detector = typeof window !== 'undefined' ? (window as any).FaceDetector : null;
-  if (!Detector || !video.videoWidth || !video.videoHeight) return null;
-
   try {
-    const detector = new Detector({ fastMode: true, maxDetectedFaces: 2 });
-    const faces = await detector.detect(video);
-    if (!Array.isArray(faces) || faces.length === 0) {
+    const faces = await detectFaceGeometry(video);
+    if (faces.length === 0) {
       return { ok: false, brightness: 0, contrast: 0, message: 'No face detected in camera. Put your face inside the oval and try again.' };
     }
 
-    if (faces.length > 1) {
-      return { ok: false, brightness: 0, contrast: 0, message: 'More than one face detected. Keep only one employee inside the camera frame.' };
-    }
-
-    const box = faces[0]?.boundingBox;
-    if (!box) {
-      return { ok: false, brightness: 0, contrast: 0, message: 'No full face detected. Move closer and keep your face inside the oval.' };
-    }
-
-    const faceCenterX = (Number(box.x || 0) + Number(box.width || 0) / 2) / video.videoWidth;
-    const faceCenterY = (Number(box.y || 0) + Number(box.height || 0) / 2) / video.videoHeight;
-    const faceWidth = Number(box.width || 0) / video.videoWidth;
-    const faceHeight = Number(box.height || 0) / video.videoHeight;
+    const face = selectBestFace(faces);
+    const { centerX: faceCenterX, centerY: faceCenterY, width: faceWidth, height: faceHeight } = face;
     const centerIsInGuide =
-      faceCenterX >= 0.39 &&
-      faceCenterX <= 0.61 &&
-      faceCenterY >= 0.34 &&
-      faceCenterY <= 0.64;
+      faceCenterX >= 0.28 &&
+      faceCenterX <= 0.72 &&
+      faceCenterY >= 0.18 &&
+      faceCenterY <= 0.82;
     const sizeIsValid =
-      faceWidth >= 0.22 &&
-      faceWidth <= 0.58 &&
-      faceHeight >= 0.28 &&
-      faceHeight <= 0.74;
+      faceWidth >= 0.14 &&
+      faceWidth <= 0.72 &&
+      faceHeight >= 0.18 &&
+      faceHeight <= 0.88;
 
     if (!centerIsInGuide) {
       return { ok: false, brightness: 0, contrast: 0, message: 'Face is not inside the oval marker. Center your full face, then try again.' };
@@ -133,8 +91,8 @@ export async function assessBrowserFaceDetection(video: HTMLVideoElement): Promi
     }
 
     return { ok: true, brightness: 0, contrast: 0, message: 'Face is centered inside the oval.' };
-  } catch {
-    return null;
+  } catch (error) {
+    return { ok: false, brightness: 0, contrast: 0, message: error instanceof Error ? error.message : 'Face landmark model could not start.' };
   }
 }
 
@@ -206,11 +164,11 @@ export function assessFaceFrame(video: HTMLVideoElement): FaceFrameQuality {
       }
 
       const yNorm = y / height;
-      if (yNorm > 0.33 && yNorm < 0.49 && lum < 0.34) {
+      if (yNorm > 0.28 && yNorm < 0.54 && lum < 0.44) {
         if (x < width / 2) leftEyeDarkPixels += 1;
         else rightEyeDarkPixels += 1;
       }
-      if (yNorm > 0.62 && yNorm < 0.80 && lum < 0.38) mouthDarkPixels += 1;
+      if (yNorm > 0.58 && yNorm < 0.83 && lum < 0.46) mouthDarkPixels += 1;
     }
   }
 
@@ -262,46 +220,39 @@ export function assessFaceFrame(video: HTMLVideoElement): FaceFrameQuality {
 }
 
 export function compareFaceDescriptors(a: FaceDescriptor, b: FaceDescriptor): number {
-  if (a.version !== 2 || b.version !== 2 || a.vector.length !== b.vector.length) {
+  if (a.version !== FACE_DESCRIPTOR_VERSION || b.version !== FACE_DESCRIPTOR_VERSION || a.vector.length !== b.vector.length) {
     return Number.POSITIVE_INFINITY;
   }
-
   let sum = 0;
   for (let i = 0; i < a.vector.length; i++) {
     const delta = a.vector[i] - b.vector[i];
     sum += delta * delta;
   }
-  return Math.sqrt(sum / a.vector.length);
+  return Math.sqrt(sum);
 }
 
+/**
+ * Closest enrolled employee, or null when nobody is within `threshold`, when the runner-up employee is too
+ * close to call (`margin`), or when the best match is in `excludeEmployeeIds` (already matched to another face).
+ */
 export function findBestFaceMatch(
   employees: Employee[],
   probe: FaceDescriptor,
-  threshold = FACE_MATCH_THRESHOLD
+  threshold = FACE_MATCH_THRESHOLD,
+  options: { margin?: number; excludeEmployeeIds?: string[] } = {}
 ): FaceMatch | null {
-  let best: FaceMatch | null = null;
-  let secondScore = Number.POSITIVE_INFINITY;
-  let secondEmployeeId = '';
-
-  for (const employee of employees) {
-    for (const descriptor of getFaceDescriptors(employee)) {
-      const score = compareFaceDescriptors(probe, descriptor);
-      if (!Number.isFinite(score)) continue;
-      if (!best || score < best.score) {
-        if (best && best.employee.id !== employee.id) {
-          secondScore = best.score;
-          secondEmployeeId = best.employee.id;
-        }
-        best = { employee, score, margin: Number.POSITIVE_INFINITY };
-      } else if (employee.id !== best.employee.id && score < secondScore) {
-        secondScore = score;
-        secondEmployeeId = employee.id;
-      }
-    }
-  }
-
+  const scored = (employees || [])
+    .map(employee => {
+      let minScore = Number.POSITIVE_INFINITY;
+      for (const descriptor of getFaceDescriptors(employee)) minScore = Math.min(minScore, compareFaceDescriptors(probe, descriptor));
+      return { employee, score: minScore };
+    })
+    .filter(item => Number.isFinite(item.score))
+    .sort((a, b) => a.score - b.score);
+  const best = scored[0];
   if (!best || best.score > threshold) return null;
-  const margin = secondScore - best.score;
-  if (secondEmployeeId && Number.isFinite(secondScore) && margin < FACE_MATCH_MARGIN) return null;
-  return { ...best, margin };
+  const margin = scored[1] ? scored[1].score - best.score : Number.POSITIVE_INFINITY;
+  if (margin < (options.margin ?? FACE_MATCH_MARGIN)) return null;
+  if (options.excludeEmployeeIds?.includes(best.employee.id)) return null;
+  return { employee: best.employee, score: best.score, margin };
 }
