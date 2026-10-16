@@ -4,6 +4,7 @@
  */
 
 import { JURISDICTIONS } from '../data/provincialCompliance';
+import { DateField } from './DateField';
 import React, { useState, useEffect, useMemo } from 'react';
 import { empAvatarUrl } from '../utils/avatar';
 import {
@@ -3025,8 +3026,8 @@ export function WebPortal({
                           }}>
                             <select required value={mobileDutyForm.employeeId} onChange={e => setMobileDutyForm(p => ({ ...p, employeeId: e.target.value }))} className="rounded-lg border border-indigo-200 bg-white p-2 text-xs"><option value="">Select employee *</option>{employees.filter(employee => employee.status === 'Active').map(employee => <option key={employee.id} value={employee.id}>{employee.fullName} ({employee.employeeCode})</option>)}</select>
                             <select value={mobileDutyForm.dutyType} onChange={e => setMobileDutyForm(p => ({ ...p, dutyType: e.target.value as MobileDutyType }))} className="rounded-lg border border-indigo-200 bg-white p-2 text-xs">{(['Work from home', 'Out of station', 'Client visit', 'Market / field duty', 'Official travel', 'Direct reporting to worksite', 'Emergency duty'] as MobileDutyType[]).map(type => <option key={type}>{type}</option>)}</select>
-                            <input type="date" required value={mobileDutyForm.validFrom} onChange={e => setMobileDutyForm(p => ({ ...p, validFrom: e.target.value }))} className="rounded-lg border border-indigo-200 bg-white p-2 text-xs" aria-label="Mobile duty valid from" />
-                            <input type="date" required value={mobileDutyForm.validTo} onChange={e => setMobileDutyForm(p => ({ ...p, validTo: e.target.value }))} className="rounded-lg border border-indigo-200 bg-white p-2 text-xs" aria-label="Mobile duty valid to" />
+                            <DateField required value={mobileDutyForm.validFrom} onChange={e => setMobileDutyForm(p => ({ ...p, validFrom: e.target.value }))} className="rounded-lg border border-indigo-200 bg-white p-2 text-xs" aria-label="Mobile duty valid from" />
+                            <DateField required value={mobileDutyForm.validTo} onChange={e => setMobileDutyForm(p => ({ ...p, validTo: e.target.value }))} className="rounded-lg border border-indigo-200 bg-white p-2 text-xs" aria-label="Mobile duty valid to" />
                             <input value={mobileDutyForm.assignedLocation} onChange={e => setMobileDutyForm(p => ({ ...p, assignedLocation: e.target.value }))} placeholder="Assigned client/location (optional)" className="rounded-lg border border-indigo-200 bg-white p-2 text-xs" />
                             <input required value={mobileDutyForm.instructions} onChange={e => setMobileDutyForm(p => ({ ...p, instructions: e.target.value }))} placeholder="Instructions / approval reason *" className="rounded-lg border border-indigo-200 bg-white p-2 text-xs md:col-span-2" />
                             <label className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 text-[10px] text-slate-700"><input type="checkbox" checked={mobileDutyForm.allowFieldVisits} onChange={e => setMobileDutyForm(p => ({ ...p, allowFieldVisits: e.target.checked }))} /> Allow multiple field visits</label>
@@ -3253,8 +3254,7 @@ export function WebPortal({
                           <div className="grid w-full grid-cols-1 gap-3 text-xs sm:grid-cols-2 md:w-auto">
                             <label className="flex flex-col gap-1.5 text-slate-500 font-medium">
                               <span>Select Register Date</span>
-                              <input
-                                type="date"
+                              <DateField
                                 aria-label="Select Attendance Register Date"
                                 value={selectedAttDate}
                                 onChange={(e) => setSelectedAttDate(e.target.value)}
@@ -3710,8 +3710,7 @@ export function WebPortal({
                         {leavePeriodType === 'daily' && (
                           <div className="flex items-center space-x-2 text-xs">
                             <span className="text-slate-500 font-medium">Select Register Date:</span>
-                            <input
-                              type="date"
+                            <DateField
                               aria-label="Select Leave Register Date"
                               value={selectedLeaveDate}
                               onChange={(e) => setSelectedLeaveDate(e.target.value)}
@@ -4284,7 +4283,7 @@ export function WebPortal({
                           <label className="block text-xs font-semibold text-slate-700 uppercase tracking-widest mb-1.5">Tax year / effective date:</label>
                           <div className="grid grid-cols-2 gap-2">
                             <input aria-label="FBR tax year" value={editableStatConfig.taxYear || ''} onChange={e => onUpdateStatConfig({ ...editableStatConfig, taxYear: e.target.value, updatedAt: new Date().toISOString() })} placeholder="2027" className="w-full text-xs font-mono p-2 border border-slate-300 rounded" />
-                            <input aria-label="Statutory effective from" type="date" value={editableStatConfig.effectiveFrom || ''} onChange={e => onUpdateStatConfig({ ...editableStatConfig, effectiveFrom: e.target.value, updatedAt: new Date().toISOString() })} className="w-full text-xs font-mono p-2 border border-slate-300 rounded" />
+                            <DateField aria-label="Statutory effective from" value={editableStatConfig.effectiveFrom || ''} onChange={e => onUpdateStatConfig({ ...editableStatConfig, effectiveFrom: e.target.value, updatedAt: new Date().toISOString() })} className="w-full text-xs font-mono p-2 border border-slate-300 rounded" />
                           </div>
                         </div>
 
@@ -5113,28 +5112,28 @@ export function WebPortal({
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 text-xs">CNIC Expiry (NADRA):</label>
-                      <input type="date" aria-label="CNIC Expiry Date" value={newEmpForm.cnicExpiryDate} onChange={e => setNewEmpForm({ ...newEmpForm, cnicExpiryDate: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none" />
+                      <DateField aria-label="CNIC Expiry Date" value={newEmpForm.cnicExpiryDate} onChange={e => setNewEmpForm({ ...newEmpForm, cnicExpiryDate: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none" />
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 text-xs">Contract End (if fixed-term):</label>
-                      <input type="date" aria-label="Contract End Date" value={newEmpForm.contractEndDate} onChange={e => setNewEmpForm({ ...newEmpForm, contractEndDate: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none" />
+                      <DateField aria-label="Contract End Date" value={newEmpForm.contractEndDate} onChange={e => setNewEmpForm({ ...newEmpForm, contractEndDate: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none" />
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 text-xs">Probation Review Due:</label>
-                      <input type="date" aria-label="Probation Review Due Date" value={newEmpForm.probationEndDate} onChange={e => setNewEmpForm({ ...newEmpForm, probationEndDate: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none" />
+                      <DateField aria-label="Probation Review Due Date" value={newEmpForm.probationEndDate} onChange={e => setNewEmpForm({ ...newEmpForm, probationEndDate: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none" />
                       <label className="mt-2 flex items-center gap-2 text-[11px] font-semibold text-slate-600"><input type="checkbox" checked={newEmpForm.probationConfirmed} onChange={e => setNewEmpForm({ ...newEmpForm, probationConfirmed: e.target.checked })} className="accent-emerald-600" />Probation decision recorded</label>
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 text-xs">Driving Licence Expiry:</label>
-                      <input type="date" aria-label="Driving Licence Expiry" value={newEmpForm.drivingLicenceExpiryDate} onChange={e => setNewEmpForm({ ...newEmpForm, drivingLicenceExpiryDate: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none" />
+                      <DateField aria-label="Driving Licence Expiry" value={newEmpForm.drivingLicenceExpiryDate} onChange={e => setNewEmpForm({ ...newEmpForm, drivingLicenceExpiryDate: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none" />
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 text-xs">Certification Expiry:</label>
-                      <input type="date" aria-label="Certification Expiry" value={newEmpForm.professionalCertificationExpiryDate} onChange={e => setNewEmpForm({ ...newEmpForm, professionalCertificationExpiryDate: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none" />
+                      <DateField aria-label="Certification Expiry" value={newEmpForm.professionalCertificationExpiryDate} onChange={e => setNewEmpForm({ ...newEmpForm, professionalCertificationExpiryDate: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none" />
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 text-xs">Work Permit / Visa Expiry:</label>
-                      <input type="date" aria-label="Work Permit / Visa Expiry" value={newEmpForm.workPermitExpiryDate} onChange={e => setNewEmpForm({ ...newEmpForm, workPermitExpiryDate: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none" />
+                      <DateField aria-label="Work Permit / Visa Expiry" value={newEmpForm.workPermitExpiryDate} onChange={e => setNewEmpForm({ ...newEmpForm, workPermitExpiryDate: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none" />
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 text-xs">Worker Category:</label>
@@ -5172,7 +5171,7 @@ export function WebPortal({
                     </div>
                     <div className="sm:col-span-2 lg:col-span-4 rounded-lg border border-emerald-100 bg-emerald-50/60 p-3">
                       <p className="mb-2 text-[11px] font-bold text-emerald-800">Ramadan shift override <span className="font-normal text-emerald-700">(optional; dates must be set each year)</span></p>
-                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4"><label className="text-[10px] font-bold text-slate-600">Start<input type="date" aria-label="Ramadan Start Date" value={newEmpForm.ramadanStartDate} onChange={e => setNewEmpForm({ ...newEmpForm, ramadanStartDate: e.target.value })} className="mt-1 h-8 w-full rounded border border-slate-300 px-2 text-xs" /></label><label className="text-[10px] font-bold text-slate-600">End<input type="date" aria-label="Ramadan End Date" value={newEmpForm.ramadanEndDate} onChange={e => setNewEmpForm({ ...newEmpForm, ramadanEndDate: e.target.value })} className="mt-1 h-8 w-full rounded border border-slate-300 px-2 text-xs" /></label><label className="text-[10px] font-bold text-slate-600">Start time<input type="time" aria-label="Ramadan Shift Start" value={newEmpForm.ramadanStartTime} onChange={e => setNewEmpForm({ ...newEmpForm, ramadanStartTime: e.target.value })} className="mt-1 h-8 w-full rounded border border-slate-300 px-2 text-xs" /></label><label className="text-[10px] font-bold text-slate-600">End time<input type="time" aria-label="Ramadan Shift End" value={newEmpForm.ramadanEndTime} onChange={e => setNewEmpForm({ ...newEmpForm, ramadanEndTime: e.target.value })} className="mt-1 h-8 w-full rounded border border-slate-300 px-2 text-xs" /></label></div>
+                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4"><label className="text-[10px] font-bold text-slate-600">Start<DateField aria-label="Ramadan Start Date" value={newEmpForm.ramadanStartDate} onChange={e => setNewEmpForm({ ...newEmpForm, ramadanStartDate: e.target.value })} className="mt-1 h-8 w-full rounded border border-slate-300 px-2 text-xs" /></label><label className="text-[10px] font-bold text-slate-600">End<DateField aria-label="Ramadan End Date" value={newEmpForm.ramadanEndDate} onChange={e => setNewEmpForm({ ...newEmpForm, ramadanEndDate: e.target.value })} className="mt-1 h-8 w-full rounded border border-slate-300 px-2 text-xs" /></label><label className="text-[10px] font-bold text-slate-600">Start time<input type="time" aria-label="Ramadan Shift Start" value={newEmpForm.ramadanStartTime} onChange={e => setNewEmpForm({ ...newEmpForm, ramadanStartTime: e.target.value })} className="mt-1 h-8 w-full rounded border border-slate-300 px-2 text-xs" /></label><label className="text-[10px] font-bold text-slate-600">End time<input type="time" aria-label="Ramadan Shift End" value={newEmpForm.ramadanEndTime} onChange={e => setNewEmpForm({ ...newEmpForm, ramadanEndTime: e.target.value })} className="mt-1 h-8 w-full rounded border border-slate-300 px-2 text-xs" /></label></div>
                       <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4"><p className="col-span-2 text-[10px] font-bold text-emerald-800">Friday / Jumu’ah override (optional)</p><label className="text-[10px] font-bold text-slate-600">Start<input type="time" aria-label="Friday Shift Start" value={newEmpForm.fridayStartTime} onChange={e => setNewEmpForm({ ...newEmpForm, fridayStartTime: e.target.value })} className="mt-1 h-8 w-full rounded border border-slate-300 px-2 text-xs" /></label><label className="text-[10px] font-bold text-slate-600">End<input type="time" aria-label="Friday Shift End" value={newEmpForm.fridayEndTime} onChange={e => setNewEmpForm({ ...newEmpForm, fridayEndTime: e.target.value })} className="mt-1 h-8 w-full rounded border border-slate-300 px-2 text-xs" /></label></div>
                     </div>
                     <div>
@@ -5244,8 +5243,7 @@ export function WebPortal({
                       <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
                         <span>Date of Birth:</span>
                       </label>
-                      <input
-                        type="date" required
+                      <DateField required
                         aria-label="Date of Birth"
                         value={newEmpForm.dateOfBirth}
                         onChange={(e) => setNewEmpForm({ ...newEmpForm, dateOfBirth: e.target.value })}
@@ -5894,28 +5892,28 @@ export function WebPortal({
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 text-xs">CNIC Expiry (NADRA):</label>
-                      <input type="date" aria-label="Edit CNIC Expiry Date" value={editEmpForm.cnicExpiryDate} onChange={e => setEditEmpForm({ ...editEmpForm, cnicExpiryDate: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none" />
+                      <DateField aria-label="Edit CNIC Expiry Date" value={editEmpForm.cnicExpiryDate} onChange={e => setEditEmpForm({ ...editEmpForm, cnicExpiryDate: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none" />
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 text-xs">Contract End (if fixed-term):</label>
-                      <input type="date" aria-label="Edit Contract End Date" value={editEmpForm.contractEndDate} onChange={e => setEditEmpForm({ ...editEmpForm, contractEndDate: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none" />
+                      <DateField aria-label="Edit Contract End Date" value={editEmpForm.contractEndDate} onChange={e => setEditEmpForm({ ...editEmpForm, contractEndDate: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none" />
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 text-xs">Probation Review Due:</label>
-                      <input type="date" aria-label="Edit Probation Review Due Date" value={editEmpForm.probationEndDate} onChange={e => setEditEmpForm({ ...editEmpForm, probationEndDate: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none" />
+                      <DateField aria-label="Edit Probation Review Due Date" value={editEmpForm.probationEndDate} onChange={e => setEditEmpForm({ ...editEmpForm, probationEndDate: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none" />
                       <label className="mt-2 flex items-center gap-2 text-[11px] font-semibold text-slate-600"><input type="checkbox" checked={editEmpForm.probationConfirmed} onChange={e => setEditEmpForm({ ...editEmpForm, probationConfirmed: e.target.checked })} className="accent-indigo-600" />Probation decision recorded</label>
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 text-xs">Driving Licence Expiry:</label>
-                      <input type="date" aria-label="Edit Driving Licence Expiry" value={editEmpForm.drivingLicenceExpiryDate} onChange={e => setEditEmpForm({ ...editEmpForm, drivingLicenceExpiryDate: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none" />
+                      <DateField aria-label="Edit Driving Licence Expiry" value={editEmpForm.drivingLicenceExpiryDate} onChange={e => setEditEmpForm({ ...editEmpForm, drivingLicenceExpiryDate: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none" />
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 text-xs">Certification Expiry:</label>
-                      <input type="date" aria-label="Edit Certification Expiry" value={editEmpForm.professionalCertificationExpiryDate} onChange={e => setEditEmpForm({ ...editEmpForm, professionalCertificationExpiryDate: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none" />
+                      <DateField aria-label="Edit Certification Expiry" value={editEmpForm.professionalCertificationExpiryDate} onChange={e => setEditEmpForm({ ...editEmpForm, professionalCertificationExpiryDate: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none" />
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 text-xs">Work Permit / Visa Expiry:</label>
-                      <input type="date" aria-label="Edit Work Permit / Visa Expiry" value={editEmpForm.workPermitExpiryDate} onChange={e => setEditEmpForm({ ...editEmpForm, workPermitExpiryDate: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none" />
+                      <DateField aria-label="Edit Work Permit / Visa Expiry" value={editEmpForm.workPermitExpiryDate} onChange={e => setEditEmpForm({ ...editEmpForm, workPermitExpiryDate: e.target.value })} className="w-full h-9 px-3 border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none" />
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 text-xs">Worker Category:</label>
@@ -5953,7 +5951,7 @@ export function WebPortal({
                     </div>
                     <div className="sm:col-span-2 lg:col-span-4 rounded-lg border border-indigo-100 bg-indigo-50/60 p-3">
                       <p className="mb-2 text-[11px] font-bold text-indigo-800">Ramadan shift override <span className="font-normal text-indigo-700">(optional; dates must be set each year)</span></p>
-                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4"><label className="text-[10px] font-bold text-slate-600">Start<input type="date" aria-label="Edit Ramadan Start Date" value={editEmpForm.ramadanStartDate} onChange={e => setEditEmpForm({ ...editEmpForm, ramadanStartDate: e.target.value })} className="mt-1 h-8 w-full rounded border border-slate-300 px-2 text-xs" /></label><label className="text-[10px] font-bold text-slate-600">End<input type="date" aria-label="Edit Ramadan End Date" value={editEmpForm.ramadanEndDate} onChange={e => setEditEmpForm({ ...editEmpForm, ramadanEndDate: e.target.value })} className="mt-1 h-8 w-full rounded border border-slate-300 px-2 text-xs" /></label><label className="text-[10px] font-bold text-slate-600">Start time<input type="time" aria-label="Edit Ramadan Shift Start" value={editEmpForm.ramadanStartTime} onChange={e => setEditEmpForm({ ...editEmpForm, ramadanStartTime: e.target.value })} className="mt-1 h-8 w-full rounded border border-slate-300 px-2 text-xs" /></label><label className="text-[10px] font-bold text-slate-600">End time<input type="time" aria-label="Edit Ramadan Shift End" value={editEmpForm.ramadanEndTime} onChange={e => setEditEmpForm({ ...editEmpForm, ramadanEndTime: e.target.value })} className="mt-1 h-8 w-full rounded border border-slate-300 px-2 text-xs" /></label></div>
+                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4"><label className="text-[10px] font-bold text-slate-600">Start<DateField aria-label="Edit Ramadan Start Date" value={editEmpForm.ramadanStartDate} onChange={e => setEditEmpForm({ ...editEmpForm, ramadanStartDate: e.target.value })} className="mt-1 h-8 w-full rounded border border-slate-300 px-2 text-xs" /></label><label className="text-[10px] font-bold text-slate-600">End<DateField aria-label="Edit Ramadan End Date" value={editEmpForm.ramadanEndDate} onChange={e => setEditEmpForm({ ...editEmpForm, ramadanEndDate: e.target.value })} className="mt-1 h-8 w-full rounded border border-slate-300 px-2 text-xs" /></label><label className="text-[10px] font-bold text-slate-600">Start time<input type="time" aria-label="Edit Ramadan Shift Start" value={editEmpForm.ramadanStartTime} onChange={e => setEditEmpForm({ ...editEmpForm, ramadanStartTime: e.target.value })} className="mt-1 h-8 w-full rounded border border-slate-300 px-2 text-xs" /></label><label className="text-[10px] font-bold text-slate-600">End time<input type="time" aria-label="Edit Ramadan Shift End" value={editEmpForm.ramadanEndTime} onChange={e => setEditEmpForm({ ...editEmpForm, ramadanEndTime: e.target.value })} className="mt-1 h-8 w-full rounded border border-slate-300 px-2 text-xs" /></label></div>
                       <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4"><p className="col-span-2 text-[10px] font-bold text-indigo-800">Friday / Jumu’ah override (optional)</p><label className="text-[10px] font-bold text-slate-600">Start<input type="time" aria-label="Edit Friday Shift Start" value={editEmpForm.fridayStartTime} onChange={e => setEditEmpForm({ ...editEmpForm, fridayStartTime: e.target.value })} className="mt-1 h-8 w-full rounded border border-slate-300 px-2 text-xs" /></label><label className="text-[10px] font-bold text-slate-600">End<input type="time" aria-label="Edit Friday Shift End" value={editEmpForm.fridayEndTime} onChange={e => setEditEmpForm({ ...editEmpForm, fridayEndTime: e.target.value })} className="mt-1 h-8 w-full rounded border border-slate-300 px-2 text-xs" /></label></div>
                     </div>
                     <div>
@@ -6025,8 +6023,7 @@ export function WebPortal({
                       <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
                         <span>Date of Birth:</span>
                       </label>
-                      <input
-                        type="date" required
+                      <DateField required
                         aria-label="Date of Birth"
                         value={editEmpForm.dateOfBirth}
                         onChange={(e) => setEditEmpForm({ ...editEmpForm, dateOfBirth: e.target.value })}
@@ -6650,7 +6647,7 @@ export function WebPortal({
                       <select value={settlementType} onChange={event => setSettlementType(event.target.value as GratuitySettlement['separationType'])} className="mt-1 w-full rounded border border-slate-300 p-2 font-normal"><option>Resignation</option><option>Termination</option><option>Retirement</option><option>Death</option><option>Redundancy</option></select>
                     </label>
                     <label className="block font-bold text-slate-700">Effective / last working date:
-                      <input type="date" value={settlementDate} onChange={event => setSettlementDate(event.target.value)} className="mt-1 w-full rounded border border-slate-300 p-2 font-normal" />
+                      <DateField value={settlementDate} onChange={event => setSettlementDate(event.target.value)} className="mt-1 w-full rounded border border-slate-300 p-2 font-normal" />
                     </label>
                   </div>
                   <label className="block font-bold text-slate-700">Separation reason / approval note:
@@ -7004,7 +7001,7 @@ export function WebPortal({
                     {bankTemplates.map(item => <option key={item.id} value={item.id}>{item.verified ? '✓ Verified — ' : '⚠ Not verified — '}{item.name}</option>)}
                   </select>
                   <label className="mt-2 block text-[11px] font-bold text-amber-950">Value date
-                    <input type="date" value={bankValueDate} onChange={event => setBankValueDate(event.target.value)} className="mt-1 h-9 w-full rounded border border-amber-300 bg-white px-2 text-xs text-slate-900" />
+                    <DateField value={bankValueDate} onChange={event => setBankValueDate(event.target.value)} className="mt-1 h-9 w-full rounded border border-amber-300 bg-white px-2 text-xs text-slate-900" />
                   </label>
                   {selectedBankTemplate && <p className="mt-2 text-[10px] text-amber-900">Batch {batchReferenceFor(showBankFileModal)} · debit account {selectedBankTemplate.debitAccount || 'not set'} · spec: {selectedBankTemplate.specReference || 'not recorded'}</p>}
                   <p className="mt-2 text-[10px] leading-relaxed text-amber-900">This application does not claim this generic file is accepted by a bank. Upload only after your bank confirms the corporate file specification and finance validates a test batch.</p>
@@ -7106,8 +7103,7 @@ export function WebPortal({
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block font-bold mb-1 text-slate-650">Date:</label>
-                    <input
-                      type="date" required
+                    <DateField required
                       aria-label="Attendance Date"
                       value={newAttendanceForm.date}
                       onChange={(e) => setNewAttendanceForm({ ...newAttendanceForm, date: e.target.value })}
@@ -7247,8 +7243,7 @@ export function WebPortal({
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block font-bold mb-1 text-slate-655">Start Date:</label>
-                    <input
-                      type="date" required
+                    <DateField required
                       aria-label="Leave Start Date"
                       value={newLeaveForm.startDate}
                       onChange={(e) => setNewLeaveForm({ ...newLeaveForm, startDate: e.target.value })}
@@ -7257,8 +7252,7 @@ export function WebPortal({
                   </div>
                   <div>
                     <label className="block font-bold mb-1 text-slate-655">End Date:</label>
-                    <input
-                      type="date" required
+                    <DateField required
                       aria-label="Leave End Date"
                       value={newLeaveForm.endDate}
                       onChange={(e) => setNewLeaveForm({ ...newLeaveForm, endDate: e.target.value })}

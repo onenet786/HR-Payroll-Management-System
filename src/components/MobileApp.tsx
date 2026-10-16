@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { DateField } from './DateField';
 import {
   Scan, ShieldCheck, MapPin, Camera, CameraOff,
   Calendar, FileText, User, Fingerprint, CheckCircle, AlertCircle, Clock
@@ -736,7 +737,7 @@ export function MobileApp({
                 <div className="border-t border-slate-700/50 pt-3">
                   <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-2">Missed Punch? Regularize</p>
                   <form onSubmit={handleApplyRegularization} className="space-y-2">
-                    <input type="date" value={regForm.date}
+                    <DateField value={regForm.date}
                       aria-label="Date of missed punch"
                       onChange={e => setRegForm(p => ({ ...p, date: e.target.value }))}
                       className="w-full bg-slate-800 border border-slate-700 text-white text-xs rounded-xl px-3 py-2 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
@@ -847,13 +848,13 @@ export function MobileApp({
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">From</label>
-                  <input type="date" aria-label="Leave start date" value={leaveForm.startDate}
+                  <DateField aria-label="Leave start date" value={leaveForm.startDate}
                     onChange={e => setLeaveForm(p => ({ ...p, startDate: e.target.value }))}
                     className="w-full bg-slate-800 border border-slate-700 text-white text-xs rounded-xl px-3 py-2.5 focus:outline-none focus:ring-1 focus:ring-emerald-500" />
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">To</label>
-                  <input type="date" aria-label="Leave end date" value={leaveForm.endDate}
+                  <DateField aria-label="Leave end date" value={leaveForm.endDate}
                     onChange={e => setLeaveForm(p => ({ ...p, endDate: e.target.value }))}
                     className="w-full bg-slate-800 border border-slate-700 text-white text-xs rounded-xl px-3 py-2.5 focus:outline-none focus:ring-1 focus:ring-emerald-500" />
                 </div>

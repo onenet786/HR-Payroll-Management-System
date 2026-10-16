@@ -4,6 +4,7 @@
  */
 
 import React, { useState } from 'react';
+import { DateField } from './DateField';
 import { Plus, ChevronDown, ChevronUp } from 'lucide-react';
 import { PerformanceReview, KpiScore, Employee, SalaryRevision } from '../types';
 import { empAvatarUrl } from '../utils/avatar';
@@ -21,7 +22,7 @@ interface PerformanceModuleProps {
 
 const ratingLabels: Record<number, string> = { 1: 'Poor', 2: 'Below Average', 3: 'Average', 4: 'Good', 5: 'Excellent' };
 const ratingColors: Record<number, string> = {
-  1: 'text-rose-400', 2: 'text-orange-400', 3: 'text-amber-400', 4: 'text-emerald-400', 5: 'text-blue-400'
+  1: 'text-rose-700', 2: 'text-orange-700', 3: 'text-amber-700', 4: 'text-emerald-700', 5: 'text-blue-700'
 };
 
 const DEFAULT_KPIS = ['Technical Delivery', 'Quality of Work', 'Team Collaboration', 'Communication', 'Attendance & Punctuality'];
@@ -33,7 +34,7 @@ function StarRating({ value, onChange, readOnly }: { value: number; onChange?: (
       {[1,2,3,4,5].map(n => (
         <button key={n} type="button" disabled={readOnly}
           onClick={() => onChange?.(n)}
-          className={`text-lg leading-none transition ${n <= value ? 'text-amber-400' : 'text-slate-600'} ${readOnly ? '' : 'hover:text-amber-300 cursor-pointer'}`}>
+          className={`text-lg leading-none transition ${n <= value ? 'text-amber-700' : 'text-slate-600'} ${readOnly ? '' : 'hover:text-amber-700 cursor-pointer'}`}>
           ★
         </button>
       ))}
@@ -153,8 +154,8 @@ export function PerformanceModule({ reviews, employees, currentUserAccount, canM
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-bold text-white">Performance Appraisals</h2>
-          <p className="text-xs text-slate-400 mt-0.5">KPI-based performance reviews with weighted scoring and increment recommendations</p>
+          <h2 className="text-lg font-bold text-slate-900">Performance Appraisals</h2>
+          <p className="text-xs text-slate-500 mt-0.5">KPI-based performance reviews with weighted scoring and increment recommendations</p>
         </div>
         {canManage && (
           <button onClick={() => setShowForm(true)}
@@ -172,10 +173,10 @@ export function PerformanceModule({ reviews, employees, currentUserAccount, canM
           { label: 'Excellent Performers', val: excellentCount, color: 'blue', icon: '🏆' },
           { label: 'Pending Review', val: pendingCount, color: 'amber', icon: '⏳' }
         ].map(({ label, val, color, icon }) => (
-          <div key={label} className={`bg-${color}-500/10 border border-${color}-500/20 rounded-2xl p-4`}>
+          <div key={label} className={`bg-${color}-50 border border-${color}-200 rounded-2xl p-4`}>
             <div className="text-xl mb-1">{icon}</div>
-            <div className={`text-2xl font-bold text-${color}-400`}>{val}</div>
-            <div className="text-xs text-slate-400">{label}</div>
+            <div className={`text-2xl font-bold text-${color}-700`}>{val}</div>
+            <div className="text-xs text-slate-500">{label}</div>
           </div>
         ))}
       </div>
@@ -183,7 +184,7 @@ export function PerformanceModule({ reviews, employees, currentUserAccount, canM
       {/* Filter */}
       <select value={filterEmpId} onChange={e => setFilterEmpId(e.target.value)}
         aria-label="Filter performance reviews by employee"
-        className="bg-slate-800 border border-slate-700 text-white text-xs rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+        className="bg-white border border-slate-200 text-slate-900 text-xs rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500">
         <option value="All">All Employees</option>
         {employees.map(e => <option key={e.id} value={e.id}>{e.fullName}</option>)}
       </select>
@@ -197,21 +198,21 @@ export function PerformanceModule({ reviews, employees, currentUserAccount, canM
           const emp = employees.find(e => e.id === review.employeeId);
           const awaitingHrDecision = review.status === 'Submitted' || review.status === 'Reviewed';
           return (
-            <div key={review.id} className="bg-slate-800/40 border border-slate-700/50 rounded-2xl overflow-hidden">
-              <div className="flex items-center justify-between p-4 cursor-pointer hover:bg-slate-700/20 transition"
+            <div key={review.id} className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
+              <div className="flex items-center justify-between p-4 cursor-pointer hover:bg-slate-100 transition"
                 onClick={() => setExpandedId(isExpanded ? null : review.id)}>
                 <div className="flex items-center gap-3">
                   <img src={empAvatarUrl(emp)} className="w-9 h-9 rounded-xl object-cover" alt="" />
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-bold text-white">{getEmpName(review.employeeId)}</span>
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-lg bg-blue-500/20 text-blue-300 border border-blue-500/30">{review.period}</span>
+                      <span className="text-sm font-bold text-slate-900">{getEmpName(review.employeeId)}</span>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-lg bg-blue-50 text-blue-700 border border-blue-200">{review.period}</span>
                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded-lg border ${
-                        review.status === 'Approved' || review.status === 'Acknowledged' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' :
-                        review.status === 'Rejected' ? 'bg-rose-500/20 text-rose-300 border-rose-500/30' :
-                        'bg-amber-500/20 text-amber-300 border-amber-500/30'}`}>{awaitingHrDecision ? 'Pending HR Approval' : review.status}</span>
+                        review.status === 'Approved' || review.status === 'Acknowledged' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                        review.status === 'Rejected' ? 'bg-rose-50 text-rose-700 border-rose-200' :
+                        'bg-amber-50 text-amber-700 border-amber-200'}`}>{awaitingHrDecision ? 'Pending HR Approval' : review.status}</span>
                     </div>
-                    <p className="text-xs text-slate-400 mt-0.5">Reviewed by {review.reviewerId} on {review.reviewDate}</p>
+                    <p className="text-xs text-slate-500 mt-0.5">Reviewed by {review.reviewerId} on {review.reviewDate}</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-4">
@@ -223,66 +224,66 @@ export function PerformanceModule({ reviews, employees, currentUserAccount, canM
                   </div>
                   {review.incrementRecommended && (
                     <div className="text-right">
-                      <div className="text-sm font-bold text-emerald-400">+{review.incrementPercent}%</div>
+                      <div className="text-sm font-bold text-emerald-700">+{review.incrementPercent}%</div>
                       <div className="text-[10px] text-slate-500">Increment</div>
                     </div>
                   )}
-                  {isExpanded ? <ChevronUp size={16} className="text-slate-400" /> : <ChevronDown size={16} className="text-slate-400" />}
+                  {isExpanded ? <ChevronUp size={16} className="text-slate-500" /> : <ChevronDown size={16} className="text-slate-500" />}
                 </div>
               </div>
 
-              {canManage && awaitingHrDecision && <div className="flex items-center gap-3 border-t border-amber-500/20 bg-amber-500/10 px-4 py-3">
+              {canManage && awaitingHrDecision && <div className="flex items-center gap-3 border-t border-amber-200 bg-amber-50 px-4 py-3">
                 <div className="mr-auto">
-                  <p className="text-xs font-bold text-amber-200">HR decision required</p>
-                  <p className="text-[10px] text-amber-200/70">Review the rating and recommendations, then approve or reject the outcomes.</p>
+                  <p className="text-xs font-bold text-amber-700">HR decision required</p>
+                  <p className="text-[10px] text-amber-700/70">Review the rating and recommendations, then approve or reject the outcomes.</p>
                 </div>
-                <button type="button" onClick={() => decideReview(review, false)} className="rounded-xl border border-rose-500/40 bg-rose-700 px-4 py-2 text-xs font-bold text-white">Reject Outcomes</button>
+                <button type="button" onClick={() => decideReview(review, false)} className="rounded-xl border border-rose-200 bg-rose-700 px-4 py-2 text-xs font-bold text-white">Reject Outcomes</button>
                 <button type="button" onClick={() => decideReview(review, true)} className="rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white">Approve Outcomes</button>
               </div>}
-              {review.status === 'Approved' && <div className="border-t border-emerald-500/20 bg-emerald-500/10 px-4 py-3">
+              {review.status === 'Approved' && <div className="border-t border-emerald-200 bg-emerald-50 px-4 py-3">
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <p className="text-xs font-bold text-emerald-200">Approved Outcome</p>
-                    <p className="mt-0.5 text-[10px] text-emerald-200/70">Approved by {review.approvedBy || 'HR'}{review.approvedOn ? ` on ${review.approvedOn}` : ''}</p>
+                    <p className="text-xs font-bold text-emerald-700">Approved Outcome</p>
+                    <p className="mt-0.5 text-[10px] text-emerald-700/70">Approved by {review.approvedBy || 'HR'}{review.approvedOn ? ` on ${review.approvedOn}` : ''}</p>
                   </div>
                   <div className="flex flex-wrap justify-end gap-1.5 text-[10px] font-bold">
-                    {review.incrementRecommended && <span className="rounded-lg border border-emerald-500/30 bg-emerald-950/50 px-2 py-1 text-emerald-200">Increment {review.incrementPercent || 0}%</span>}
-                    {review.promotionRecommended && <span className="rounded-lg border border-blue-500/30 bg-blue-950/50 px-2 py-1 text-blue-200">Promotion recommended</span>}
-                    {review.trainingRecommended && <span className="rounded-lg border border-violet-500/30 bg-violet-950/50 px-2 py-1 text-violet-200">Training required</span>}
-                    {review.improvementPlanRequired && <span className="rounded-lg border border-amber-500/30 bg-amber-950/50 px-2 py-1 text-amber-200">Improvement plan required</span>}
+                    {review.incrementRecommended && <span className="rounded-lg border border-emerald-200 bg-emerald-950/50 px-2 py-1 text-emerald-700">Increment {review.incrementPercent || 0}%</span>}
+                    {review.promotionRecommended && <span className="rounded-lg border border-blue-200 bg-blue-950/50 px-2 py-1 text-blue-700">Promotion recommended</span>}
+                    {review.trainingRecommended && <span className="rounded-lg border border-indigo-200 bg-indigo-950/50 px-2 py-1 text-indigo-700">Training required</span>}
+                    {review.improvementPlanRequired && <span className="rounded-lg border border-amber-200 bg-amber-950/50 px-2 py-1 text-amber-700">Improvement plan required</span>}
                   </div>
                 </div>
                 {!review.incrementRecommended && !review.promotionRecommended && !review.trainingRecommended && !review.improvementPlanRequired
-                  ? <p className="mt-2 rounded-lg border border-slate-700/60 bg-slate-900/40 p-2 text-[10px] text-slate-300">No salary, promotion, training, or improvement-plan action was recommended. Approval finalizes the rating and appraisal record only.</p>
+                  ? <p className="mt-2 rounded-lg border border-slate-200 bg-white p-2 text-[10px] text-slate-600">No salary, promotion, training, or improvement-plan action was recommended. Approval finalizes the rating and appraisal record only.</p>
                   : review.incrementRecommended
-                    ? <p className="mt-2 text-[10px] text-emerald-200">Salary impact: {review.salaryRevisionId ? 'a draft revision was created in Salary Revisions and still requires Approve & Apply.' : 'no draft revision is linked to this legacy approved review.'}</p>
-                    : <p className="mt-2 text-[10px] text-emerald-200">The approved non-payroll recommendations are recorded above for HR follow-up.</p>}
+                    ? <p className="mt-2 text-[10px] text-emerald-700">Salary impact: {review.salaryRevisionId ? 'a draft revision was created in Salary Revisions and still requires Approve & Apply.' : 'no draft revision is linked to this legacy approved review.'}</p>
+                    : <p className="mt-2 text-[10px] text-emerald-700">The approved non-payroll recommendations are recorded above for HR follow-up.</p>}
               </div>}
 
               <AnimatePresence>
                 {isExpanded && (
                   <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
-                    className="border-t border-slate-700/50 overflow-hidden">
+                    className="border-t border-slate-200 overflow-hidden">
                     <div className="p-4 space-y-4">
                       {/* KPI Table */}
                       <div>
-                        <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">KPI Breakdown</h4>
+                        <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">KPI Breakdown</h4>
                         <table className="w-full text-xs">
-                          <thead><tr className="text-slate-500 border-b border-slate-700">
+                          <thead><tr className="text-slate-500 border-b border-slate-200">
                             <th className="text-left pb-1">KPI</th>
                             <th className="text-center pb-1">Weight</th>
                             <th className="text-center pb-1">Self</th>
                             <th className="text-center pb-1">Manager</th>
                             <th className="text-left pb-1">Comments</th>
                           </tr></thead>
-                          <tbody className="divide-y divide-slate-700/30">
+                          <tbody className="divide-y divide-slate-100">
                             {review.kpis.map((k, i) => (
                               <tr key={i}>
-                                <td className="py-1.5 text-slate-200 font-medium">{k.kpi}</td>
-                                <td className="py-1.5 text-center text-slate-400">{k.weight}%</td>
+                                <td className="py-1.5 text-slate-800 font-medium">{k.kpi}</td>
+                                <td className="py-1.5 text-center text-slate-500">{k.weight}%</td>
                                 <td className="py-1.5 text-center"><span className={`font-bold ${ratingColors[k.selfScore]}`}>{k.selfScore}</span></td>
                                 <td className="py-1.5 text-center"><span className={`font-bold ${ratingColors[k.managerScore]}`}>{k.managerScore}</span></td>
-                                <td className="py-1.5 text-slate-400 text-[10px]">{k.comment || '—'}</td>
+                                <td className="py-1.5 text-slate-500 text-[10px]">{k.comment || '—'}</td>
                               </tr>
                             ))}
                           </tbody>
@@ -291,20 +292,20 @@ export function PerformanceModule({ reviews, employees, currentUserAccount, canM
 
                       {/* Weighted Summary */}
                       <div className="grid grid-cols-2 gap-3">
-                        <div className="bg-slate-900/60 rounded-xl p-3">
+                        <div className="bg-white rounded-xl p-3">
                           <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">Self Rating</p>
                           <div className="flex items-center gap-2">
                             <StarRating value={Math.round(review.overallSelfRating)} readOnly />
                             <span className={`font-bold ${ratingColors[Math.round(review.overallSelfRating)]}`}>{review.overallSelfRating.toFixed(2)}</span>
-                            <span className="text-slate-400 text-xs">— {ratingLabels[Math.round(review.overallSelfRating)]}</span>
+                            <span className="text-slate-500 text-xs">— {ratingLabels[Math.round(review.overallSelfRating)]}</span>
                           </div>
                         </div>
-                        <div className="bg-slate-900/60 rounded-xl p-3">
+                        <div className="bg-white rounded-xl p-3">
                           <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">Manager Rating</p>
                           <div className="flex items-center gap-2">
                             <StarRating value={Math.round(review.overallManagerRating)} readOnly />
                             <span className={`font-bold ${ratingColors[Math.round(review.overallManagerRating)]}`}>{review.overallManagerRating.toFixed(2)}</span>
-                            <span className="text-slate-400 text-xs">— {ratingLabels[Math.round(review.overallManagerRating)]}</span>
+                            <span className="text-slate-500 text-xs">— {ratingLabels[Math.round(review.overallManagerRating)]}</span>
                           </div>
                         </div>
                       </div>
@@ -316,25 +317,25 @@ export function PerformanceModule({ reviews, employees, currentUserAccount, canM
                           { label: 'Areas of Improvement', text: review.areasOfImprovement, color: 'amber' },
                           { label: 'Manager Comments', text: review.managerComments, color: 'blue' }
                         ].map(({ label, text, color }) => (
-                          <div key={label} className={`bg-${color}-500/10 border border-${color}-500/20 rounded-xl p-3`}>
-                            <p className={`text-[10px] font-bold text-${color}-400 uppercase tracking-wider mb-1`}>{label}</p>
-                            <p className="text-slate-300">{text || '—'}</p>
+                          <div key={label} className={`bg-${color}-50 border border-${color}-200 rounded-xl p-3`}>
+                            <p className={`text-[10px] font-bold text-${color}-700 uppercase tracking-wider mb-1`}>{label}</p>
+                            <p className="text-slate-600">{text || '—'}</p>
                           </div>
                         ))}
                       </div>
 
                       {review.incrementRecommended && (
-                        <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-3 text-xs text-emerald-300">
+                        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-xs text-emerald-700">
                           <strong>Increment Recommended:</strong> +{review.incrementPercent}% salary increase recommended for next revision cycle.
                         </div>
                       )}
                       <div className="grid grid-cols-3 gap-2 text-xs">
-                        <div className={`rounded-xl border p-3 ${review.promotionRecommended ? 'border-blue-500/30 bg-blue-500/10 text-blue-300' : 'border-slate-700 text-slate-500'}`}><strong>Promotion:</strong> {review.promotionRecommended ? 'Recommended' : 'Not recommended'}</div>
-                        <div className={`rounded-xl border p-3 ${review.trainingRecommended ? 'border-violet-500/30 bg-violet-500/10 text-violet-300' : 'border-slate-700 text-slate-500'}`}><strong>Training:</strong> {review.trainingRecommended ? 'Required' : 'Not required'}</div>
-                        <div className={`rounded-xl border p-3 ${review.improvementPlanRequired ? 'border-amber-500/30 bg-amber-500/10 text-amber-300' : 'border-slate-700 text-slate-500'}`}><strong>Improvement plan:</strong> {review.improvementPlanRequired ? 'Required' : 'Not required'}</div>
+                        <div className={`rounded-xl border p-3 ${review.promotionRecommended ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-500'}`}><strong>Promotion:</strong> {review.promotionRecommended ? 'Recommended' : 'Not recommended'}</div>
+                        <div className={`rounded-xl border p-3 ${review.trainingRecommended ? 'border-indigo-200 bg-indigo-50 text-indigo-700' : 'border-slate-200 text-slate-500'}`}><strong>Training:</strong> {review.trainingRecommended ? 'Required' : 'Not required'}</div>
+                        <div className={`rounded-xl border p-3 ${review.improvementPlanRequired ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-slate-200 text-slate-500'}`}><strong>Improvement plan:</strong> {review.improvementPlanRequired ? 'Required' : 'Not required'}</div>
                       </div>
-                      {review.developmentPlan && <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-3 text-xs text-slate-300"><strong>Development / action plan:</strong> {review.developmentPlan}</div>}
-                      {review.salaryRevisionId && <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-300">Draft salary revision created. It will not affect payroll until separately approved.</div>}
+                      {review.developmentPlan && <div className="rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-600"><strong>Development / action plan:</strong> {review.developmentPlan}</div>}
+                      {review.salaryRevisionId && <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-700">Draft salary revision created. It will not affect payroll until separately approved.</div>}
                     </div>
                   </motion.div>
                 )}
@@ -350,37 +351,37 @@ export function PerformanceModule({ reviews, employees, currentUserAccount, canM
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4 overflow-y-auto">
             <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-3xl p-6 space-y-5 my-8">
-              <h3 className="text-base font-bold text-white">New Performance Review</h3>
+              className="bg-white border border-slate-200 rounded-2xl w-full max-w-3xl p-6 space-y-5 my-8">
+              <h3 className="text-base font-bold text-slate-900">New Performance Review</h3>
 
               <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <label htmlFor="perf-employee" className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Employee *</label>
+                  <label htmlFor="perf-employee" className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Employee *</label>
                   <select id="perf-employee" value={form.employeeId} onChange={e => setForm(p => ({ ...p, employeeId: e.target.value }))}
-                    className="w-full bg-slate-800 border border-slate-700 text-white text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                    className="w-full bg-white border border-slate-200 text-slate-900 text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500">
                     {employees.filter(e => e.status === 'Active').map(e => <option key={e.id} value={e.id}>{e.fullName}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label htmlFor="perf-period" className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Review Period</label>
+                  <label htmlFor="perf-period" className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Review Period</label>
                   <select id="perf-period" value={form.period} onChange={e => setForm(p => ({ ...p, period: e.target.value }))}
-                    className="w-full bg-slate-800 border border-slate-700 text-white text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                    className="w-full bg-white border border-slate-200 text-slate-900 text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500">
                     {PERIODS.map(p => <option key={p} value={p}>{p}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label htmlFor="perf-review-date" className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Review Date</label>
-                  <input id="perf-review-date" type="date" value={form.reviewDate} onChange={e => setForm(p => ({ ...p, reviewDate: e.target.value }))}
-                    className="w-full bg-slate-800 border border-slate-700 text-white text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                  <label htmlFor="perf-review-date" className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Review Date</label>
+                  <DateField id="perf-review-date" value={form.reviewDate} onChange={e => setForm(p => ({ ...p, reviewDate: e.target.value }))}
+                    className="w-full bg-white border border-slate-200 text-slate-900 text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
                 </div>
               </div>
 
               {/* KPI Grid */}
               <div>
                 <div className="flex justify-between items-center mb-2">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">KPI Scores</label>
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">KPI Scores</label>
                   <button type="button" onClick={addKpi}
-                    className="text-[10px] text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-1">
+                    className="text-[10px] text-emerald-700 hover:text-emerald-700 font-bold flex items-center gap-1">
                     <Plus size={11} /> Add KPI
                   </button>
                 </div>
@@ -388,14 +389,14 @@ export function PerformanceModule({ reviews, employees, currentUserAccount, canM
                   {form.kpis.map((kpi, idx) => (
                     <div key={idx} className="grid grid-cols-12 gap-2 items-center">
                       <div className="col-span-4">
-                        <label htmlFor={`perf-kpi-${idx}`} className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">KPI Name</label>
+                        <label htmlFor={`perf-kpi-${idx}`} className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">KPI Name</label>
                         <input id={`perf-kpi-${idx}`} value={kpi.kpi} onChange={e => updateKpi(idx, 'kpi', e.target.value)}
-                          placeholder="KPI Name" className="w-full bg-slate-800 border border-slate-700 text-white text-xs rounded-lg px-2 py-1.5 focus:outline-none" />
+                          placeholder="KPI Name" className="w-full bg-white border border-slate-200 text-slate-900 text-xs rounded-lg px-2 py-1.5 focus:outline-none" />
                       </div>
                       <div className="col-span-1 flex items-center gap-1">
-                        <label htmlFor={`perf-weight-${idx}`} className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Wt</label>
+                        <label htmlFor={`perf-weight-${idx}`} className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Wt</label>
                         <input id={`perf-weight-${idx}`} type="number" min="5" max="100" value={kpi.weight} onChange={e => updateKpi(idx, 'weight', Number(e.target.value))}
-                          className="w-12 bg-slate-800 border border-slate-700 text-white text-xs rounded-lg px-2 py-1.5 focus:outline-none" />
+                          className="w-12 bg-white border border-slate-200 text-slate-900 text-xs rounded-lg px-2 py-1.5 focus:outline-none" />
                         <span className="text-slate-500 text-xs">%</span>
                       </div>
                       <div className="col-span-3">
@@ -407,14 +408,14 @@ export function PerformanceModule({ reviews, employees, currentUserAccount, canM
                         <StarRating value={kpi.managerScore} onChange={v => updateKpi(idx, 'managerScore', v)} />
                       </div>
                       <button type="button" onClick={() => removeKpi(idx)}
-                        className="col-span-1 text-slate-600 hover:text-rose-400 transition text-base font-bold">×</button>
+                        className="col-span-1 text-slate-600 hover:text-rose-700 transition text-base font-bold">×</button>
                     </div>
                   ))}
                 </div>
                 <div className="mt-2 text-xs text-slate-500">
-                  Weighted Score Preview — Self: <span className="text-emerald-400 font-bold">{computeWeightedRating(form.kpis, 'selfScore').toFixed(2)}</span>
-                  {' '}| Manager: <span className="text-blue-400 font-bold">{computeWeightedRating(form.kpis, 'managerScore').toFixed(2)}</span>
-                  {' '}| Weight Total: <span className={form.kpis.reduce((s,k)=>s+k.weight,0)===100?'text-emerald-400':'text-rose-400'} >{form.kpis.reduce((s,k)=>s+k.weight,0)}%</span>
+                  Weighted Score Preview — Self: <span className="text-emerald-700 font-bold">{computeWeightedRating(form.kpis, 'selfScore').toFixed(2)}</span>
+                  {' '}| Manager: <span className="text-blue-700 font-bold">{computeWeightedRating(form.kpis, 'managerScore').toFixed(2)}</span>
+                  {' '}| Weight Total: <span className={form.kpis.reduce((s,k)=>s+k.weight,0)===100?'text-emerald-700':'text-rose-700'} >{form.kpis.reduce((s,k)=>s+k.weight,0)}%</span>
                 </div>
               </div>
 
@@ -426,43 +427,43 @@ export function PerformanceModule({ reviews, employees, currentUserAccount, canM
                   { label: 'Manager Comments', field: 'managerComments' as const }
                 ].map(({ label, field }) => (
                   <div key={field}>
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">{label}</label>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">{label}</label>
                     <textarea aria-label={label} value={form[field]} onChange={e => setForm(p => ({ ...p, [field]: e.target.value }))}
                       rows={3} placeholder={`${label}...`}
-                      className="w-full bg-slate-800 border border-slate-700 text-white text-xs rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none" />
+                      className="w-full bg-white border border-slate-200 text-slate-900 text-xs rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none" />
                   </div>
                 ))}
               </div>
 
               {/* Increment */}
-              <div className="flex items-center gap-4 bg-slate-800/60 rounded-xl p-3">
+              <div className="flex items-center gap-4 bg-slate-50 rounded-xl p-3">
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input type="checkbox" checked={form.incrementRecommended}
                     onChange={e => setForm(p => ({ ...p, incrementRecommended: e.target.checked }))}
                     className="w-4 h-4 rounded accent-emerald-500" />
-                  <span className="text-sm text-white font-medium">Recommend Salary Increment</span>
+                  <span className="text-sm text-slate-900 font-medium">Recommend Salary Increment</span>
                 </label>
                 {form.incrementRecommended && (
                   <div className="flex items-center gap-2">
-                    <label htmlFor="perf-increment" className="text-xs text-slate-400">Increment %</label>
+                    <label htmlFor="perf-increment" className="text-xs text-slate-500">Increment %</label>
                     <input id="perf-increment" type="number" min="0" max="100" value={form.incrementPercent}
                       onChange={e => setForm(p => ({ ...p, incrementPercent: Number(e.target.value) }))}
-                      className="w-16 bg-slate-700 border border-slate-600 text-white text-sm rounded-lg px-2 py-1 focus:outline-none" />
-                    <span className="text-slate-400 text-sm">%</span>
+                      className="w-16 bg-slate-100 border border-slate-300 text-slate-900 text-sm rounded-lg px-2 py-1 focus:outline-none" />
+                    <span className="text-slate-500 text-sm">%</span>
                   </div>
                 )}
               </div>
 
-              <div className="grid grid-cols-3 gap-3 rounded-xl bg-slate-800/60 p-3 text-xs text-slate-200">
+              <div className="grid grid-cols-3 gap-3 rounded-xl bg-slate-50 p-3 text-xs text-slate-800">
                 <label className="flex items-center gap-2"><input type="checkbox" checked={form.promotionRecommended} onChange={e => setForm(p => ({ ...p, promotionRecommended: e.target.checked }))} /> Promotion recommendation</label>
                 <label className="flex items-center gap-2"><input type="checkbox" checked={form.trainingRecommended} onChange={e => setForm(p => ({ ...p, trainingRecommended: e.target.checked }))} /> Training required</label>
                 <label className="flex items-center gap-2"><input type="checkbox" checked={form.improvementPlanRequired} onChange={e => setForm(p => ({ ...p, improvementPlanRequired: e.target.checked }))} /> Improvement plan</label>
-                <textarea value={form.developmentPlan} onChange={e => setForm(p => ({ ...p, developmentPlan: e.target.value }))} rows={2} placeholder="Development, training, promotion, or improvement actions..." className="col-span-3 rounded-xl border border-slate-700 bg-slate-900 p-2 text-white" />
+                <textarea value={form.developmentPlan} onChange={e => setForm(p => ({ ...p, developmentPlan: e.target.value }))} rows={2} placeholder="Development, training, promotion, or improvement actions..." className="col-span-3 rounded-xl border border-slate-200 bg-white p-2 text-slate-900" />
               </div>
 
               <div className="flex gap-3">
                 <button onClick={() => setShowForm(false)}
-                  className="flex-1 bg-slate-800 hover:bg-slate-700 text-white text-sm font-bold py-2.5 rounded-xl transition">Cancel</button>
+                  className="flex-1 bg-white hover:bg-slate-100 text-slate-900 text-sm font-bold py-2.5 rounded-xl transition">Cancel</button>
                 <button onClick={handleSave}
                   className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold py-2.5 rounded-xl transition">Submit Review</button>
               </div>
