@@ -299,6 +299,14 @@ if (!process.env.DATA_BACKEND || (process.env.DATA_BACKEND || '').trim().toLower
       }
 
       if (user.mfaEnabled) {
+        // A device that completed MFA recently (Remember me) signs in with the password alone.
+        const { isTrustedDevice } = require('./server/trusted-devices.cjs');
+        if (await isTrustedDevice(req.body?.trustedDeviceToken, userDoc.document_id, user, req)) {
+          const token = await createSession(userDoc.document_id, req, rememberMe === true);
+          const { passwordHash: _hash, password: _legacy, mfaSecretCipher: _secret, ...trustedUser } = user;
+          res.setHeader('Cache-Control', 'no-store');
+          return res.json({ token, user: trustedUser, trustedDevice: true });
+        }
         const mfaChallenge = await createLoginChallenge(userDoc.document_id);
         res.setHeader('Cache-Control', 'no-store');
         const mfaMethods = user.mfaMethod === 'email' ? ['email'] : user.mfaMethod === 'totp' ? ['totp'] : ['totp', 'email'];

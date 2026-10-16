@@ -2499,7 +2499,15 @@ export function WebPortal({
                             ? 'This account can access sensitive people, payroll, or system data. Set up MFA now.'
                             : 'Set up MFA to protect your account if your password is ever exposed.'}
                       </p>
-                      <p className="mt-1 text-[11px] text-slate-600">Session policy: signed out after 30 minutes of inactivity, or 12 hours maximum.</p>
+                      <p className="mt-1 text-[11px] text-slate-600">Session policy: signed out after 30 minutes of inactivity (12 hours maximum), or up to 5 days with “Remember me”.</p>
+                      {mfaEnabled && <button type="button" onClick={async () => {
+                        if (!window.confirm('Every device that skips the verification code will have to enter a code again at its next sign-in. Continue?')) return;
+                        try {
+                          const result = await payrollApi('/api/auth/mfa/trusted-devices/revoke', { method: 'POST', body: '{}' }) as { revoked: number };
+                          try { localStorage.removeItem('hr_mfa_trusted_devices'); } catch { /* nothing stored */ }
+                          showToast(`${result.revoked} trusted device(s) removed. A code will be asked at the next sign-in.`);
+                        } catch (error) { alert(error instanceof Error ? error.message : 'Trusted devices could not be removed.'); }
+                      }} className="mt-2 text-[11px] font-semibold text-emerald-800 underline hover:text-emerald-950">Stop trusting my devices (lost phone or shared device)</button>}
                     </div>
                   </div>
                   {!mfaEnabled && !mfaSetupChoice && <button type="button" onClick={() => setMfaSetupChoice('choose')} className="shrink-0 rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2">Set up MFA</button>}

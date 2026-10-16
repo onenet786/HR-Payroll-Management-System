@@ -38,7 +38,21 @@ const privacyStorage = {
 
 const publicUser = ({ passwordHash: _passwordHash, ...profile }: UserAccount): UserAccount => profile;
 
-const retainedBrowserKeys = new Set(['hr_auth_token', 'hr_remembered_email']);
+const TRUSTED_DEVICE_KEY = 'hr_mfa_trusted_devices';
+const retainedBrowserKeys = new Set(['hr_auth_token', 'hr_remembered_email', TRUSTED_DEVICE_KEY]);
+
+// Per-account MFA trust tokens survive sign-out on purpose: that is what lets this device skip the code.
+const readTrustedDevices = (): Record<string, string> => {
+  try { return JSON.parse(localStorage.getItem(TRUSTED_DEVICE_KEY) || '{}') || {}; } catch { return {}; }
+};
+const writeTrustedDevice = (loginId: string, token: string | null) => {
+  try {
+    const all = readTrustedDevices();
+    const key = loginId.trim().toLowerCase();
+    if (token) all[key] = token; else delete all[key];
+    localStorage.setItem(TRUSTED_DEVICE_KEY, JSON.stringify(all));
+  } catch { /* storage unavailable: the user is simply asked for the code */ }
+};
 for (let index = localStorage.length - 1; index >= 0; index -= 1) {
   const key = localStorage.key(index);
   if ((key?.startsWith('hr_') && !retainedBrowserKeys.has(key)) || key?.startsWith('webauthn_')) localStorage.removeItem(key);
@@ -241,11 +255,18 @@ export default function App() {
       const response = await fetch(`${apiBase}${mfaChallenge ? '/api/auth/mfa/verify-login' : '/api/auth/login'}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(mfaChallenge ? { challenge: mfaChallenge, code: mfaCode, method: mfaMethod, rememberMe } : { email: email.trim(), password, rememberMe }),
+        body: JSON.stringify(mfaChallenge
+          ? { challenge: mfaChallenge, code: mfaCode, method: mfaMethod, rememberMe }
+          : { email: email.trim(), password, rememberMe, trustedDeviceToken: readTrustedDevices()[email.trim().toLowerCase()] }),
       });
       if (response.ok) {
         const data = await response.json();
-        if (data.mfaRequired && data.mfaChallenge) return { mfaChallenge: data.mfaChallenge, mfaMethods: data.mfaMethods };
+        if (data.mfaRequired && data.mfaChallenge) {
+          // The server no longer trusts this device (expired, revoked or credentials changed).
+          writeTrustedDevice(email, null);
+          return { mfaChallenge: data.mfaChallenge, mfaMethods: data.mfaMethods };
+        }
+        if (data.trustedDeviceToken) writeTrustedDevice(email, data.trustedDeviceToken);
         setAuthToken(data.token);
         const userProfile: UserAccount = {
           id: data.user.id || data.token,
@@ -2630,7 +2651,7 @@ function LoginScreen({
                   </label>
 
                 </div>
-                {rememberMe && <p className="-mt-1 text-[10px] leading-relaxed text-emerald-300/80">This browser will stay signed in for up to 5 days. You will need to verify again after that, or sooner if you sign out.</p>}
+                {rememberMe && <p className="-mt-1 text-[10px] leading-relaxed text-emerald-300/80">Stay signed in on this device for up to 5 days. After you enter a verification code once, this device won't ask for it again for 5 days, even after you sign out. Don't tick this on a shared device.</p>}
 
                 {/* Primary CTA Submit Button */}
                 <button

@@ -3,6 +3,7 @@ const express = require('express');
 const nodemailer = require('nodemailer');
 const { pool, transaction } = require('./db.cjs');
 const { createSession } = require('./sessions.cjs');
+const { issueTrustedDevice, revokeTrustedDevices } = require('./trusted-devices.cjs');
 const { newSecret, verifyTotp, encryptSecret, decryptSecret } = require('./totp.cjs');
 
 const router = express.Router();
@@ -104,6 +105,14 @@ router.post('/email-enroll/confirm', async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
+router.post('/trusted-devices/revoke', async (req, res, next) => {
+  try {
+    const revoked = await revokeTrustedDevices(req.identity.uid);
+    await pool.query(`INSERT INTO hr_audit_log(actor_uid,actor_role_id,action,collection_name,document_id,new_data,correlation_id,source_ip) VALUES($1,$2,'mfa_trusted_devices_revoked','users',$1,$3::jsonb,$4,$5)`, [req.identity.uid, req.identity.roleId, JSON.stringify({ revoked }), req.correlationId, req.ip]);
+    res.json({ revoked });
+  } catch (error) { next(error); }
+});
+
 router.post('/recovery-request', async (req, res, next) => {
   try {
     const targetUserId = typeof req.body?.userId === 'string' && req.body.userId ? req.body.userId : req.identity.uid;
@@ -154,6 +163,8 @@ router.post('/recovery-request/:id/resolve', async (req, res, next) => {
       return item;
     });
     if (!resolved) return res.status(404).json({ error: 'Pending recovery request was not found.' });
+    // Belt and braces: the credential fingerprint already invalidates trust after an MFA reset.
+    if (decision === 'Approved') await revokeTrustedDevices(resolved.user_id).catch(() => undefined);
     await pool.query(`INSERT INTO hr_audit_log(actor_uid,actor_role_id,action,collection_name,document_id,new_data,correlation_id,source_ip) VALUES($1,$2,$3,'users',$4,$5::jsonb,$6,$7)`, [req.identity.uid, req.identity.roleId, decision === 'Approved' ? 'mfa_recovery_approved' : 'mfa_recovery_rejected', resolved.user_id, JSON.stringify({ requestId: resolved.id, note }), req.correlationId, req.ip]);
     res.json({ ok: true, status: decision });
   } catch (error) { if (error.message?.startsWith('Maker-checker')) error.status = 403; next(error); }
@@ -215,9 +226,11 @@ publicRouter.post('/verify-login', async (req, res, next) => {
     });
     if (!user) return res.status(401).json({ error: 'Invalid, expired, or already used verification code.' });
     const token = await createSession(user.id, req, rememberMe === true);
+    // Remember me also trusts this device for the MFA step; a failure here must not block sign-in.
+    const trustedDeviceToken = rememberMe === true ? await issueTrustedDevice(user.id, user.data, req).catch(() => undefined) : undefined;
     const { passwordHash, password, mfaSecretCipher, ...safeUser } = user.data;
     res.setHeader('Cache-Control', 'no-store');
-    res.json({ token, user: safeUser });
+    res.json({ token, user: safeUser, ...(trustedDeviceToken && { trustedDeviceToken }) });
   } catch (error) { next(error); }
 });
 
