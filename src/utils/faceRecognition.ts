@@ -1,9 +1,10 @@
 import { Employee } from '../types';
 import { isValidLivenessAttestation, selectBestFace } from './faceLiveness';
 import { detectFaceGeometry } from './faceLandmarker';
+import { computeFaceEmbedding, type FaceBox } from './faceEmbedding';
 
 export interface FaceDescriptor {
-  version: 1 | 2 | 3;
+  version: 1 | 2 | 3 | 4;
   vector: number[];
   capturedAt: string;
   source?: string;
@@ -27,62 +28,21 @@ export interface FaceFrameQuality {
   message: string;
 }
 
-const GRID_W = 16;
-const GRID_H = 20;
-const V2_LENGTH = GRID_W * GRID_H * 4;
-const FACE_FRAME_ASPECT = 4 / 3;
-export const FACE_MATCH_THRESHOLD = 0.255;
-export const FACE_VERIFY_THRESHOLD = 0.280;
-export const FACE_MATCH_MARGIN = 0.035;
-
-function drawNormalizedFaceFrame(
-  ctx: CanvasRenderingContext2D,
-  video: HTMLVideoElement,
-  width: number,
-  height: number,
-): void {
-  const sourceWidth = video.videoWidth;
-  const sourceHeight = video.videoHeight;
-  let sourceX = 0;
-  let sourceY = 0;
-  let cropWidth = sourceWidth;
-  let cropHeight = sourceHeight;
-
-  if (sourceWidth / sourceHeight > FACE_FRAME_ASPECT) {
-    cropWidth = sourceHeight * FACE_FRAME_ASPECT;
-    sourceX = (sourceWidth - cropWidth) / 2;
-  } else if (sourceWidth / sourceHeight < FACE_FRAME_ASPECT) {
-    cropHeight = sourceWidth / FACE_FRAME_ASPECT;
-    sourceY = (sourceHeight - cropHeight) / 2;
-  }
-
-  ctx.drawImage(video, sourceX, sourceY, cropWidth, cropHeight, 0, 0, width, height);
-}
-
-export function drawCroppedFaceFrame(
-  ctx: CanvasRenderingContext2D,
-  video: HTMLVideoElement,
-  box: { x: number; y: number; width: number; height: number },
-  width: number,
-  height: number,
-): void {
-  const videoW = video.videoWidth;
-  const videoH = video.videoHeight;
-  const padX = box.width * 0.15;
-  const padY = box.height * 0.15;
-  const sx = Math.max(0, (box.x - padX) * videoW);
-  const sy = Math.max(0, (box.y - padY) * videoH);
-  const sw = Math.min(videoW - sx, (box.width + padX * 2) * videoW);
-  const sh = Math.min(videoH - sy, (box.height + padY * 2) * videoH);
-  ctx.drawImage(video, sx, sy, sw, sh, 0, 0, width, height);
-}
+// Identity embeddings (version 4): 128 numbers from face-api; Euclidean distance between two faces.
+// The same person is typically below ~0.40 and different people above ~0.55.
+export const FACE_DESCRIPTOR_VERSION = 4;
+export const FACE_DESCRIPTOR_LENGTH = 128;
+export const FACE_MATCH_THRESHOLD = 0.45; // identify without an employee code
+export const FACE_VERIFY_THRESHOLD = 0.5; // confirm one named employee
+export const FACE_MATCH_MARGIN = 0.06; // runner-up employee must be at least this much further away
+export const FACE_STRONG_DISTANCE = 0.25; // distance that counts as a 100% match
 
 export function getFaceDescriptors(employee: Employee): FaceDescriptor[] {
   const values = employee.faceDescriptors || [];
   return values.filter(item =>
-    item.version === 3 &&
+    item.version === FACE_DESCRIPTOR_VERSION &&
     Array.isArray(item.vector) &&
-    item.vector.length === V2_LENGTH &&
+    item.vector.length === FACE_DESCRIPTOR_LENGTH &&
     isValidLivenessAttestation(item.liveness)
   );
 }
@@ -91,62 +51,15 @@ export function hasFaceEnrollment(employee: Employee): boolean {
   return getFaceDescriptors(employee).length > 0;
 }
 
-export function createFaceDescriptorFromVideo(
+/** Identity embedding for the face inside `cropBox` (or the most prominent face). Throws if no clear face is visible. */
+export async function createFaceDescriptorFromVideo(
   video: HTMLVideoElement,
   source = 'camera',
-  cropBox?: { x: number; y: number; width: number; height: number }
-): FaceDescriptor {
-  const canvas = document.createElement('canvas');
-  canvas.width = GRID_W;
-  canvas.height = GRID_H;
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  if (!ctx) throw new Error('Camera descriptor canvas is unavailable.');
+  cropBox?: FaceBox
+): Promise<FaceDescriptor> {
   if (!video.videoWidth || !video.videoHeight) throw new Error('Camera is not ready yet.');
-
-  if (cropBox && cropBox.width > 0.05 && cropBox.height > 0.05) {
-    drawCroppedFaceFrame(ctx, video, cropBox, GRID_W, GRID_H);
-  } else {
-    drawNormalizedFaceFrame(ctx, video, GRID_W, GRID_H);
-  }
-  const image = ctx.getImageData(0, 0, GRID_W, GRID_H).data;
-  const luma: number[] = [];
-
-  for (let i = 0; i < image.length; i += 4) {
-    const r = image[i] / 255;
-    const g = image[i + 1] / 255;
-    const b = image[i + 2] / 255;
-    luma.push(0.299 * r + 0.587 * g + 0.114 * b);
-  }
-
-  const mean = luma.reduce((sum, value) => sum + value, 0) / luma.length;
-  const vector: number[] = [];
-
-  for (let y = 0; y < GRID_H; y++) {
-    for (let x = 0; x < GRID_W; x++) {
-      const idx = y * GRID_W + x;
-      const base = idx * 4;
-      const r = image[base] / 255;
-      const g = image[base + 1] / 255;
-      const b = image[base + 2] / 255;
-      const lum = luma[idx] - mean;
-      const gx = x > 0 && x < GRID_W - 1 ? luma[idx + 1] - luma[idx - 1] : 0;
-      const gy = y > 0 && y < GRID_H - 1 ? luma[idx + GRID_W] - luma[idx - GRID_W] : 0;
-
-      vector.push(
-        Number(lum.toFixed(4)),
-        Number((r - g).toFixed(4)),
-        Number((b - (r + g) / 2).toFixed(4)),
-        Number(Math.sqrt(gx * gx + gy * gy).toFixed(4))
-      );
-    }
-  }
-
-  return {
-    version: 2,
-    vector,
-    capturedAt: new Date().toISOString(),
-    source,
-  };
+  const vector = await computeFaceEmbedding(video, cropBox);
+  return { version: FACE_DESCRIPTOR_VERSION, vector, capturedAt: new Date().toISOString(), source };
 }
 
 export async function assessBrowserFaceDetection(video: HTMLVideoElement): Promise<FaceFrameQuality | null> {
@@ -307,44 +220,39 @@ export function assessFaceFrame(video: HTMLVideoElement): FaceFrameQuality {
 }
 
 export function compareFaceDescriptors(a: FaceDescriptor, b: FaceDescriptor): number {
-  if (![2, 3].includes(a.version) || ![2, 3].includes(b.version) || a.vector.length !== b.vector.length) {
+  if (a.version !== FACE_DESCRIPTOR_VERSION || b.version !== FACE_DESCRIPTOR_VERSION || a.vector.length !== b.vector.length) {
     return Number.POSITIVE_INFINITY;
   }
-
   let sum = 0;
   for (let i = 0; i < a.vector.length; i++) {
     const delta = a.vector[i] - b.vector[i];
     sum += delta * delta;
   }
-  return Math.sqrt(sum / a.vector.length);
+  return Math.sqrt(sum);
 }
 
+/**
+ * Closest enrolled employee, or null when nobody is within `threshold`, when the runner-up employee is too
+ * close to call (`margin`), or when the best match is in `excludeEmployeeIds` (already matched to another face).
+ */
 export function findBestFaceMatch(
   employees: Employee[],
   probe: FaceDescriptor,
-  threshold = FACE_MATCH_THRESHOLD
+  threshold = FACE_MATCH_THRESHOLD,
+  options: { margin?: number; excludeEmployeeIds?: string[] } = {}
 ): FaceMatch | null {
-  const scoredEmployees = (employees || [])
+  const scored = (employees || [])
     .map(employee => {
       let minScore = Number.POSITIVE_INFINITY;
-      for (const descriptor of getFaceDescriptors(employee)) {
-        const score = compareFaceDescriptors(probe, descriptor);
-        if (Number.isFinite(score) && score < minScore) {
-          minScore = score;
-        }
-      }
+      for (const descriptor of getFaceDescriptors(employee)) minScore = Math.min(minScore, compareFaceDescriptors(probe, descriptor));
       return { employee, score: minScore };
     })
     .filter(item => Number.isFinite(item.score))
     .sort((a, b) => a.score - b.score);
-
-  if (scoredEmployees.length === 0) return null;
-
-  const best = scoredEmployees[0];
-  if (best.score > threshold) return null;
-
-  const second = scoredEmployees[1] || null;
-  const margin = second ? second.score - best.score : Number.POSITIVE_INFINITY;
-
+  const best = scored[0];
+  if (!best || best.score > threshold) return null;
+  const margin = scored[1] ? scored[1].score - best.score : Number.POSITIVE_INFINITY;
+  if (margin < (options.margin ?? FACE_MATCH_MARGIN)) return null;
+  if (options.excludeEmployeeIds?.includes(best.employee.id)) return null;
   return { employee: best.employee, score: best.score, margin };
 }

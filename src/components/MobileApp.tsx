@@ -15,7 +15,7 @@ import { leaveBalanceError, leaveBalances } from '../data/leavePolicy';
 import type { StatutoryConfig } from '../types';
 import { Employee, AttendanceLog, LeaveRequest, Payslip, PayrollRun, UserAccount, MobileAttendanceAction, MobilePunchDetails, MobileDutyAuthorization } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
-import { assessBrowserFaceDetection, createFaceDescriptorFromVideo, findBestFaceMatch, hasFaceEnrollment } from '../utils/faceRecognition';
+import { assessBrowserFaceDetection, createFaceDescriptorFromVideo, findBestFaceMatch, hasFaceEnrollment, FACE_VERIFY_THRESHOLD } from '../utils/faceRecognition';
 import { performActiveLiveness, randomLivenessOrder } from '../utils/faceLiveness';
 
 interface MobileAppProps {
@@ -398,8 +398,8 @@ export function MobileApp({
       const liveness = await performActiveLiveness(video, order, message => setFaceStatus(message));
       if (!liveness.ok) throw new Error(liveness.message);
 
-      const probe = createFaceDescriptorFromVideo(video, 'mobile-front-camera');
-      const match = findBestFaceMatch([currentEmp], probe, 0.24);
+      const probe = await createFaceDescriptorFromVideo(video, 'mobile-front-camera');
+      const match = findBestFaceMatch([currentEmp], probe, FACE_VERIFY_THRESHOLD);
       if (!match || match.employee.id !== currentEmp.id) throw new Error('Face does not match the signed-in employee. Attendance was not recorded.');
 
       setFaceStatus('Face verified. Capturing secure GPS location…');

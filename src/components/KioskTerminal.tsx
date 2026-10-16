@@ -10,7 +10,8 @@ import {
 import { Employee, AttendanceLog, Branch, MobilePunchDetails } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 import { captureBiometric } from '../utils/uru4500Bridge';
-import { assessBrowserFaceDetection, createFaceDescriptorFromVideo, findBestFaceMatch, hasFaceEnrollment, FACE_MATCH_THRESHOLD } from '../utils/faceRecognition';
+import { assessBrowserFaceDetection, createFaceDescriptorFromVideo, findBestFaceMatch, hasFaceEnrollment, FACE_MATCH_THRESHOLD, FACE_STRONG_DISTANCE } from '../utils/faceRecognition';
+import { biometricMatchEvidence } from '../data/complianceAlerts';
 import { performActiveLiveness, randomLivenessOrder } from '../utils/faceLiveness';
 import { MultiFaceTracker } from '../utils/multiFaceTracker';
 import { drawMultiFaceHUD } from '../utils/faceCanvasOverlay';
@@ -332,12 +333,12 @@ export function KioskTerminal({
       if (!frameQuality?.ok) throw new Error(frameQuality?.message || 'Keep one complete face inside the oval.');
       const liveness = await performActiveLiveness(videoRef.current, randomLivenessOrder(), statusMessage => setMessage(statusMessage));
       if (!liveness.ok) throw new Error(liveness.message);
-      const probe = createFaceDescriptorFromVideo(videoRef.current, 'kiosk-webcam');
+      const probe = await createFaceDescriptorFromVideo(videoRef.current, 'kiosk-webcam');
       const match = findBestFaceMatch(enrolledEmployees, probe, FACE_MATCH_THRESHOLD);
       if (!match) {
-        throw new Error('Face not recognized. Step closer, improve lighting, or re-enroll the camera profile.');
+        throw new Error('Face not recognized, or it resembles more than one employee. Step closer in good light, or use your employee code.');
       }
-      setMessage(`Face match confidence ${(Math.max(0, 1 - match.score / FACE_MATCH_THRESHOLD) * 100).toFixed(1)}%.`);
+      setMessage(`Face match strength ${biometricMatchEvidence('face', match.score, FACE_MATCH_THRESHOLD, undefined, FACE_STRONG_DISTANCE).strengthPercent}%.`);
       await triggerPunch(match.employee, 'Camera');
     } catch (error) {
       setStatus('error');

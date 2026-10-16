@@ -52,24 +52,28 @@ export class MultiFaceTracker {
     const now = Date.now();
     const renderList: TrackedFaceRenderData[] = [];
 
+    // Identify every face first, then let each employee claim at most one face (the closest). Two people
+    // can never both be shown, or punched, as the same employee.
+    const matches = await Promise.all(detectedFaces.map(async (face, index) => {
+      try {
+        const probe = await createFaceDescriptorFromVideo(video, `multi-face-${index}`, face.box);
+        return findBestFaceMatch(enrolledEmployees, probe, FACE_MATCH_THRESHOLD);
+      } catch {
+        return null;
+      }
+    }));
+    const closestFaceFor = new Map<string, number>();
+    matches.forEach((match, index) => {
+      if (!match) return;
+      const held = closestFaceFor.get(match.employee.id);
+      if (held === undefined || matches[held]!.score > match.score) closestFaceFor.set(match.employee.id, index);
+    });
+
     for (let index = 0; index < detectedFaces.length; index++) {
       const face = detectedFaces[index];
       const box = face.box;
-
-      // Extract descriptor cropped specifically to this face
-      let matchedEmployee: Employee | null = null;
-      let matchScore = 1;
-
-      try {
-        const probe = createFaceDescriptorFromVideo(video, `multi-face-${index}`, box);
-        const match = findBestFaceMatch(enrolledEmployees, probe, FACE_MATCH_THRESHOLD);
-        if (match) {
-          matchedEmployee = match.employee;
-          matchScore = match.score;
-        }
-      } catch (err) {
-        // Fall back to unknown
-      }
+      const match = matches[index];
+      const matchedEmployee: Employee | null = match && closestFaceFor.get(match.employee.id) === index ? match.employee : null;
 
       const faceId = `face-${index}`;
 

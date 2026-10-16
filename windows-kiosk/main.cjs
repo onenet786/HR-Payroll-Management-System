@@ -11,9 +11,10 @@ const {
   canReturnFromTemporaryExit,
   resumeFromTemporaryExit,
 } = require('./attendance-state.cjs');
-const { createChallengeManager, isValidAttestation } = require('./liveness.cjs');
+const { createChallengeManager } = require('./liveness.cjs');
 const { authorizeCameraAttempt, requireSecureEnrollment } = require('./camera-authorization.cjs');
 const { LOW_CONFIDENCE_BIOMETRIC_PERCENT, biometricMatchEvidence, evaluateAttendanceTimes } = require('./attendance-rules.cjs');
+const { FACE_IDENTIFY_THRESHOLD, FACE_VERIFY_THRESHOLD, FACE_STRONG_DISTANCE, normalizeFaceDescriptor, identifyFace } = require('./face-match.cjs');
 
 dotenv.config({ quiet: true });
 
@@ -722,21 +723,6 @@ function getFingerprintTemplates(employee) {
   return list.map(normalizeFingerprintTemplate).filter(Boolean);
 }
 
-function normalizeFaceDescriptor(value, requireSecure = true) {
-  if (!value || typeof value !== 'object') return null;
-  const vector = Array.isArray(value.vector) ? value.vector.map(Number).filter(Number.isFinite) : [];
-  const attestation = value.liveness;
-  if (vector.length !== 1280) return null;
-  if (requireSecure && (value.version !== 3 || !isValidAttestation(attestation))) return null;
-  return {
-    version: requireSecure ? 3 : Number(value.version || 2),
-    vector,
-    capturedAt: value.capturedAt || '',
-    source: value.source || '',
-    liveness: attestation,
-  };
-}
-
 function getFaceDescriptors(employee) {
   const source =
     employee?.faceDescriptors ||
@@ -745,66 +731,8 @@ function getFaceDescriptors(employee) {
     employee?.biometric?.faceDescriptors ||
     [];
   const list = Array.isArray(source) ? source : [source];
-  return list.map(item => normalizeFaceDescriptor(item, false)).filter(Boolean);
-}
-
-function compareFaceDescriptors(a, b) {
-  const length = a?.vector?.length || 0;
-  if (!length || length !== (b?.vector?.length || 0)) return Number.POSITIVE_INFINITY;
-  let sum = 0;
-  for (let i = 0; i < length; i++) {
-    const delta = Number(a.vector[i]) - Number(b.vector[i]);
-    sum += delta * delta;
-  }
-  return Math.sqrt(sum / length);
-}
-
-function identifyFaceDescriptor(employees, probe, threshold = 0.255) {
-  const normalizedProbe = normalizeFaceDescriptor(probe, false);
-  if (!normalizedProbe) return { ok: false, message: 'Camera face descriptor was invalid. Try another capture.' };
-
-  const scoredEmployees = (employees || [])
-    .map(employee => {
-      let minScore = Number.POSITIVE_INFINITY;
-      for (const descriptor of getFaceDescriptors(employee)) {
-        const score = compareFaceDescriptors(normalizedProbe, descriptor);
-        if (Number.isFinite(score) && score < minScore) {
-          minScore = score;
-        }
-      }
-      return { employee, score: minScore };
-    })
-    .filter(item => Number.isFinite(item.score))
-    .sort((a, b) => a.score - b.score);
-
-  if (scoredEmployees.length === 0) {
-    return { ok: false, message: 'Face was not recognized in directory. Ensure good lighting or verify employee code.' };
-  }
-
-  const best = scoredEmployees[0];
-  const second = scoredEmployees[1] || null;
-
-  if (best.score > threshold) {
-    return {
-      ok: false,
-      message: `Face not recognized (score ${best.score.toFixed(3)}, required ${threshold.toFixed(3)} or lower). Move back until the full head and face fit inside the oval, matching the enrollment distance.`,
-      score: best.score,
-    };
-  }
-
-  const margin = second ? second.score - best.score : Number.POSITIVE_INFINITY;
-  if (second && Number.isFinite(second.score) && second.score <= threshold && margin < 0.035) {
-    console.warn(`[Kiosk Face] Ambiguous match rejected: ${best.employee.fullName} (${best.score.toFixed(3)}) vs ${second.employee.fullName} (${second.score.toFixed(3)}), margin=${margin.toFixed(3)}`);
-    return {
-      ok: false,
-      ambiguous: true,
-      message: `Ambiguous face match between ${best.employee.fullName} and ${second.employee.fullName}. Enter your employee code to punch.`,
-      score: best.score,
-      margin,
-    };
-  }
-
-  return { ok: true, employee: best.employee, score: best.score, margin };
+  // Only identity embeddings (version 4) count; older pixel-based profiles must be re-enrolled.
+  return list.map(normalizeFaceDescriptor).filter(Boolean);
 }
 
 function buildFingerprintGallery(employees) {
@@ -916,7 +844,7 @@ function savePunch(store, employee, method, evidence, meta) {
     };
   }
   const matchKind = method === 'Camera' ? 'face' : method === 'Biometric' ? 'fingerprint' : null;
-  const biometricMatch = matchKind ? biometricMatchEvidence(matchKind, Number(meta?.score), Number(meta?.threshold), store.biometricPolicy?.lowConfidencePercent ?? LOW_CONFIDENCE_BIOMETRIC_PERCENT) : null;
+  const biometricMatch = matchKind ? biometricMatchEvidence(matchKind, Number(meta?.score), Number(meta?.threshold), store.biometricPolicy?.lowConfidencePercent ?? LOW_CONFIDENCE_BIOMETRIC_PERCENT, matchKind === 'face' ? FACE_STRONG_DISTANCE : 0) : null;
   const resumed = isReturningFromBreak
     ? resumeFromTemporaryExit(existing, {
         at,
@@ -1237,12 +1165,17 @@ ipcMain.handle('kiosk:punch-camera', async (_event, payload) => {
   const secureDescriptorCount = candidates.reduce((count, employee) => count + getFaceDescriptors(employee).length, 0);
   if (secureDescriptorCount === 0) {
     if (payload.mode !== 'multi-face') cameraChallenges.recordFailure(terminalId);
-    return { ok: false, message: 'No enrolled face profiles found for this employee. Please enroll face in HR portal.' };
+    return { ok: false, message: 'No face profile enrolled with the current recognition model. Re-enroll this face in the HR portal (Biometric Devices).' };
   }
   // A typed code narrows the gallery; without one the same descriptor matcher
   // searches every securely enrolled employee and enforces uniqueness margin.
-  const matchThreshold = typedEmployee ? 0.280 : 0.230;
-  const match = identifyFaceDescriptor(candidates, payload.descriptor, matchThreshold);
+  const matchThreshold = typedEmployee ? FACE_VERIFY_THRESHOLD : FACE_IDENTIFY_THRESHOLD;
+  const match = identifyFace(candidates, payload.descriptor, {
+    threshold: matchThreshold,
+    excludeEmployeeIds: Array.isArray(payload.excludeEmployeeIds) ? payload.excludeEmployeeIds.slice(0, 20) : [],
+    getDescriptors: getFaceDescriptors,
+  });
+  if (!match.ok && (match.ambiguous || match.duplicate)) addEvent('security', `Camera match refused: ${match.message} (distance ${Number(match.score).toFixed(3)})`);
   if (!match.ok) {
     if (payload.mode !== 'multi-face') {
       const failure = cameraChallenges.recordFailure(terminalId);

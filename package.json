@@ -5,7 +5,9 @@
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
+    "predev": "node scripts/sync-face-models.cjs",
     "dev": "vite --port=3000 --host=0.0.0.0",
+    "prebuild": "node scripts/sync-face-models.cjs",
     "build": "vite build",
     "preview": "vite preview",
     "start": "node server.cjs",
@@ -22,7 +24,9 @@
     "postgres:restore": "node scripts/postgres-restore.cjs",
     "windows:run": "npm run build && electron .",
     "windows:build": "npm run build && electron-builder --win",
+    "prekiosk:run": "node scripts/sync-face-models.cjs",
     "kiosk:run": "electron windows-kiosk/main.cjs",
+    "prekiosk:build": "node scripts/sync-face-models.cjs",
     "kiosk:build": "node scripts/electron-builder-retry.cjs --config windows-kiosk/electron-builder.json --win"
   },
   "build": {
@@ -89,6 +93,7 @@
     "@tailwindcss/vite": "^4.1.14",
     "@types/qrcode": "^1.5.6",
     "@vitejs/plugin-react": "^5.0.4",
+    "@vladmandic/face-api": "1.7.15",
     "bcryptjs": "^3.0.3",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",

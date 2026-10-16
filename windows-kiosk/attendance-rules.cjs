@@ -35,9 +35,10 @@ const LOW_CONFIDENCE_BIOMETRIC_PERCENT = 25;
 
 // Face distances and DigitalPersona dissimilarity scores are both "lower is better" against an acceptance
 // threshold, so strength is how far below the threshold the accepted match landed.
-function biometricMatchEvidence(kind, score, threshold, lowConfidencePercent = LOW_CONFIDENCE_BIOMETRIC_PERCENT) {
-  if (!Number.isFinite(score) || !Number.isFinite(threshold) || threshold <= 0) return null;
-  const strengthPercent = Math.max(0, Math.min(100, Math.round(((threshold - score) / threshold) * 100)));
+// `strongScore` is the distance that counts as a 100% match (face embeddings never reach 0).
+function biometricMatchEvidence(kind, score, threshold, lowConfidencePercent = LOW_CONFIDENCE_BIOMETRIC_PERCENT, strongScore = 0) {
+  if (!Number.isFinite(score) || !Number.isFinite(threshold) || threshold <= strongScore) return null;
+  const strengthPercent = Math.max(0, Math.min(100, Math.round(((threshold - score) / (threshold - strongScore)) * 100)));
   return { kind, score, threshold, strengthPercent, lowConfidence: strengthPercent < lowConfidencePercent };
 }
 

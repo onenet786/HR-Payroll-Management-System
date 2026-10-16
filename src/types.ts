@@ -213,7 +213,8 @@ export interface Employee {
   ntn?: string;
   fingerprintTemplates?: string[]; // base64 FMD templates from Digital Persona URU 4500
   faceDescriptors?: {
-    version: 1 | 2 | 3;
+    version: 1 | 2 | 3 | 4; // only 4 (128-number identity embedding) is used for matching
+    model?: string;
     vector: number[];
     capturedAt: string;
     source?: string;

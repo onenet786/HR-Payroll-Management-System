@@ -15,7 +15,6 @@ const IP_CAM_REFRESH_MS = 2000;
 const AUTO_GOOD_FRAMES_NEEDED = 3;
 const AUTO_LOOP_MS = 700;
 const AUTO_PUNCH_COOLDOWN_MS = 8000;
-const FACE_FRAME_ASPECT = 4 / 3;
 const CHECKOUT_REASONS = [
   'End of Shift',
   'Lunch Break',
@@ -613,86 +612,41 @@ function getCameraSourceReadiness(source) {
   return { ok: true, message: '' };
 }
 
-function drawCroppedCameraFrame(ctx, source, width, height, cropBox) {
-  const sourceWidth = source instanceof HTMLVideoElement ? source.videoWidth : source.naturalWidth;
-  const sourceHeight = source instanceof HTMLVideoElement ? source.videoHeight : source.naturalHeight;
-  if (!cropBox) {
-    drawNormalizedCameraFrame(ctx, source, width, height);
-    return;
-  }
-  const padX = (cropBox.width || 0.2) * 0.15;
-  const padY = (cropBox.height || 0.2) * 0.15;
-  const sx = Math.max(0, (cropBox.x - padX) * sourceWidth);
-  const sy = Math.max(0, (cropBox.y - padY) * sourceHeight);
-  const sw = Math.min(sourceWidth - sx, (cropBox.width + padX * 2) * sourceWidth);
-  const sh = Math.min(sourceHeight - sy, (cropBox.height + padY * 2) * sourceHeight);
-  ctx.drawImage(source, sx, sy, sw, sh, 0, 0, width, height);
-}
-
-function captureCameraDescriptor(cropBox = null) {
-  const width = 16;
-  const height = 20;
+// Identity embedding (face-api, 128 numbers) for the face inside cropBox, or the most prominent face.
+async function captureCameraDescriptor(cropBox = null) {
   const source = kioskState?.terminal?.ipCameraUrl ? el.ipcamEl : el.webcamEl;
   const readiness = getCameraSourceReadiness(source);
   if (!readiness.ok) throw new Error(readiness.message);
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  if (cropBox) {
-    drawCroppedCameraFrame(ctx, source, width, height, cropBox);
-  } else {
-    drawNormalizedCameraFrame(ctx, source, width, height);
-  }
-  const data = ctx.getImageData(0, 0, width, height).data;
-  const luma = [];
-  for (let i = 0; i < data.length; i += 4) {
-    luma.push((0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]) / 255);
-  }
-  const mean = luma.reduce((sum, value) => sum + value, 0) / luma.length;
-  const vector = [];
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const idx = y * width + x;
-      const base = idx * 4;
-      const r = data[base] / 255;
-      const g = data[base + 1] / 255;
-      const b = data[base + 2] / 255;
-      const gx = x > 0 && x < width - 1 ? luma[idx + 1] - luma[idx - 1] : 0;
-      const gy = y > 0 && y < height - 1 ? luma[idx + width] - luma[idx - width] : 0;
-      vector.push(
-        Number((luma[idx] - mean).toFixed(4)),
-        Number((r - g).toFixed(4)),
-        Number((b - (r + g) / 2).toFixed(4)),
-        Number(Math.sqrt(gx * gx + gy * gy).toFixed(4))
-      );
-    }
-  }
+  if (!window.computeFaceEmbedding) await window.faceEmbeddingReady;
+  const { vector } = await window.computeFaceEmbedding(source, cropBox);
   return {
-    version: 2,
+    version: 4,
     vector,
     capturedAt: new Date().toISOString(),
     source: kioskState?.terminal?.ipCameraUrl ? 'ip-camera' : 'webcam',
   };
 }
 
-function drawNormalizedCameraFrame(ctx, source, width, height) {
-  const sourceWidth = source instanceof HTMLVideoElement ? source.videoWidth : source.naturalWidth;
-  const sourceHeight = source instanceof HTMLVideoElement ? source.videoHeight : source.naturalHeight;
-  let sourceX = 0;
-  let sourceY = 0;
-  let cropWidth = sourceWidth;
-  let cropHeight = sourceHeight;
+function descriptorDistance(a, b) {
+  let sum = 0;
+  for (let i = 0; i < a.length; i += 1) sum += (a[i] - b[i]) ** 2;
+  return Math.sqrt(sum);
+}
 
-  if (sourceWidth / sourceHeight > FACE_FRAME_ASPECT) {
-    cropWidth = sourceHeight * FACE_FRAME_ASPECT;
-    sourceX = (sourceWidth - cropWidth) / 2;
-  } else if (sourceWidth / sourceHeight < FACE_FRAME_ASPECT) {
-    cropHeight = sourceWidth / FACE_FRAME_ASPECT;
-    sourceY = (sourceHeight - cropHeight) / 2;
-  }
+// Two embeddings a moment apart, averaged. If they disagree the person moved or a different face slid into
+// the box, so nothing is matched.
+async function captureStableDescriptor(getBox) {
+  const first = await captureCameraDescriptor(getBox());
+  await new Promise(resolve => setTimeout(resolve, 120));
+  const second = await captureCameraDescriptor(getBox());
+  if (descriptorDistance(first.vector, second.vector) > 0.32) throw new Error('Hold still and look at the camera.');
+  return { ...second, vector: first.vector.map((value, i) => Math.round(((value + second.vector[i]) / 2) * 1e6) / 1e6) };
+}
 
-  ctx.drawImage(source, sourceX, sourceY, cropWidth, cropHeight, 0, 0, width, height);
+async function primaryFaceBox(source) {
+  if (!window.detectFaceGeometry) return null;
+  const faces = await window.detectFaceGeometry(source).catch(() => []);
+  return (faces || []).reduce((best, face) => (!best || face.box.width * face.box.height > best.box.width * best.box.height ? face : best), null)?.box || null;
 }
 
 async function detectFaceInsideGuide(source) {
@@ -747,7 +701,7 @@ async function assessCameraFrame() {
   const guideFace = await detectFaceInsideGuide(source);
   if (guideFace && !guideFace.ok) return { ok: false, descriptor: null, message: guideFace.message };
   const landmarkFaceIsReady = guideFace?.ok === true;
-  const descriptor = captureCameraDescriptor();
+  const descriptor = null;
   const ctx = brightnessCanvas.getContext('2d', { willReadFrequently: true });
   ctx.drawImage(source, 0, 0, 48, 60);
   const data = ctx.getImageData(0, 0, 48, 60).data;
@@ -1086,6 +1040,14 @@ function setKioskCamMode(mode) {
   resetResultToIdle();
 }
 
+// One identification at a time, so two faces can never be matched in parallel against the same employee.
+let multiFaceQueue = Promise.resolve();
+function identifyInQueue(task) {
+  const run = multiFaceQueue.then(task, task);
+  multiFaceQueue = run.catch(() => undefined);
+  return run;
+}
+
 function startMultiFaceLoop() {
   stopMultiFaceLoop();
   multiFaceTrackers.clear();
@@ -1194,34 +1156,38 @@ async function runMultiFaceStep() {
       }
 
       if (tracker.status !== 'matched' && tracker.status !== 'cooldown') {
-        if (tracker.stableFrames >= 3) {
+        if (tracker.stableFrames >= 3 && now >= (tracker.retryAfter || 0)) {
           tracker.isPunching = true;
           tracker.status = 'verifying';
           tracker.statusText = 'Verifying…';
 
           (async () => {
             try {
-              const descriptor = captureCameraDescriptor(box);
-              const evidence = await captureEvidence().catch(() => null);
-              const code = el.codeInput?.value?.trim() || '';
-              const punchPayload = {
-                mode: 'multi-face',
-                code,
-                descriptor,
-                evidence,
-                meta: { camera: 'webcam' },
-              };
-
-              const result = await api.punchCamera(punchPayload);
+              const result = await identifyInQueue(async () => {
+                const descriptor = await captureStableDescriptor(() => tracker.box);
+                const evidence = await captureEvidence().catch(() => null);
+                const code = el.codeInput?.value?.trim() || '';
+                // Employees already shown on another face in view cannot be matched again.
+                const excludeEmployeeIds = [...multiFaceTrackers.values()]
+                  .filter(other => other !== tracker && other.matchedEmployeeId && Date.now() - other.lastSeen < 1500)
+                  .map(other => other.matchedEmployeeId);
+                const payload = { mode: 'multi-face', code, descriptor, evidence, excludeEmployeeIds, meta: { camera: 'webcam' } };
+                const response = await api.punchCamera(payload);
+                // Claim the employee before the next face is identified (a checkout-reason prompt may follow).
+                if (response?.employee) tracker.matchedEmployeeId = response.employee.id || response.employee.employeeCode;
+                return { payload, response };
+              });
+              const punchPayload = result.payload;
               const finalResult = await resolveCheckoutReasonAndRetry(
-                result,
-                outReason => api.punchCamera({ ...punchPayload, cameraAuthorization: result.cameraAuthorization, meta: { ...punchPayload.meta, outReason } })
+                result.response,
+                outReason => api.punchCamera({ ...punchPayload, cameraAuthorization: result.response.cameraAuthorization, meta: { ...punchPayload.meta, outReason } })
               );
 
               if (finalResult?.employee) {
                 const emp = finalResult.employee;
                 const empCode = emp.employeeCode || emp.id;
                 tracker.matchedEmployeeCode = empCode;
+                tracker.matchedEmployeeId = emp.id || empCode;
                 tracker.employeeName = emp.fullName || '';
                 tracker.employeeCode = emp.employeeCode || '';
 
@@ -1254,13 +1220,17 @@ async function runMultiFaceStep() {
                 }
               } else {
                 tracker.status = 'unknown';
-                tracker.statusText = finalResult?.ambiguous ? 'Ambiguous · Enter Code' : (finalResult?.message?.slice(0, 30) || 'Unknown Person');
+                tracker.statusText = finalResult?.ambiguous ? 'Ambiguous · Enter Code' : finalResult?.duplicate ? 'Not recognized' : (finalResult?.message?.slice(0, 30) || 'Unknown Person');
                 tracker.matchedEmployeeCode = null;
+                tracker.matchedEmployeeId = null;
+                tracker.retryAfter = Date.now() + 2500;
               }
-            } catch {
+            } catch (error) {
               tracker.status = 'unknown';
-              tracker.statusText = 'Scan retry';
+              tracker.statusText = String(error?.message || 'Scan retry').slice(0, 30);
               tracker.matchedEmployeeCode = null;
+              tracker.matchedEmployeeId = null;
+              tracker.retryAfter = Date.now() + 1500;
             } finally {
               tracker.isPunching = false;
             }
@@ -1608,7 +1578,7 @@ async function performCameraPunch() {
           targetBox = faces[0].box;
         }
       }
-      descriptor = captureCameraDescriptor(targetBox);
+      descriptor = await captureStableDescriptor(() => targetBox);
       evidence = await captureEvidence();
     } catch (err) {
       const message = err?.message || 'Could not detect face in camera.';
@@ -1643,7 +1613,9 @@ async function performCameraPunch() {
       lastReadyFrame = frame;
       if (i < 2) await new Promise(resolve => setTimeout(resolve, 140));
     }
-    descriptor = lastReadyFrame.descriptor;
+    const source = kioskState?.terminal?.ipCameraUrl ? el.ipcamEl : el.webcamEl;
+    const box = await primaryFaceBox(source);
+    descriptor = await captureStableDescriptor(() => box);
     evidence = await captureEvidence();
   } catch (err) {
     const message = err?.message || 'Could not complete active liveness.';

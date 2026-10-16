@@ -137,7 +137,8 @@ export function complianceAlerts(inputs: ComplianceInputs): ComplianceAlert[] {
   return alerts.sort((left, right) => rank[left.severity] - rank[right.severity] || left.employeeName.localeCompare(right.employeeName));
 }
 
-export function biometricMatchEvidence(kind: 'face' | 'fingerprint', score: number, threshold: number, lowConfidencePercent = DEFAULT_LOW_CONFIDENCE_BIOMETRIC_PERCENT) {
-  const strengthPercent = Math.max(0, Math.min(100, Math.round(((threshold - score) / threshold) * 100)));
+/** `strongScore` is the distance that counts as a 100% match (face embeddings never reach 0). */
+export function biometricMatchEvidence(kind: 'face' | 'fingerprint', score: number, threshold: number, lowConfidencePercent = DEFAULT_LOW_CONFIDENCE_BIOMETRIC_PERCENT, strongScore = 0) {
+  const strengthPercent = Math.max(0, Math.min(100, Math.round(((threshold - score) / (threshold - strongScore)) * 100)));
   return { kind, score, threshold, strengthPercent, lowConfidence: strengthPercent < lowConfidencePercent };
 }

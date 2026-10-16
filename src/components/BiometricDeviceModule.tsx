@@ -714,9 +714,10 @@ export function BiometricDeviceModule({
         return;
       }
       const samples: FaceDescriptor[] = [];
-      setFaceMsg({ type: 'ok', text: `Capturing 3 camera face samples for ${emp.fullName}. Keep the face steady inside the oval.` });
+      const SAMPLE_COUNT = 5;
+      setFaceMsg({ type: 'ok', text: `Capturing ${SAMPLE_COUNT} face samples for ${emp.fullName}. Keep the face steady inside the oval.` });
 
-      for (let i = 0; i < 3; i += 1) {
+      for (let i = 0; i < SAMPLE_COUNT; i += 1) {
         const browserFace = await assessBrowserFaceDetection(faceVideoRef.current);
         if (browserFace !== null) {
           if (!browserFace.ok) {
@@ -731,10 +732,9 @@ export function BiometricDeviceModule({
           }
         }
 
-        const descriptor = createFaceDescriptorFromVideo(faceVideoRef.current, `admin-webcam-${i + 1}`);
+        const descriptor = await createFaceDescriptorFromVideo(faceVideoRef.current, `admin-webcam-${i + 1}`);
         samples.push({
           ...descriptor,
-          version: 3,
           liveness: {
             method: 'active-turn-v1',
             verifiedAt: new Date().toISOString(),
@@ -749,14 +749,22 @@ export function BiometricDeviceModule({
             },
           },
         });
-        if (i < 2) await wait(350);
+        if (i < SAMPLE_COUNT - 1) await wait(300);
       }
 
-      // Prevent duplicate enrollment: ensure this face does not match another enrolled employee
+      // Every sample must be the same person; a different face or a badly turned head during capture is rejected.
+      let widest = 0;
+      for (let a = 0; a < samples.length; a += 1) for (let b = a + 1; b < samples.length; b += 1) widest = Math.max(widest, compareFaceDescriptors(samples[a], samples[b]));
+      if (widest > 0.4) {
+        setFaceMsg({ type: 'err', text: `The ${SAMPLE_COUNT} samples did not agree (spread ${widest.toFixed(2)}). Only ${emp.fullName} should be in front of the camera; keep still with even light and try again.` });
+        return;
+      }
+
+      // Prevent duplicate enrollment: no sample may match another enrolled employee.
       const otherEnrolled = employees.filter(e => e.id !== emp.id && hasFaceEnrollment(e));
       for (const other of otherEnrolled) {
         for (const desc of getFaceDescriptors(other)) {
-          const score = compareFaceDescriptors(samples[0], desc);
+          const score = Math.min(...samples.map(sample => compareFaceDescriptors(sample, desc)));
           if (Number.isFinite(score) && score <= FACE_MATCH_THRESHOLD) {
             setFaceMsg({
               type: 'err',
@@ -774,8 +782,8 @@ export function BiometricDeviceModule({
       };
       await onUpdateEmployee(updated);
       setRecognizedFaceMatch(null);
-      setFaceMsg({ type: 'ok', text: `3 camera face samples saved for ${emp.fullName}. Click Verify Face to test this enrollment.` });
-      log('Camera face enrollment saved: [REDACTED] (3 samples)');
+      setFaceMsg({ type: 'ok', text: `${SAMPLE_COUNT} face samples saved for ${emp.fullName}. Click Verify Face to test this enrollment.` });
+      log(`Camera face enrollment saved: [REDACTED] (${SAMPLE_COUNT} samples)`);
     } catch (error) {
       setFaceMsg({ type: 'err', text: error instanceof Error ? error.message : 'Camera enrollment failed.' });
       log('Camera enrollment failed [REDACTED]');
@@ -820,7 +828,7 @@ export function BiometricDeviceModule({
         }
       }
 
-      const probe = createFaceDescriptorFromVideo(faceVideoRef.current, 'admin-verify');
+      const probe = await createFaceDescriptorFromVideo(faceVideoRef.current, 'admin-verify');
       const selectedEmp = employees.find(e => e.id === enrollEmpId);
       const isTargeted = Boolean(selectedEmp && hasFaceEnrollment(selectedEmp));
       const verifyThreshold = isTargeted ? FACE_VERIFY_THRESHOLD : FACE_MATCH_THRESHOLD;
@@ -876,7 +884,7 @@ export function BiometricDeviceModule({
       }
 
       const margin = second ? second.score - best.score : Number.POSITIVE_INFINITY;
-      if (second && Number.isFinite(second.score) && second.score <= verifyThreshold && margin < FACE_MATCH_MARGIN) {
+      if (second && Number.isFinite(second.score) && margin < FACE_MATCH_MARGIN) {
         setFaceMsg({ type: 'err', text: `Face match is ambiguous between ${best.employee.fullName} and ${second.employee.fullName}. Best score ${best.score.toFixed(3)}, margin ${margin.toFixed(3)}.` });
         log(`Camera face recognition ambiguous: score=${best.score.toFixed(3)} margin=${margin.toFixed(3)}`);
         return;
