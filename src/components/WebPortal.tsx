@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import {
   Employee, AttendanceLog, AttendancePeriod, LeaveRequest, StatutoryConfig, TaxSlab, PayrollRun, Payslip,
-  StatutoryChangeRequest, LifecycleRequest, OnboardingChecklistItem,
+  StatutoryChangeRequest, LifecycleRequest, OnboardingChecklistItem, ParallelRunRecord,
   Role, UserAccount, NewUserAccount, Branch, Department, Designation, Holiday, LoanAdvance, SalaryRevision,
   PerformanceReview, CompanyAsset, JobPosting, JobApplication, GratuitySettlement, AppNotification, Company, CompanySetupPayload, Zone, UcTown, WageType, MobileDutyAuthorization, MobileDutyType, PayrollAdjustment, PayrollAdjustmentType
 } from '../types';
@@ -51,6 +51,9 @@ import { PaymentExceptionsModal } from './PaymentExceptionsModal';
 import { PayrollReportsPanel } from './PayrollReportsPanel';
 import { StatutoryGovernancePanel } from './StatutoryGovernancePanel';
 import { leaveBalances } from '../data/leavePolicy';
+import { goLiveReadiness } from '../data/goLiveReadiness';
+import { GoLiveReadinessPanel } from './GoLiveReadinessPanel';
+import { ParallelRunPanel } from './ParallelRunPanel';
 import { applyUrduInterface } from '../utils/urduInterface';
 import { authenticatedApiRequest as payrollApi } from '../data/postgresStore';
 import { exportTemplatesFor, renderExport, type ExportKind } from '../data/exportTemplates';
@@ -194,6 +197,7 @@ export interface WebPortalProps {
   onMarkPaymentFailed: (payslipId: string, reason: string) => void;
   onRecordPaymentRetry: (payslipIds: string[], reference: string) => void;
   onRetroRecalculate: (payslipId: string, reason: string, target: { month: number; year: number }) => void | Promise<void>;
+  onRecordParallelRun: (runId: string, record: Omit<ParallelRunRecord, 'comparedAt' | 'comparedById' | 'comparedBy'>) => void | Promise<void>;
   onRecordBankAdvice: (runId: string, checksum: string, employeeCount: number, total: number, profile: PayrollRun['bankAdviceProfile'], batch?: { batchReference: string; controlHash: string; verified: boolean }) => void | Promise<void>;
   onSendPayslips: (runId: string) => Promise<{ sent: number; skipped: number; failed: Array<{ employeeId: string; error: string }> }>;
   onApplyLeave: (leave: LeaveRequest) => void;
@@ -526,6 +530,7 @@ export function WebPortal({
   onMarkPaymentFailed,
   onRecordPaymentRetry,
   onRetroRecalculate,
+  onRecordParallelRun,
   onRecordBankAdvice,
   onSendPayslips,
   onApplyLeave,
@@ -650,11 +655,11 @@ export function WebPortal({
     return main ? applyUrduInterface(main) : undefined;
   }, [portalLanguage]);
   const [paymentExceptionRun, setPaymentExceptionRun] = useState<PayrollRun | null>(null);
-  const [alertChannels, setAlertChannels] = useState<{ sms: boolean; whatsapp: boolean }>({ sms: false, whatsapp: false });
+  const [alertChannels, setAlertChannels] = useState<{ email: boolean; sms: boolean; whatsapp: boolean; known: boolean }>({ email: false, sms: false, whatsapp: false, known: false });
   useEffect(() => {
-    if (activeTab !== 'payroll') return;
+    if (activeTab !== 'payroll' && activeTab !== 'dashboard') return;
     let active = true;
-    payrollApi('/api/payroll-delivery/channels').then(result => { if (active) setAlertChannels({ sms: Boolean(result.sms), whatsapp: Boolean(result.whatsapp) }); }).catch(() => undefined);
+    payrollApi('/api/payroll-delivery/channels').then(result => { if (active) setAlertChannels({ email: Boolean(result.email), sms: Boolean(result.sms), whatsapp: Boolean(result.whatsapp), known: true }); }).catch(() => undefined);
     return () => { active = false; };
   }, [activeTab]);
   const sendSalaryAlerts = async (runId: string, channel: 'sms' | 'whatsapp') => {
@@ -2556,6 +2561,9 @@ export function WebPortal({
                     </div>
                   </div>
 
+                  {(userPermissions.includes('manage_settings') || userPermissions.includes('manage_payroll')) && (
+                    <GoLiveReadinessPanel items={goLiveReadiness({ statConfig, employees, branches, users, roles, payrollRuns, channels: alertChannels.known ? alertChannels : undefined })} />
+                  )}
                   <ComplianceAlertsPanel alerts={openComplianceAlerts} onOpenEmployees={() => setActiveTab('employees')} />
 
                   {/* Operations Metrics */}
@@ -3972,6 +3980,7 @@ export function WebPortal({
                     onCreatePayrollAdjustment={onCreatePayrollAdjustment}
                     onRetroRecalculate={onRetroRecalculate}
                   />
+                  <ParallelRunPanel payrollRuns={payrollRuns} payrollPayslips={payrollPayslips} onRecord={onRecordParallelRun} />
 
                   <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-4">
                     <div>

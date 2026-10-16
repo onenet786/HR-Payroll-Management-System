@@ -13,7 +13,7 @@ import {
   Employee, AttendanceLog, AttendancePeriod, LeaveRequest, StatutoryConfig, TaxSlab, PayrollRun, PayrollAdjustment, Payslip, MobilePunchDetails,
   Role, UserAccount, Branch, Department, Designation, Holiday, LoanAdvance, SalaryRevision,
   PerformanceReview, CompanyAsset, JobPosting, JobApplication, GratuitySettlement, AppNotification, Company, CompanySetupPayload, Zone, UcTown, WageType, NewUserAccount, MobileDutyAuthorization,
-  StatutoryChangeRequest, LifecycleRequest
+  StatutoryChangeRequest, LifecycleRequest, ParallelRunRecord
 } from './types';
 import { attendancePeriodId, createAttendancePeriod, isAttendancePeriodValid, reopenAttendancePeriod } from './data/attendancePeriod';
 import { evaluateAttendanceTimes, isDuplicatePunch } from './data/attendanceRules';
@@ -1462,6 +1462,15 @@ export default function App() {
     }
   };
 
+  const handleRecordParallelRun = async (runId: string, record: Omit<ParallelRunRecord, 'comparedAt' | 'comparedById' | 'comparedBy'>) => {
+    const run = payrollRuns.find(item => item.id === runId);
+    if (!run || (run.status !== 'Approved' && run.status !== 'Disbursed')) { alert('Record parallel-run results on an approved or disbursed payroll.'); return; }
+    if ((record.differing || record.onlyLegacy || record.onlySystem) && !record.explanation) { alert('Explain the differences before recording the result.'); return; }
+    const updated: PayrollRun = { ...run, parallelRun: { ...record, comparedAt: new Date().toISOString(), comparedById: currentUserAccount.id, comparedBy: currentUserAccount.username } };
+    await setDoc(doc(db, 'payrollRuns', runId), cleanData(updated));
+    setPayrollRuns(previous => previous.map(item => item.id === runId ? updated : item));
+  };
+
   const handleRecordTaxDeposit = async (runId: string, cprNumber: string, amount: number, depositedOn: string) => {
     const run = payrollRuns.find(item => item.id === runId);
     if (!run || (run.status !== 'Approved' && run.status !== 'Disbursed')) { alert('Record the FBR deposit only for an approved or disbursed payroll.'); return; }
@@ -2189,7 +2198,7 @@ export default function App() {
         lifecycleRequests, onCreateLifecycleRequest: handleCreateLifecycleRequest, onReviewLifecycleRequest: handleReviewLifecycleRequest,
         onUpdateOnboarding: handleUpdateOnboarding, onCreateSupplementaryRun: handleCreateSupplementaryRun,
         onCreateFinalSettlementRun: handleCreateFinalSettlementRun, onRecordTaxDeposit: handleRecordTaxDeposit,
-        onMarkPaymentFailed: handleMarkPaymentFailed, onRecordPaymentRetry: handleRecordPaymentRetry, onRetroRecalculate: handleRetroRecalculate,
+        onMarkPaymentFailed: handleMarkPaymentFailed, onRecordPaymentRetry: handleRecordPaymentRetry, onRetroRecalculate: handleRetroRecalculate, onRecordParallelRun: handleRecordParallelRun,
       }}
       onUpdatePayrollStatus={handleUpdatePayrollStatus}
       onRecordBankAdvice={handleRecordBankAdvice}

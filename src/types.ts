@@ -551,6 +551,20 @@ export interface PayrollRun {
   runType?: PayrollRunType;
   settlementId?: string;
   taxDeposit?: TaxDepositRecord;
+  parallelRun?: ParallelRunRecord;
+}
+
+export interface ParallelRunRecord {
+  comparedAt: string;
+  comparedById: string;
+  comparedBy: string;
+  legacyFileName: string;
+  matched: number;
+  differing: number;
+  onlyLegacy: number;
+  onlySystem: number;
+  netDelta: number;
+  explanation?: string;
 }
 
 export type PayrollRunType = 'Regular' | 'Supplementary' | 'Final Settlement';

@@ -42,7 +42,7 @@ interface DeviceEmulatorProps {
   onLockAttendancePeriod: (month: number, year: number) => void;
   onReopenAttendancePeriod: (month: number, year: number, reason: string) => void;
   onCancelPayrollRun: (runId: string, reason: string) => void;
-  portalGovernance: Pick<WebPortalProps, 'statutoryChangeRequests' | 'onReviewStatutoryChange' | 'lifecycleRequests' | 'onCreateLifecycleRequest' | 'onReviewLifecycleRequest' | 'onUpdateOnboarding' | 'onCreateSupplementaryRun' | 'onCreateFinalSettlementRun' | 'onRecordTaxDeposit' | 'onMarkPaymentFailed' | 'onRecordPaymentRetry' | 'onRetroRecalculate'>;
+  portalGovernance: Pick<WebPortalProps, 'statutoryChangeRequests' | 'onReviewStatutoryChange' | 'lifecycleRequests' | 'onCreateLifecycleRequest' | 'onReviewLifecycleRequest' | 'onUpdateOnboarding' | 'onCreateSupplementaryRun' | 'onCreateFinalSettlementRun' | 'onRecordTaxDeposit' | 'onMarkPaymentFailed' | 'onRecordPaymentRetry' | 'onRetroRecalculate' | 'onRecordParallelRun'>;
   onUpdatePayrollStatus: (runId: string, status: 'Approved' | 'Disbursed', disbursementReference?: string) => void;
   onRecordBankAdvice: (runId: string, checksum: string, employeeCount: number, total: number, profile: PayrollRun['bankAdviceProfile'], batch?: { batchReference: string; controlHash: string; verified: boolean }) => void | Promise<void>;
   onSendPayslips: (runId: string) => Promise<{ sent: number; skipped: number; failed: Array<{ employeeId: string; error: string }> }>;

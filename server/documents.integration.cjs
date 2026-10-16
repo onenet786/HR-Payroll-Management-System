@@ -194,3 +194,12 @@ test('lifecycle requests and salary revisions require a second user', async () =
   assert.equal(await put('u-maker', 'salaryRevisions', 'rev-1', { ...revision, status: 'Approved', approvedById: 'u-maker' }), 403);
   assert.equal(await put('u-checker', 'salaryRevisions', 'rev-1', { ...revision, status: 'Approved', approvedById: 'u-checker' }), 200);
 });
+
+test('a disbursed run accepts a parallel-run result from the recording user and nothing else', async () => {
+  const disbursed = await current('payroll_runs', 'run-c');
+  const result = { comparedAt: new Date().toISOString(), comparedById: 'u-third', comparedBy: 'u-third', legacyFileName: 'legacy-sep.csv', matched: 1, differing: 0, onlyLegacy: 0, onlySystem: 0, netDelta: 0 };
+  assert.equal(await put('u-maker', 'payrollRuns', 'run-c', { ...disbursed, parallelRun: result }), 403, 'recorder must be the acting user');
+  assert.equal(await put('u-third', 'payrollRuns', 'run-c', { ...disbursed, parallelRun: { ...result, matched: -1 } }), 403, 'counts are validated');
+  assert.equal(await put('u-third', 'payrollRuns', 'run-c', { ...disbursed, parallelRun: result, totalNetPay: 1 }), 403, 'cannot piggyback financial edits');
+  assert.equal(await put('u-third', 'payrollRuns', 'run-c', { ...disbursed, parallelRun: result }), 200);
+});

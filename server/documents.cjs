@@ -171,10 +171,22 @@ async function authorizeWrite(client, name, table, id, identity, existing, next)
     if (next.createdById !== previous.createdById || next.attendancePeriodId !== previous.attendancePeriodId
       || next.attendanceIntegrityHash !== previous.attendanceIntegrityHash || next.attendanceRegisterHash !== previous.attendanceRegisterHash) return false;
     if (next.runType !== previous.runType || next.settlementId !== previous.settlementId) return false;
-    if (['Approved', 'Disbursed'].includes(previous.status) && next.status === previous.status && next.taxDeposit && onlyChanged(previous, next, ['taxDeposit'])) {
-      const deposit = next.taxDeposit;
-      if (deposit.recordedById !== identity.uid || !/^[A-Z0-9-]{6,40}$/.test(String(deposit.cprNumber || '')) || !Number.isFinite(deposit.amount) || deposit.amount < 0
-        || !/^\d{4}-\d{2}-\d{2}$/.test(deposit.depositedOn || '') || !Number.isFinite(Date.parse(deposit.recordedAt))) return false;
+    const postingFields = ['taxDeposit', 'parallelRun'];
+    if (['Approved', 'Disbursed'].includes(previous.status) && next.status === previous.status && onlyChanged(previous, next, postingFields)
+      && postingFields.some(field => !sameJson(previous[field], next[field]))) {
+      // After approval a run accepts only its FBR deposit record and the parallel-run reconciliation result.
+      if (!sameJson(previous.taxDeposit, next.taxDeposit)) {
+        const deposit = next.taxDeposit;
+        if (!deposit || deposit.recordedById !== identity.uid || !/^[A-Z0-9-]{6,40}$/.test(String(deposit.cprNumber || '')) || !Number.isFinite(deposit.amount) || deposit.amount < 0
+          || !/^\d{4}-\d{2}-\d{2}$/.test(deposit.depositedOn || '') || !Number.isFinite(Date.parse(deposit.recordedAt))) return false;
+      }
+      if (!sameJson(previous.parallelRun, next.parallelRun)) {
+        const result = next.parallelRun;
+        const counts = ['matched', 'differing', 'onlyLegacy', 'onlySystem'];
+        if (!result || result.comparedById !== identity.uid || !Number.isFinite(Date.parse(result.comparedAt)) || typeof result.legacyFileName !== 'string'
+          || counts.some(field => !Number.isInteger(result[field]) || result[field] < 0) || !Number.isFinite(result.netDelta)
+          || (result.explanation !== undefined && (typeof result.explanation !== 'string' || result.explanation.length > 1000))) return false;
+      }
     } else if (next.status === 'Cancelled') {
       if (!['Draft', 'Approved'].includes(previous.status) || next.statusBeforeCancellation !== previous.status
         || next.cancelledById !== identity.uid || !Number.isFinite(Date.parse(next.cancelledAt))
