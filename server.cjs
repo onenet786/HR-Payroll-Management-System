@@ -545,7 +545,8 @@ if (!process.env.DATA_BACKEND || (process.env.DATA_BACKEND || '').trim().toLower
     try {
       const { pool } = require('./server/db.cjs');
       await pool.query('SELECT 1');
-      res.json({ ok: true, backend: 'postgres' });
+      // Public endpoint: confirm availability without describing the stack.
+      res.json({ ok: true });
     } catch (error) { next(error); }
   });
 }

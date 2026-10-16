@@ -199,7 +199,7 @@ export default function App() {
   const [authMessage, setAuthMessage] = useState('');
   const [firestoreSyncStatus, setFirestoreSyncStatus] = useState<FirestoreSyncStatus>({
     state: 'synced',
-    message: 'PostgreSQL Backend Connected.'
+    message: 'Connected.'
   });
   const [currentUserAccount, setCurrentUserAccount] = useState<UserAccount>(() => {
     const storedCurrent = getInitialValue<UserAccount | null>('hr_current_user', null);
@@ -335,11 +335,11 @@ export default function App() {
     const markSnapshotLoaded = (collectionName: string) => {
       loadedSnapshots.add(collectionName);
       if (loadedSnapshots.size >= requiredSnapshots.size) {
-        setFirestoreSyncStatus({ state: 'synced', message: 'PostgreSQL Database Synced.' });
+        setFirestoreSyncStatus({ state: 'synced', message: 'All data is up to date.' });
       } else {
         setFirestoreSyncStatus({
           state: 'syncing',
-          message: `Loading PostgreSQL data (${loadedSnapshots.size}/${requiredSnapshots.size})...`,
+          message: `Loading your data (${loadedSnapshots.size}/${requiredSnapshots.size})...`,
         });
       }
     };
@@ -2312,6 +2312,18 @@ function LoginScreen({
   const [mfaMethod, setMfaMethod] = useState<'totp' | 'email'>('totp');
   const [mfaMethods, setMfaMethods] = useState<Array<'totp' | 'email'>>(['totp', 'email']);
   const [emailCodeSent, setEmailCodeSent] = useState(false);
+  // Only an unreachable server is worth telling users about; infrastructure details stay private.
+  const [serverReachable, setServerReachable] = useState<boolean | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 8000);
+    const apiBase = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+    fetch(`${apiBase}/api/health`, { signal: controller.signal })
+      .then(response => setServerReachable(response.ok))
+      .catch(() => setServerReachable(false))
+      .finally(() => window.clearTimeout(timer));
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, []);
 
   const handleSubmit = async (e: React.SyntheticEvent) => {
     e.preventDefault();
@@ -2429,11 +2441,11 @@ function LoginScreen({
 
             <div className="bg-slate-900/60 backdrop-blur-md border border-slate-800/80 rounded-2xl p-3.5 flex items-center gap-3 text-left hover:border-emerald-500/40 transition">
               <div className="w-9 h-9 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center shrink-0 text-cyan-400">
-                <Database className="w-4 h-4" />
+                <ShieldCheck className="w-4 h-4" />
               </div>
               <div>
-                <div className="text-xs font-bold text-white">PostgreSQL Core</div>
-                <div className="text-[10px] text-slate-400">27 Relational Tables</div>
+                <div className="text-xs font-bold text-white">Approval Controls</div>
+                <div className="text-[10px] text-slate-400">Two-person sign-off &amp; audit trail</div>
               </div>
             </div>
           </div>
@@ -2473,7 +2485,7 @@ function LoginScreen({
                   <AlertCircle className="w-4 h-4 shrink-0" />
                   <span>Database is uninitialized</span>
                 </div>
-                <p>No user accounts exist in local PostgreSQL yet.</p>
+                <p>No user accounts have been created yet.</p>
                 {onLaunchSetup && (
                   <button
                     type="button"
@@ -2610,9 +2622,7 @@ function LoginScreen({
                     />
                     <span className="text-xs text-slate-300 font-medium">Remember me for 5 days</span>
                   </label>
-                  <span className="text-[10px] text-slate-500 font-mono flex items-center gap-1">
-                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-500/70" /> 256-bit Encrypted
-                  </span>
+
                 </div>
                 {rememberMe && <p className="-mt-1 text-[10px] leading-relaxed text-emerald-300/80">This browser will stay signed in for up to 5 days. You will need to verify again after that, or sooner if you sign out.</p>}
 
@@ -2659,11 +2669,12 @@ function LoginScreen({
                     <span>Password Reset Assistance</span>
                   </div>
                   <p className="text-xs text-slate-300 leading-relaxed">
-                    To maintain organizational security, administrative account credentials are managed through your local PostgreSQL instance or by the Super Administrator.
+                    For your security, passwords are reset by your HR or system administrator, not by email link.
                   </p>
-                  <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-[11px] font-mono text-slate-400 space-y-1">
-                    <div>1. Contact your system admin.</div>
-                    <div>2. Or run reset script via aaPanel SSH terminal.</div>
+                  <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-[11px] text-slate-400 space-y-1">
+                    <div>1. Contact your HR or system administrator.</div>
+                    <div>2. They reset your password in User Management after confirming your identity.</div>
+                    <div>3. Sign in with the new password they give you.</div>
                   </div>
                   <button
                     type="button"
@@ -2676,20 +2687,17 @@ function LoginScreen({
               </div>
             )}
 
-            {/* Live Server Indicator & Engine Footer */}
-            <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between text-[10px] text-slate-500 font-mono">
-              <span className="flex items-center gap-1.5 text-emerald-400 font-medium">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse inline-block" />
-                <span>Engine Online</span>
-              </span>
-              <span>PostgreSQL • Port 8080</span>
-            </div>
+            {serverReachable === false && (
+              <div role="alert" className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                The server can&apos;t be reached right now. Check your internet connection and try again in a moment.
+              </div>
+            )}
 
           </div>
 
           {/* Under-Card Footnote */}
           <div className="text-center text-[10px] text-slate-500 mt-4 font-mono">
-            {appName} • PostgreSQL Local Enterprise Engine
+            © {new Date().getFullYear()} {appName}. Authorised users only.
           </div>
 
         </div>
@@ -2741,7 +2749,7 @@ function SetupWizardScreen({
             HR
           </div>
           <h2 className="text-xl font-bold tracking-tight text-white uppercase">Database Setup Wizard</h2>
-          <p className="text-xs text-slate-400">Initialize your PostgreSQL database and create the Super Admin account.</p>
+          <p className="text-xs text-slate-400">Set up your company and create the first administrator account.</p>
         </div>
 
         {error && (

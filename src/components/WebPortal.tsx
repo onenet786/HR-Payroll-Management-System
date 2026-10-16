@@ -451,7 +451,7 @@ const TAB_WORKFLOW_META: Record<PortalTab, {
     guideContent: 'Enforce dual authorization principles: one officer prepares payroll, another approves. Granular permissions govern access to salaries and audit logs.'
   },
   maintenance: {
-    heading: 'Database backup, PostgreSQL synchronization, and system recovery snapshots.',
+    heading: 'Database backup, synchronization, and system recovery snapshots.',
     help: 'Verify server health, inspect local and database synchronization states, and export database recovery snapshots.',
     guideTitle: 'Guide for Data Backup & Maintenance',
     guideContent: 'Ensure offline logs and biometric attestation events are securely backed up. Database synchronization runs continuously.'
