@@ -61,6 +61,7 @@ import { authenticatedApiRequest as payrollApi } from '../data/postgresStore';
 import { exportTemplatesFor, renderExport, type ExportKind } from '../data/exportTemplates';
 import { authenticatedApiRequest } from '../data/postgresStore';
 import KioskDevicesPanel from './KioskDevicesPanel';
+import RolePermissionsPanel from './RolePermissionsPanel';
 import QRCode from 'qrcode';
 
 const PAKISTAN_BANKS = [
@@ -4556,22 +4557,7 @@ export function WebPortal({
                     <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm lg:col-span-2 space-y-4">
                       <h3 className="font-bold text-slate-800 text-xs uppercase tracking-wide font-mono">System Users</h3>
 
-                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                        <h4 className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-500">Role permission updates</h4>
-                        <div className="grid gap-2 sm:grid-cols-2">
-                          {roles.map(role => {
-                            const enabled = role.permissions.includes('manage_mobile_duty');
-                            return <label key={role.id} className="flex items-center justify-between rounded-lg border border-slate-200 bg-white p-2 text-[11px]">
-                              <span><strong>{role.name}</strong><span className="ml-1 text-slate-400">Assign Mobile Duty</span></span>
-                              <input type="checkbox" checked={enabled} disabled={role.id === 'role-employee' || role.id === 'role-kiosk'} onChange={async event => {
-                                const permissions = event.target.checked ? [...new Set([...role.permissions, 'manage_mobile_duty'])] : role.permissions.filter(permission => permission !== 'manage_mobile_duty');
-                                await onUpdateRole({ ...role, permissions });
-                              }} />
-                            </label>;
-                          })}
-                        </div>
-                        <p className="mt-2 text-[9px] text-slate-400">Employee and Kiosk roles cannot assign mobile duty.</p>
-                      </div>
+                      <RolePermissionsPanel roles={roles} users={users} currentRoleId={loggedInUser.roleId} onUpdateRole={onUpdateRole} />
                       
                       <div className="overflow-x-auto">
                         <table className="min-w-full divide-y divide-slate-200 text-left text-xs">
