@@ -4,7 +4,7 @@
   "icon": "assets/icon.png",
   "extraMetadata": {
     "main": "windows-kiosk/main.cjs",
-    "version": "1.0.9"
+    "version": "1.0.10"
   },
   "directories": {
     "output": "dist-kiosk"

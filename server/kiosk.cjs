@@ -3,8 +3,8 @@
 // needs and can write only attendance punches.
 const crypto = require('node:crypto');
 const express = require('express');
-const bcrypt = require('bcryptjs');
 const { pool } = require('./db.cjs');
+const { findLoginUser, verifyUserPassword } = require('./user-secrets.cjs');
 
 const router = express.Router();
 const sha256 = value => crypto.createHash('sha256').update(String(value)).digest('hex');
@@ -41,9 +41,10 @@ router.post('/register', async (req, res, next) => {
   try {
     const { email, password, terminalName } = req.body || {};
     if (typeof email !== 'string' || typeof password !== 'string' || !email.trim() || !password) return res.status(400).json({ error: 'Enter the kiosk account email and password.' });
-    const found = await pool.query(`SELECT id, data FROM users WHERE LOWER(data->>'email')=$1 OR LOWER(data->>'username')=$1 LIMIT 1`, [email.trim().toLowerCase()]);
-    const user = found.rows[0]?.data;
-    const valid = user?.passwordHash ? await bcrypt.compare(password, user.passwordHash) : false;
+    // Same lookup and password check as the web login, so an account that signs in there registers here.
+    const found = await findLoginUser(pool, email);
+    const user = found?.data;
+    const valid = user ? await verifyUserPassword(pool, user, password) : false;
     if (!user || !valid) return res.status(401).json({ error: 'Invalid kiosk account email or password.' });
     if (user.status !== 'Active') return res.status(403).json({ error: 'This kiosk account is not active.' });
     const permissions = await permissionsOf(user);
@@ -53,8 +54,8 @@ router.post('/register', async (req, res, next) => {
     const token = crypto.randomBytes(32).toString('base64url');
     const id = crypto.randomUUID();
     const name = String(terminalName || 'Kiosk terminal').slice(0, 120);
-    await pool.query(`INSERT INTO kiosk_devices(id,user_id,name,token_hash,created_ip) VALUES($1,$2,$3,$4,$5)`, [id, found.rows[0].id, name, sha256(token), req.ip]);
-    req.kiosk = { userId: found.rows[0].id };
+    await pool.query(`INSERT INTO kiosk_devices(id,user_id,name,token_hash,created_ip) VALUES($1,$2,$3,$4,$5)`, [id, found.id, name, sha256(token), req.ip]);
+    req.kiosk = { userId: found.id };
     await audit(req, 'kiosk_device_registered', id, { name });
     res.setHeader('Cache-Control', 'no-store');
     res.status(201).json({ deviceToken: token, deviceId: id, name });

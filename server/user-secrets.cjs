@@ -49,4 +49,35 @@ async function hashLegacyPasswords(pool) {
   return rows.length;
 }
 
-module.exports = { publicUserData, prepareUserWrite, hashLegacyPasswords, MIN_PASSWORD_LENGTH };
+/** The user a login name (email or username, any case) belongs to: { id, data } or null. */
+async function findLoginUser(pool, login) {
+  const clean = String(login || '').trim().toLowerCase();
+  if (!clean) return null;
+  let result;
+  try {
+    result = await pool.query(
+      `SELECT id AS document_id, data FROM users WHERE (LOWER(email) = $1 OR LOWER(username) = $1 OR LOWER(data->>'email') = $1 OR LOWER(data->>'username') = $1)`,
+      [clean],
+    );
+  } catch {
+    result = await pool.query(
+      `SELECT document_id, data FROM hr_documents WHERE collection_name = 'users' AND (LOWER(data->>'email') = $1 OR LOWER(data->>'username') = $1)`,
+      [clean],
+    );
+  }
+  const row = result.rows[0];
+  return row ? { id: row.document_id, data: row.data } : null;
+}
+
+/** Checks a password against the stored hash, or a legacy plain-text password (which is then hashed). */
+async function verifyUserPassword(pool, user, password) {
+  if (user?.passwordHash) return bcrypt.compare(String(password), user.passwordHash);
+  if (typeof user?.password !== 'string' || !user.password) return false;
+  const given = Buffer.from(String(password));
+  const stored = Buffer.from(user.password);
+  const valid = given.length === stored.length && require('node:crypto').timingSafeEqual(given, stored);
+  if (valid) await hashLegacyPasswords(pool).catch(() => undefined);
+  return valid;
+}
+
+module.exports = { publicUserData, prepareUserWrite, hashLegacyPasswords, findLoginUser, verifyUserPassword, MIN_PASSWORD_LENGTH };

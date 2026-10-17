@@ -253,23 +253,10 @@ if (!process.env.DATA_BACKEND || (process.env.DATA_BACKEND || '').trim().toLower
       if (!email || !password) {
         return res.status(400).json({ error: 'Email and password are required.' });
       }
-      const cleanEmail = String(email).trim().toLowerCase();
-
       const { pool } = require('./server/db.cjs');
-      let result;
-      try {
-        result = await pool.query(
-          `SELECT id AS document_id, data FROM users WHERE (LOWER(email) = $1 OR LOWER(username) = $1 OR LOWER(data->>'email') = $1 OR LOWER(data->>'username') = $1)`,
-          [cleanEmail],
-        );
-      } catch {
-        result = await pool.query(
-          `SELECT document_id, data FROM hr_documents WHERE collection_name = 'users' AND (LOWER(data->>'email') = $1 OR LOWER(data->>'username') = $1)`,
-          [cleanEmail],
-        );
-      }
-
-      const userDoc = result.rows[0];
+      const userSecrets = require('./server/user-secrets.cjs');
+      const found = await userSecrets.findLoginUser(pool, email);
+      const userDoc = found && { document_id: found.id, data: found.data };
       if (!userDoc) {
         return res.status(401).json({ error: 'Invalid email or password.' });
       }
@@ -279,16 +266,8 @@ if (!process.env.DATA_BACKEND || (process.env.DATA_BACKEND || '').trim().toLower
         return res.status(403).json({ error: 'Account is suspended. Contact your administrator.' });
       }
 
-      let passwordValid = false;
-      if (user.passwordHash) {
-        passwordValid = await bcrypt.compare(password, user.passwordHash);
-      } else if (typeof user.password === 'string' && user.password) {
-        // Legacy plain-text record: compare in constant time, then store it hashed from now on.
-        const given = Buffer.from(String(password));
-        const stored = Buffer.from(user.password);
-        passwordValid = given.length === stored.length && require('node:crypto').timingSafeEqual(given, stored);
-        if (passwordValid) await require('./server/user-secrets.cjs').hashLegacyPasswords(pool).catch(() => undefined);
-      }
+      // Legacy plain-text passwords are compared in constant time and stored hashed from then on.
+      const passwordValid = await userSecrets.verifyUserPassword(pool, user, password);
 
       if (!passwordValid) {
         return res.status(401).json({ error: 'Invalid email or password.' });

@@ -1110,6 +1110,9 @@ ipcMain.handle('kiosk:register-device', async (_event, payload) => {
     addEvent('config', `Kiosk registered with the server as ${result.name || terminalName}`);
     return { ok: true, ...publicDeviceRegistration() };
   } catch (error) {
+    addEvent('config', `Kiosk registration failed: ${error.statusCode ? `HTTP ${error.statusCode} ` : ''}${error.message || ''}`);
+    if (error.statusCode === 429) return { ok: false, error: 'Too many sign-in attempts. Wait one minute, then try again.' };
+    if (!error.statusCode) return { ok: false, error: `Cannot reach the server at ${kioskPortalUrl} (${error.code || error.message}). Check the internet connection.` };
     return { ok: false, error: error.message || 'Registration failed.' };
   }
 });

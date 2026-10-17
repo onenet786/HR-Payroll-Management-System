@@ -27,7 +27,7 @@ test.before(async () => {
   await pool.query(`DELETE FROM kiosk_devices`);
   await pool.query(`DELETE FROM attendances WHERE id LIKE 'att-kt-%'`);
   await pool.query(`DELETE FROM attendance_periods WHERE id=$1`, [`attendance-period-${today.slice(0, 7)}`]);
-  await pool.query(`DELETE FROM users WHERE id IN ('u-kiosk','u-kiosk-hr')`);
+  await pool.query(`DELETE FROM users WHERE id IN ('u-kiosk','u-kiosk-hr','u-kiosk-legacy')`);
   await pool.query(`DELETE FROM roles WHERE id IN ('role-kiosk','role-kt-hr')`);
   await pool.query(`DELETE FROM employees WHERE id IN ('e-kt-1','e-kt-2')`);
   await pool.query(`INSERT INTO roles(id, data) VALUES('role-kiosk', '{"id":"role-kiosk","permissions":["use_kiosk"]}'::jsonb), ('role-kt-hr', '{"id":"role-kt-hr","permissions":["manage_employees"]}'::jsonb)`);
@@ -36,6 +36,9 @@ test.before(async () => {
     await pool.query(`INSERT INTO users(id, email, username, role_id, status, data) VALUES($1,$2,$3,$4,'Active',$5::jsonb)`,
       [id, `${id}@test.local`, id, roleId, JSON.stringify({ id, email: `${id}@test.local`, username: id, roleId, status: 'Active', passwordHash: hash })]);
   }
+  // A kiosk account saved by an older server: plain-text password, email only in the column (not in data).
+  await pool.query(`INSERT INTO users(id, email, username, role_id, status, data) VALUES('u-kiosk-legacy','gate2@test.local','gate2','role-kiosk','Active',$1::jsonb)`,
+    [JSON.stringify({ id: 'u-kiosk-legacy', roleId: 'role-kiosk', status: 'Active', password: 'Legacy-Kiosk-2026' })]);
   const employee = (id, status) => ({ id, employeeCode: `ONS-KT-${id}`, fullName: `Kiosk ${id}`, status, cnic: '35202-1234567-1', basicSalary: 250000, bankAccountNumber: 'PK00TEST', phone: '0300' });
   await pool.query(`INSERT INTO employees(id, data) VALUES('e-kt-1',$1::jsonb), ('e-kt-2',$2::jsonb)`, [JSON.stringify(employee('e-kt-1', 'Active')), JSON.stringify(employee('e-kt-2', 'Terminated'))]);
   server = spawn(process.execPath, [path.join(__dirname, '..', 'server.cjs')], {
@@ -70,6 +73,16 @@ test('only Kiosk Terminal accounts can register, with the right password', async
   assert.ok(ok.body.deviceToken?.length >= 40);
   const stored = (await pool.query(`SELECT token_hash FROM kiosk_devices WHERE id=$1`, [ok.body.deviceId])).rows[0];
   assert.notEqual(stored.token_hash, ok.body.deviceToken, 'only the hash is stored');
+});
+
+test('an account that signs in on the web also registers a kiosk (legacy password, email column only)', async () => {
+  assert.equal((await call('POST', '/api/kiosk/register', { email: ' Gate2@test.local ', password: 'wrong-password' })).status, 401);
+  const ok = await call('POST', '/api/kiosk/register', { email: ' Gate2@test.local ', password: 'Legacy-Kiosk-2026', terminalName: 'Gate 2' });
+  assert.equal(ok.status, 201, JSON.stringify(ok.body));
+  const user = (await pool.query(`SELECT data FROM users WHERE id='u-kiosk-legacy'`)).rows[0].data;
+  assert.equal(user.password, undefined, 'plain-text password removed');
+  assert.ok(await bcrypt.compare('Legacy-Kiosk-2026', user.passwordHash), 'password stored hashed');
+  assert.equal((await call('POST', '/api/auth/login', { email: 'gate2@test.local', password: 'Legacy-Kiosk-2026' })).status, 200, 'web login still works');
 });
 
 test('a registered kiosk syncs only allow-listed collections and fields', async () => {
