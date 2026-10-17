@@ -25,6 +25,8 @@ import {
   hasFaceEnrollment,
 } from '../utils/faceRecognition';
 import { performActiveLiveness, randomLivenessOrder, type LivenessDirection } from '../utils/faceLiveness';
+import { getFaceLandmarker } from '../utils/faceLandmarker';
+import { loadFaceEmbedder } from '../utils/faceEmbedding';
 type WsStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 type CaptureState = 'idle' | 'scanning' | 'captured' | 'error';
 type TabId = 'test' | 'enroll' | 'attendance';
@@ -152,6 +154,7 @@ export function BiometricDeviceModule({
   const [faceMsg, setFaceMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const [recognizedFaceMatch, setRecognizedFaceMatch] = useState<{ employee: Employee; score: number; margin: number } | null>(null);
   const [livenessPhase, setLivenessPhase] = useState(-1);
+  const [faceModelsLoading, setFaceModelsLoading] = useState(false);
   const [livenessOrder, setLivenessOrder] = useState<[LivenessDirection, LivenessDirection]>(['left', 'right']);
   const [livenessBusy, setLivenessBusy] = useState(false);
 
@@ -686,10 +689,23 @@ export function BiometricDeviceModule({
         faceVideoRef.current.srcObject = stream;
         await faceVideoRef.current.play();
       }
-      setFaceCameraReady(true);
     } catch (error) {
       setFaceCameraReady(false);
       setFaceMsg({ type: 'err', text: 'Camera access failed. Check permission and try again.' });
+      return;
+    }
+    // Download the face models now (first time ~20 MB) so Save / Verify start immediately.
+    setFaceModelsLoading(true);
+    setFaceMsg({ type: 'ok', text: 'Loading face recognition (first time can take up to a minute)…' });
+    try {
+      await Promise.all([getFaceLandmarker(), loadFaceEmbedder()]);
+      setFaceCameraReady(true);
+      setFaceMsg({ type: 'ok', text: 'Camera ready. Keep the face inside the oval, then click Save 5 Faces.' });
+    } catch (error) {
+      setFaceCameraReady(false);
+      setFaceMsg({ type: 'err', text: error instanceof Error ? error.message : 'Face recognition could not start. Reload the page and try again.' });
+    } finally {
+      setFaceModelsLoading(false);
     }
   }, []);
 
@@ -1612,10 +1628,11 @@ export function BiometricDeviceModule({
                 <button
                   type="button"
                   onClick={faceCameraReady ? stopFaceCamera : startFaceCamera}
-                  className="flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-900 text-white text-sm font-bold py-2.5 rounded-xl transition shadow-sm"
+                  disabled={faceModelsLoading}
+                  className="flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-900 text-white text-sm font-bold py-2.5 rounded-xl transition shadow-sm disabled:cursor-wait disabled:opacity-70"
                 >
                   {faceCameraReady ? <VideoOff className="w-4 h-4" /> : <Camera className="w-4 h-4" />}
-                  {faceCameraReady ? 'Stop Camera' : 'Start Camera'}
+                  {faceModelsLoading ? 'Loading…' : faceCameraReady ? 'Stop Camera' : 'Start Camera'}
                 </button>
                 <button
                   type="button"

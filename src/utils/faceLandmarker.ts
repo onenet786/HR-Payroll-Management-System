@@ -47,8 +47,17 @@ async function createLandmarker(): Promise<FaceLandmarker> {
   }
 }
 
+const LOAD_TIMEOUT_MS = 120_000;
+
+/**
+ * The face model is about 15 MB; on a slow connection the first load can take a minute. Callers should await
+ * this before starting any timed step, and a load that never finishes reports an error instead of hanging.
+ */
 export function getFaceLandmarker(): Promise<FaceLandmarker> {
-  landmarkerPromise ||= createLandmarker().catch(error => { landmarkerPromise = null; throw error; });
+  landmarkerPromise ||= Promise.race([
+    createLandmarker(),
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('The face detection model did not finish downloading. Check the internet connection and press Ctrl+F5 to reload, then try again.')), LOAD_TIMEOUT_MS)),
+  ]).catch(error => { landmarkerPromise = null; throw error; });
   return landmarkerPromise;
 }
 

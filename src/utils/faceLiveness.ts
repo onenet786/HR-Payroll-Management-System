@@ -1,4 +1,4 @@
-import { detectFaceGeometry } from './faceLandmarker';
+import { detectFaceGeometry, getFaceLandmarker } from './faceLandmarker';
 
 export type LivenessDirection = 'left' | 'right';
 
@@ -173,6 +173,12 @@ export async function performActiveLiveness(
     order[1] === 'left' ? 'Turn your head LEFT' : 'Turn your head RIGHT',
     'Return to center',
   ];
+  // Load the model before the clock starts, so a slow first download cannot use up the challenge time.
+  try {
+    await getFaceLandmarker();
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : 'The face detection model could not start.' };
+  }
   const observations: LivenessObservation[] = [];
   const start = Date.now();
   let phase = 0;
