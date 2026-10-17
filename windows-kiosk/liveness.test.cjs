@@ -113,3 +113,15 @@ test('kiosk measures turns from the resting pose and still rejects a photo', () 
   assert.equal(validateSequence(frames([.28, .28, .28, .28, .28]), ['left', 'right']).ok, false);
   assert.equal(validateSequence(frames([.28, .4, .28, .15, .28]), ['left', 'right']).ok, false);
 });
+
+test('settling into the oval during the first frames does not fail the check', () => {
+  const settling = frames([0, 0, .35, 0, -.35, 0]).map((item, index) => (index < 3 ? { ...item, centerX: .62, centerY: .58 } : item));
+  const result = validateSequence(settling, ['left', 'right']);
+  assert.equal(result.ok, true, result.message);
+  assert.equal(isValidAttestation({ method: 'active-turn-v1', verifiedAt: new Date().toISOString(), summary: result.summary }), true);
+});
+
+test('walking across the frame during the check still fails', () => {
+  const walking = frames([0, .35, 0, -.35, 0]).map((item, index) => ({ ...item, centerX: .2 + index * .04 }));
+  assert.equal(validateSequence(walking, ['left', 'right']).ok, false);
+});

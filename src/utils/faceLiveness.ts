@@ -80,10 +80,12 @@ export function validateLivenessSequence(
     return { ok: false, message: 'Active liveness challenge expired. Start again.' };
   }
 
-  const origin = observations.slice(0, LIVENESS_MIN_FRAMES);
-  const baseX = origin.reduce((sum, item) => sum + item.centerX, 0) / origin.length;
-  const baseY = origin.reduce((sum, item) => sum + item.centerY, 0) / origin.length;
-  const baseScale = origin.reduce((sum, item) => sum + item.scale, 0) / origin.length;
+  // Movement is measured from the middle of the range the face moved over, not from the first frames, which are
+  // often taken while the person is still settling into the oval.
+  const midpoint = (values: number[]) => (Math.min(...values) + Math.max(...values)) / 2;
+  const baseX = midpoint(observations.map(item => item.centerX));
+  const baseY = midpoint(observations.map(item => item.centerY));
+  const baseScale = midpoint(observations.map(item => item.scale));
   if (!Number.isFinite(baseScale) || baseScale <= 0) return { ok: false, message: 'Invalid face geometry.' };
 
   let maxCenterDrift = 0;

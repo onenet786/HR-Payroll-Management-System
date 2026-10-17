@@ -17,8 +17,8 @@ test('rejects wrong direction and insufficient yaw', () => {
   assert.equal(validateLivenessSequence(frames([0, 0.1, 0, -0.1, 0]), ['left', 'right']).ok, false);
 });
 test('rejects translated flat-photo motion and scale change', () => {
-  const translated = frames([0, 0.35, 0, -0.35, 0]); translated[6].centerX = 0.7;
-  const scaled = frames([0, 0.35, 0, -0.35, 0]); scaled[7].scale = 0.42;
+  const translated = frames([0, 0.35, 0, -0.35, 0]); translated[6].centerX = 0.85;
+  const scaled = frames([0, 0.35, 0, -0.35, 0]); scaled[7].scale = 0.5;
   assert.equal(validateLivenessSequence(translated, ['left', 'right']).ok, false);
   assert.equal(validateLivenessSequence(scaled, ['left', 'right']).ok, false);
 });

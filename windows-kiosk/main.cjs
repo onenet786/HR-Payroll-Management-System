@@ -546,6 +546,8 @@ async function loadCrossBranchAttendanceContext(store, employeeId) {
 async function performSync() {
   const store = readStore();
   const report = { employees: 0, attendances: 0, branches: 0, departments: 0, designations: 0, biometricTemplates: 0, pushed: 0, changed: false, errors: [] };
+  // Without a device key the server refuses every download, so the kiosk keeps matching an old employee list.
+  report.notRegistered = !readDeviceRegistration();
 
   try {
     const records = await fetchFirestoreCollection('branches');
@@ -647,7 +649,8 @@ async function performSync() {
   }
   store.pendingSync = remaining;
   store.employees = mergeEmployeeBiometricTemplates(store.employees || [], store.biometricTemplates || []);
-  store.lastSync = new Date().toISOString();
+  // Only a sync that reached the server counts; otherwise "last synced" would hide that nothing downloaded.
+  if (!report.notRegistered) store.lastSync = new Date().toISOString();
   store.lastSyncReport = report;
   writeStore(store);
   addEvent('sync', 'Kiosk sync completed', report);
@@ -1206,6 +1209,9 @@ ipcMain.handle('kiosk:punch-camera', async (_event, payload) => {
   const secureDescriptorCount = candidates.reduce((count, employee) => count + getFaceDescriptors(employee).length, 0);
   if (secureDescriptorCount === 0) {
     if (payload.mode !== 'multi-face') cameraChallenges.recordFailure(terminalId);
+    if (!readDeviceRegistration()) {
+      return { ok: false, message: 'This kiosk is not registered with the server, so enrolled faces cannot download. Open Settings → Server Registration and sign in with the kiosk account.' };
+    }
     return { ok: false, message: 'No face profile enrolled with the current recognition model. Re-enroll this face in the HR portal (Biometric Devices).' };
   }
   // A typed code narrows the gallery; without one the same descriptor matcher

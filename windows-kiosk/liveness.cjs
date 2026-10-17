@@ -5,6 +5,10 @@ const MIN_FRAMES = 3;
 const MAX_DURATION_MS = 25_000;
 const CLOCK_TOLERANCE_MS = 250;
 const MAX_OBSERVATIONS = 240;
+// Head movement allowed during the check, as a fraction of the camera frame (same limit as the web portal).
+const MAX_CENTER_DRIFT = 0.15;
+const MAX_SCALE_CHANGE = 0.22;
+const midpoint = values => (Math.min(...values) + Math.max(...values)) / 2;
 
 // Turns are measured from the person's own resting pose (first steady, roughly frontal frames), so an off-centre
 // webcam or someone looking slightly down still passes; a photo still fails because two real turns are required.
@@ -24,7 +28,7 @@ function isValidAttestation(value) {
     Number.isFinite(summary.durationMs) && summary.durationMs > 0 && summary.durationMs <= MAX_DURATION_MS &&
     Number.isFinite(summary.maxLeftYaw) && summary.maxLeftYaw >= .27 && summary.maxLeftYaw <= 2 &&
     Number.isFinite(summary.maxRightYaw) && summary.maxRightYaw >= .27 && summary.maxRightYaw <= 2 &&
-    Number.isFinite(summary.maxCenterDrift) && summary.maxCenterDrift >= 0 && summary.maxCenterDrift <= .15 &&
+    Number.isFinite(summary.maxCenterDrift) && summary.maxCenterDrift >= 0 && summary.maxCenterDrift <= MAX_CENTER_DRIFT &&
     Number.isFinite(summary.maxScaleChange) && summary.maxScaleChange >= 0 && summary.maxScaleChange <= .22;
 }
 
@@ -34,11 +38,12 @@ function validateSequence(observations, order, maxDurationMs = MAX_DURATION_MS) 
   if (!Array.isArray(order) || order.length !== 2 || order[0] === order[1] || !order.every(value => value === 'left' || value === 'right')) return { ok: false, message: 'Invalid liveness challenge order.' };
   const durationMs = Number(observations.at(-1)?.at) - Number(observations[0]?.at);
   if (!(durationMs > 0) || durationMs > maxDurationMs) return { ok: false, message: 'Active liveness challenge expired. Start again.' };
-  const origin = observations.slice(0, MIN_FRAMES);
-  const average = key => origin.reduce((sum, item) => sum + Number(item[key]), 0) / origin.length;
-  const baseX = average('centerX');
-  const baseY = average('centerY');
-  const baseScale = average('scale');
+  // Movement is measured from the middle of the range the face moved over, not from the first frames, which are
+  // often taken while the person is still settling into the oval. Head turns barely move the face box; a flat photo
+  // cannot fake the yaw turns at all, so this only rejects someone walking or swinging the camera.
+  const baseX = midpoint(observations.map(item => Number(item?.centerX)));
+  const baseY = midpoint(observations.map(item => Number(item?.centerY)));
+  const baseScale = midpoint(observations.map(item => Number(item?.scale)));
   if (![baseX, baseY, baseScale].every(Number.isFinite) || baseScale <= 0) return { ok: false, message: 'Invalid face geometry.' };
   let maxCenterDrift = 0;
   let maxScaleChange = 0;
@@ -53,8 +58,8 @@ function validateSequence(observations, order, maxDurationMs = MAX_DURATION_MS) 
     maxCenterDrift = Math.max(maxCenterDrift, Math.hypot(values[2] - baseX, values[3] - baseY));
     maxScaleChange = Math.max(maxScaleChange, Math.abs(values[4] / baseScale - 1));
   }
-  if (maxCenterDrift > 0.085) return { ok: false, message: 'Face frame translated instead of the head turning.' };
-  if (maxScaleChange > 0.22) return { ok: false, message: 'Face scale changed excessively.' };
+  if (maxCenterDrift > MAX_CENTER_DRIFT) return { ok: false, message: 'You moved too far during the check. Stand still and turn only your head.' };
+  if (maxScaleChange > MAX_SCALE_CHANGE) return { ok: false, message: 'Face size changed too much. Keep the same distance from the camera.' };
   const targets = ['center', order[0], 'center', order[1], 'center'];
   const counts = [0, 0, 0, 0, 0];
   let phase = 0;

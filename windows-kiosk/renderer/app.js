@@ -1045,6 +1045,7 @@ function shortFaceFailure(result) {
   const message = String(result?.message || '');
   if (result?.ambiguous) return 'Ambiguous · Enter Code';
   if (result?.duplicate) return 'Not recognized';
+  if (/not registered/i.test(message)) return 'Kiosk not registered · Settings';
   if (/re-enroll|no face profile|no enrolled faces/i.test(message)) return 'Face not enrolled · See HR';
   if (/not recognized/i.test(message)) return 'Not recognized';
   if (/hold still|no clear face|too small/i.test(message)) return 'Look at camera · Hold still';
@@ -2144,10 +2145,12 @@ async function performSync() {
     kioskState = await api.getState();
     applyModeSecurity();
     const errs = report.errors?.length || 0;
-    el.syncStatus.textContent = errs
-      ? `${errs} sync warning(s)`
-      : `Synced: ${report.employees} emp, ${report.biometricTemplates || 0} bio, ${report.departments || 0} dept, ${report.pushed} pushed`;
-    setPill(el.pillOnline, 'online');
+    el.syncStatus.textContent = report.notRegistered
+      ? 'Not registered — open Settings to register this kiosk'
+      : errs
+        ? `${errs} sync warning(s)`
+        : `Synced: ${report.employees} emp, ${report.biometricTemplates || 0} bio, ${report.departments || 0} dept, ${report.pushed} pushed`;
+    setPill(el.pillOnline, report.notRegistered ? 'offline' : 'online');
     renderDirectory(el.dirSearch.value);
     refreshTodayFeed();
     refreshStats();
