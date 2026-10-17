@@ -1529,7 +1529,12 @@ async function runCameraLivenessChallenge() {
   const observations = [];
   let phase = 0;
   let consecutive = 0;
-  const matches = (target, yaw) => target === 'center' ? Math.abs(yaw) <= 0.20 : target === 'left' ? yaw >= 0.27 : yaw <= -0.27;
+  // Turns count from the person's own resting pose, so an off-centre webcam still passes (same rule as the main process).
+  let base = null;
+  let resting = [];
+  const stepMatches = (target, yaw) => base === null
+    ? Math.abs(yaw) <= 0.35
+    : target === 'center' ? Math.abs(yaw - base) <= 0.20 : target === 'left' ? yaw - base >= 0.27 : yaw - base <= -0.27;
   try {
     while (Date.now() <= issued.expiresAt) {
       setLivenessProgress(phase, labels[phase], false, issued.order);
@@ -1542,8 +1547,15 @@ async function runCameraLivenessChallenge() {
         continue;
       }
       observations.push(observation);
-      consecutive = matches(targets[phase], observation.yaw) ? consecutive + 1 : 0;
+      if (stepMatches(targets[phase], observation.yaw)) {
+        consecutive += 1;
+        if (base === null) resting.push(observation.yaw);
+      } else {
+        consecutive = 0;
+        if (base === null) resting = [];
+      }
       if (consecutive >= 3) {
+        if (base === null) base = resting.slice(-3).reduce((sum, value) => sum + value, 0) / 3;
         if (phase === 4) { setLivenessProgress(5, 'Live person verified', false, issued.order); return { challengeId: issued.id, observations }; }
         phase += 1;
         consecutive = 0;

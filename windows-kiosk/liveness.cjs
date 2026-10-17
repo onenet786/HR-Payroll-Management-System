@@ -6,6 +6,12 @@ const MAX_DURATION_MS = 25_000;
 const CLOCK_TOLERANCE_MS = 250;
 const MAX_OBSERVATIONS = 240;
 
+// Turns are measured from the person's own resting pose (first steady, roughly frontal frames), so an off-centre
+// webcam or someone looking slightly down still passes; a photo still fails because two real turns are required.
+const FRONTAL_YAW = 0.35;
+const stepMatches = (target, yaw, base) => base === null
+  ? Math.abs(yaw) <= FRONTAL_YAW
+  : target === 'center' ? Math.abs(yaw - base) <= 0.20 : target === 'left' ? yaw - base >= 0.27 : yaw - base <= -0.27;
 function isValidAttestation(value) {
   const summary = value?.summary;
   const order = summary?.order;
@@ -36,8 +42,6 @@ function validateSequence(observations, order, maxDurationMs = MAX_DURATION_MS) 
   if (![baseX, baseY, baseScale].every(Number.isFinite) || baseScale <= 0) return { ok: false, message: 'Invalid face geometry.' };
   let maxCenterDrift = 0;
   let maxScaleChange = 0;
-  let maxLeftYaw = 0;
-  let maxRightYaw = 0;
   let previousAt = Number.NEGATIVE_INFINITY;
   for (const item of observations) {
     if (!item || typeof item !== 'object' || Array.isArray(item) || Object.keys(item).some(key => !['at', 'yaw', 'centerX', 'centerY', 'scale'].includes(key))) return { ok: false, message: 'Liveness observation shape is invalid.' };
@@ -48,20 +52,33 @@ function validateSequence(observations, order, maxDurationMs = MAX_DURATION_MS) 
     previousAt = values[0];
     maxCenterDrift = Math.max(maxCenterDrift, Math.hypot(values[2] - baseX, values[3] - baseY));
     maxScaleChange = Math.max(maxScaleChange, Math.abs(values[4] / baseScale - 1));
-    maxLeftYaw = Math.max(maxLeftYaw, values[1]);
-    maxRightYaw = Math.max(maxRightYaw, -values[1]);
   }
   if (maxCenterDrift > 0.085) return { ok: false, message: 'Face frame translated instead of the head turning.' };
   if (maxScaleChange > 0.22) return { ok: false, message: 'Face scale changed excessively.' };
   const targets = ['center', order[0], 'center', order[1], 'center'];
   const counts = [0, 0, 0, 0, 0];
-  const matches = (target, yaw) => target === 'center' ? Math.abs(yaw) <= 0.20 : target === 'left' ? yaw >= 0.27 : yaw <= -0.27;
   let phase = 0;
+  let base = null;
+  let resting = [];
+  let maxLeftYaw = 0;
+  let maxRightYaw = 0;
   for (const item of observations) {
-    if (matches(targets[phase], Number(item.yaw))) {
+    const yaw = Number(item.yaw);
+    if (stepMatches(targets[phase], yaw, base)) {
       counts[phase] += 1;
-      if (counts[phase] >= MIN_FRAMES && phase < 4) phase += 1;
-    } else if (counts[phase] < MIN_FRAMES) counts[phase] = 0;
+      if (base === null) resting.push(yaw);
+      if (counts[phase] >= MIN_FRAMES && phase < 4) {
+        if (base === null) base = resting.slice(-MIN_FRAMES).reduce((sum, value) => sum + value, 0) / MIN_FRAMES;
+        phase += 1;
+      }
+    } else if (counts[phase] < MIN_FRAMES) {
+      counts[phase] = 0;
+      if (base === null) resting = [];
+    }
+    if (base !== null) {
+      maxLeftYaw = Math.max(maxLeftYaw, yaw - base);
+      maxRightYaw = Math.max(maxRightYaw, base - yaw);
+    }
   }
   if (phase !== 4 || counts[4] < MIN_FRAMES) return { ok: false, message: 'Required center and head-turn sequence was not completed.' };
   return { ok: true, summary: { order, frameCounts: counts, durationMs, maxLeftYaw, maxRightYaw, maxCenterDrift, maxScaleChange } };

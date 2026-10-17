@@ -48,6 +48,22 @@ export function isValidLivenessAttestation(value: unknown): boolean {
   return true;
 }
 
+/** Steady, roughly frontal pose accepted for the first step; it becomes the person's own "straight ahead". */
+export const LIVENESS_FRONTAL_YAW = 0.35;
+const CENTER_TOLERANCE = 0.20;
+const TURN_THRESHOLD = 0.27;
+
+/**
+ * Head turns are measured from the person's resting pose, not from an exact straight-ahead angle, so a webcam
+ * mounted to one side (or someone looking slightly down at a laptop) can still complete the check.
+ * base === null means the resting pose has not been established yet (first step).
+ */
+export function livenessStepMatches(target: LivenessDirection | 'center', yaw: number, base: number | null): boolean {
+  if (base === null) return Math.abs(yaw) <= LIVENESS_FRONTAL_YAW;
+  const relative = yaw - base;
+  return target === 'center' ? Math.abs(relative) <= CENTER_TOLERANCE : target === 'left' ? relative >= TURN_THRESHOLD : relative <= -TURN_THRESHOLD;
+}
+
 const phaseTarget = (phase: number, order: [LivenessDirection, LivenessDirection]) =>
   phase === 1 ? order[0] : phase === 3 ? order[1] : 'center';
 
@@ -72,16 +88,12 @@ export function validateLivenessSequence(
 
   let maxCenterDrift = 0;
   let maxScaleChange = 0;
-  let maxLeftYaw = 0;
-  let maxRightYaw = 0;
   for (const item of observations) {
     if (![item.at, item.yaw, item.centerX, item.centerY, item.scale].every(Number.isFinite)) {
       return { ok: false, message: 'Invalid liveness observation.' };
     }
     maxCenterDrift = Math.max(maxCenterDrift, Math.hypot(item.centerX - baseX, item.centerY - baseY));
     maxScaleChange = Math.max(maxScaleChange, Math.abs(item.scale / baseScale - 1));
-    maxLeftYaw = Math.max(maxLeftYaw, item.yaw);
-    maxRightYaw = Math.max(maxRightYaw, -item.yaw);
   }
   if (maxCenterDrift > LIVENESS_MAX_CENTER_DRIFT) {
     return { ok: false, message: 'The phone or face moved too far during verification. Hold the phone steady and turn only your head.' };
@@ -90,17 +102,28 @@ export function validateLivenessSequence(
     return { ok: false, message: 'Face size changed too much. Keep the same distance from the camera.' };
   }
 
-  const matches = (target: LivenessDirection | 'center', yaw: number) =>
-    target === 'center' ? Math.abs(yaw) <= 0.20 : target === 'left' ? yaw >= 0.27 : yaw <= -0.27;
   const frameCounts: [number, number, number, number, number] = [0, 0, 0, 0, 0];
   let phase = 0;
+  let base: number | null = null;
+  let restingYaws: number[] = [];
+  let maxLeftYaw = 0;
+  let maxRightYaw = 0;
   for (const item of observations) {
     const target = phaseTarget(phase, order);
-    if (matches(target, item.yaw)) {
+    if (livenessStepMatches(target, item.yaw, base)) {
       frameCounts[phase] += 1;
-      if (frameCounts[phase] >= LIVENESS_MIN_FRAMES && phase < 4) phase += 1;
+      if (base === null) restingYaws.push(item.yaw);
+      if (frameCounts[phase] >= LIVENESS_MIN_FRAMES && phase < 4) {
+        if (base === null) base = restingYaws.slice(-LIVENESS_MIN_FRAMES).reduce((sum, yaw) => sum + yaw, 0) / LIVENESS_MIN_FRAMES;
+        phase += 1;
+      }
     } else if (frameCounts[phase] < LIVENESS_MIN_FRAMES) {
       frameCounts[phase] = 0;
+      if (base === null) restingYaws = [];
+    }
+    if (base !== null) {
+      maxLeftYaw = Math.max(maxLeftYaw, item.yaw - base);
+      maxRightYaw = Math.max(maxRightYaw, base - item.yaw);
     }
   }
   if (phase !== 4 || frameCounts[4] < LIVENESS_MIN_FRAMES) {
@@ -158,8 +181,8 @@ export async function performActiveLiveness(
   let noFaceCount = 0;
   let lastReported = '';
 
-  const matches = (target: LivenessDirection | 'center', yaw: number) =>
-    target === 'center' ? Math.abs(yaw) <= 0.20 : target === 'left' ? yaw >= 0.27 : yaw <= -0.27;
+  let base: number | null = null;
+  let restingYaws: number[] = [];
 
   while (Date.now() - start <= LIVENESS_MAX_DURATION_MS) {
     if (phase !== lastPhase) {
@@ -189,13 +212,15 @@ export async function performActiveLiveness(
 
     observations.push(observation);
     const target = phaseTarget(phase, order);
-    if (matches(target, observation.yaw)) {
+    if (livenessStepMatches(target, observation.yaw, base)) {
       consecutive += 1;
+      if (base === null) restingYaws.push(observation.yaw);
       if (consecutive === 2 && consecutive < LIVENESS_MIN_FRAMES) {
         onStatus?.(`${labels[phase]} (Hold steady...)`, phase);
       }
     } else {
       consecutive = 0;
+      if (base === null) restingYaws = [];
     }
 
     if (consecutive >= LIVENESS_MIN_FRAMES) {
@@ -204,6 +229,7 @@ export async function performActiveLiveness(
         if (result.ok) { onStatus?.('Live person verified', 5); return result; }
         return result;
       }
+      if (base === null) base = restingYaws.slice(-LIVENESS_MIN_FRAMES).reduce((sum, yaw) => sum + yaw, 0) / LIVENESS_MIN_FRAMES;
       phase += 1;
       consecutive = 0;
     }

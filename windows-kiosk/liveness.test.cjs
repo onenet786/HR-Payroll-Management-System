@@ -105,3 +105,11 @@ test('cancel consumes an incomplete challenge and counts failure', () => {
   const challengeFrames = frames([0, challenge.order[0] === 'left' ? .35 : -.35, 0, challenge.order[1] === 'left' ? .35 : -.35, 0], 1000);
   assert.equal(manager.validateAndConsume('t1', { challengeId: challenge.id, observations: challengeFrames }).ok, false);
 });
+
+test('kiosk measures turns from the resting pose and still rejects a photo', () => {
+  const offset = validateSequence(frames([.28, .6, .28, -.02, .28]), ['left', 'right']);
+  assert.equal(offset.ok, true);
+  assert.equal(isValidAttestation({ method: 'active-turn-v1', verifiedAt: new Date().toISOString(), summary: offset.summary }), true);
+  assert.equal(validateSequence(frames([.28, .28, .28, .28, .28]), ['left', 'right']).ok, false);
+  assert.equal(validateSequence(frames([.28, .4, .28, .15, .28]), ['left', 'right']).ok, false);
+});

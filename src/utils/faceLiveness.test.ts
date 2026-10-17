@@ -27,3 +27,16 @@ test('rejects insufficient frames and timeout', () => {
   const timed = frames([0, 0.35, 0, -0.35, 0]); timed.at(-1)!.at = 30_000;
   assert.equal(validateLivenessSequence(timed, ['left', 'right']).ok, false);
 });
+test('turns are measured from the person\'s own resting pose (camera off to one side)', () => {
+  // Resting yaw 0.28: the old fixed "centre within 0.20" rule could never start.
+  const offset = frames([0.28, 0.6, 0.28, -0.02, 0.28]);
+  const result = validateLivenessSequence(offset, ['left', 'right']);
+  assert.equal(result.ok, true);
+  assert.ok(result.summary!.maxLeftYaw >= 0.27 && result.summary!.maxRightYaw >= 0.27, 'turn sizes are relative to the resting pose');
+  assert.equal(validateLivenessSequence(frames([-0.3, -0.02, -0.3, -0.6, -0.3]), ['left', 'right']).ok, true);
+});
+test('a still photo or small wobble still fails from an offset pose', () => {
+  assert.equal(validateLivenessSequence(frames([0.28, 0.28, 0.28, 0.28, 0.28]), ['left', 'right']).ok, false);
+  assert.equal(validateLivenessSequence(frames([0.28, 0.4, 0.28, 0.15, 0.28]), ['left', 'right']).ok, false);
+  assert.equal(validateLivenessSequence(frames([0.5, 0.9, 0.5, 0.1, 0.5]), ['left', 'right']).ok, false, 'near-profile start is not accepted');
+});
