@@ -1,5 +1,5 @@
 const { app, BrowserWindow, ipcMain, dialog, session, safeStorage } = require('electron');
-const { spawn } = require('child_process');
+const { execFile, spawn } = require('child_process');
 const fs = require('fs');
 const net = require('net');
 const path = require('path');
@@ -287,9 +287,25 @@ function isBridgePortOpen() {
   });
 }
 
+// State of the URU4500Bridge Windows service registered by the installer ('RUNNING', 'STOPPED', ...), or
+// 'MISSING' when it is not installed. The kiosk cannot start a service without admin rights.
+function queryBridgeService() {
+  return new Promise(resolve => {
+    execFile('sc.exe', ['query', 'URU4500Bridge'], { windowsHide: true, timeout: 5000 }, (_error, stdout) => {
+      const match = /STATE\s*:\s*\d+\s+(\w+)/.exec(String(stdout || ''));
+      resolve(match ? match[1] : 'MISSING');
+    });
+  });
+}
+
 async function startUru4500Bridge() {
   if (process.platform !== 'win32') return { ok: false, message: 'Windows biometric driver host starts only on Windows.' };
   if (await isBridgePortOpen()) return { ok: true, message: 'Windows biometric driver host already running.' };
+  // A running service is still opening its port (or restarting after a crash); a second copy would fight it.
+  const serviceState = await queryBridgeService();
+  if (serviceState === 'RUNNING' || serviceState === 'START_PENDING') {
+    return { ok: true, message: 'Waiting for the URU4500Bridge Windows service to come online.' };
+  }
 
   const bridgePath = getBridgeExecutablePath();
   if (!fs.existsSync(bridgePath)) {
