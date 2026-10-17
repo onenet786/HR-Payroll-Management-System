@@ -18,6 +18,14 @@ import { resolveWageBasis } from './masterData';
 
 // Official FBR Income Tax Slabs for Salaried Individuals (Annual)
 // Enacted under Finance Act, 2024 / First Schedule, Part I, Division I, Clause (2) of the Income Tax Ordinance, 2001
+/**
+ * Slab rates are whole percentages (5 = 5%). Earlier screens told users to type 0.05 for 5%; no FBR salary slab has a
+ * rate between 0% and 1%, so such fractions are read as percentages instead of producing tax 100 times too low.
+ */
+export function slabRatePercent(rate: number): number {
+  return rate > 0 && rate < 1 ? rate * 100 : rate;
+}
+
 export const DEFAULT_TAX_SLABS: TaxSlab[] = [
   { id: 'fbr-slab-1', minIncome: 0, maxIncome: 600000, baseTax: 0, percentage: 0 },
   { id: 'fbr-slab-2', minIncome: 600000, maxIncome: 1200000, baseTax: 0, percentage: 5 },
@@ -418,10 +426,10 @@ export function calculateAnnualTax(annualTaxableIncome: number, slabs: TaxSlab[]
     // If somehow not found, go to highest
     const highest = effectiveSlabs[effectiveSlabs.length - 1] || DEFAULT_TAX_SLABS[DEFAULT_TAX_SLABS.length - 1];
     const excess = annualTaxableIncome - (highest?.minIncome ?? 4100000);
-    baseCalculatedTax = (highest?.baseTax ?? 700000) + (excess * (highest?.percentage ?? 35)) / 100;
+    baseCalculatedTax = (highest?.baseTax ?? 700000) + (excess * slabRatePercent(highest?.percentage ?? 35)) / 100;
   } else {
     const excess = annualTaxableIncome - (matchingSlab.minIncome ?? 0);
-    baseCalculatedTax = (matchingSlab.baseTax ?? 0) + (excess * (matchingSlab.percentage ?? 0)) / 100;
+    baseCalculatedTax = (matchingSlab.baseTax ?? 0) + (excess * slabRatePercent(matchingSlab.percentage ?? 0)) / 100;
   }
 
   // Section 4AB: 10% Surcharge on income exceeding Rs. 10 million (PKR 10,000,000)

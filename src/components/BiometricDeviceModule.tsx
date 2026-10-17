@@ -1490,7 +1490,7 @@ export function BiometricDeviceModule({
                     Enroll Camera Face (Kiosk Optimized)
                   </h4>
                   <p className="text-xs text-slate-500 mt-1">
-                    Save 3 camera face samples for kiosk recognition with active liveness verification.
+                    Save 5 camera face samples for kiosk recognition with active liveness verification.
                   </p>
                 </div>
                 {(() => {

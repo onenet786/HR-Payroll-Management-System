@@ -4275,7 +4275,7 @@ export function WebPortal({
                                 <span className="block text-[10px] text-slate-400 font-sans">Base Tax + Rate:</span>
                                 <div className="flex gap-1">
                                   <input aria-label={`Slab ${idx + 1} base tax`} type="number" value={slab.baseTax} onChange={e => updateTaxSlab(slab.id, 'baseTax', Number(e.target.value))} className="w-2/3 font-bold bg-white border border-slate-200 rounded px-1.5 py-1 text-slate-800" title="Fixed Base Tax in PKR" />
-                                  <input aria-label={`Slab ${idx + 1} percentage`} type="number" step="0.01" value={slab.percentage} onChange={e => updateTaxSlab(slab.id, 'percentage', Number(e.target.value))} className="w-1/3 font-bold bg-white border border-slate-200 rounded px-1.5 py-1 text-slate-800" title="Tax Rate (e.g. 0.05 for 5%)" />
+                                  <input aria-label={`Slab ${idx + 1} percentage`} type="number" step="0.01" value={slab.percentage} onChange={e => updateTaxSlab(slab.id, 'percentage', Number(e.target.value))} className="w-1/3 font-bold bg-white border border-slate-200 rounded px-1.5 py-1 text-slate-800" title="Tax rate in percent (e.g. 5 for 5%)" />
                                 </div>
                               </div>
                             </div>
