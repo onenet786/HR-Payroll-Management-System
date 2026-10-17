@@ -368,8 +368,18 @@ function createWindow() {
 
 function configureCameraPermission() {
   const rendererUrl = pathToFileURL(path.join(__dirname, 'renderer', 'index.html')).toString();
-  const isTrustedRenderer = webContents =>
-    !!webContents && !webContents.isDestroyed() && webContents.getURL() === rendererUrl;
+  // Trust only the kiosk's own window showing the bundled renderer. Comparing the exact URL text failed when the
+  // app was installed under a path with spaces (e.g. C:\Program Files\...), which blocked the camera.
+  const normalizeFileUrl = url => {
+    try { return decodeURIComponent(new URL(url).pathname).replace(/\\/g, '/').toLowerCase(); } catch { return ''; }
+  };
+  const trustedPath = normalizeFileUrl(rendererUrl);
+  const isTrustedRenderer = webContents => {
+    if (!webContents || webContents.isDestroyed()) return false;
+    const url = webContents.getURL();
+    const trusted = url.startsWith('file:') && normalizeFileUrl(url) === trustedPath;
+    return trusted || (!!mainWindow && !mainWindow.isDestroyed() && webContents.id === mainWindow.webContents.id && url.startsWith('file:'));
+  };
 
   session.defaultSession.setPermissionCheckHandler((webContents, permission, _origin, details) =>
     permission === 'media' &&
@@ -380,7 +390,11 @@ function configureCameraPermission() {
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
     const mediaTypes = Array.isArray(details?.mediaTypes) ? details.mediaTypes : [];
     const requestsVideoOnly = mediaTypes.includes('video') && !mediaTypes.includes('audio');
-    callback(permission === 'media' && isTrustedRenderer(webContents) && requestsVideoOnly);
+    const allowed = permission === 'media' && isTrustedRenderer(webContents) && requestsVideoOnly;
+    if (permission === 'media' && !allowed) {
+      addEvent('security', `Camera request refused (${isTrustedRenderer(webContents) ? 'audio or unknown media requested' : 'request did not come from the kiosk window'})`);
+    }
+    callback(allowed);
   });
 }
 
@@ -601,8 +615,18 @@ async function performSync() {
       await putFirestoreDocument(item.collection, item.id, item.data);
       report.pushed += 1;
     } catch (error) {
-      remaining.push(item);
-      report.errors.push('pending item: sync failed');
+      // 400/403/404/409 mean the server will never accept this punch (too old, locked month, inactive
+      // employee, conflicting record). Keep it for HR review instead of retrying it forever.
+      const permanent = [400, 403, 404, 409].includes(Number(error?.statusCode));
+      const who = item.data?.employeeName || item.data?.employeeCode || item.data?.employeeId || 'employee';
+      if (permanent) {
+        store.rejectedSync = [...(store.rejectedSync || []), { ...item, rejectedAt: new Date().toISOString(), reason: error.message }].slice(-200);
+        addEvent('sync-error', `Punch for ${who} on ${item.data?.date || '?'} was not accepted by the server: ${error.message}`);
+        report.errors.push(`punch rejected: ${error.message}`);
+      } else {
+        remaining.push(item);
+        report.errors.push(`pending punch not sent: ${error.message || 'connection problem'}`);
+      }
     }
   }
   store.pendingSync = remaining;

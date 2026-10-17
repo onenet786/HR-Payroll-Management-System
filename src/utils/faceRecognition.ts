@@ -58,7 +58,13 @@ export async function createFaceDescriptorFromVideo(
   cropBox?: FaceBox
 ): Promise<FaceDescriptor> {
   if (!video.videoWidth || !video.videoHeight) throw new Error('Camera is not ready yet.');
-  const vector = await computeFaceEmbedding(video, cropBox);
+  // Without a box, let the landmark detector find the face first: the recognition detector works far more
+  // reliably on a tight crop than on a whole, dim webcam frame where the face is small.
+  let box = cropBox;
+  if (!box) {
+    try { box = selectBestFace(await detectFaceGeometry(video)).box; } catch { box = undefined; }
+  }
+  const vector = await computeFaceEmbedding(video, box);
   return { version: FACE_DESCRIPTOR_VERSION, vector, capturedAt: new Date().toISOString(), source };
 }
 

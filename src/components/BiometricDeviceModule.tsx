@@ -733,46 +733,50 @@ export function BiometricDeviceModule({
       const SAMPLE_COUNT = 5;
       setFaceMsg({ type: 'ok', text: `Capturing ${SAMPLE_COUNT} face samples for ${emp.fullName}. Keep the face steady inside the oval.` });
 
-      for (let i = 0; i < SAMPLE_COUNT; i += 1) {
+      // Take a few extra photos and keep the most consistent ones, so one blink or a dim frame doesn't fail
+      // the whole enrollment.
+      const attestation = {
+        method: 'active-turn-v1' as const,
+        verifiedAt: new Date().toISOString(),
+        summary: {
+          order: live.summary.order,
+          durationMs: live.summary.durationMs,
+          frameCounts: live.summary.frameCounts,
+          maxLeftYaw: live.summary.maxLeftYaw,
+          maxRightYaw: live.summary.maxRightYaw,
+          maxCenterDrift: live.summary.maxCenterDrift,
+          maxScaleChange: live.summary.maxScaleChange,
+        },
+      };
+      const captured: FaceDescriptor[] = [];
+      let lastProblem = '';
+      for (let attempt = 0; attempt < 12 && captured.length < SAMPLE_COUNT + 2; attempt += 1) {
         const browserFace = await assessBrowserFaceDetection(faceVideoRef.current);
-        if (browserFace !== null) {
-          if (!browserFace.ok) {
-            setFaceMsg({ type: 'err', text: `Sample ${i + 1} failed: ${browserFace.message}` });
-            return;
-          }
+        const quality = browserFace ?? assessFaceFrame(faceVideoRef.current);
+        if (!quality.ok) {
+          lastProblem = quality.message;
         } else {
-          const frameQuality = assessFaceFrame(faceVideoRef.current);
-          if (!frameQuality.ok) {
-            setFaceMsg({ type: 'err', text: `Sample ${i + 1} failed: ${frameQuality.message}` });
-            return;
+          try {
+            const descriptor = await createFaceDescriptorFromVideo(faceVideoRef.current, `admin-webcam-${captured.length + 1}`);
+            captured.push({ ...descriptor, liveness: attestation });
+            setFaceMsg({ type: 'ok', text: `Capturing face samples for ${emp.fullName}: ${Math.min(captured.length, SAMPLE_COUNT)}/${SAMPLE_COUNT}. Keep still.` });
+          } catch (error) {
+            lastProblem = error instanceof Error ? error.message : 'No clear face found.';
           }
         }
-
-        const descriptor = await createFaceDescriptorFromVideo(faceVideoRef.current, `admin-webcam-${i + 1}`);
-        samples.push({
-          ...descriptor,
-          liveness: {
-            method: 'active-turn-v1',
-            verifiedAt: new Date().toISOString(),
-            summary: {
-              order: live.summary.order,
-              durationMs: live.summary.durationMs,
-              frameCounts: live.summary.frameCounts,
-              maxLeftYaw: live.summary.maxLeftYaw,
-              maxRightYaw: live.summary.maxRightYaw,
-              maxCenterDrift: live.summary.maxCenterDrift,
-              maxScaleChange: live.summary.maxScaleChange,
-            },
-          },
-        });
-        if (i < SAMPLE_COUNT - 1) await wait(300);
+        await wait(250);
       }
-
-      // Every sample must be the same person; a different face or a badly turned head during capture is rejected.
-      let widest = 0;
-      for (let a = 0; a < samples.length; a += 1) for (let b = a + 1; b < samples.length; b += 1) widest = Math.max(widest, compareFaceDescriptors(samples[a], samples[b]));
-      if (widest > 0.4) {
-        setFaceMsg({ type: 'err', text: `The ${SAMPLE_COUNT} samples did not agree (spread ${widest.toFixed(2)}). Only ${emp.fullName} should be in front of the camera; keep still with even light and try again.` });
+      if (captured.length < SAMPLE_COUNT) {
+        setFaceMsg({ type: 'err', text: `Nothing was saved: only ${captured.length} of ${SAMPLE_COUNT} clear face samples could be taken (${lastProblem || 'face not clear'}). Face the camera in even light and try again.` });
+        return;
+      }
+      // Keep the samples closest to their average; all of them must clearly be the same person.
+      const mean = captured[0].vector.map((_, k) => captured.reduce((sum, item) => sum + item.vector[k], 0) / captured.length);
+      const distanceToMean = (item: FaceDescriptor) => Math.sqrt(item.vector.reduce((sum, value, k) => sum + (value - mean[k]) ** 2, 0));
+      for (const item of captured.sort((a, b) => distanceToMean(a) - distanceToMean(b)).slice(0, SAMPLE_COUNT)) samples.push(item);
+      const spread = Math.max(...samples.map(distanceToMean));
+      if (spread > 0.32) {
+        setFaceMsg({ type: 'err', text: `Nothing was saved: the face samples did not agree (spread ${spread.toFixed(2)}). Only ${emp.fullName} should be in front of the camera; keep still with even light and try again.` });
         return;
       }
 
@@ -784,7 +788,7 @@ export function BiometricDeviceModule({
           if (Number.isFinite(score) && score <= FACE_MATCH_THRESHOLD) {
             setFaceMsg({
               type: 'err',
-              text: `This face matches already enrolled employee ${other.fullName} (${other.employeeCode}) [distance ${score.toFixed(3)}]. To prevent identity confusion, duplicate face enrollments are prohibited.`,
+              text: `Nothing was saved: this face matches already enrolled employee ${other.fullName} (${other.employeeCode}) [distance ${score.toFixed(3)}]. To prevent identity confusion, duplicate face enrollments are prohibited.`,
             });
             log(`Duplicate face enrollment blocked: matches ${other.fullName} score=${score.toFixed(3)}`);
             return;
