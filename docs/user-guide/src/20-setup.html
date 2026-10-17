@@ -1,0 +1,118 @@
+
+<div class="part"><div class="label">PART B</div><div class="title">One-time setup</div>
+<div class="lead">For administrators. Do these steps once, in this order, before adding employees or running payroll. Afterwards you only come back when a law, a rate or your company changes.</div>
+<ul><li>1. Statutory Config — legal rates and company rules (B1)</li><li>2. Company &amp; Master Data — your company (B2)</li><li>Master Data — branches, departments, designations, wage types (B3)</li><li>4. Holiday Calendar — public holidays (B4)</li><li>User Management — logins, roles and kiosks (B5)</li></ul></div>
+
+<h2 id="statutory"><span class="num">B1</span>Legal rates and company rules — 1. Statutory Config</h2>
+<p>This page holds everything payroll needs from the law and from your company policy: income-tax slabs, EOBI, provincial social security, minimum wage, leave days, gratuity rules, alert limits, bank file layouts and accounting codes.</p>
+<figure><img src="shots/20-statutory.png"><figcaption><b>Top of 1. Statutory Config</b> — the change-control box, the rate source and the salary tax rules.</figcaption></figure>
+<h3>How changes work here (very important)</h3>
+<ul>
+  <li><b>There is no Save button.</b> Every number you type is saved immediately as a <b>proposal</b>.</li>
+  <li>Payroll keeps using the old (live) rates until a <b>different</b> authorised person approves your proposal.</li>
+  <li>While a proposal is waiting, the page shows the proposed values, and the box at the top shows <span class="msg">Pending proposal by … since … — changed: …</span>.</li>
+  <li>Only one proposal can be open at a time.</li>
+</ul>
+<h3>To change a rate (the person making the change)</h3>
+<ol class="steps">
+  <li>Open <span class="ui">1. Statutory Config</span>.</li>
+  <li>In <span class="ui">Source of these rates</span>, type the official notification number or web link (for example "Finance Act 2026, FBR withholding card TY2027"). <b>This is required before approval.</b></li>
+  <li>Click <span class="ui">Attach notification (PDF/image)</span> and choose the official document (PDF, JPEG or PNG).</li>
+  <li>Change the values you need (the sections are explained below).</li>
+  <li>Ask a colleague with the Settings permission to approve.</li>
+</ol>
+<h3>To approve or reject (the second person)</h3>
+<ol class="steps">
+  <li>Open <span class="ui">1. Statutory Config</span>. The amber box shows the waiting proposal and what changed.</li>
+  <li>Compare the values with the official notice.</li>
+  <li>Click <span class="ui">Approve &amp; apply</span> and type a short comment (at least 5 characters), for example the notice number you checked. The new rates now apply to payroll.</li>
+  <li>Or click <span class="ui">Reject</span> and give a reason. (If you made the proposal yourself, your button says <span class="ui">Withdraw</span> instead.)</li>
+</ol>
+
+<h3>The sections on this page</h3>
+<table>
+<tr><th style="width:27%">Section</th><th>What to enter</th></tr>
+<tr><td><b>Salary tax rules</b></td><td><span class="ui">Medical allowance exempt (% of basic)</span>, <span class="ui">Surcharge rate (% of tax)</span> and the income above which the surcharge applies. Take these from the Finance Act for the tax year.</td></tr>
+<tr><td><b>Provincial social security coverage</b></td><td>Who pays social security (everyone up to the wage ceiling, or only people earning below it), which worker categories are excluded (Supervisory, Managerial, Contract, Apprentice), and the wage ceiling for each province.</td></tr>
+<tr><td><b>Leave entitlements</b></td><td>Days per calendar year for Annual, Casual, Sick, Maternity, Paternity and Hajj leave. <b>Paternity and Hajj start at 0</b> — enter your policy, otherwise these leaves cannot be approved as paid.</td></tr>
+<tr><td><b>Factories vs shops &amp; establishments</b></td><td>Different overtime rate, weekly overtime limit, consecutive-day limit or minimum wage for factories, shops and other sites. Leave a box empty ("global") to use the normal setting.</td></tr>
+<tr><td><b>Gratuity, settlement &amp; leave rules</b></td><td>Daily rate (monthly ÷ 30 or ÷ 26), minimum service for gratuity, % paid on resignation within 5 years, counting part-years over 6 months, annual leave days and maximum leave days that can be encashed.</td></tr>
+<tr><td><b>Compliance alert limits &amp; settlement tax</b></td><td>Maximum weekly overtime (default 12 hours) and consecutive work days (default 6) before an alert, the <b>low-confidence biometric</b> level (default 25%) and the tax-free part of gratuity (0 = all taxable; ask your tax adviser).</td></tr>
+<tr><td><b>Bank &amp; statutory upload file templates</b></td><td>The exact file layout your bank, EOBI or social-security office wants (see below).</td></tr>
+<tr><td><b>Chart of accounts mapping</b></td><td>Your general-ledger account code and name for each payroll posting (salaries, EOBI, tax payable, net salary, etc.). Ask your accountant.</td></tr>
+<tr><td><b>FBR Individual Tax Slabs</b></td><td>The income-tax table (see below).</td></tr>
+<tr><td><b>Regional Contribution Configurations</b></td><td>Tax year and effective date, government minimum wage, social-security employer % per province, how absences are deducted, overtime multiplier, social-security wage ceiling and gratuity days per year.</td></tr>
+</table>
+<figure><img src="shots/20f-leave-gratuity.png"><figcaption><b>Leave entitlements, factory/shop rules, gratuity rules and alert limits.</b></figcaption></figure>
+
+<h3>Income-tax slabs</h3>
+<figure><img src="shots/20d-tax-slabs.png"><figcaption><b>FBR Individual Tax Slabs</b> (left) and <b>Regional Contribution Configurations</b> (right).</figcaption></figure>
+<p>Each slab row has: <span class="ui">Min Annual (PKR)</span>, <span class="ui">Max Annual (PKR)</span>, the fixed <b>Base Tax</b> and the <b>Rate</b>.</p>
+<div class="box important"><span class="t">Important — type the rate as a percentage</span>
+<p>Type <b>11</b> for 11%, <b>1</b> for 1%, <b>35</b> for 35%. (Older screens suggested typing 0.11; the system now reads such small numbers correctly as well, but whole percentages are clearer.)</p></div>
+<ul>
+  <li><span class="ui">Download CSV</span> saves the table for your records.</li>
+  <li><span class="ui">Update from FBR</span> does <b>not</b> go online. It replaces your slabs with the table built into the program, which may be from an earlier year. Always compare with the current Finance Act before approving.</li>
+  <li>A 10% surcharge is added automatically when yearly taxable income is above PKR 10 million (or the threshold you set).</li>
+</ul>
+<div class="box important"><span class="t">Important — every July</span><p>The tax year changes on 1 July. Before the first July payroll, update the tax year, effective date and slabs, and have them approved. Otherwise payroll refuses to run with <span class="msg">Payroll refused: statutory configuration is not valid for this period.</span></p></div>
+
+<h3>Bank, EOBI and social-security file templates</h3>
+<figure><img src="shots/20c-file-templates.png"><figcaption><b>File templates.</b> Choose a template, edit its columns and check the preview.</figcaption></figure>
+<ol class="steps">
+  <li>Choose a template in the list. ✓ means verified with the bank; ⚠ means not yet verified. Templates exist for HBL, UBL, Meezan, MCB, Bank Alfalah, Allied and Standard Chartered, plus EOBI and social-security schedules.</li>
+  <li>Click <span class="ui">Copy</span> to start from an existing one, or <span class="ui">New</span> for an empty one.</li>
+  <li>Using your bank's official file specification, fill <span class="ui">Name</span>, <span class="ui">Purpose</span>, <span class="ui">Layout</span> (Delimited or Fixed Width), <span class="ui">Delimiter</span>, <span class="ui">Debit (payroll funding) account</span> and <span class="ui">Specification reference</span>.</li>
+  <li>Edit the columns (title, value, format, required). Use <span class="ui">+ Add column</span> to add one.</li>
+  <li>Look at <span class="ui">Preview (one sample employee)</span>. Fix any red errors.</li>
+  <li>Send a small test file to your bank. Only after the bank accepts it, tick <span class="ui">Verified with a bank-accepted test batch</span>.</li>
+</ol>
+<div class="box note"><span class="t">Good to know</span><p>The "Generic bank advice CSV" is for internal checking only — it is not a bank upload format. Any change to a template removes its "verified" tick, and template changes need approval like rates.</p></div>
+<h3>Watch panels further down the page</h3>
+<p>Read-only lists that warn you early: <b>CNIC Compliance Watch</b> (CNICs expiring within 90 days), <b>Contract &amp; Probation Watch</b>, <b>Identity &amp; Payment Collision Watch</b> (two employees with the same CNIC or bank account — this blocks payroll), <b>Attendance Compliance Alerts</b>, <b>Payroll Release Control</b> and <b>Today's Attendance Exceptions</b>.</p>
+
+<h2 id="company"><span class="num">B2</span>Your company — 2. Company &amp; Master Data</h2>
+<p>A five-step form that creates (or updates) your company, its main branch, starting departments and designations, and the basic payroll settings.</p>
+<figure><img src="shots/21-company.png"><figcaption><b>Step 1 of 5 — Company identity.</b> Fields marked * are required.</figcaption></figure>
+<ol class="steps">
+  <li><b>Company identity:</b> <span class="ui">Legal name</span>, <span class="ui">Display / trading name</span>, <span class="ui">Company code</span>, <span class="ui">Industry</span>, <span class="ui">NTN</span> (all required), plus legal type, fiscal year start (July), payroll frequency, currency and time zone. Click <span class="ui">Continue</span>.</li>
+  <li><b>Office &amp; branch:</b> the registered office address, city and province. The main branch is "Head Office" at the same address unless you untick <span class="ui">Same as registered office</span>.</li>
+  <li><b>Organization:</b> at least one department (name and short code, for example "Production" / <b>PRD</b>) and, optionally, designations with their department and grade. Use <span class="ui">Add row</span>.</li>
+  <li><b>Payroll compliance:</b> tax year, effective date, minimum wage, EOBI employee and employer %, social security %, wage ceiling, gratuity days, provident-fund maximum, overtime multiplier, monthly hours, and whether you are registered with EOBI and social security (enter the registration numbers).</li>
+  <li><b>Review:</b> check the summary, tick <span class="ui">I reviewed these details and statutory settings.</span> and click <span class="ui">Create primary company</span> (or <span class="ui">Update primary company</span>).</li>
+</ol>
+<div class="box important"><span class="t">Important</span>
+<ul><li>The payroll values entered in step 4 become live straight away. Later changes should be made in 1. Statutory Config, where they need approval.</li>
+<li>The short department codes you type (PRD, HR, FIN) become part of every employee code, so keep them short.</li></ul></div>
+
+<h2 id="master-data"><span class="num">B3</span>Branches, departments, designations and wage types — Master Data</h2>
+<p>Use <span class="ui">Master Data</span> (under SYSTEM in the menu) to add or change lists after the first setup. The tabs are <span class="ui">Branches</span>, <span class="ui">Departments</span>, <span class="ui">Designations</span>, <span class="ui">Zones</span>, <span class="ui">UC/Towns</span> and <span class="ui">Wage Types</span>.</p>
+<figure><img src="shots/23b-masterdata-add.png"><figcaption><b>Adding a branch.</b> The geofence fields define where mobile punches are accepted.</figcaption></figure>
+<ol class="steps">
+  <li>Choose a tab and click <span class="ui">Add …</span> (for example <span class="ui">Add Branch</span>), or <span class="ui">Edit</span> next to an existing record.</li>
+  <li>Fill the form and click <span class="ui">Save record</span>.</li>
+</ol>
+<table>
+<tr><th style="width:18%">Tab</th><th>What to enter</th></tr>
+<tr><td>Branch</td><td>Name, code, city, province (Punjab, Sindh, Khyber Pakhtunkhwa, Balochistan or Islamabad/ICT), address, <b>geofence</b> (latitude, longitude and radius in metres — the area in which phone punches count as "on site"; 50–200 m is recommended) and <b>establishment type</b> (Factory / Shop / Industrial / Other).</td></tr>
+<tr><td>Department</td><td>Branch, department name, code.</td></tr>
+<tr><td>Designation</td><td>Department, title, code, grade.</td></tr>
+<tr><td>Zone, UC/Town</td><td>Optional geographic groupings used for reports.</td></tr>
+<tr><td>Wage Type</td><td>Name, code and calculation basis: <b>Monthly</b> (salaried) or <b>Daily</b> (daily wagers). Every employee needs one.</td></tr>
+</table>
+<div class="box tip"><span class="t">Tip — finding a branch's latitude and longitude</span>
+<p>Open Google Maps, right-click the middle of the branch building and click the two numbers shown at the top (for example 31.4504, 73.1350). The first is latitude, the second longitude.</p></div>
+<div class="box note"><span class="t">Good to know</span><p>Codes are created automatically (tick off <span class="ui">Auto-generate code</span> to type your own: capital letters, numbers and single hyphens). Records cannot be deleted, and a record already used by employees cannot be moved to another branch or department.</p></div>
+
+<h2 id="holidays"><span class="num">B4</span>Public holidays — 4. Holiday Calendar</h2>
+<p>Holidays here are paid days off and are not counted as absences.</p>
+<figure><img src="shots/22b-holiday-add.png"><figcaption><b>Add New Holiday.</b></figcaption></figure>
+<ol class="steps">
+  <li>Open <span class="ui">4. Holiday Calendar</span> and click <span class="ui">Add Holiday</span>.</li>
+  <li>Type the <span class="ui">HOLIDAY NAME</span> and the <span class="ui">DATE</span>, and choose the <span class="ui">TYPE</span>: Public, Company or Optional.</li>
+  <li>Tick <span class="ui">Recurring annually</span> only for holidays on the same date every year (14 August, 23 March, 25 December…).</li>
+  <li>Click <span class="ui">Add Holiday</span>.</li>
+</ol>
+<p>To change or remove a holiday, move the mouse over it and click the pencil or the bin. Use the year list and the All / Public / Company / Optional buttons to filter.</p>
+<div class="box important"><span class="t">Important — Eid and other moon-based holidays</span><p>Do <b>not</b> mark Eid ul-Fitr, Eid ul-Adha, Ashura or 12 Rabi-ul-Awwal as recurring. Add them each year once the official dates are announced.</p></div>
+<div class="box note"><span class="t">Good to know — shifts, Ramadan and Fridays</span><p>There is no separate shift page. Each employee's shift times, grace minutes, Ramadan timings and Friday timings are set on the employee's own record (section C1).</p></div>

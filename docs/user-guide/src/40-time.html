@@ -1,0 +1,129 @@
+
+<div class="part"><div class="label">PART D</div><div class="title">Time &amp; attendance</div>
+<div class="lead">How attendance is recorded and checked, how faces and fingerprints are enrolled, how staff are allowed to punch from their phones, and how leave is handled. For HR and attendance staff.</div></div>
+
+<h2 id="attendance-flow"><span class="num">D1</span>How attendance becomes pay</h2>
+<div class="flow"><span class="s">1. Punch</span><span class="a">→</span><span class="s">2. Status worked out</span><span class="a">→</span><span class="s">3. Problems flagged</span><span class="a">→</span><span class="s">4. Leave &amp; holidays added</span><span class="a">→</span><span class="s">5. Month locked</span><span class="a">→</span><span class="s">6. Payroll</span></div>
+<ol class="steps">
+  <li><b>Punch.</b> Employees punch at a kiosk (face or fingerprint), on their phone (face check and GPS, only when allowed), or HR types an entry by hand. A kiosk keeps punches even when the internet is down and sends them later (up to 8 days old).</li>
+  <li><b>Status.</b> The system compares the punch with the employee's shift:
+    <table>
+    <tr><th>Status</th><th>Rule</th></tr>
+    <tr><td>Present</td><td>Arrived within the grace minutes (default 15 minutes).</td></tr>
+    <tr><td>Late</td><td>Arrived after the grace minutes but less than 2 hours late.</td></tr>
+    <tr><td>Half Day</td><td>Arrived 2 hours or more late.</td></tr>
+    <tr><td>Absent</td><td>No punch on a working day, with no leave and no holiday.</td></tr>
+    </table>
+    Overtime is time worked beyond 8 hours (after breaks). Friday and Ramadan timings are used when set.</li>
+  <li><b>Problems are flagged</b> for a person to check: weak face or fingerprint matches, phone punches outside the branch area, impossible travel, hand-typed entries and employee correction requests.</li>
+  <li><b>Leave and holidays.</b> Approved leave becomes paid (or unpaid) leave days; holidays and weekly days off are added from the calendar.</li>
+  <li><b>Lock.</b> At month end, payroll staff lock ("certify") the register in 10. Payroll Processing. It cannot be locked while any item is waiting for review.</li>
+  <li><b>Pay.</b> Payroll counts present, late, half and leave days from the locked register. Absent and unpaid days are deducted; overtime is paid.</li>
+</ol>
+
+<h2 id="biometric"><span class="num">D2</span>Enrolling fingerprints and faces — 6. Biometric Devices</h2>
+<p>Before an employee can use a kiosk, their fingerprints and/or face must be enrolled here — usually on the HR office computer.</p>
+<figure><img src="shots/41b-enroll.png"><figcaption><b>Enroll Biometrics.</b> Choose the employee; the list on the right shows who is enrolled.</figcaption></figure>
+<h3>Connect the fingerprint reader (one time per computer)</h3>
+<ol class="steps">
+  <li>Install the reader software (DigitalPersona U.are.U SDK or SecuGen FDx SDK Pro) supplied by your IT person, and plug the reader (U.are.U 4500 or SecuGen Hamster Pro) into a USB port.</li>
+  <li>Open <span class="ui">6. Biometric Devices</span> and click <span class="ui">Connect Bridge</span>. The status changes from <i>Disconnected</i> to <i>Native Bridge</i>.</li>
+  <li>On the <span class="ui">TEST DEVICE</span> tab, click <span class="ui">Scan Fingerprint</span> and place a finger to check the reader works.</li>
+</ol>
+<p class="small">If you see <i>Bridge connected, but no fingerprint reader was detected</i>, unplug and reconnect the reader and restart the bridge program. <span class="ui">Simulate</span> is only for practice without a reader.</p>
+<h3>Enroll fingerprints</h3>
+<ol class="steps">
+  <li>On <span class="ui">ENROLL BIOMETRICS</span>, choose the <span class="ui">EMPLOYEE</span>.</li>
+  <li>Click <span class="ui">Scan Sample 1/3</span> and ask the employee to press the finger flat on the reader. Repeat for samples 2 and 3 (same finger). A sample below 60% quality is refused — clean the reader and try again.</li>
+  <li>Click <span class="ui">Save to Database</span>.</li>
+</ol>
+<h3>Enroll a face</h3>
+<figure><img src="shots/41c-face-enroll.png"><figcaption><b>Enroll Camera Face.</b> Start the camera, then click <b>Save 5 Faces</b> and follow the head-turn instructions.</figcaption></figure>
+<ol class="steps">
+  <li>Choose the employee at the top of the tab.</li>
+  <li>Make sure the room is evenly lit (no bright window behind the person) and <b>only this employee</b> is in front of the camera. Glasses normally worn can stay on.</li>
+  <li>Click <span class="ui">Start Camera</span> and allow the camera if the browser asks. The face should fill the oval.</li>
+  <li>Click <span class="ui">Save 5 Faces</span>. Follow the prompts: <i>Center your face</i>, <i>Turn your head LEFT</i> (or RIGHT), <i>Return to center</i>, then the other side. This "liveness" check proves a real person is present, not a photo.</li>
+  <li>Keep still while 5 pictures are taken. You see <span class="msg">5 face samples saved for … Click Verify Face to test this enrollment.</span></li>
+  <li>Click <span class="ui">Verify Face</span>. The card <b>Recognized Employee</b> should show the right person.</li>
+  <li>Press <b>Sync</b> on each kiosk (or wait a few minutes) so it receives the new face.</li>
+</ol>
+<table>
+<tr><th>Status next to an employee</th><th>Meaning</th></tr>
+<tr><td>Secure face enrolled</td><td>Ready to use at kiosks and on the phone.</td></tr>
+<tr><td>Re-enrollment required</td><td>An old-style face record exists but is no longer used. Enroll the face again.</td></tr>
+<tr><td>No face</td><td>Not enrolled yet.</td></tr>
+</table>
+<div class="box important"><span class="t">Important — after the face-recognition upgrade (October 2026)</span><p>The face recognition was replaced by a much more accurate method. Face records made before the upgrade no longer work — <b>every employee's face must be enrolled again once</b>. Fingerprints are not affected.</p></div>
+<table>
+<tr><th>Message</th><th>What to do</th></tr>
+<tr><td><span class="msg">The 5 samples did not agree…</span></td><td>Someone moved or another face came into view. Only the employee in front of the camera; keep still; try again.</td></tr>
+<tr><td><span class="msg">This face matches already enrolled employee …</span></td><td>This face is already enrolled for someone else. Check you chose the right employee.</td></tr>
+<tr><td><span class="msg">Face area is too dark / overexposed</span></td><td>Improve the lighting; avoid strong light behind the person.</td></tr>
+<tr><td><span class="msg">Required head-turn sequence was not completed…</span></td><td>Turn only the head, slowly, and do not move the camera.</td></tr>
+<tr><td><span class="msg">Camera access failed…</span></td><td>Allow the camera in the browser, and close other programs using it (Teams, Zoom, the kiosk app).</td></tr>
+</table>
+<p>To remove saved samples use <span class="ui">Remove Face</span>, <span class="ui">Remove Fingerprints</span> or <span class="ui">Remove All</span>.</p>
+<div class="box note"><span class="t">Good to know</span><p>The <span class="ui">MARK ATTENDANCE</span> tab on this page is for testing the reader only. Real attendance should be recorded on the Windows kiosk (Part G), which checks the fingerprint against the saved templates.</p></div>
+
+<h2 id="attendance"><span class="num">D3</span>Checking attendance — 7. Attendance</h2>
+<figure><img src="shots/42c-mobile-duty.png"><figcaption><b>7. Attendance</b> — mobile duty at the top, items waiting for review, then the live list of punches.</figcaption></figure>
+<h3>The live list of punches</h3>
+<p>The <span class="ui">Digital Attendance Stream</span> shows every punch with the date, in and out times, method (Camera, Biometric, Mobile GPS…), location evidence for phone punches (with a map link and accuracy), overtime and status.</p>
+<h3>Review corrections and flagged punches</h3>
+<p>When anything needs a decision, an amber box <span class="ui">Pending Attendance Regularization Requests</span> appears. Each card shows the employee, date, reason, any evidence files (gate pass, client sign-off) and, for flagged biometric punches, the match strength.</p>
+<ol class="steps">
+  <li>Read the reason and open the evidence.</li>
+  <li>Click <span class="ui">Approve</span> and type what you checked (for example "gate log confirms 09:05 entry"), or click <span class="ui">Decline</span> and give a reason.</li>
+</ol>
+<ul>
+  <li><b>Who decides:</b> the employee's line manager first. HR may decide only after <b>3 working days</b>; after that the request shows <span class="msg">OVERDUE — escalate to department head</span> and the manager is reminded.</li>
+  <li>Approving re-checks the time against the shift — a late arrival stays <b>Late</b>. Declining a flagged punch marks the day <b>Absent</b>.</li>
+  <li>Nobody can decide their own request, and decisions cannot be changed afterwards.</li>
+</ul>
+<h3>Add an attendance entry by hand</h3>
+<ol class="steps">
+  <li>Click <span class="ui">Add Attendance Log</span>.</li>
+  <li>Choose the employee, date, status, in and out times and method, and click <span class="ui">Save Punch Log</span>.</li>
+  <li>The entry goes into the review box — <b>another person must approve it</b> before the month can be locked.</li>
+</ol>
+<h3>Allow an employee to punch from their phone (mobile duty)</h3>
+<p>Phone attendance is switched off for everyone by default. Allow it only for people working away from the office on given days.</p>
+<ol class="steps">
+  <li>In <span class="ui">Mobile Duty Authorizations</span>, choose the employee and the duty type: Work from home, Out of station, Client visit, Market / field duty, Official travel, Direct reporting to worksite or Emergency duty.</li>
+  <li>Set the <b>from</b> and <b>to</b> dates, optionally the client or location, and type the instructions or approval reason.</li>
+  <li>Tick <span class="ui">Allow multiple field visits</span> if they will check in at several clients in a day.</li>
+  <li>Click <span class="ui">Assign Mobile Duty</span>. The employee's app now shows the <b>Attend</b> tab on those dates. Click <span class="ui">Cancel authorization</span> to withdraw it.</li>
+</ol>
+<p class="small">Phone punches outside the branch area are still saved but sent to the manager for review.</p>
+<h3>Registers (reports)</h3>
+<figure><img src="shots/42e-registers.png"><figcaption><b>Daily / Weekly / Monthly / Yearly Registers.</b></figcaption></figure>
+<p>Click <span class="ui">DAILY / WEEKLY / MONTHLY / YEARLY REGISTERS</span>. Choose daily, weekly, monthly or yearly, pick the date and (optionally) one employee, and see counts of Present, Late, Half Day, On Leave and Absent with each person's punches.</p>
+<div class="box note"><span class="t">Good to know</span><p>The weekly and yearly registers currently show fixed example periods; use the daily and monthly registers for real checks.</p></div>
+
+<h2 id="leave"><span class="num">D4</span>Leave — 5. Leave Management</h2>
+<figure><img src="shots/40-leaves.png"><figcaption><b>Leave Applications List.</b> The remaining balance is shown under each leave type.</figcaption></figure>
+<h3>Leave types and yearly days (default)</h3>
+<table>
+<tr><th>Type</th><th>Days per year</th><th>Notes</th></tr>
+<tr><td>Annual</td><td>14</td><td>Reduced pro-rata for people who joined during the year.</td></tr>
+<tr><td>Casual</td><td>10</td><td>Reduced pro-rata for joiners.</td></tr>
+<tr><td>Sick</td><td>16</td><td></td></tr>
+<tr><td>Maternity</td><td>90</td><td>Paper documents to HR.</td></tr>
+<tr><td>Paternity, Hajj</td><td>0</td><td>Set your policy in 1. Statutory Config first; paper documents to HR.</td></tr>
+<tr><td>Unpaid</td><td>No limit</td><td>Deducted from pay.</td></tr>
+</table>
+<p>Balances run January to December. <b>Remaining = entitlement − approved − pending</b>, so waiting requests already reduce the balance.</p>
+<h3>Approve or reject a request</h3>
+<ol class="steps">
+  <li>Employees apply in the mobile app. Requests appear in <span class="ui">LEAVE APPLICATIONS LIST</span> with the dates, days, reason and remaining balance (red if it is not enough).</li>
+  <li>Click <span class="ui">Approve</span> or <span class="ui">Reject</span>. The employee is notified, and approved days are added to the attendance register automatically.</li>
+</ol>
+<h3>Record leave yourself</h3>
+<ol class="steps">
+  <li>Click <span class="ui">Add Leave Record</span>.</li>
+  <li>Choose the employee, leave type, start and end dates and reason.</li>
+  <li>Click <span class="ui">Approve &amp; Log Leave</span>. It is saved as approved immediately.</li>
+</ol>
+<div class="box important"><span class="t">Important</span><ul><li>Leave days are counted as calendar days from start to end, including weekends and holidays.</li><li>If the balance is not enough, approval is blocked with <span class="msg">Approval blocked: … Apply the excess as Unpaid leave.</span> Record the extra days as Unpaid leave.</li></ul></div>
+<p>The <span class="ui">DAILY / WEEKLY / MONTHLY / YEARLY REPORTS</span> tab shows who is on approved leave on a date, and monthly and yearly summaries.</p>

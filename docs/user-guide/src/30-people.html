@@ -1,0 +1,161 @@
+
+<div class="part"><div class="label">PART C</div><div class="title">People</div>
+<div class="lead">Adding and looking after employee records, their documents and their career changes, plus recruitment, performance reviews and company assets. For HR staff.</div></div>
+
+<h2 id="employees"><span class="num">C1</span>Employee records — 3. Employee Directory</h2>
+<figure><img src="shots/30-employees.png"><figcaption><b>Central Employee Master.</b> Each row has <b>Documents</b>, <b>Edit Record</b> and <b>Trigger Exit</b> buttons on the right.</figcaption></figure>
+<div class="box important"><span class="t">Before you start</span><p>Branches, departments, designations and wage types must already exist (sections B2 and B3). The employee form can only choose from those lists.</p></div>
+
+<h3>Add a new employee</h3>
+<ol class="steps">
+  <li>Click <span class="ui">Onboard Employee</span> (top right). The <span class="ui">ONBOARD NEW EMPLOYEE WORKSPACE</span> opens. It has four sections; scroll down through all of them.</li>
+  <li>Fill <b>Personal &amp; Core Details</b> (see below).</li>
+  <li>Fill <b>Organization &amp; Regional Assignment</b>: <span class="ui">Assigned Branch</span>, then <span class="ui">Department</span>, then <span class="ui">Designation</span> (each list depends on the one before).</li>
+  <li>Fill <b>Wage &amp; Custom Allowance Configuration</b>: wage type, salary, bank, account number and IBAN.</li>
+  <li>Fill <b>Statutory &amp; Trust Compliance</b>: EOBI, FBR tax, social security, provident fund and gratuity.</li>
+  <li>Click <span class="ui">Complete Onboarding</span>. The new employee appears in the list as Active, with today as the joining date.</li>
+</ol>
+<div class="box danger"><span class="t">Warning — the form starts with sample values</span><p>Some boxes already contain example data (CNIC 42101-1234567-3, mobile +923001234567, an HBL account, IBAN, EOBI and social-security numbers and a salary of 85,000). <b>Replace every one</b> with the real employee's details. Wrong bank details mean the salary goes to the wrong account.</p></div>
+<figure><img src="shots/30b-onboard-personal.png"><figcaption><b>Personal &amp; Core Details.</b></figcaption></figure>
+<h4>Personal &amp; Core Details</h4>
+<table>
+<tr><th style="width:30%">Field</th><th>What to enter</th></tr>
+<tr><td>Full Name, Official Email ID</td><td>Required. Use the name as on the CNIC.</td></tr>
+<tr><td>Employee Code</td><td>Tick <span class="ui">Auto</span> to create it automatically (see below), or leave it empty and it is created when you save.</td></tr>
+<tr><td>Pakistan CNIC</td><td>Required. Type the 13 digits; dashes are added for you (42101-1234567-3).</td></tr>
+<tr><td>CNIC Expiry (NADRA), Contract End, Probation Review Due, Driving Licence Expiry, Certification Expiry, Work Permit / Visa Expiry</td><td>Fill these if they apply. The system warns you 60–90 days before they expire.</td></tr>
+<tr><td>Worker Category</td><td>Worker, Supervisory, Managerial, Contract or Apprentice (affects social-security coverage).</td></tr>
+<tr><td>Vehicle / Accommodation / Other Perquisite</td><td>Monthly value of taxable benefits, if any.</td></tr>
+<tr><td>Shift Start, Shift End, Grace Minutes, Break Minutes</td><td>Normal working hours (default 09:00–17:00), minutes allowed late before "Late" (default 15) and unpaid break minutes.</td></tr>
+<tr><td>Ramadan shift override</td><td>Ramadan start and end dates and timings. Enter the dates every year.</td></tr>
+<tr><td>Friday / Jumu'ah override</td><td>Different start and end time on Fridays, if any.</td></tr>
+<tr><td>Prior Employer Taxable Income / Tax Deducted</td><td>For staff who joined during the tax year: income and tax from their previous job this year (from their previous employer's tax certificate).</td></tr>
+<tr><td>Mobile Contact</td><td>Required, as +923XXXXXXXXX. Typing 0300… is converted automatically. Needed for SMS alerts.</td></tr>
+<tr><td>Gender, Marital Status, Date of Birth</td><td>Date of birth is required.</td></tr>
+<tr><td>Picture URL / Upload</td><td>Click <span class="ui">Browse...</span> to add a photo (JPEG, PNG or WebP, up to 512 KB).</td></tr>
+</table>
+<h4>Wage and bank details</h4>
+<figure><img src="shots/30d-onboard-wage.png"><figcaption><b>Wage &amp; Custom Allowance Configuration</b> and <b>Statutory &amp; Trust Compliance.</b></figcaption></figure>
+<ul>
+  <li><span class="ui">Wage Type</span> — Monthly salaried or Daily wager.</li>
+  <li><span class="ui">Basic Monthly Wage / Daily Rate (PKR)</span> — the gross monthly salary (or daily rate). The green box shows how it is split: Basic 50%, House Rent 30%, Conveyance 10%, Medical 10%, with estimated tax and take-home pay. Click <span class="ui">Auto-fill FBR Allowances</span> to fill the allowance boxes, or type your own amounts in <span class="ui">Allowance Overrides</span>.</li>
+  <li>Tick <span class="ui">Take Home (FBR Auto)</span> if you know the agreed <b>take-home</b> amount instead; the system works out the gross for you.</li>
+  <li><span class="ui">Disbursal Bank</span>, <span class="ui">Account Number</span> and <span class="ui">PKR IBAN Number</span> are required. Click <span class="ui">+</span> to add a bank that is not listed.</li>
+</ul>
+<div class="box important"><span class="t">Important — always check the IBAN</span><p>When you pick a bank and type the account number, the system builds a <i>suggested</i> IBAN. It may not be correct. Copy the real 24-character IBAN (it starts with PK) from the employee's bank letter or cheque book.</p></div>
+<h4>Statutory &amp; Trust Compliance</h4>
+<ul>
+  <li><span class="ui">Enable EOBI</span> — type the EOBI number. If the employee is exempt, untick it and type the reason.</li>
+  <li><span class="ui">Enable FBR Tax</span> — deduct income tax. Type the employee's NTN if they have one, and their provincial social-security number (for example the PESSI number). If they are not registered, type the reason.</li>
+  <li><span class="ui">Opt In PF Fund</span> and <span class="ui">Opt In Gratuity</span> — tick if the employee is in your provident fund or gratuity scheme.</li>
+</ul>
+
+<h3>Employee codes</h3>
+<p>Codes look like <b>DTE-PRD-00001</b>:</p>
+<ul>
+  <li><b>DTE</b> — the first three initials of your company's <i>name</i> (for example "OneNet Solutions" → <b>ONS</b>, "Demo Textiles" → <b>DTE</b>, "Bin Ishaq" → <b>BIS</b>). Words like (Pvt), Ltd, Limited and Pakistan are ignored.</li>
+  <li><b>PRD</b> — the short code of the department.</li>
+  <li><b>00001</b> — a running number. Numbers are never reused.</li>
+</ul>
+<p>If you type a code yourself it must start with your company prefix and must not already be in use. Existing codes are never changed automatically.</p>
+
+<h3>Change an employee's details</h3>
+<ol class="steps">
+  <li>Find the person in the list (or press <span class="kbd">Ctrl</span>+<span class="kbd">K</span> and type their name).</li>
+  <li>Click <span class="ui">Edit Record</span>, change what you need and click <span class="ui">Save Changes</span>.</li>
+</ol>
+<div class="box note"><span class="t">Good to know</span><p>Salary increases, promotions and transfers should <b>not</b> be typed here — use 9. Salary Revisions and 12. Employee Lifecycle, so a second person approves them and arrears are calculated. The list has no search box of its own; use <span class="kbd">Ctrl</span>+<span class="kbd">K</span>. There is no bulk import from Excel; employees are added one by one.</p></div>
+
+<h3>Employee documents</h3>
+<figure><img src="shots/30f-document-vault.png"><figcaption><b>Employee Document Vault</b> — private storage for each employee's papers.</figcaption></figure>
+<ol class="steps">
+  <li>Click <span class="ui">Documents</span> on the employee's row.</li>
+  <li>Choose the document type: CNIC, Contract, Appointment letter, Certificate, Resume or Other.</li>
+  <li>Click <span class="ui">Upload document</span> and choose the file (PDF, JPEG or PNG, up to 10 MB).</li>
+  <li>Use the download symbol to open a document, or the bin to delete it (you are asked to confirm).</li>
+</ol>
+
+<h3>When an employee leaves (Trigger Exit)</h3>
+<figure><img src="shots/30g-trigger-exit.png"><figcaption><b>Employee Exit Clearance &amp; Settlement</b> — shows an estimate of gratuity, leave encashment and notice pay.</figcaption></figure>
+<ol class="steps">
+  <li>Click <span class="ui">Trigger Exit</span> on the employee's row.</li>
+  <li>Choose the <span class="ui">Separation type</span> (Resignation, Termination, Retirement, Death or Redundancy) and the last working date.</li>
+  <li>Type the reason, notice-pay days and leave days to be encashed (filled in from the earned leave balance).</li>
+  <li>Click <span class="ui">Finalize Exit &amp; Disbursal</span>.</li>
+</ol>
+<div class="box important"><span class="t">Important — this sends the exit for approval</span><p>The employee stays Active until <b>another</b> person approves the request in <span class="ui">12. Employee Lifecycle</span>. Approval marks them as left and creates their final settlement in <span class="ui">11. Gratuity &amp; Settlement</span>. The amounts on this screen are an estimate; the settlement uses your gratuity rules exactly. Before paying, collect company assets (section C5).</p></div>
+
+<h2 id="lifecycle"><span class="num">C2</span>Career changes — 12. Employee Lifecycle</h2>
+<p>Probation, transfers, promotions, resignations and terminations all go through this page so that a second person approves them before the employee record changes.</p>
+<figure><img src="shots/34-lifecycle.png"><figcaption><b>Employee Lifecycle — Requests tab.</b> Raise a request on the left; requests waiting for approval appear on the right.</figcaption></figure>
+<h3>Raise a request</h3>
+<ol class="steps">
+  <li>On the <span class="ui">Requests</span> tab, choose the <span class="ui">Employee</span> and <span class="ui">Request type</span>.</li>
+  <li>Set the <span class="ui">Effective date</span> and write the <span class="ui">Reason / justification</span> (at least 10 characters).</li>
+  <li>Fill the extra boxes for the request type:
+    <table>
+    <tr><th style="width:30%">Request type</th><th>Extra information</th></tr>
+    <tr><td>Probation Confirmation</td><td>None — approval marks probation as confirmed.</td></tr>
+    <tr><td>Probation Extension</td><td>New probation review date.</td></tr>
+    <tr><td>Transfer</td><td>Destination branch, department and designation.</td></tr>
+    <tr><td>Promotion</td><td>New designation and, optionally, the proposed new salary.</td></tr>
+    <tr><td>Resignation / Termination</td><td>Notice-pay days and leave days to encash (click "use it" to copy the earned leave balance).</td></tr>
+    </table></li>
+  <li>Click <span class="ui">Submit for approval</span>.</li>
+</ol>
+<h3>Approve or reject (a different person)</h3>
+<ol class="steps">
+  <li>Requests appear under <span class="ui">Awaiting approval</span> with who raised them.</li>
+  <li>Click <span class="ui">Approve</span> (type a short comment) or <span class="ui">Reject</span> (type the reason).</li>
+</ol>
+<table>
+<tr><th style="width:30%">When approved</th><th>What happens</th></tr>
+<tr><td>Probation extension / confirmation</td><td>The probation date or status on the employee record is updated.</td></tr>
+<tr><td>Transfer</td><td>Branch, department and designation change.</td></tr>
+<tr><td>Promotion</td><td>Designation changes. A higher salary becomes a <b>draft salary revision</b> that must be approved separately in 9. Salary Revisions.</td></tr>
+<tr><td>Resignation / Termination</td><td>The employee is marked as left, and a final settlement (gratuity, leave encashment, notice pay) is created in 11. Gratuity &amp; Settlement for payroll to process.</td></tr>
+</table>
+<h3>Onboarding checklist</h3>
+<figure><img src="shots/34b-onboarding-checklist.png"><figcaption><b>Onboarding tab</b> — what is still missing for each new employee.</figcaption></figure>
+<p>The <span class="ui">Onboarding</span> tab lists active employees whose joining paperwork is not complete. Tick by hand: CNIC copy on file, signed appointment letter, bank account verified, HR policies acknowledged. Items marked <b>(auto)</b> tick themselves when the employee record is complete: EOBI registered, social security registered, NTN captured, fingerprint or face enrolled.</p>
+<h3>Employment letters and experience certificates</h3>
+<p>On the <span class="ui">Letters</span> tab, click <span class="ui">Employment letter</span> (current staff) or <span class="ui">Experience certificate</span> (staff who have left). A ready-to-print letter opens in a new browser tab; print it with <span class="kbd">Ctrl</span>+<span class="kbd">P</span>, sign and stamp it. If nothing opens, allow pop-ups for this site in your browser.</p>
+
+<h2 id="recruitment"><span class="num">C3</span>Recruitment</h2>
+<figure><img src="shots/31c-pipeline.png"><figcaption><b>Recruitment — Applicant Pipeline.</b> Each column is a hiring stage.</figcaption></figure>
+<h3>Post a job</h3>
+<ol class="steps">
+  <li>Click <span class="ui">Post Job</span>.</li>
+  <li>Fill <span class="ui">Job Title</span>, department, branch, job type, number of vacancies, salary range, experience and qualification, <span class="ui">Posted Date</span>, <span class="ui">Closing Date</span> and the description.</li>
+  <li>Click <span class="ui">Post Job</span>. (Nothing happens if the title or closing date is empty.)</li>
+</ol>
+<p>On the <span class="ui">Job Postings</span> tab, use <span class="ui">Hold</span> or <span class="ui">Filled</span> to change a job's status, and <span class="ui">View Pipeline</span> to see its applicants.</p>
+<h3>Track applicants</h3>
+<ol class="steps">
+  <li>Click <span class="ui">Add Applicant</span>, choose the job, type the name, email, phone and other details, and save.</li>
+  <li>On <span class="ui">Applicant Pipeline</span>, move each applicant with the → and ← buttons through: Applied, Shortlisted, Interview Scheduled, Interviewed, Offer Extended, Hired or Rejected.</li>
+  <li>Click an applicant card to see all details or jump to any stage.</li>
+</ol>
+<div class="box note"><span class="t">Good to know</span><p>Moving an applicant to <b>Hired</b> does not create the employee record. Add the person yourself with <span class="ui">Onboard Employee</span> (section C1).</p></div>
+
+<h2 id="performance"><span class="num">C4</span>Performance reviews</h2>
+<figure><img src="shots/32-performance-new.png"><figcaption><b>New Performance Review</b> — score each KPI from 1 (poor) to 5 (excellent).</figcaption></figure>
+<ol class="steps">
+  <li>Open <span class="ui">Performance</span> and click <span class="ui">New Review</span>.</li>
+  <li>Choose the employee, review period (for example H2-2026) and review date.</li>
+  <li>For each KPI (Technical Delivery, Quality of Work, Team Collaboration, Communication, Attendance &amp; Punctuality — you can add or remove KPIs), give the weight and the self and manager star ratings. The weights should add up to 100%.</li>
+  <li>Write strengths, areas for improvement and manager comments. Tick <span class="ui">Recommend Salary Increment</span> (with %), promotion, training or improvement plan if needed.</li>
+  <li>Click <span class="ui">Submit Review</span>. It shows <b>Pending HR Approval</b>.</li>
+  <li>HR clicks <span class="ui">Approve Outcomes</span> or <span class="ui">Reject Outcomes</span>. An approved increment becomes a <b>draft</b> salary revision; pay changes only after that draft is approved in 9. Salary Revisions.</li>
+</ol>
+<p>Employees can see their own approved reviews.</p>
+
+<h2 id="assets"><span class="num">C5</span>Company assets</h2>
+<figure><img src="shots/33-assets.png"><figcaption><b>Asset Management</b> — laptops, phones, SIM cards, vehicles and other company property.</figcaption></figure>
+<ol class="steps">
+  <li><b>Add:</b> click <span class="ui">Add Asset</span>, type the asset tag (for example ASSET-LPT-004), name, serial number, cost, category, condition and purchase date, and click <span class="ui">Add Asset</span>.</li>
+  <li><b>Give to an employee:</b> click <span class="ui">Assign</span> on an available asset, choose the employee and click <span class="ui">Assign</span>.</li>
+  <li><b>Take back:</b> click <span class="ui">Return</span> and then <span class="ui">Confirm Return</span>. The asset becomes Available.</li>
+  <li><b>Repairs:</b> click <span class="ui">Repair</span> while it is away and <span class="ui">Fixed</span> when it is back.</li>
+</ol>
+<div class="box important"><span class="t">Important — before a final settlement</span><p>Check this page for anything still assigned to a leaving employee and collect it before the settlement is paid. The settlement does not check assets automatically.</p></div>
