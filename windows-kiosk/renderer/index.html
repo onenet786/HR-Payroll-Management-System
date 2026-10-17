@@ -409,17 +409,18 @@
       </div>
 
       <div class="dialog-body">
+        <p class="form-help req-note">Fields marked <span class="req" aria-hidden="true">*</span> are required.</p>
         <div class="dialog-section">
           <h3 class="dialog-section-title">Server Registration</h3>
           <p class="form-help" id="stRegStatus">Checking registration…</p>
           <div class="form-grid" id="stRegForm">
             <label class="form-field">
-              <span class="form-label">Kiosk account email or username</span>
-              <input id="stRegEmail" class="form-input" autocomplete="off" placeholder="kiosk.gate1@company.com" />
+              <span class="form-label">Kiosk account email or username<span class="req" aria-hidden="true">*</span></span>
+              <input id="stRegEmail" class="form-input" autocomplete="off" required aria-required="true" placeholder="kiosk.gate1@company.com" />
             </label>
             <label class="form-field">
-              <span class="form-label">Password</span>
-              <input id="stRegPassword" class="form-input" type="password" autocomplete="off" />
+              <span class="form-label">Password<span class="req" aria-hidden="true">*</span></span>
+              <input id="stRegPassword" class="form-input" type="password" autocomplete="off" required aria-required="true" />
             </label>
             <small class="form-help full">Use a user with the <b>Kiosk Terminal</b> role (User Management). The password is sent once and not stored; this PC receives its own device key, which an administrator can revoke.</small>
           </div>
@@ -441,8 +442,8 @@
               <input id="stLocation" class="form-input" placeholder="Main Entrance Gate-1" />
             </label>
             <label class="form-field full">
-              <span class="form-label">Assigned Branch <small>(controls the local employee and biometric cache)</small></span>
-              <select id="stBranchId" class="form-input">
+              <span class="form-label">Assigned Branch<span class="req" aria-hidden="true">*</span> <small>(controls the local employee and biometric cache)</small></span>
+              <select id="stBranchId" class="form-input" required aria-required="true">
                 <option value="">Select a branch…</option>
               </select>
               <small class="form-help">Other-branch employees must use Camera and provide their complete employee ID for ID + face verification.</small>

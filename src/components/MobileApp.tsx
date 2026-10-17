@@ -18,6 +18,16 @@ import { motion, AnimatePresence } from 'motion/react';
 import { assessBrowserFaceDetection, createFaceDescriptorFromVideo, findBestFaceMatch, hasFaceEnrollment, FACE_VERIFY_THRESHOLD } from '../utils/faceRecognition';
 import { performActiveLiveness, randomLivenessOrder } from '../utils/faceLiveness';
 
+/** Required-field asterisk tuned for the dark phone screen (lighter rose than the shared RequiredMark). */
+function MobileRequiredMark() {
+  return <span className="ml-0.5 font-bold text-rose-400" aria-hidden="true" title="Required">*</span>;
+}
+
+/** "Fields marked * are required." line for the dark phone screen. */
+function MobileRequiredNote() {
+  return <p className="text-[10px] text-slate-400">Fields marked <span className="font-bold text-rose-400">*</span> are required.</p>;
+}
+
 interface MobileAppProps {
   employees: Employee[];
   attendances: AttendanceLog[];
@@ -633,10 +643,10 @@ export function MobileApp({
 
                 <div className="space-y-2 rounded-2xl border border-slate-700/60 bg-slate-800/60 p-3">
                   <p className="text-[10px] font-bold uppercase tracking-wider text-slate-300">Required mobile reason</p>
-                  {selectedAction === 'visit-in' && <input value={punchReason.clientName} onChange={e => setPunchReason(p => ({ ...p, clientName: e.target.value }))} placeholder="Client or field location name *" className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-white focus:border-indigo-500 focus:outline-none" />}
+                  {selectedAction === 'visit-in' && <label className="block text-[10px] font-semibold text-slate-400">Client or field location name<MobileRequiredMark /><input aria-required="true" value={punchReason.clientName} onChange={e => setPunchReason(p => ({ ...p, clientName: e.target.value }))} placeholder="e.g. client name or site" className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-white focus:border-indigo-500 focus:outline-none" /></label>}
                   {selectedAction === 'visit-out' && activeVisit && <div className="rounded-lg bg-slate-900 px-3 py-2 text-[10px] text-indigo-300">Checking out from: <strong>{activeVisit.clientName}</strong></div>}
                   <div className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-semibold text-indigo-300">{activeMobileDuty?.dutyType}</div>
-                  <textarea value={punchReason.note} onChange={e => setPunchReason(p => ({ ...p, note: e.target.value }))} rows={2} placeholder="Business reason, instructions, client purpose or completion details *" className="w-full resize-none rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-white focus:border-indigo-500 focus:outline-none" />
+                  <label className="block text-[10px] font-semibold text-slate-400">Business reason<MobileRequiredMark /><textarea aria-required="true" value={punchReason.note} onChange={e => setPunchReason(p => ({ ...p, note: e.target.value }))} rows={2} placeholder="Instructions, client purpose or completion details" className="mt-1 w-full resize-none rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-white focus:border-indigo-500 focus:outline-none" /></label>
                 </div>
 
                 {isWorkdayComplete && <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3 text-center text-[10px] text-emerald-300">Today’s workday is complete. No further attendance or visit actions are available.</div>}
@@ -737,15 +747,22 @@ export function MobileApp({
                 <div className="border-t border-slate-700/50 pt-3">
                   <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-2">Missed Punch? Regularize</p>
                   <form onSubmit={handleApplyRegularization} className="space-y-2">
+                    <MobileRequiredNote />
+                    <label className="block text-[10px] text-slate-400">Date of missed punch<MobileRequiredMark />
                     <DateField value={regForm.date}
+                      required
                       aria-label="Date of missed punch"
                       onChange={e => setRegForm(p => ({ ...p, date: e.target.value }))}
-                      className="w-full bg-slate-800 border border-slate-700 text-white text-xs rounded-xl px-3 py-2 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+                      className="mt-1 w-full bg-slate-800 border border-slate-700 text-white text-xs rounded-xl px-3 py-2 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+                    </label>
+                    <label className="block text-[10px] text-slate-400">Reason (at least 10 characters)<MobileRequiredMark />
                     <textarea aria-label="Reason for missing punch" value={regForm.reason}
+                      required
                       onChange={e => setRegForm(p => ({ ...p, reason: e.target.value }))}
-                      placeholder="Reason for missing punch..."
+                      placeholder="What happened? e.g. card reader fault at the gate"
                       rows={2}
-                      className="w-full bg-slate-800 border border-slate-700 text-white text-xs rounded-xl px-3 py-2 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none" />
+                      className="mt-1 w-full bg-slate-800 border border-slate-700 text-white text-xs rounded-xl px-3 py-2 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none" />
+                    </label>
                     <label className="block text-[10px] text-slate-400">Evidence (optional: gate pass, client sign-off, ticket — PDF/JPG/PNG, max 10 MB)
                       <input type="file" accept="application/pdf,image/jpeg,image/png" onChange={e => setRegEvidence(e.target.files?.[0] || null)} className="mt-1 block w-full text-[10px] text-slate-300 file:mr-2 file:rounded-lg file:border-0 file:bg-slate-700 file:px-2 file:py-1 file:text-white" />
                     </label>
@@ -834,6 +851,7 @@ export function MobileApp({
             </section>
 
             <form onSubmit={handleApplyLeaveSubmit} className="space-y-3">
+              <MobileRequiredNote />
               <div>
                 <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Leave Type</label>
                 <select aria-label="Leave type" value={leaveForm.leaveType}
@@ -847,21 +865,21 @@ export function MobileApp({
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">From</label>
-                  <DateField aria-label="Leave start date" value={leaveForm.startDate}
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">From<MobileRequiredMark /></label>
+                  <DateField aria-label="Leave start date" required value={leaveForm.startDate}
                     onChange={e => setLeaveForm(p => ({ ...p, startDate: e.target.value }))}
                     className="w-full bg-slate-800 border border-slate-700 text-white text-xs rounded-xl px-3 py-2.5 focus:outline-none focus:ring-1 focus:ring-emerald-500" />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">To</label>
-                  <DateField aria-label="Leave end date" value={leaveForm.endDate}
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">To<MobileRequiredMark /></label>
+                  <DateField aria-label="Leave end date" required value={leaveForm.endDate}
                     onChange={e => setLeaveForm(p => ({ ...p, endDate: e.target.value }))}
                     className="w-full bg-slate-800 border border-slate-700 text-white text-xs rounded-xl px-3 py-2.5 focus:outline-none focus:ring-1 focus:ring-emerald-500" />
                 </div>
               </div>
               <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Reason *</label>
-                <textarea aria-label="Leave reason" value={leaveForm.reason}
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Reason<MobileRequiredMark /></label>
+                <textarea aria-label="Leave reason" required value={leaveForm.reason}
                   onChange={e => setLeaveForm(p => ({ ...p, reason: e.target.value }))}
                   rows={3} placeholder="Describe your reason..."
                   className="w-full bg-slate-800 border border-slate-700 text-white text-xs rounded-xl px-3 py-2 focus:outline-none focus:ring-1 focus:ring-emerald-500 resize-none" />

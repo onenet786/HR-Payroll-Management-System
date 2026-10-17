@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { CheckCircle, ClipboardList, FileText, UserCheck } from 'lucide-react';
 import { DateField } from './DateField';
+import { RequiredMark, RequiredNote } from './RequiredMark';
 import type { Branch, Company, Department, Designation, Employee, LeaveRequest, LifecycleRequest, LifecycleRequestType, OnboardingChecklistItem, StatutoryConfig } from '../types';
 import { annualLeaveBalance, experienceLetterHtml, MANUAL_ONBOARDING_ITEMS, ONBOARDING_ITEMS, onboardingStatus, openPrintableHtml } from '../data/lifecycle';
 
@@ -79,16 +80,17 @@ export function EmployeeLifecycleModule({ employees, branches, departments, desi
       {view === 'requests' && <div className="grid gap-5 lg:grid-cols-[22rem_1fr]">
         <form onSubmit={submit} className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 text-xs shadow-sm">
           <h3 className="text-sm font-bold text-slate-900">Raise a request</h3>
-          <label className="block text-slate-600">Employee<select required value={form.employeeId} onChange={e => setForm({ ...form, employeeId: e.target.value, newBranchId: '', newDepartmentId: '', newDesignationId: '' })} className={input}><option value="">Select employee</option>{active.map(employee => <option key={employee.id} value={employee.id}>{employee.fullName} ({employee.employeeCode})</option>)}</select></label>
+          <RequiredNote />
+          <label className="block text-slate-600">Employee<RequiredMark /><select required aria-required="true" value={form.employeeId} onChange={e => setForm({ ...form, employeeId: e.target.value, newBranchId: '', newDepartmentId: '', newDesignationId: '' })} className={input}><option value="">Select employee</option>{active.map(employee => <option key={employee.id} value={employee.id}>{employee.fullName} ({employee.employeeCode})</option>)}</select></label>
           <label className="block text-slate-600">Request type<select value={form.type} onChange={e => setForm({ ...form, type: e.target.value as LifecycleRequestType })} className={input}>{TYPES.map(type => <option key={type}>{type}</option>)}</select></label>
-          <label className="block text-slate-600">Effective date<DateField required value={form.effectiveDate} onChange={e => setForm({ ...form, effectiveDate: e.target.value })} className={input} /></label>
+          <label className="block text-slate-600">Effective date<RequiredMark /><DateField required aria-required="true" value={form.effectiveDate} onChange={e => setForm({ ...form, effectiveDate: e.target.value })} className={input} /></label>
           {form.type === 'Transfer' && <>
             <label className="block text-slate-600">Destination branch<select value={form.newBranchId} onChange={e => setForm({ ...form, newBranchId: e.target.value, newDepartmentId: '', newDesignationId: '' })} className={input}><option value="">Same branch</option>{branches.map(branch => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>
             <label className="block text-slate-600">Destination department<select value={form.newDepartmentId} onChange={e => setForm({ ...form, newDepartmentId: e.target.value, newDesignationId: '' })} className={input}><option value="">Same department</option>{destinationDepartments.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
           </>}
-          {(form.type === 'Transfer' || form.type === 'Promotion') && <label className="block text-slate-600">{form.type === 'Promotion' ? 'New designation' : 'Designation'}<select value={form.newDesignationId} onChange={e => setForm({ ...form, newDesignationId: e.target.value })} className={input}><option value="">Select designation</option>{destinationDesignations.map(item => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>}
+          {(form.type === 'Transfer' || form.type === 'Promotion') && <label className="block text-slate-600">{form.type === 'Promotion' ? 'New designation' : 'Designation'}{(form.type === 'Promotion' || !!form.newDepartmentId) && <RequiredMark />}<select required={form.type === 'Promotion' || !!form.newDepartmentId} aria-required={form.type === 'Promotion' || !!form.newDepartmentId || undefined} value={form.newDesignationId} onChange={e => setForm({ ...form, newDesignationId: e.target.value })} className={input}><option value="">Select designation</option>{destinationDesignations.map(item => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>}
           {form.type === 'Promotion' && <label className="block text-slate-600">Proposed salary (optional, PKR)<input type="number" min="0" value={form.newBasicSalary} onChange={e => setForm({ ...form, newBasicSalary: e.target.value })} className={input} placeholder={selected ? `Current ${selected.basicSalary.toLocaleString()}` : ''} /></label>}
-          {form.type === 'Probation Extension' && <label className="block text-slate-600">New probation review date<DateField value={form.newProbationEndDate} onChange={e => setForm({ ...form, newProbationEndDate: e.target.value })} className={input} /></label>}
+          {form.type === 'Probation Extension' && <label className="block text-slate-600">New probation review date<RequiredMark /><DateField required aria-required="true" value={form.newProbationEndDate} onChange={e => setForm({ ...form, newProbationEndDate: e.target.value })} className={input} /></label>}
           {(form.type === 'Resignation' || form.type === 'Termination') && <div className="grid grid-cols-2 gap-2">
             <label className="text-slate-600">Notice pay days<input type="number" min="0" value={form.noticeDays} onChange={e => setForm({ ...form, noticeDays: e.target.value })} className={input} /></label>
             <label className="text-slate-600">Leave encash days<input type="number" min="0" value={form.leaveEncashDays} onChange={e => setForm({ ...form, leaveEncashDays: e.target.value })} className={input} /></label>
@@ -97,7 +99,7 @@ export function EmployeeLifecycleModule({ employees, branches, departments, desi
               return <button type="button" onClick={() => setForm({ ...form, leaveEncashDays: String(balance) })} className="col-span-2 text-left text-[11px] font-semibold text-indigo-700 hover:underline">Earned annual leave balance: {balance} day(s) — use it</button>;
             })()}
           </div>}
-          <label className="block text-slate-600">Reason / justification<textarea required minLength={10} value={form.reason} onChange={e => setForm({ ...form, reason: e.target.value })} className={`${input} min-h-20`} /></label>
+          <label className="block text-slate-600">Reason / justification<RequiredMark /><textarea required aria-required="true" minLength={10} value={form.reason} onChange={e => setForm({ ...form, reason: e.target.value })} className={`${input} min-h-20`} /></label>
           <button type="submit" className="w-full rounded-lg bg-emerald-700 py-2 font-bold text-white hover:bg-emerald-800">Submit for approval</button>
         </form>
         <div className="space-y-4">

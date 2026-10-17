@@ -16,6 +16,11 @@ import { performActiveLiveness, randomLivenessOrder } from '../utils/faceLivenes
 import { MultiFaceTracker } from '../utils/multiFaceTracker';
 import { drawMultiFaceHUD } from '../utils/faceCanvasOverlay';
 
+/** Required-field asterisk for the dark kiosk screens (lighter rose than the shared RequiredMark so it reads on slate-900). */
+function KioskRequiredMark() {
+  return <span className="ml-0.5 font-bold text-rose-400" aria-hidden="true" title="Required">*</span>;
+}
+
 const RETURNABLE_CHECKOUT_REASONS = new Set([
   'Lunch Break', 'Tea Break', 'Official Duty', 'Client Meeting', 'Site Visit',
   'Personal Work', 'Medical Appointment', 'Prayer',
@@ -451,8 +456,8 @@ export function KioskTerminal({
         }}>
           <h3 className="text-lg font-black text-white">Punch Out Reason</h3>
           <p className="mt-1 text-xs text-slate-400">{pendingCheckout.employee.fullName} · Face verified at {pendingCheckout.time}</p>
-          <label className="mt-4 block text-xs font-bold uppercase tracking-wider text-amber-300">Reason is required</label>
-          <select autoFocus value={checkoutReason} onChange={event => setCheckoutReason(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 p-3 text-sm text-white">
+          <label htmlFor="kiosk-checkout-reason" className="mt-4 block text-xs font-bold uppercase tracking-wider text-amber-300">Checkout reason<KioskRequiredMark /></label>
+          <select id="kiosk-checkout-reason" autoFocus required value={checkoutReason} onChange={event => setCheckoutReason(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 p-3 text-sm text-white">
             <option value="">Select checkout reason</option>
             <option>End of Shift</option>
             <option>Lunch Break</option>
@@ -636,11 +641,12 @@ export function KioskTerminal({
             >
               <div className="flex-1 flex flex-col justify-center space-y-3 w-full">
                 <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Enter Employee ID Code:</label>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Enter Employee ID Code<KioskRequiredMark /></label>
                   <form onSubmit={handleIdSubmit} className="flex space-x-2">
                     <input
                       type="text"
                       aria-label="Employee ID Code"
+                      required
                       placeholder="e.g. IND-KHI-001"
                       value={empIdInput}
                       onChange={(e) => setEmpIdInput(e.target.value)}
@@ -655,7 +661,7 @@ export function KioskTerminal({
                   </form>
                 </div>
                 <p className="text-[10px] text-slate-400 italic">
-                  * Typable inputs match codes like <code>IND-KHI-001</code>, <code>002</code>, etc.
+                  Tip: typable inputs match codes like <code>IND-KHI-001</code>, <code>002</code>, etc.
                 </p>
               </div>
 

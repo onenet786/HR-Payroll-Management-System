@@ -5,6 +5,7 @@
 
 import React, { useState } from 'react';
 import { DateField } from './DateField';
+import { RequiredMark, RequiredNote } from './RequiredMark';
 import { Plus, Trash2, Edit2, Check, X, RefreshCw } from 'lucide-react';
 import { Holiday } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
@@ -232,13 +233,14 @@ export function HolidayModule({ holidays, onAddHoliday, onUpdateHoliday, onDelet
               <h3 className="text-base font-bold text-slate-900">
                 {editingHoliday ? 'Edit Holiday' : 'Add New Holiday'}
               </h3>
+              <RequiredNote />
 
               <div className="space-y-3">
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Holiday Name *</label>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Holiday Name<RequiredMark /></label>
                   <input
                     type="text" value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
-                    aria-label="Holiday Name"
+                    aria-label="Holiday Name" aria-required="true"
                     placeholder="e.g. Eid ul Fitr, Independence Day"
                     className="w-full bg-white border border-slate-200 text-slate-900 text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   />
@@ -246,9 +248,9 @@ export function HolidayModule({ holidays, onAddHoliday, onUpdateHoliday, onDelet
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label htmlFor="holiday-date" className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Date *</label>
+                    <label htmlFor="holiday-date" className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Date<RequiredMark /></label>
                     <DateField
-                      id="holiday-date" value={form.date} onChange={e => setForm(p => ({ ...p, date: e.target.value }))}
+                      id="holiday-date" aria-required="true" value={form.date} onChange={e => setForm(p => ({ ...p, date: e.target.value }))}
                       className="w-full bg-white border border-slate-200 text-slate-900 text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     />
                   </div>

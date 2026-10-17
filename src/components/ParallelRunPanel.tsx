@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Download, Upload } from 'lucide-react';
 import type { ParallelRunRecord, PayrollRun, Payslip } from '../types';
 import { compareParallelRun, parallelRunCsv, parseLegacyPayrollCsv, type ParallelRunResult } from '../data/parallelRun';
+import { RequiredMark, RequiredNote } from './RequiredMark';
 
 interface Props {
   payrollRuns: PayrollRun[];
@@ -20,6 +21,7 @@ export function ParallelRunPanel({ payrollRuns, payrollPayslips, onRecord }: Pro
   const [error, setError] = useState('');
   const [explanation, setExplanation] = useState('');
   const run = candidates.find(item => item.id === runId);
+  const explanationRequired = Boolean(result && (result.differing || result.onlyLegacy || result.onlySystem));
   const sheets = useMemo(() => payrollPayslips.filter(item => item.payrollRunId === runId), [payrollPayslips, runId]);
 
   const load = async (file?: File) => {
@@ -75,10 +77,12 @@ export function ParallelRunPanel({ payrollRuns, payrollPayslips, onRecord }: Pro
           </table>
           {result.lines.every(line => line.status === 'Match') && <p className="p-3 font-semibold text-emerald-700">Every employee matches the legacy payroll.</p>}
         </div>
+        {explanationRequired && <RequiredNote />}
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" onClick={download} className="flex items-center gap-1 rounded border border-slate-300 px-3 py-1.5 font-semibold text-slate-700"><Download size={13} />Difference report</button>
-          <input aria-label="Explanation of differences" value={explanation} onChange={event => setExplanation(event.target.value)} placeholder={result.differing || result.onlyLegacy || result.onlySystem ? 'Explain the differences (e.g. legacy ignored medical exemption)' : 'Optional note'} className="min-w-64 flex-1 rounded border border-slate-300 p-1.5" />
-          <button type="button" onClick={() => void onRecord(run.id, { legacyFileName: fileName, matched: result.matched, differing: result.differing, onlyLegacy: result.onlyLegacy, onlySystem: result.onlySystem, netDelta: result.netDelta, ...(explanation.trim() && { explanation: explanation.trim().slice(0, 1000) }) })} className="rounded bg-slate-800 px-3 py-1.5 font-bold text-white">Record result on this run</button>
+          {explanationRequired && <label htmlFor="parallel-run-explanation" className="font-semibold text-slate-700">Explanation<RequiredMark /></label>}
+          <input id="parallel-run-explanation" aria-label="Explanation of differences" aria-required={explanationRequired || undefined} value={explanation} onChange={event => setExplanation(event.target.value)} placeholder={result.differing || result.onlyLegacy || result.onlySystem ? 'Explain the differences (e.g. legacy ignored medical exemption)' : 'Optional note'} className="min-w-64 flex-1 rounded border border-slate-300 p-1.5" />
+          <button type="button" onClick={() => void onRecord(run.id, { legacyFileName: fileName, matched: result.matched, differing: result.differing, onlyLegacy: result.onlyLegacy, onlySystem: result.onlySystem, netDelta: result.netDelta, ...(explanation.trim() && { explanation: explanation.trim().slice(0, 1000) }) })} disabled={explanationRequired && !explanation.trim()} className="rounded bg-slate-800 px-3 py-1.5 font-bold text-white disabled:opacity-40">Record result on this run</button>
         </div>
       </>}
     </section>

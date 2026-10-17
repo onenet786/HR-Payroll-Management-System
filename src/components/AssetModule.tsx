@@ -5,6 +5,7 @@
 
 import React, { useState } from 'react';
 import { DateField } from './DateField';
+import { RequiredMark, RequiredNote } from './RequiredMark';
 import { Plus, Package, Laptop, Smartphone, Car, Wrench } from 'lucide-react';
 import { CompanyAsset, Employee } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
@@ -218,17 +219,18 @@ export function AssetModule({ assets, employees, canManage, onAddAsset, onUpdate
             <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }}
               className="bg-white border border-slate-200 rounded-2xl w-full max-w-xl p-6 space-y-4">
               <h3 className="text-base font-bold text-slate-900">Add New Asset</h3>
+              <RequiredNote />
               <div className="grid grid-cols-2 gap-3">
                 {[
-                  { label: 'Asset Tag *', field: 'assetTag', placeholder: 'ASSET-LPT-004' },
-                  { label: 'Name *', field: 'name', placeholder: 'Dell Latitude 5420' },
+                  { label: 'Asset Tag', field: 'assetTag', placeholder: 'ASSET-LPT-004', required: true },
+                  { label: 'Name', field: 'name', placeholder: 'Dell Latitude 5420', required: true },
                   { label: 'Serial Number', field: 'serialNumber', placeholder: 'Optional' },
                   { label: 'Purchase Cost (PKR)', field: 'purchaseCost', placeholder: '150000', type: 'number' }
-                ].map(({ label, field, placeholder, type }) => (
+                ].map(({ label, field, placeholder, type, required }) => (
                   <div key={field}>
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">{label}</label>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">{label}{required && <RequiredMark />}</label>
                     <input type={type || 'text'} placeholder={placeholder}
-                      aria-label={label}
+                      aria-label={label} aria-required={required || undefined}
                       value={(form as any)[field] || ''}
                       onChange={e => setForm(p => ({ ...p, [field]: type === 'number' ? Number(e.target.value) : e.target.value }))}
                       className="w-full bg-white border border-slate-200 text-slate-900 text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500" />
@@ -267,8 +269,8 @@ export function AssetModule({ assets, employees, canManage, onAddAsset, onUpdate
               <div className="flex gap-3">
                 <button onClick={() => { setShowForm(false); setForm(emptyForm); }}
                   className="flex-1 bg-white hover:bg-slate-100 text-slate-900 text-sm font-bold py-2.5 rounded-xl transition">Cancel</button>
-                <button onClick={handleAdd}
-                  className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold py-2.5 rounded-xl transition">Add Asset</button>
+                <button onClick={handleAdd} disabled={!form.assetTag || !form.name}
+                  className="flex-1 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white text-sm font-bold py-2.5 rounded-xl transition">Add Asset</button>
               </div>
             </motion.div>
           </motion.div>
@@ -283,10 +285,11 @@ export function AssetModule({ assets, employees, canManage, onAddAsset, onUpdate
             <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }}
               className="bg-white border border-slate-200 rounded-2xl w-full max-w-sm p-6 space-y-4">
               <h3 className="text-base font-bold text-slate-900">Assign: {assignModal.name}</h3>
+              <RequiredNote />
               <div>
-                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Assign To Employee</label>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Assign To Employee<RequiredMark /></label>
                 <select value={assignToId} onChange={e => setAssignToId(e.target.value)}
-                  aria-label="Assign To Employee"
+                  aria-label="Assign To Employee" aria-required="true"
                   className="w-full bg-white border border-slate-200 text-slate-900 text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500">
                   <option value="">— Select Employee —</option>
                   {employees.filter(e => e.status === 'Active').map(e => <option key={e.id} value={e.id}>{e.fullName}</option>)}

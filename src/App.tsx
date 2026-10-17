@@ -2304,6 +2304,11 @@ export default function App() {
 }
 
 // Login Screen
+/** Required-field asterisk for the dark sign-in and setup screens (lighter rose than the shared RequiredMark so it reads on slate-950). */
+function DarkRequiredMark() {
+  return <span className="ml-0.5 font-bold text-rose-400" aria-hidden="true" title="Required">*</span>;
+}
+
 function LoginScreen({
   authReady,
   authMessage,
@@ -2551,7 +2556,7 @@ function LoginScreen({
                 {/* Email Field */}
                 <div className="space-y-1.5">
                   <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-widest">
-                    EMAIL
+                    EMAIL<DarkRequiredMark />
                   </label>
                   <div className="relative group">
                     <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500 group-focus-within:text-emerald-400 transition-colors">
@@ -2573,7 +2578,7 @@ function LoginScreen({
                 {!mfaChallenge && <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
                     <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-widest">
-                      PASSWORD
+                      PASSWORD<DarkRequiredMark />
                     </label>
                     <button
                       type="button"
@@ -2623,7 +2628,7 @@ function LoginScreen({
                 </div>}
 
                 {mfaChallenge && <div className="space-y-1.5">
-                  <label className="block text-[11px] font-bold text-emerald-400 uppercase tracking-widest">TWO-FACTOR VERIFICATION</label>
+                  <label className="block text-[11px] font-bold text-emerald-400 uppercase tracking-widest">TWO-FACTOR VERIFICATION<DarkRequiredMark /></label>
                   <div className="grid grid-cols-2 gap-2">
                     {mfaMethods.includes('totp') && <button type="button" onClick={() => { setMfaMethod('totp'); setMfaCode(''); setError(''); }} className={`rounded-lg border px-3 py-2 text-xs font-bold ${mfaMethod === 'totp' ? 'border-emerald-400 bg-emerald-500/20 text-emerald-300' : 'border-slate-700 bg-slate-900 text-slate-400'}`}>Authenticator app</button>}
                     {mfaMethods.includes('email') && <button type="button" onClick={() => { setMfaMethod('email'); setMfaCode(''); setError(''); }} className={`rounded-lg border px-3 py-2 text-xs font-bold ${mfaMethod === 'email' ? 'border-emerald-400 bg-emerald-500/20 text-emerald-300' : 'border-slate-700 bg-slate-900 text-slate-400'}`}>Email verification</button>}
@@ -2639,6 +2644,7 @@ function LoginScreen({
                     autoFocus
                     value={mfaCode}
                     onChange={event => setMfaCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                    aria-label={mfaMethod === 'email' ? 'Email verification code' : 'Authenticator code'}
                     placeholder={mfaMethod === 'email' ? 'Email code' : 'Authenticator code'}
                     className="w-full text-center tracking-[0.5em] text-lg font-mono py-3 bg-slate-950/80 border border-emerald-700/70 rounded-xl text-white placeholder-slate-600 focus:outline-none focus:border-emerald-400"
                   />
@@ -2793,23 +2799,24 @@ function SetupWizardScreen({
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
+          <p className="text-[11px] text-slate-400">Fields marked <span className="font-bold text-rose-400">*</span> are required.</p>
           <div className="space-y-1">
-            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">Company Name</label>
+            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">Company Name<DarkRequiredMark /></label>
             <input type="text" required value={companyName} onChange={e => setCompanyName(e.target.value)} placeholder="e.g. OneNet Solutions" className="w-full text-sm p-3 bg-slate-900 border border-slate-800 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none text-white" />
           </div>
 
           <div className="space-y-1">
-            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">Super Admin Full Name</label>
+            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">Super Admin Full Name<DarkRequiredMark /></label>
             <input type="text" required value={adminName} onChange={e => setAdminName(e.target.value)} placeholder="System Administrator" className="w-full text-sm p-3 bg-slate-900 border border-slate-800 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none text-white" />
           </div>
 
           <div className="space-y-1">
-            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">Super Admin Email</label>
+            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">Super Admin Email<DarkRequiredMark /></label>
             <input type="email" required value={adminEmail} onChange={e => setAdminEmail(e.target.value)} placeholder="admin@company.com" className="w-full text-sm p-3 bg-slate-900 border border-slate-800 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none text-white" />
           </div>
 
           <div className="space-y-1">
-            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">Super Admin Password</label>
+            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">Super Admin Password<DarkRequiredMark /></label>
             <input type="password" required value={adminPassword} onChange={e => setAdminPassword(e.target.value)} placeholder="Set initial password" className="w-full text-sm p-3 bg-slate-900 border border-slate-800 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none text-white font-mono" />
           </div>
 

@@ -7,6 +7,7 @@ import {
   taxDepositLines, taxDepositReconciliation, taxReconciliationReport, taxYearOfPeriod, type CsvReport,
 } from '../data/payrollLedgers';
 import { openPrintableHtml } from '../data/lifecycle';
+import { RequiredMark, RequiredNote } from './RequiredMark';
 
 interface Props {
   employees: Employee[];
@@ -100,14 +101,18 @@ export function PayrollReportsPanel(props: Props) {
       <div className="rounded-lg border border-slate-200 p-3">
         <h4 className="font-bold text-slate-900">Retroactive attendance correction</h4>
         <p className="mt-1 text-[11px] text-slate-500">Paid months stay locked. Days found later are paid (arrears) or recovered (deduction) in {periodMonth}/{periodYear}, after approval by another payroll user.</p>
+        <RequiredNote className="mt-1" />
         <div className="mt-2 grid gap-2 md:grid-cols-[minmax(0,2fr)_6rem_minmax(0,2fr)_auto]">
-          <select aria-label="Paid payslip to correct" value={retro.payslipId} onChange={event => setRetro({ ...retro, payslipId: event.target.value })} className="rounded border border-slate-300 bg-white p-1.5">
+          <label className="flex min-w-0 flex-col gap-0.5 text-[10px] font-semibold text-slate-600">Paid payslip<RequiredMark />
+          <select aria-label="Paid payslip to correct" aria-required="true" value={retro.payslipId} onChange={event => setRetro({ ...retro, payslipId: event.target.value })} className="rounded border border-slate-300 bg-white p-1.5 text-xs font-normal">
             <option value="">Choose paid payslip</option>
             {retroCandidates.slice(0, 300).map(item => <option key={item.id} value={item.id}>{item.periodYear}-{String(item.periodMonth).padStart(2, '0')} · {item.employeeName} ({item.employeeCode})</option>)}
-          </select>
-          <input aria-label="Days to add or recover" type="number" placeholder="+/- days" value={retro.days} onChange={event => setRetro({ ...retro, days: event.target.value })} className="rounded border border-slate-300 p-1.5" />
-          <input aria-label="Correction reason" placeholder="Reason / evidence" value={retro.reason} onChange={event => setRetro({ ...retro, reason: event.target.value })} className="rounded border border-slate-300 p-1.5" />
-          <button type="button" onClick={() => void submitRetro()} className="rounded bg-slate-800 px-3 py-1.5 font-bold text-white">Raise</button>
+          </select></label>
+          <label className="flex min-w-0 flex-col gap-0.5 text-[10px] font-semibold text-slate-600">Days<RequiredMark />
+          <input aria-label="Days to add or recover" aria-required="true" type="number" placeholder="+/- days" value={retro.days} onChange={event => setRetro({ ...retro, days: event.target.value })} className="rounded border border-slate-300 p-1.5 text-xs font-normal" /></label>
+          <label className="flex min-w-0 flex-col gap-0.5 text-[10px] font-semibold text-slate-600">Reason<RequiredMark />
+          <input aria-label="Correction reason" aria-required="true" placeholder="Reason / evidence" value={retro.reason} onChange={event => setRetro({ ...retro, reason: event.target.value })} className="rounded border border-slate-300 p-1.5 text-xs font-normal" /></label>
+          <button type="button" disabled={!retro.payslipId || !retro.days || !retro.reason.trim()} onClick={() => void submitRetro()} className="self-end rounded bg-slate-800 px-3 py-1.5 font-bold text-white disabled:opacity-40">Raise</button>
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2">
           <span className="text-[11px] text-slate-500">Or fix the employee record (salary, allowances, wage type, shift) and recalculate the chosen month in full:</span>

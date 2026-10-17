@@ -5,6 +5,7 @@
 
 import React, { useState } from 'react';
 import { DateField } from './DateField';
+import { RequiredMark, RequiredNote } from './RequiredMark';
 import { Plus, TrendingUp, ArrowUpRight } from 'lucide-react';
 import { SalaryRevision, Employee } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
@@ -233,13 +234,14 @@ export function SalaryRevisionModule({ salaryRevisions, employees, currentUserAc
               className="bg-white border border-slate-200 rounded-2xl w-full max-w-lg p-6 space-y-4"
             >
               <h3 className="text-base font-bold text-slate-900">Process Salary Revision</h3>
+              <RequiredNote />
 
               <div className="space-y-3">
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Employee *</label>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Employee<RequiredMark /></label>
                     <select value={form.employeeId}
-                      aria-label="Employee"
+                      aria-label="Employee" aria-required="true"
                       onChange={e => setForm(p => ({ ...p, employeeId: e.target.value, newSalary: 0 }))}
                       className="w-full bg-white border border-slate-200 text-slate-900 text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500">
                       {employees.filter(e => e.status === 'Active').map(e => (
@@ -270,9 +272,9 @@ export function SalaryRevisionModule({ salaryRevisions, employees, currentUserAc
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">New Salary (PKR) *</label>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">New Salary (PKR)<RequiredMark /></label>
                     <input type="number" min={previousSalary} step="1000" value={form.newSalary || ''}
-                      aria-label="New Salary (PKR)"
+                      aria-label="New Salary (PKR)" aria-required="true"
                       onChange={e => setForm(p => ({ ...p, newSalary: Number(e.target.value) }))}
                       placeholder={`Min PKR ${previousSalary.toLocaleString()}`}
                       className="w-full bg-white border border-slate-200 text-slate-900 text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
@@ -293,8 +295,8 @@ export function SalaryRevisionModule({ salaryRevisions, employees, currentUserAc
                 )}
 
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Reason / Notes *</label>
-                  <textarea aria-label="Reason / Notes" value={form.reason} onChange={e => setForm(p => ({ ...p, reason: e.target.value }))}
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Reason / Notes<RequiredMark /></label>
+                  <textarea aria-label="Reason / Notes" aria-required="true" value={form.reason} onChange={e => setForm(p => ({ ...p, reason: e.target.value }))}
                     rows={3} placeholder="Justification for this salary revision..."
                     className="w-full bg-white border border-slate-200 text-slate-900 text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none" />
                 </div>
@@ -306,7 +308,7 @@ export function SalaryRevisionModule({ salaryRevisions, employees, currentUserAc
                   Cancel
                 </button>
                 <button onClick={handleSave}
-                  disabled={!form.newSalary || form.newSalary <= 0 || !form.reason.trim()}
+                  disabled={!form.employeeId || !form.newSalary || form.newSalary <= 0 || !form.reason.trim()}
                   className="flex-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-sm font-bold py-2.5 rounded-xl transition">
                   Submit Revision for Approval
                 </button>

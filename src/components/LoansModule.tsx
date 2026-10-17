@@ -7,6 +7,7 @@ import React, { useState } from 'react';
 import { Plus, CheckCircle, XCircle } from 'lucide-react';
 import { LoanAdvance, Employee } from '../types';
 import { empAvatarUrl } from '../utils/avatar';
+import { RequiredMark, RequiredNote } from './RequiredMark';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface LoansModuleProps {
@@ -223,12 +224,14 @@ export function LoansModule({
               className="bg-white border border-slate-200 rounded-2xl w-full max-w-md p-6 space-y-4"
             >
               <h3 className="text-base font-bold text-slate-900">Apply for Loan / Advance</h3>
+              <RequiredNote />
 
               <div className="space-y-3">
                 <div>
-                  <label htmlFor="loan-employee" className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Employee</label>
-                  <select id="loan-employee" value={form.employeeId} onChange={e => setForm(p => ({ ...p, employeeId: e.target.value }))}
+                  <label htmlFor="loan-employee" className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Employee<RequiredMark /></label>
+                  <select id="loan-employee" aria-required="true" value={form.employeeId} onChange={e => setForm(p => ({ ...p, employeeId: e.target.value }))}
                     className="w-full bg-white border border-slate-200 text-slate-900 text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                    <option value="">Select employee</option>
                     {employees.filter(e => e.status === 'Active').map(e => (
                       <option key={e.id} value={e.id}>{e.fullName} ({e.employeeCode})</option>
                     ))}
@@ -245,8 +248,8 @@ export function LoansModule({
                     </select>
                   </div>
                 <div>
-                  <label htmlFor="loan-amount" className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Amount (PKR)</label>
-                  <input id="loan-amount" type="number" min="1000" step="1000" value={form.principalAmount}
+                  <label htmlFor="loan-amount" className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Amount (PKR)<RequiredMark /></label>
+                  <input id="loan-amount" aria-required="true" type="number" min="1000" step="1000" value={form.principalAmount}
                       onChange={e => setForm(p => ({ ...p, principalAmount: Number(e.target.value) }))}
                       className="w-full bg-white border border-slate-200 text-slate-900 text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
                   </div>
@@ -269,8 +272,8 @@ export function LoansModule({
                 </div>
 
                 <div>
-                  <label htmlFor="loan-reason" className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Reason *</label>
-                  <textarea id="loan-reason" value={form.reason} onChange={e => setForm(p => ({ ...p, reason: e.target.value }))}
+                  <label htmlFor="loan-reason" className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Reason<RequiredMark /></label>
+                  <textarea id="loan-reason" aria-required="true" value={form.reason} onChange={e => setForm(p => ({ ...p, reason: e.target.value }))}
                     rows={3} placeholder="State the purpose of this loan/advance request..."
                     className="w-full bg-white border border-slate-200 text-slate-900 text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none" />
                 </div>
@@ -285,7 +288,7 @@ export function LoansModule({
                   className="flex-1 bg-white hover:bg-slate-100 text-slate-900 text-sm font-bold py-2.5 rounded-xl transition">
                   Cancel
                 </button>
-                <button onClick={handleApply} disabled={!form.reason.trim() || form.principalAmount <= 0}
+                <button onClick={handleApply} disabled={!form.employeeId || !form.reason.trim() || form.principalAmount <= 0}
                   className="flex-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-sm font-bold py-2.5 rounded-xl transition">
                   Submit Application
                 </button>

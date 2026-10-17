@@ -5,6 +5,7 @@
 
 import React, { useState } from 'react';
 import { DateField } from './DateField';
+import { RequiredMark, RequiredNote } from './RequiredMark';
 import { formatDisplayDate } from '../utils/dateFormat';
 import { Plus, Briefcase, ChevronRight, X } from 'lucide-react';
 import { JobPosting, JobApplication, AppStage, Department, Branch } from '../types';
@@ -302,11 +303,12 @@ export function RecruitmentModule({
             <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }}
               className="bg-white border border-slate-200 rounded-2xl w-full max-w-2xl p-6 space-y-4 my-8">
               <h3 className="text-base font-bold text-slate-900">Post New Job</h3>
+              <RequiredNote />
               <div className="grid grid-cols-2 gap-3">
                 <div className="col-span-2">
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Job Title *</label>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Job Title<RequiredMark /></label>
                   <input value={jobForm.title || ''} onChange={e => setJobForm(p => ({ ...p, title: e.target.value }))}
-                    aria-label="Job Title"
+                    aria-label="Job Title" aria-required="true"
                     placeholder="Senior React Developer"
                     className="w-full bg-white border border-slate-200 text-slate-900 text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
                 </div>
@@ -330,12 +332,12 @@ export function RecruitmentModule({
                   { label: 'Experience Required', key: 'experienceRequired', placeholder: '2-4 years' },
                   { label: 'Qualification', key: 'qualificationRequired', placeholder: 'BS Computer Science' },
                   { label: 'Posted Date', key: 'postedDate', type: 'date' },
-                  { label: 'Closing Date *', key: 'closingDate', type: 'date' }
+                  { label: 'Closing Date', key: 'closingDate', type: 'date' }
                 ].map(({ label, key, type, placeholder }) => (
                   <div key={key}>
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">{label}</label>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">{label}{key === 'closingDate' && <RequiredMark />}</label>
                     {type === 'date' ? (
-                      <DateField aria-label={label} required={key === 'closingDate'}
+                      <DateField aria-label={label} required={key === 'closingDate'} aria-required={key === 'closingDate' || undefined}
                         value={(jobForm as any)[key] || ''}
                         onChange={e => setJobForm(p => ({ ...p, [key]: e.target.value }))}
                         className="w-full bg-white border border-slate-300 text-slate-900 text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500" />
@@ -358,8 +360,8 @@ export function RecruitmentModule({
               <div className="flex gap-3">
                 <button onClick={() => { setShowJobForm(false); setJobForm(emptyJob); }}
                   className="flex-1 bg-white hover:bg-slate-100 text-slate-900 text-sm font-bold py-2.5 rounded-xl transition">Cancel</button>
-                <button onClick={handleAddJob}
-                  className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold py-2.5 rounded-xl transition">Post Job</button>
+                <button onClick={handleAddJob} disabled={!jobForm.title || !jobForm.closingDate}
+                  className="flex-1 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white text-sm font-bold py-2.5 rounded-xl transition">Post Job</button>
               </div>
             </motion.div>
           </motion.div>
@@ -374,17 +376,19 @@ export function RecruitmentModule({
             <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }}
               className="bg-white border border-slate-200 rounded-2xl w-full max-w-xl p-6 space-y-4 my-8">
               <h3 className="text-base font-bold text-slate-900">Add Applicant</h3>
+              <RequiredNote />
               <div className="grid grid-cols-2 gap-3">
                 <div className="col-span-2">
-                  <label htmlFor="app-job-posting" className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Job Posting *</label>
-                  <select id="app-job-posting" value={appForm.jobPostingId || ''} onChange={e => setAppForm(p => ({ ...p, jobPostingId: e.target.value }))}
+                  <label htmlFor="app-job-posting" className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Job Posting<RequiredMark /></label>
+                  <select id="app-job-posting" aria-required="true" value={appForm.jobPostingId || ''} onChange={e => setAppForm(p => ({ ...p, jobPostingId: e.target.value }))}
                     className="w-full bg-white border border-slate-200 text-slate-900 text-sm rounded-xl px-3 py-2.5 focus:outline-none">
+                    <option value="">Select job posting</option>
                     {jobPostings.map(j => <option key={j.id} value={j.id}>{j.title}</option>)}
                   </select>
                 </div>
                 {[
-                  { label: 'Full Name *', key: 'applicantName', placeholder: 'Muhammad Ali' },
-                  { label: 'Email *', key: 'applicantEmail', placeholder: 'applicant@email.com' },
+                  { label: 'Full Name', key: 'applicantName', placeholder: 'Muhammad Ali' },
+                  { label: 'Email', key: 'applicantEmail', placeholder: 'applicant@email.com' },
                   { label: 'Phone', key: 'applicantPhone', placeholder: '0300-1234567' },
                   { label: 'CNIC', key: 'cnic', placeholder: '42101-XXXXXXX-X' },
                   { label: 'Current Salary (PKR)', key: 'currentSalary', type: 'number' },
@@ -393,14 +397,14 @@ export function RecruitmentModule({
                   { label: 'Interview Date', key: 'interviewDate', type: 'date' }
                 ].map(({ label, key, placeholder, type }) => (
                   <div key={key}>
-                    <label htmlFor={`app-${key}`} className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">{label}</label>
+                    <label htmlFor={`app-${key}`} className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">{label}{key === 'applicantName' && <RequiredMark />}</label>
                     {type === 'date' ? (
                       <DateField id={`app-${key}`}
                         value={(appForm as any)[key] || ''}
                         onChange={e => setAppForm(p => ({ ...p, [key]: e.target.value }))}
                         className="w-full bg-white border border-slate-300 text-slate-900 text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500" />
                     ) : (
-                    <input id={`app-${key}`} type={type || 'text'} placeholder={placeholder}
+                    <input id={`app-${key}`} type={type || 'text'} placeholder={placeholder} aria-required={key === 'applicantName' || undefined}
                       value={(appForm as any)[key] || ''}
                       onChange={e => setAppForm(p => ({ ...p, [key]: type === 'number' ? Number(e.target.value) : e.target.value }))}
                       className="w-full bg-white border border-slate-300 text-slate-900 text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500" />
@@ -416,8 +420,8 @@ export function RecruitmentModule({
               <div className="flex gap-3">
                 <button onClick={() => setShowAppForm(false)}
                   className="flex-1 bg-white hover:bg-slate-100 text-slate-900 text-sm font-bold py-2.5 rounded-xl transition">Cancel</button>
-                <button onClick={handleAddApp}
-                  className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold py-2.5 rounded-xl transition">Add Applicant</button>
+                <button onClick={handleAddApp} disabled={!appForm.applicantName || !appForm.jobPostingId}
+                  className="flex-1 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white text-sm font-bold py-2.5 rounded-xl transition">Add Applicant</button>
               </div>
             </motion.div>
           </motion.div>

@@ -4,6 +4,7 @@ import { ShieldCheck } from 'lucide-react';
 import type { JournalAccountKey, StatutoryChangeRequest, StatutoryConfig } from '../types';
 import { JOURNAL_ACCOUNT_LABELS, resolveJournalAccounts } from '../data/accountingJournal';
 import { ExportTemplateEditor } from './ExportTemplateEditor';
+import { RequiredMark, RequiredNote } from './RequiredMark';
 import { downloadEmployeeDocument, uploadEmployeeDocument } from '../utils/employeeDocuments';
 import { DEFAULT_LEAVE_ENTITLEMENTS, leaveEntitlementFor } from '../data/leavePolicy';
 import { DEFAULT_LOW_CONFIDENCE_BIOMETRIC_PERCENT, DEFAULT_MAX_CONSECUTIVE_WORK_DAYS, DEFAULT_MAX_WEEKLY_OVERTIME_HOURS } from '../data/complianceAlerts';
@@ -58,8 +59,9 @@ export function StatutoryGovernancePanel({ editableConfig, pendingRequest, recen
 
       <section className="rounded-xl border border-slate-200 bg-white p-4 text-xs shadow-sm" aria-labelledby="statutory-source-title">
         <h3 id="statutory-source-title" className="text-sm font-bold text-slate-900">Source of these rates</h3>
-        <label className="mt-2 block text-slate-600">Official FBR / EOBI / provincial notification number or URL (required before approval)
-          <input value={editableConfig.sourceReference || ''} onChange={e => update({ sourceReference: e.target.value })} placeholder="e.g. Finance Act 2026, FBR withholding rate card TY2027 — https://www.fbr.gov.pk/..." className="mt-1 w-full rounded border border-slate-300 p-2" />
+        <RequiredNote className="mt-1" />
+        <label className="mt-2 block text-slate-600">Official FBR / EOBI / provincial notification number or URL (required before approval)<RequiredMark />
+          <input aria-required="true" value={editableConfig.sourceReference || ''} onChange={e => update({ sourceReference: e.target.value })} placeholder="e.g. Finance Act 2026, FBR withholding rate card TY2027 — https://www.fbr.gov.pk/..." className="mt-1 w-full rounded border border-slate-300 p-2" />
         </label>
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <label className="cursor-pointer rounded border border-slate-300 px-3 py-1.5 font-semibold text-slate-700 hover:bg-slate-50">Attach notification (PDF/image)

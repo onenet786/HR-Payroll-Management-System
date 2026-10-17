@@ -5,6 +5,7 @@
 
 import { JURISDICTIONS } from '../data/provincialCompliance';
 import { DateField } from './DateField';
+import { RequiredMark, RequiredNote } from './RequiredMark';
 import React, { useState, useEffect, useMemo } from 'react';
 import { empAvatarUrl } from '../utils/avatar';
 import {
@@ -1572,6 +1573,15 @@ export function WebPortal({
       return;
     }
 
+    if (!String(newEmpForm.bankName || '').trim()) {
+      alert('Select the Disbursal Bank. Salaries cannot be paid without it.');
+      return;
+    }
+    if (!(Number(newEmpForm.basicSalary) > 0)) {
+      alert('Enter a basic wage greater than zero.');
+      return;
+    }
+
     const masterErrors = validateEmployeeMasterSelection(newEmpForm, { branches: companyBranches, departments: localDepartments, designations: localDesignations, zones, ucTowns, wageTypes });
     if (masterErrors.length) { alert(`Please correct the employee assignment:\n• ${masterErrors.join('\n• ')}`); return; }
 
@@ -1722,6 +1732,15 @@ export function WebPortal({
 
     if (!isValidPakMobileNumber(editEmpForm.contactNumber)) {
       alert('Mobile Contact must start with +923 followed by exactly 9 digits (e.g. +923214444444).');
+      return;
+    }
+
+    if (!String(editEmpForm.bankName || '').trim()) {
+      alert('Select the Disbursal Bank. Salaries cannot be paid without it.');
+      return;
+    }
+    if (!(Number(editEmpForm.basicSalary) > 0)) {
+      alert('Enter a basic wage greater than zero.');
       return;
     }
 
@@ -2543,7 +2562,7 @@ export function WebPortal({
                     </div>
                     <div className="flex flex-col gap-2 sm:flex-row lg:flex-col">
                       <label className="sr-only" htmlFor="my-security-mfa-code">Six-digit authenticator code</label>
-                      <input id="my-security-mfa-code" aria-describedby="mfa-code-help" value={mfaEnrollmentCode} onChange={event => setMfaEnrollmentCode(event.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" autoComplete="one-time-code" maxLength={6} placeholder="Authenticator code" className="w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm tracking-[0.2em] outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 lg:w-40" />
+                      <input id="my-security-mfa-code" aria-required="true" aria-describedby="mfa-code-help" value={mfaEnrollmentCode} onChange={event => setMfaEnrollmentCode(event.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" autoComplete="one-time-code" maxLength={6} placeholder="Authenticator code" className="w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm tracking-[0.2em] outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 lg:w-40" />
                       <span id="mfa-code-help" className="sr-only">Enter the current six-digit code shown by your authenticator app.</span>
                       <button type="button" disabled={mfaEnrollmentCode.length !== 6} onClick={confirmMfaEnrollment} className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-bold text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50">Confirm MFA</button>
                       <button type="button" onClick={() => { setMfaEnrollment(null); setMfaQrCode(''); setMfaEnrollmentCode(''); setMfaSetupChoice(null); setMfaEnrollmentError(''); }} className="rounded-lg px-3 py-2 text-xs font-semibold text-slate-600 underline hover:text-slate-900">Cancel</button>
@@ -2551,9 +2570,9 @@ export function WebPortal({
                   </div>
                   {mfaEnrollmentError && <p role="alert" className="mt-3 text-xs font-medium text-rose-700">{mfaEnrollmentError}</p>}
                 </div>}
-                {emailMfaEnrollment && <div className="border-t border-amber-200 bg-white/85 p-4"><div className="max-w-xl space-y-3"><h3 className="text-sm font-bold text-slate-900">Confirm email MFA</h3><p className="text-xs text-slate-600">A six-digit setup code was sent to <strong>{emailMfaEnrollment.email}</strong>. Enter it to enable email verification as your MFA method.</p><input value={mfaEmailCode} onChange={event => setMfaEmailCode(event.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" autoComplete="one-time-code" maxLength={6} placeholder="Email verification code" className="w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm tracking-[0.2em]" /><div className="flex gap-2"><button type="button" disabled={mfaEmailCode.length !== 6} onClick={confirmEmailMfaEnrollment} className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-bold text-white disabled:opacity-50">Confirm email MFA</button><button type="button" onClick={() => { setEmailMfaEnrollment(null); setMfaEmailCode(''); setMfaSetupChoice(null); setMfaEnrollmentError(''); }} className="px-2 text-xs font-semibold text-slate-600 underline">Cancel</button></div></div>{mfaEnrollmentError && <p role="alert" className="mt-3 text-xs font-medium text-rose-700">{mfaEnrollmentError}</p>}</div>}
+                {emailMfaEnrollment && <div className="border-t border-amber-200 bg-white/85 p-4"><div className="max-w-xl space-y-3"><h3 className="text-sm font-bold text-slate-900">Confirm email MFA</h3><p className="text-xs text-slate-600">A six-digit setup code was sent to <strong>{emailMfaEnrollment.email}</strong>. Enter it to enable email verification as your MFA method.</p><input aria-label="Email verification code" aria-required="true" value={mfaEmailCode} onChange={event => setMfaEmailCode(event.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" autoComplete="one-time-code" maxLength={6} placeholder="Email verification code" className="w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm tracking-[0.2em]" /><div className="flex gap-2"><button type="button" disabled={mfaEmailCode.length !== 6} onClick={confirmEmailMfaEnrollment} className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-bold text-white disabled:opacity-50">Confirm email MFA</button><button type="button" onClick={() => { setEmailMfaEnrollment(null); setMfaEmailCode(''); setMfaSetupChoice(null); setMfaEnrollmentError(''); }} className="px-2 text-xs font-semibold text-slate-600 underline">Cancel</button></div></div>{mfaEnrollmentError && <p role="alert" className="mt-3 text-xs font-medium text-rose-700">{mfaEnrollmentError}</p>}</div>}
                 {mfaEnabled && <div className="border-t border-emerald-200 bg-white/70 p-4">
-                  {!showMfaRecoveryForm ? <button type="button" onClick={() => setShowMfaRecoveryForm(true)} className="text-xs font-semibold text-slate-700 underline hover:text-rose-700">Lost or replacing your authenticator device? Request a controlled MFA reset.</button> : <div className="max-w-xl space-y-2"><label className="block text-xs font-bold text-slate-800">MFA recovery reason</label><textarea value={mfaRecoveryReason} onChange={event => setMfaRecoveryReason(event.target.value)} maxLength={500} rows={2} placeholder="Describe how your identity can be independently verified." className="w-full rounded-lg border border-slate-300 p-2 text-xs" /><div className="flex gap-2"><button type="button" disabled={mfaRecoverySubmitting} onClick={() => submitMfaRecoveryRequest()} className="rounded-lg bg-rose-700 px-3 py-2 text-xs font-bold text-white disabled:opacity-50">Submit recovery request</button><button type="button" onClick={() => { setShowMfaRecoveryForm(false); setMfaRecoveryError(''); }} className="px-2 text-xs font-semibold text-slate-600 underline">Cancel</button></div>{mfaRecoveryError && <p role="alert" className="text-xs font-medium text-rose-700">{mfaRecoveryError}</p>}</div>}
+                  {!showMfaRecoveryForm ? <button type="button" onClick={() => setShowMfaRecoveryForm(true)} className="text-xs font-semibold text-slate-700 underline hover:text-rose-700">Lost or replacing your authenticator device? Request a controlled MFA reset.</button> : <div className="max-w-xl space-y-2"><label htmlFor="mfa-recovery-reason" className="block text-xs font-bold text-slate-800">MFA recovery reason<RequiredMark /></label><textarea id="mfa-recovery-reason" aria-required="true" value={mfaRecoveryReason} onChange={event => setMfaRecoveryReason(event.target.value)} maxLength={500} rows={2} placeholder="Describe how your identity can be independently verified." className="w-full rounded-lg border border-slate-300 p-2 text-xs" /><div className="flex gap-2"><button type="button" disabled={mfaRecoverySubmitting} onClick={() => submitMfaRecoveryRequest()} className="rounded-lg bg-rose-700 px-3 py-2 text-xs font-bold text-white disabled:opacity-50">Submit recovery request</button><button type="button" onClick={() => { setShowMfaRecoveryForm(false); setMfaRecoveryError(''); }} className="px-2 text-xs font-semibold text-slate-600 underline">Cancel</button></div>{mfaRecoveryError && <p role="alert" className="text-xs font-medium text-rose-700">{mfaRecoveryError}</p>}</div>}
                 </div>}
               </section>
 
@@ -3027,6 +3046,7 @@ export function WebPortal({
                           <div>
                             <h3 className="font-bold text-sm text-indigo-900">Mobile Duty Authorizations</h3>
                             <p className="text-[10px] text-indigo-700">Mobile attendance remains hidden unless an approved assignment is valid for the employee and date.</p>
+                            <RequiredNote className="mt-1" />
                           </div>
                           <form className="grid grid-cols-1 gap-2 md:grid-cols-4" onSubmit={async event => {
                             event.preventDefault();
@@ -3047,12 +3067,12 @@ export function WebPortal({
                             });
                             setMobileDutyForm(previous => ({ ...previous, employeeId: '', instructions: '', assignedLocation: '' }));
                           }}>
-                            <select required value={mobileDutyForm.employeeId} onChange={e => setMobileDutyForm(p => ({ ...p, employeeId: e.target.value }))} className="rounded-lg border border-indigo-200 bg-white p-2 text-xs"><option value="">Select employee *</option>{employees.filter(employee => employee.status === 'Active').map(employee => <option key={employee.id} value={employee.id}>{employee.fullName} ({employee.employeeCode})</option>)}</select>
+                            <select required aria-required="true" aria-label="Mobile duty employee" value={mobileDutyForm.employeeId} onChange={e => setMobileDutyForm(p => ({ ...p, employeeId: e.target.value }))} className="rounded-lg border border-indigo-200 bg-white p-2 text-xs"><option value="">Select employee *</option>{employees.filter(employee => employee.status === 'Active').map(employee => <option key={employee.id} value={employee.id}>{employee.fullName} ({employee.employeeCode})</option>)}</select>
                             <select value={mobileDutyForm.dutyType} onChange={e => setMobileDutyForm(p => ({ ...p, dutyType: e.target.value as MobileDutyType }))} className="rounded-lg border border-indigo-200 bg-white p-2 text-xs">{(['Work from home', 'Out of station', 'Client visit', 'Market / field duty', 'Official travel', 'Direct reporting to worksite', 'Emergency duty'] as MobileDutyType[]).map(type => <option key={type}>{type}</option>)}</select>
-                            <DateField required value={mobileDutyForm.validFrom} onChange={e => setMobileDutyForm(p => ({ ...p, validFrom: e.target.value }))} className="rounded-lg border border-indigo-200 bg-white p-2 text-xs" aria-label="Mobile duty valid from" />
-                            <DateField required value={mobileDutyForm.validTo} onChange={e => setMobileDutyForm(p => ({ ...p, validTo: e.target.value }))} className="rounded-lg border border-indigo-200 bg-white p-2 text-xs" aria-label="Mobile duty valid to" />
+                            <DateField required aria-required="true" value={mobileDutyForm.validFrom} onChange={e => setMobileDutyForm(p => ({ ...p, validFrom: e.target.value }))} className="rounded-lg border border-indigo-200 bg-white p-2 text-xs" aria-label="Mobile duty valid from" />
+                            <DateField required aria-required="true" value={mobileDutyForm.validTo} onChange={e => setMobileDutyForm(p => ({ ...p, validTo: e.target.value }))} className="rounded-lg border border-indigo-200 bg-white p-2 text-xs" aria-label="Mobile duty valid to" />
                             <input value={mobileDutyForm.assignedLocation} onChange={e => setMobileDutyForm(p => ({ ...p, assignedLocation: e.target.value }))} placeholder="Assigned client/location (optional)" className="rounded-lg border border-indigo-200 bg-white p-2 text-xs" />
-                            <input required value={mobileDutyForm.instructions} onChange={e => setMobileDutyForm(p => ({ ...p, instructions: e.target.value }))} placeholder="Instructions / approval reason *" className="rounded-lg border border-indigo-200 bg-white p-2 text-xs md:col-span-2" />
+                            <input required aria-required="true" aria-label="Mobile duty instructions" value={mobileDutyForm.instructions} onChange={e => setMobileDutyForm(p => ({ ...p, instructions: e.target.value }))} placeholder="Instructions / approval reason *" className="rounded-lg border border-indigo-200 bg-white p-2 text-xs md:col-span-2" />
                             <label className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 text-[10px] text-slate-700"><input type="checkbox" checked={mobileDutyForm.allowFieldVisits} onChange={e => setMobileDutyForm(p => ({ ...p, allowFieldVisits: e.target.checked }))} /> Allow multiple field visits</label>
                             <button type="submit" className="rounded-lg bg-indigo-700 px-4 py-2 text-xs font-bold text-white md:col-span-4">Assign Mobile Duty</button>
                           </form>
@@ -4008,6 +4028,7 @@ export function WebPortal({
                     <div>
                       <h3 className="font-bold text-slate-900 text-sm uppercase tracking-wide">One-time payroll adjustments</h3>
                       <p className="text-xs text-slate-500">Period-specific items require approval by a different payroll user and can be consumed by one payroll run only.</p>
+                      <RequiredNote className="mt-1" />
                     </div>
                     <form className="grid grid-cols-1 md:grid-cols-6 gap-3" onSubmit={async event => {
                       event.preventDefault();
@@ -4035,15 +4056,15 @@ export function WebPortal({
                       setAdjustmentReason('');
                       showToast('Adjustment submitted for independent approval.');
                     }}>
-                      <select aria-label="Adjustment employee" value={adjustmentEmployeeId} onChange={e => setAdjustmentEmployeeId(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-2 text-xs bg-white">
-                        <option value="">Select employee</option>
+                      <select required aria-required="true" aria-label="Adjustment employee" value={adjustmentEmployeeId} onChange={e => setAdjustmentEmployeeId(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-2 text-xs bg-white">
+                        <option value="">Select employee *</option>
                         {employees.map(employee => <option key={employee.id} value={employee.id}>{employee.employeeCode} — {employee.fullName}</option>)}
                       </select>
                       <select aria-label="Adjustment type" value={adjustmentType} onChange={e => setAdjustmentType(e.target.value as PayrollAdjustmentType)} className="border border-slate-300 rounded-lg px-3 py-2 text-xs bg-white">
                         {(['Bonus', 'Commission', 'Arrears', 'Reimbursement', 'Deduction', 'Tax Adjustment'] as PayrollAdjustmentType[]).map(type => <option key={type}>{type}</option>)}
                       </select>
-                      <input aria-label="Adjustment amount" type="number" min="1" step="0.01" value={adjustmentAmount} onChange={e => setAdjustmentAmount(e.target.value)} placeholder="Amount (PKR)" className="border border-slate-300 rounded-lg px-3 py-2 text-xs" />
-                      <input aria-label="Adjustment reason" value={adjustmentReason} onChange={e => setAdjustmentReason(e.target.value)} placeholder="Reason / reference" className="border border-slate-300 rounded-lg px-3 py-2 text-xs md:col-span-2" />
+                      <input required aria-required="true" aria-label="Adjustment amount" type="number" min="1" step="0.01" value={adjustmentAmount} onChange={e => setAdjustmentAmount(e.target.value)} placeholder="Amount (PKR) *" className="border border-slate-300 rounded-lg px-3 py-2 text-xs" />
+                      <input required aria-required="true" aria-label="Adjustment reason" value={adjustmentReason} onChange={e => setAdjustmentReason(e.target.value)} placeholder="Reason / reference *" className="border border-slate-300 rounded-lg px-3 py-2 text-xs md:col-span-2" />
                       <button type="submit" className="bg-indigo-700 hover:bg-indigo-800 text-white font-bold text-xs px-3 py-2 rounded-lg">Submit for approval</button>
                       {!['Reimbursement', 'Deduction', 'Tax Adjustment'].includes(adjustmentType) && <label className="md:col-span-6 flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" checked={adjustmentTaxable} onChange={e => setAdjustmentTaxable(e.target.checked)} /> Include in taxable salary</label>}
                     </form>
@@ -4518,12 +4539,13 @@ export function WebPortal({
                       <div>
                         <h3 id="mfa-recovery-requests-title" className="text-xs font-bold uppercase tracking-wide text-slate-800">MFA recovery requests</h3>
                         <p className="mt-1 text-xs text-slate-500">Approve only after verifying the employee identity through an independent channel.</p>
+                        <RequiredNote className="mt-1" />
                       </div>
                       <span className={`rounded px-2 py-1 text-[10px] font-bold ${mfaRecoveryRequests.length ? 'bg-rose-100 text-rose-800' : 'bg-slate-100 text-slate-600'}`}>{mfaRecoveryRequests.length} pending</span>
                     </div>
                     <div className="mt-3 grid gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto]">
-                      <select aria-label="User needing MFA recovery" value={adminRecoveryTargetId} onChange={event => setAdminRecoveryTargetId(event.target.value)} className="rounded border border-slate-300 bg-white px-2 py-1.5 text-xs"><option value="">Select user for recovery</option>{users.filter(user => user.mfaEnabled).map(user => <option key={user.id} value={user.id}>{user.username}</option>)}</select>
-                      <input aria-label="Administrator recovery reason" value={adminRecoveryReason} onChange={event => setAdminRecoveryReason(event.target.value)} maxLength={500} placeholder="Identity-verification reason" className="rounded border border-slate-300 px-2 py-1.5 text-xs" />
+                      <select aria-required="true" aria-label="User needing MFA recovery" value={adminRecoveryTargetId} onChange={event => setAdminRecoveryTargetId(event.target.value)} className="rounded border border-slate-300 bg-white px-2 py-1.5 text-xs"><option value="">Select user for recovery *</option>{users.filter(user => user.mfaEnabled).map(user => <option key={user.id} value={user.id}>{user.username}</option>)}</select>
+                      <input aria-required="true" aria-label="Administrator recovery reason" value={adminRecoveryReason} onChange={event => setAdminRecoveryReason(event.target.value)} maxLength={500} placeholder="Identity-verification reason (min 10 characters) *" className="rounded border border-slate-300 px-2 py-1.5 text-xs" />
                       <button type="button" disabled={!adminRecoveryTargetId || adminRecoveryReason.trim().length < 10 || mfaRecoverySubmitting} onClick={() => submitMfaRecoveryRequest(adminRecoveryTargetId, adminRecoveryReason)} className="rounded bg-amber-700 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50">Request reset</button>
                     </div>
                     {mfaRecoveryRequests.length === 0 ? (
@@ -4668,21 +4690,22 @@ export function WebPortal({
                             alert(message);
                           }
                         }} className="space-y-3">
+                          <RequiredNote />
                           <div>
-                            <label htmlFor="username" className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Username:</label>
+                            <label htmlFor="username" className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Username:<RequiredMark /></label>
                             <input id="username" name="username" type="text" required placeholder="e.g. jahanzaib.hr" className="w-full text-xs p-2 border border-slate-300 rounded focus:ring-1 focus:ring-emerald-500 focus:outline-none" />
                           </div>
                           <div>
-                            <label htmlFor="email" className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Email:</label>
+                            <label htmlFor="email" className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Email:<RequiredMark /></label>
                             <input id="email" name="email" type="email" required placeholder="e.g. jahanzaib@binishaq.com" className="w-full text-xs p-2 border border-slate-300 rounded focus:ring-1 focus:ring-emerald-500 focus:outline-none" />
                           </div>
                           <div>
-                            <label htmlFor="password" className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Password:</label>
+                            <label htmlFor="password" className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Password:<RequiredMark /></label>
                             <input id="password" name="password" type="password" required placeholder="Assign system password" className="w-full text-xs p-2 border border-slate-300 rounded focus:ring-1 focus:ring-emerald-500 focus:outline-none" />
                           </div>
                           <div>
-                            <label htmlFor="roleId" className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Assign Initial Role:</label>
-                            <select id="roleId" name="roleId" className="w-full text-xs p-2 bg-white border border-slate-300 rounded focus:ring-1">
+                            <label htmlFor="roleId" className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Assign Initial Role:<RequiredMark /></label>
+                            <select id="roleId" name="roleId" required aria-required="true" className="w-full text-xs p-2 bg-white border border-slate-300 rounded focus:ring-1">
                               {roles.map(r => (
                                 <option key={r.id} value={r.id}>{r.name}</option>
                               ))}
@@ -4738,8 +4761,9 @@ export function WebPortal({
                           form.reset();
                           alert(`Success: Role "${roleName}" has been created.`);
                         }} className="space-y-3">
+                          <RequiredNote />
                           <div>
-                            <label htmlFor="roleName" className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Role Name:</label>
+                            <label htmlFor="roleName" className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Role Name:<RequiredMark /></label>
                             <input id="roleName" name="roleName" type="text" required placeholder="e.g. Auditor" className="w-full text-xs p-2 border border-slate-300 rounded focus:ring-1 focus:ring-emerald-500 focus:outline-none" />
                           </div>
                           <div>
@@ -4804,20 +4828,21 @@ export function WebPortal({
                           <div>
                             <h3 id="edit-user-title" className="text-lg font-bold text-slate-900">Edit User Account</h3>
                             <p className="mt-1 text-xs text-slate-500">Link this login to an employee for mobile attendance, leave, and payslips.</p>
+                            <RequiredNote className="mt-1" />
                           </div>
                           <button type="button" onClick={() => setEditingUser(null)} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Close edit user"><X size={18} /></button>
                         </div>
 
                         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                          <label className="text-xs font-semibold text-slate-700">Username
+                          <label className="text-xs font-semibold text-slate-700">Username<RequiredMark />
                             <input value={editingUser.username} onChange={event => setEditingUser({ ...editingUser, username: event.target.value })} required className="mt-1 w-full rounded-lg border border-slate-300 p-2.5 text-sm" />
                           </label>
                           <label className="text-xs font-semibold text-slate-700">Authentication Email
                             <input value={editingUser.email} readOnly className="mt-1 w-full cursor-not-allowed rounded-lg border border-slate-200 bg-slate-100 p-2.5 text-sm text-slate-500" />
                             <span className="mt-1 block text-[10px] font-normal text-slate-400">Email is unique and read-only for identity security.</span>
                           </label>
-                          <label className="text-xs font-semibold text-slate-700">Role
-                            <select value={editingUser.roleId} onChange={event => setEditingUser({ ...editingUser, roleId: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 bg-white p-2.5 text-sm">
+                          <label className="text-xs font-semibold text-slate-700">Role<RequiredMark />
+                            <select required aria-required="true" value={editingUser.roleId} onChange={event => setEditingUser({ ...editingUser, roleId: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 bg-white p-2.5 text-sm">
                               {roles.map(role => <option key={role.id} value={role.id}>{role.name}</option>)}
                             </select>
                           </label>
@@ -5055,6 +5080,7 @@ export function WebPortal({
               </div>
 
               <form onSubmit={handleCreateEmployeeSubmit} className="p-5 md:p-6 overflow-y-auto space-y-4 text-xs select-none flex-1 bg-slate-50/50">
+                <RequiredNote className="-mb-1" />
                 {/* SECTION 1: PERSONAL & CORE DETAILS */}
                 <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-2xs space-y-3.5">
                   <h3 className="font-bold text-slate-800 text-xs uppercase tracking-wider flex items-center text-emerald-600 border-b border-slate-100 pb-2">Personal &amp; Core Details</h3>
@@ -5062,7 +5088,7 @@ export function WebPortal({
                   <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4 items-start">
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
-                        <span>Full Name:</span>
+                        <span>Full Name:<RequiredMark /></span>
                       </label>
                       <input
                         type="text" required
@@ -5075,7 +5101,7 @@ export function WebPortal({
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
-                        <span>Official Email ID:</span>
+                        <span>Official Email ID:<RequiredMark /></span>
                       </label>
                       <input
                         type="email" required
@@ -5114,7 +5140,7 @@ export function WebPortal({
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
-                        <span>Pakistan CNIC:</span>
+                        <span>Pakistan CNIC:<RequiredMark /></span>
                       </label>
                       <input
                         type="text" required
@@ -5202,7 +5228,7 @@ export function WebPortal({
                   <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4 items-start">
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
-                        <span>Mobile Contact:</span>
+                        <span>Mobile Contact:<RequiredMark /></span>
                         <span className={`text-[10px] font-mono ${isValidPakMobileNumber(newEmpForm.contactNumber) ? 'text-emerald-600 font-bold' : 'text-slate-400'}`}>
                           {isValidPakMobileNumber(newEmpForm.contactNumber) ? '✓ Valid (9 digits)' : `${Math.max(0, 9 - (newEmpForm.contactNumber.replace(/\D/g, '').slice(3).length))} digits left`}
                         </span>
@@ -5256,7 +5282,7 @@ export function WebPortal({
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
-                        <span>Date of Birth:</span>
+                        <span>Date of Birth:<RequiredMark /></span>
                       </label>
                       <DateField required
                         aria-label="Date of Birth"
@@ -5353,9 +5379,10 @@ export function WebPortal({
                   <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3 items-start">
                     <div className="min-w-0">
                       <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
-                        <span>Assigned Branch:</span>
+                        <span>Assigned Branch:<RequiredMark /></span>
                       </label>
                       <select
+                        required aria-required="true"
                         aria-label="Assigned Branch"
                         value={newEmpForm.branchId}
                         onChange={(e) => handleAddBranchChange(e.target.value)}
@@ -5369,9 +5396,10 @@ export function WebPortal({
                     </div>
                     <div className="min-w-0">
                       <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
-                        <span>Department:</span>
+                        <span>Department:<RequiredMark /></span>
                       </label>
                       <select
+                        required aria-required="true"
                         aria-label="Department"
                         value={newEmpForm.departmentId}
                         onChange={(e) => handleAddDeptChange(e.target.value)}
@@ -5385,9 +5413,10 @@ export function WebPortal({
                     </div>
                     <div className="min-w-0 sm:col-span-2 lg:col-span-1">
                       <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
-                        <span>Designation:</span>
+                        <span>Designation:<RequiredMark /></span>
                       </label>
                       <select
+                        required aria-required="true"
                         aria-label="Designation"
                         value={newEmpForm.designationId}
                         onChange={(e) => setNewEmpForm({ ...newEmpForm, designationId: e.target.value })}
@@ -5467,9 +5496,10 @@ export function WebPortal({
                   <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4 items-start">
                     <div className="min-w-0">
                       <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
-                        <span>Wage Type:</span>
+                        <span>Wage Type:<RequiredMark /></span>
                       </label>
                       <select
+                        required aria-required="true"
                         aria-label="Wage Type"
                         value={newEmpForm.wageTypeId}
                         onChange={(e) => setNewEmpForm({ ...newEmpForm, wageTypeId: e.target.value })}
@@ -5482,7 +5512,7 @@ export function WebPortal({
                     <div>
                       <div className="flex items-center justify-between mb-1 min-h-[1.25rem]">
                         <label className="font-bold text-slate-700 font-sans text-xs">
-                          <span>{newEmpTakeHome ? 'Target Take Home (Net PKR):' : 'Basic Monthly Wage / Daily Rate (PKR):'}</span>
+                          <span>{newEmpTakeHome ? 'Target Take Home (Net PKR):' : 'Basic Monthly Wage / Daily Rate (PKR):'}<RequiredMark /></span>
                         </label>
                         <label className="flex items-center gap-1.5 cursor-pointer select-none bg-emerald-50 hover:bg-emerald-100/80 px-2 py-0.5 rounded border border-emerald-200 text-emerald-800 transition-colors" title="Check to enter target take-home pay and auto-calculate gross and FBR allowances">
                           <input
@@ -5531,7 +5561,7 @@ export function WebPortal({
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
-                        <span>Disbursal Bank:</span>
+                        <span>Disbursal Bank:<RequiredMark /></span>
                       </label>
                       <div className="flex space-x-1.5 items-center h-9">
                         <select
@@ -5566,7 +5596,7 @@ export function WebPortal({
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
-                        <span>Account Number:</span>
+                        <span>Account Number:<RequiredMark /></span>
                       </label>
                       <input
                         type="text" required
@@ -5648,7 +5678,7 @@ export function WebPortal({
                   <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4 items-start">
                     <div className="sm:col-span-2">
                       <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
-                        <span>PKR IBAN Number:</span>
+                        <span>PKR IBAN Number:<RequiredMark /></span>
                       </label>
                       <input
                         type="text" required
@@ -5835,6 +5865,7 @@ export function WebPortal({
               </div>
 
               <form onSubmit={handleEditEmployeeSubmit} className="p-5 md:p-6 overflow-y-auto space-y-4 text-xs select-none flex-1 bg-slate-50/50">
+                <RequiredNote className="-mb-1" />
                 {/* SECTION 1: PERSONAL & CORE DETAILS */}
                 <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-2xs space-y-3.5">
                   <h3 className="font-bold text-slate-800 text-xs uppercase tracking-wider flex items-center text-indigo-600 border-b border-slate-100 pb-2">Personal &amp; Core Details</h3>
@@ -5842,7 +5873,7 @@ export function WebPortal({
                   <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4 items-start">
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
-                        <span>Full Name:</span>
+                        <span>Full Name:<RequiredMark /></span>
                       </label>
                       <input
                         type="text" required
@@ -5855,7 +5886,7 @@ export function WebPortal({
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
-                        <span>Official Email ID:</span>
+                        <span>Official Email ID:<RequiredMark /></span>
                       </label>
                       <input
                         type="email" required
@@ -5894,7 +5925,7 @@ export function WebPortal({
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
-                        <span>Pakistan CNIC:</span>
+                        <span>Pakistan CNIC:<RequiredMark /></span>
                       </label>
                       <input
                         type="text" required
@@ -5982,7 +6013,7 @@ export function WebPortal({
                   <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4 items-start">
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
-                        <span>Mobile Contact:</span>
+                        <span>Mobile Contact:<RequiredMark /></span>
                         <span className={`text-[10px] font-mono ${isValidPakMobileNumber(editEmpForm.contactNumber) ? 'text-indigo-600 font-bold' : 'text-slate-400'}`}>
                           {isValidPakMobileNumber(editEmpForm.contactNumber) ? '✓ Valid (9 digits)' : `${Math.max(0, 9 - (editEmpForm.contactNumber.replace(/\D/g, '').slice(3).length))} digits left`}
                         </span>
@@ -6036,7 +6067,7 @@ export function WebPortal({
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
-                        <span>Date of Birth:</span>
+                        <span>Date of Birth:<RequiredMark /></span>
                       </label>
                       <DateField required
                         aria-label="Date of Birth"
@@ -6133,9 +6164,10 @@ export function WebPortal({
                   <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3 items-start">
                     <div className="min-w-0">
                       <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
-                        <span>Assigned Branch:</span>
+                        <span>Assigned Branch:<RequiredMark /></span>
                       </label>
                       <select
+                        required aria-required="true"
                         aria-label="Assigned Branch"
                         value={editEmpForm.branchId}
                         onChange={(e) => handleEditBranchChange(e.target.value)}
@@ -6149,9 +6181,10 @@ export function WebPortal({
                     </div>
                     <div className="min-w-0">
                       <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
-                        <span>Department:</span>
+                        <span>Department:<RequiredMark /></span>
                       </label>
                       <select
+                        required aria-required="true"
                         aria-label="Department"
                         value={editEmpForm.departmentId}
                         onChange={(e) => handleEditDeptChange(e.target.value)}
@@ -6171,9 +6204,10 @@ export function WebPortal({
                     </div>
                     <div className="min-w-0 sm:col-span-2 lg:col-span-1">
                       <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
-                        <span>Designation:</span>
+                        <span>Designation:<RequiredMark /></span>
                       </label>
                       <select
+                        required aria-required="true"
                         aria-label="Designation"
                         value={editEmpForm.designationId}
                         onChange={(e) => setEditEmpForm({ ...editEmpForm, designationId: e.target.value })}
@@ -6258,9 +6292,10 @@ export function WebPortal({
                   <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4 items-start">
                     <div className="min-w-0">
                       <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
-                        <span>Wage Type:</span>
+                        <span>Wage Type:<RequiredMark /></span>
                       </label>
                       <select
+                        required aria-required="true"
                         aria-label="Wage Type"
                         value={editEmpForm.wageTypeId}
                         onChange={(e) => setEditEmpForm({ ...editEmpForm, wageTypeId: e.target.value })}
@@ -6274,7 +6309,7 @@ export function WebPortal({
                     <div>
                       <div className="flex items-center justify-between mb-1 min-h-[1.25rem]">
                         <label className="font-bold text-slate-700 font-sans text-xs">
-                          <span>{editEmpTakeHome ? 'Target Take Home (Net PKR):' : 'Basic Monthly Wage / Daily Rate (PKR):'}</span>
+                          <span>{editEmpTakeHome ? 'Target Take Home (Net PKR):' : 'Basic Monthly Wage / Daily Rate (PKR):'}<RequiredMark /></span>
                         </label>
                         <label className="flex items-center gap-1.5 cursor-pointer select-none bg-indigo-50 hover:bg-indigo-100/80 px-2 py-0.5 rounded border border-indigo-200 text-indigo-800 transition-colors" title="Check to enter target take-home pay and auto-calculate gross and FBR allowances">
                           <input
@@ -6323,7 +6358,7 @@ export function WebPortal({
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
-                        <span>Disbursal Bank:</span>
+                        <span>Disbursal Bank:<RequiredMark /></span>
                       </label>
                       <div className="flex space-x-1.5 items-center h-9">
                         <select
@@ -6358,7 +6393,7 @@ export function WebPortal({
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
-                        <span>Account Number:</span>
+                        <span>Account Number:<RequiredMark /></span>
                       </label>
                       <input
                         type="text" required
@@ -6440,7 +6475,7 @@ export function WebPortal({
                   <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4 items-start">
                     <div className="sm:col-span-2">
                       <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
-                        <span>PKR IBAN Number:</span>
+                        <span>PKR IBAN Number:<RequiredMark /></span>
                       </label>
                       <input
                         type="text" required
@@ -6657,16 +6692,17 @@ export function WebPortal({
                 </div>
 
                 <div className="space-y-3">
+                  <RequiredNote />
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <label className="block font-bold text-slate-700">Separation type:
                       <select value={settlementType} onChange={event => setSettlementType(event.target.value as GratuitySettlement['separationType'])} className="mt-1 w-full rounded border border-slate-300 p-2 font-normal"><option>Resignation</option><option>Termination</option><option>Retirement</option><option>Death</option><option>Redundancy</option></select>
                     </label>
-                    <label className="block font-bold text-slate-700">Effective / last working date:
-                      <DateField value={settlementDate} onChange={event => setSettlementDate(event.target.value)} className="mt-1 w-full rounded border border-slate-300 p-2 font-normal" />
+                    <label className="block font-bold text-slate-700">Effective / last working date:<RequiredMark />
+                      <DateField aria-required="true" value={settlementDate} onChange={event => setSettlementDate(event.target.value)} className="mt-1 w-full rounded border border-slate-300 p-2 font-normal" />
                     </label>
                   </div>
-                  <label className="block font-bold text-slate-700">Separation reason / approval note:
-                    <textarea value={settlementReason} onChange={event => setSettlementReason(event.target.value)} rows={2} placeholder="Required for audit and final settlement" className="mt-1 w-full rounded border border-slate-300 p-2 font-normal" />
+                  <label className="block font-bold text-slate-700">Separation reason / approval note:<RequiredMark />
+                    <textarea aria-required="true" value={settlementReason} onChange={event => setSettlementReason(event.target.value)} rows={2} placeholder="Required for audit and final settlement" className="mt-1 w-full rounded border border-slate-300 p-2 font-normal" />
                   </label>
                   <label className="block font-bold text-slate-700">Notice pay days:
                     <input type="number" min="0" max="180" value={settlementNoticeDays} onChange={event => setSettlementNoticeDays(Number(event.target.value))} className="mt-1 w-full rounded border border-slate-300 p-2 font-mono font-normal" />
@@ -7099,8 +7135,9 @@ export function WebPortal({
               </div>
 
               <form onSubmit={handleCreateAttendanceSubmit} className="p-6 space-y-4 text-slate-700">
+                <RequiredNote className="-mt-1" />
                 <div>
-                  <label className="block font-bold mb-1 text-slate-650">Select Employee:</label>
+                  <label className="block font-bold mb-1 text-slate-650">Select Employee:<RequiredMark /></label>
                   <select
                     aria-label="Select Employee"
                     value={newAttendanceForm.employeeId}
@@ -7117,7 +7154,7 @@ export function WebPortal({
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block font-bold mb-1 text-slate-650">Date:</label>
+                    <label className="block font-bold mb-1 text-slate-650">Date:<RequiredMark /></label>
                     <DateField required
                       aria-label="Attendance Date"
                       value={newAttendanceForm.date}
@@ -7221,8 +7258,9 @@ export function WebPortal({
               </div>
 
               <form onSubmit={handleCreateLeaveSubmit} className="p-6 space-y-4 text-slate-700">
+                <RequiredNote className="-mt-1" />
                 <div>
-                  <label className="block font-bold mb-1 text-slate-650">Select Employee:</label>
+                  <label className="block font-bold mb-1 text-slate-650">Select Employee:<RequiredMark /></label>
                   <select
                     aria-label="Select Employee for Leave"
                     value={newLeaveForm.employeeId}
@@ -7257,7 +7295,7 @@ export function WebPortal({
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block font-bold mb-1 text-slate-655">Start Date:</label>
+                    <label className="block font-bold mb-1 text-slate-655">Start Date:<RequiredMark /></label>
                     <DateField required
                       aria-label="Leave Start Date"
                       value={newLeaveForm.startDate}
@@ -7266,7 +7304,7 @@ export function WebPortal({
                     />
                   </div>
                   <div>
-                    <label className="block font-bold mb-1 text-slate-655">End Date:</label>
+                    <label className="block font-bold mb-1 text-slate-655">End Date:<RequiredMark /></label>
                     <DateField required
                       aria-label="Leave End Date"
                       value={newLeaveForm.endDate}
@@ -7277,7 +7315,7 @@ export function WebPortal({
                 </div>
 
                 <div>
-                  <label className="block font-bold mb-1 text-slate-650">Reason / Description:</label>
+                  <label className="block font-bold mb-1 text-slate-650">Reason / Description:<RequiredMark /></label>
                   <textarea required
                     aria-label="Reason / Description"
                     rows={3}

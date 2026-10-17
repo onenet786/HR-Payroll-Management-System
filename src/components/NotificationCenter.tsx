@@ -7,6 +7,7 @@ import React, { useState } from 'react';
 import { Bell, BellOff, Plus, CheckCheck, Trash2, X } from 'lucide-react';
 import { AppNotification, Employee } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
+import { RequiredMark, RequiredNote } from './RequiredMark';
 
 interface NotificationCenterProps {
   notifications: AppNotification[];
@@ -347,6 +348,7 @@ export function NotificationCenter({
                 </button>
               </div>
 
+              <RequiredNote />
               <div className="space-y-3.5">
                 <div>
                   <label htmlFor="notif-type" className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
@@ -419,10 +421,11 @@ export function NotificationCenter({
 
                 <div>
                   <label htmlFor="notif-title" className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
-                    Title *
+                    Title<RequiredMark />
                   </label>
                   <input
                     id="notif-title"
+                    aria-required="true"
                     value={form.title}
                     onChange={e => setForm(p => ({ ...p, title: e.target.value }))}
                     placeholder="Notification title..."
@@ -432,10 +435,11 @@ export function NotificationCenter({
 
                 <div>
                   <label htmlFor="notif-message" className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
-                    Message *
+                    Message<RequiredMark />
                   </label>
                   <textarea
                     id="notif-message"
+                    aria-required="true"
                     value={form.message}
                     onChange={e => setForm(p => ({ ...p, message: e.target.value }))}
                     rows={3}

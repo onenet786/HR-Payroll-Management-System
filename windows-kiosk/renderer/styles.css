@@ -1274,6 +1274,9 @@ body {
 .form-input:focus { border-color: var(--em); }
 .form-input::placeholder { color: var(--t4); }
 .form-help { color: var(--t3); font-size: 11px; line-height: 1.45; }
+/* Required-field asterisk: shown after the label of every field that must be filled before saving. */
+.req { color: #fb7185; font-weight: 800; margin-left: 2px; }
+.req-note { margin-bottom: -8px; }
 select.form-input { cursor: pointer; }
 select.form-input option { background: #071426; color: var(--t1); }
 

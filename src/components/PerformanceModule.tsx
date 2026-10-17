@@ -5,6 +5,7 @@
 
 import React, { useState } from 'react';
 import { DateField } from './DateField';
+import { RequiredMark, RequiredNote } from './RequiredMark';
 import { Plus, ChevronDown, ChevronUp } from 'lucide-react';
 import { PerformanceReview, KpiScore, Employee, SalaryRevision } from '../types';
 import { empAvatarUrl } from '../utils/avatar';
@@ -353,18 +354,19 @@ export function PerformanceModule({ reviews, employees, currentUserAccount, canM
             <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
               className="bg-white border border-slate-200 rounded-2xl w-full max-w-3xl p-6 space-y-5 my-8">
               <h3 className="text-base font-bold text-slate-900">New Performance Review</h3>
+              <RequiredNote />
 
               <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <label htmlFor="perf-employee" className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Employee *</label>
-                  <select id="perf-employee" value={form.employeeId} onChange={e => setForm(p => ({ ...p, employeeId: e.target.value }))}
+                  <label htmlFor="perf-employee" className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Employee<RequiredMark /></label>
+                  <select id="perf-employee" aria-required="true" value={form.employeeId} onChange={e => setForm(p => ({ ...p, employeeId: e.target.value }))}
                     className="w-full bg-white border border-slate-200 text-slate-900 text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500">
                     {employees.filter(e => e.status === 'Active').map(e => <option key={e.id} value={e.id}>{e.fullName}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label htmlFor="perf-period" className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Review Period</label>
-                  <select id="perf-period" value={form.period} onChange={e => setForm(p => ({ ...p, period: e.target.value }))}
+                  <label htmlFor="perf-period" className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Review Period<RequiredMark /></label>
+                  <select id="perf-period" aria-required="true" value={form.period} onChange={e => setForm(p => ({ ...p, period: e.target.value }))}
                     className="w-full bg-white border border-slate-200 text-slate-900 text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500">
                     {PERIODS.map(p => <option key={p} value={p}>{p}</option>)}
                   </select>
@@ -464,8 +466,8 @@ export function PerformanceModule({ reviews, employees, currentUserAccount, canM
               <div className="flex gap-3">
                 <button onClick={() => setShowForm(false)}
                   className="flex-1 bg-white hover:bg-slate-100 text-slate-900 text-sm font-bold py-2.5 rounded-xl transition">Cancel</button>
-                <button onClick={handleSave}
-                  className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold py-2.5 rounded-xl transition">Submit Review</button>
+                <button onClick={handleSave} disabled={!form.employeeId || !form.period}
+                  className="flex-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-sm font-bold py-2.5 rounded-xl transition">Submit Review</button>
               </div>
             </motion.div>
           </motion.div>
