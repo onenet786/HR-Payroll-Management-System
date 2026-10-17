@@ -68,6 +68,8 @@ const el = {
   pillOnline:     id('pillOnline'),
   pillSync:       id('pillSync'),
   settingsBtn:    id('settingsBtn'),
+  regBanner:      id('regBanner'),
+  regBannerBtn:   id('regBannerBtn'),
   exitBtn:        id('exitBtn'),
   modeNav:        id('modeNav'),
   codeModeBtn:    id('codeModeBtn'),
@@ -2143,6 +2145,7 @@ async function performSync() {
   try {
     const { report } = await api.sync();
     kioskState = await api.getState();
+    updateRegistrationBanner();
     applyModeSecurity();
     const errs = report.errors?.length || 0;
     el.syncStatus.textContent = report.notRegistered
@@ -2206,8 +2209,13 @@ function openSettings() {
   el.settingsOverlay.classList.remove('hidden');
 }
 
+function updateRegistrationBanner() {
+  el.regBanner?.classList.toggle('hidden', kioskState?.deviceRegistration?.registered !== false);
+}
+
 function renderRegistration(registration) {
   const registered = !!registration?.registered;
+  updateRegistrationBanner();
   el.stRegStatus.textContent = registered
     ? `Registered as "${registration.name}" on ${new Date(registration.registeredAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })} with ${registration.portalUrl}.`
     : `Not registered. This kiosk cannot download employees or upload punches until it is registered with ${registration?.portalUrl || 'the server'}.`;
@@ -2501,6 +2509,10 @@ function bindEvents() {
 
   // Settings
   el.settingsBtn.addEventListener('click', openSettings);
+  el.regBannerBtn?.addEventListener('click', () => {
+    openSettings();
+    el.stRegEmail?.focus();
+  });
   el.settingsClose.addEventListener('click', closeSettings);
   el.stSave.addEventListener('click', saveSettings);
   el.stClearAttendanceCache.addEventListener('click', clearLocalAttendanceCache);
@@ -2686,6 +2698,7 @@ async function boot() {
 
   try {
     kioskState = await api.getState();
+    updateRegistrationBanner();
 
     // Terminal info
     const branchName = kioskState.assignedBranch?.name || 'Branch not assigned';

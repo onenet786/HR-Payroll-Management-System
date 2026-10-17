@@ -64,6 +64,12 @@
       </div>
     </header>
 
+    <!-- Shown until the kiosk has a device key: without it no employees or faces download. -->
+    <div class="reg-banner hidden" id="regBanner" role="alert">
+      <span><b>This kiosk is not registered.</b> Employees and enrolled faces cannot download and punches cannot upload, so every face shows as not enrolled.</span>
+      <button class="btn btn-primary" id="regBannerBtn" type="button">Register now</button>
+    </div>
+
     <!-- ═══ STATS BAR ══════════════════════════════════════════════════════ -->
     <div class="stats-bar">
       <div class="stat-chip">
