@@ -73,7 +73,7 @@ export function NotificationCenter({
     .filter(n => filterPriority === 'All' || n.priority === filterPriority)
     .filter(n => !showUnreadOnly || !isRead(n))
     .filter(n => !n.targetEmployeeId || !currentEmployeeId || n.targetEmployeeId === currentEmployeeId)
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
 
   const unreadCount = notifications.filter(n =>
     (!n.targetEmployeeId || !currentEmployeeId || n.targetEmployeeId === currentEmployeeId) && !isRead(n)

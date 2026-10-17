@@ -1,7 +1,7 @@
 import type { Payslip } from '../types';
 
 export function bankAdvicePayload(payslips: Payslip[]): string {
-  return JSON.stringify(payslips.slice().sort((a, b) => a.id.localeCompare(b.id)).map(item => ({
+  return JSON.stringify(payslips.slice().sort((a, b) => (a.id || '').localeCompare(b.id || '')).map(item => ({
     id: item.id, employeeId: item.employeeId, employeeCode: item.employeeCode,
     bankName: item.bankName, iban: (item.iban || '').replace(/\s/g, '').toUpperCase(),
     bankAccountNumber: item.bankAccountNumber, netSalary: item.netSalary,

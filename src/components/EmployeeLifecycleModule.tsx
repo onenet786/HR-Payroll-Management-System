@@ -32,11 +32,11 @@ export function EmployeeLifecycleModule({ employees, branches, departments, desi
   const selected = employees.find(employee => employee.id === form.employeeId);
   const destinationDepartments = departments.filter(item => item.branchId === (form.newBranchId || selected?.branchId));
   const destinationDesignations = designations.filter(item => item.departmentId === (form.newDepartmentId || selected?.departmentId));
-  const pending = lifecycleRequests.filter(item => item.status === 'Pending').sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const pending = lifecycleRequests.filter(item => item.status === 'Pending').sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
   const decided = lifecycleRequests.filter(item => item.status !== 'Pending').sort((a, b) => (b.reviewedAt || '').localeCompare(a.reviewedAt || '')).slice(0, 12);
   const onboardingQueue = useMemo(() => active.map(employee => ({ employee, status: onboardingStatus(employee) }))
     .filter(item => Object.values(item.status).some(done => !done))
-    .sort((a, b) => b.employee.dateOfJoining.localeCompare(a.employee.dateOfJoining)), [active]);
+    .sort((a, b) => (b.employee.dateOfJoining || '').localeCompare(a.employee.dateOfJoining || '')), [active]);
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -148,7 +148,7 @@ export function EmployeeLifecycleModule({ employees, branches, departments, desi
       {view === 'letters' && <section className="rounded-xl border border-slate-200 bg-white p-4 text-xs shadow-sm">
         <p className="text-slate-500">Employment letters for current staff and experience certificates for separated staff open as printable pages.</p>
         <ul className="mt-3 divide-y divide-slate-100">
-          {employees.slice().sort((a, b) => a.fullName.localeCompare(b.fullName)).map(employee => <li key={employee.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+          {employees.slice().sort((a, b) => (a.fullName || '').localeCompare(b.fullName || '')).map(employee => <li key={employee.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
             <span><strong>{employee.fullName}</strong> · {designationTitle(employee.designationId)} · {employee.status}{employee.separationDate ? ` (left ${employee.separationDate})` : ''}</span>
             <button type="button" onClick={() => { try { openPrintableHtml(experienceLetterHtml(employee, designationTitle(employee.designationId), departmentName(employee.departmentId), companies.find(item => item.id === employee.companyId) || companies[0])); } catch (error) { alert(error instanceof Error ? error.message : 'Letter could not be opened.'); } }} className="rounded border border-emerald-300 px-3 py-1 font-semibold text-emerald-700 hover:bg-emerald-50">
               {employee.status === 'Terminated' ? 'Experience certificate' : 'Employment letter'}

@@ -19,7 +19,7 @@ const csvCell = (value: string | number | undefined) => {
 
 export function PaymentExceptionsModal({ run, payslips, employees, onClose, onMarkFailed, onRecordRetry }: Props) {
   const [selected, setSelected] = useState<string[]>([]);
-  const sheets = payslips.filter(item => item.payrollRunId === run.id).sort((a, b) => a.employeeCode.localeCompare(b.employeeCode));
+  const sheets = payslips.filter(item => item.payrollRunId === run.id).sort((a, b) => (a.employeeCode || '').localeCompare(b.employeeCode || ''));
   const failed = sheets.filter(item => item.paymentStatus === 'Failed');
   const employee = (id: string) => employees.find(item => item.id === id);
   const retryAdvice = () => {

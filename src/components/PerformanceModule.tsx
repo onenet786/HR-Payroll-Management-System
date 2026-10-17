@@ -117,7 +117,7 @@ export function PerformanceModule({ reviews, employees, currentUserAccount, canM
 
   const visibleReviews = canManage ? reviews : reviews.filter(r => r.employeeId === currentUserAccount.employeeId && ['Approved', 'Acknowledged'].includes(r.status));
   const filtered = visibleReviews.filter(r => filterEmpId === 'All' || r.employeeId === filterEmpId)
-    .sort((a, b) => b.reviewDate.localeCompare(a.reviewDate));
+    .sort((a, b) => (b.reviewDate || '').localeCompare(a.reviewDate || ''));
 
   const avgRating = reviews.length > 0
     ? reviews.reduce((s, r) => s + r.overallManagerRating, 0) / reviews.length : 0;

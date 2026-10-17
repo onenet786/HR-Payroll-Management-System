@@ -80,7 +80,7 @@ export function getEmployeeEditDepartmentOptions(
       const rightPriority = right.branchId === selectedBranchId ? 0 : 1;
       return leftPriority - rightPriority
         || (branchNames.get(left.branchId) ?? '').localeCompare(branchNames.get(right.branchId) ?? '')
-        || left.name.localeCompare(right.name);
+        || (left.name || '').localeCompare(right.name || '');
     });
 }
 

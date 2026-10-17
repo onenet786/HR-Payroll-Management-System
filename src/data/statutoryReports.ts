@@ -21,7 +21,7 @@ const socialSecurityScheme = (province?: Province | string) => ({ Punjab: 'PESSI
 
 export function createStatutoryReport(kind: StatutoryReportKind, run: PayrollRun, payslips: Payslip[], employees: Employee[]): StatutoryReport {
   if (run.status === 'Draft') throw new Error('Approve payroll before generating statutory returns.');
-  const sheets = payslips.filter(item => item.payrollRunId === run.id).sort((a, b) => a.employeeCode.localeCompare(b.employeeCode));
+  const sheets = payslips.filter(item => item.payrollRunId === run.id).sort((a, b) => (a.employeeCode || '').localeCompare(b.employeeCode || ''));
   if (!sheets.length) throw new Error('No payslips are available for this payroll run.');
   const employee = (id: string) => employees.find(item => item.id === id);
   const period = `${run.periodYear}-${String(run.periodMonth).padStart(2, '0')}`;

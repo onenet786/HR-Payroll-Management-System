@@ -100,7 +100,7 @@ export function renderExport(template: ExportTemplate, payslips: Payslip[], cont
   if (!template.columns.length) errors.push('The template has no columns.');
   if (!template.verified) warnings.push(`"${template.name}" has not been verified against the ${template.bank || 'institution'} specification. Run a test batch before uploading.`);
   const sheets = payslips.filter(sheet => sheet.payrollRunId === context.run.id && amountOf(template.kind, sheet) > 0)
-    .sort((a, b) => a.employeeCode.localeCompare(b.employeeCode));
+    .sort((a, b) => (a.employeeCode || '').localeCompare(b.employeeCode || ''));
   if (!sheets.length) errors.push('No payable rows for this template.');
   const separator = template.format === 'Delimited' ? (template.delimiter ?? ',') : '';
   const cell = (value: string) => template.format === 'Delimited' && template.quoteValues ? `"${(/^[=+\-@]/.test(value) ? `'${value}` : value).replace(/"/g, '""')}"` : value;

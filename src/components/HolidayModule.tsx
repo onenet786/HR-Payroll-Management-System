@@ -84,7 +84,7 @@ export function HolidayModule({ holidays, onAddHoliday, onUpdateHoliday, onDelet
       const typeMatch = filterType === 'All' || h.type === filterType;
       return yearMatch && typeMatch;
     })
-    .sort((a, b) => a.date.localeCompare(b.date));
+    .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 
   // Group by month
   const grouped: Record<number, Holiday[]> = {};

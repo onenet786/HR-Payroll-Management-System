@@ -99,7 +99,7 @@ export function compareParallelRun(legacy: ParsedLegacyPayroll, sheets: Payslip[
     if (!used.has(sheet.id)) lines.push({ employeeCode: sheet.employeeCode, employeeName: sheet.employeeName, status: 'Only in this system', differences: [] });
   }
   const rank = { 'Difference': 0, 'Only in legacy': 1, 'Only in this system': 2, 'Match': 3 };
-  lines.sort((a, b) => rank[a.status] - rank[b.status] || a.employeeCode.localeCompare(b.employeeCode));
+  lines.sort((a, b) => rank[a.status] - rank[b.status] || (a.employeeCode || '').localeCompare(b.employeeCode || ''));
   const netDelta = lines.flatMap(line => line.differences).filter(item => item.field === 'Net').reduce((sum, item) => sum + item.delta, 0);
   const count = (status: ParallelRunLine['status']) => lines.filter(line => line.status === status).length;
   return { lines, matched: count('Match'), differing: count('Difference'), onlyLegacy: count('Only in legacy'), onlySystem: count('Only in this system'), netDelta };

@@ -146,7 +146,7 @@ export function MobileApp({
   const leaveYear = new Date().getFullYear();
   const myLeaveRequests = leaves
     .filter(leave => leave.employeeId === currentEmp?.id && leave.startDate.slice(0, 4) === String(leaveYear))
-    .sort((left, right) => right.appliedOn.localeCompare(left.appliedOn));
+    .sort((left, right) => (right.appliedOn || '').localeCompare(left.appliedOn || ''));
   const approvedLeaveDays = myLeaveRequests
     .filter(leave => leave.status === 'Approved')
     .reduce((sum, leave) => sum + leave.totalDays, 0);

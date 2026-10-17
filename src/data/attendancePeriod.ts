@@ -35,7 +35,7 @@ export function attendanceIntegrityHash(attendances: AttendanceLog[], month: num
   const prefix = `${year}-${String(month).padStart(2, '0')}`;
   const canonical = attendances
     .filter(item => item.date.startsWith(prefix))
-    .sort((a, b) => a.id.localeCompare(b.id))
+    .sort((a, b) => (a.id || '').localeCompare(b.id || ''))
     .map(item => [item.id, item.employeeId, item.date, item.punchIn || '', item.punchOut || '', item.status, item.method, item.overtimeMinutes, item.regularizationApproved ?? ''].join('|'))
     .join('\n');
   let hash = 0x811c9dc5;

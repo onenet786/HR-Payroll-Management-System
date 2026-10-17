@@ -67,7 +67,7 @@ export function SalaryRevisionModule({ salaryRevisions, employees, currentUserAc
 
   const filtered = salaryRevisions
     .filter(r => filterEmpId === 'All' || r.employeeId === filterEmpId)
-    .sort((a, b) => b.effectiveDate.localeCompare(a.effectiveDate));
+    .sort((a, b) => (b.effectiveDate || '').localeCompare(a.effectiveDate || ''));
 
   const approvedRevisions = salaryRevisions.filter(r => r.status !== 'Draft');
   const totalRevisionsThisYear = approvedRevisions.filter(r => r.effectiveDate.startsWith('2026')).length;
@@ -127,7 +127,7 @@ export function SalaryRevisionModule({ salaryRevisions, employees, currentUserAc
               {employees.filter(e => e.status === 'Active').map(emp => {
                 const lastRevision = salaryRevisions
                   .filter(r => r.employeeId === emp.id && r.status !== 'Draft')
-                  .sort((a, b) => b.effectiveDate.localeCompare(a.effectiveDate))[0];
+                  .sort((a, b) => (b.effectiveDate || '').localeCompare(a.effectiveDate || ''))[0];
                 return (
                   <tr key={emp.id} className="hover:bg-slate-100 transition">
                     <td className="py-2 pr-4">

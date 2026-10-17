@@ -72,7 +72,7 @@ export function LoansModule({
     const statusMatch = filterStatus === 'All' || l.status === filterStatus;
     const empMatch = filterEmpId === 'All' || l.employeeId === filterEmpId;
     return statusMatch && empMatch;
-  }).sort((a, b) => b.appliedOn.localeCompare(a.appliedOn));
+  }).sort((a, b) => (b.appliedOn || '').localeCompare(a.appliedOn || ''));
 
   const totalActive = loanAdvances.filter(l => l.status === 'Active').length;
   const totalPending = loanAdvances.filter(l => l.status === 'Pending').length;

@@ -60,7 +60,7 @@ export function complianceAlerts(inputs: ComplianceInputs): ComplianceAlert[] {
   for (const employee of active) {
     const add = (severity: ComplianceSeverity, category: ComplianceCategory, key: string, message: string, date?: string) =>
       alerts.push({ id: `${category}-${employee.id}-${key}`, severity, category, employeeId: employee.id, employeeName: employee.fullName, message, date });
-    const logs = (byEmployee.get(employee.id) || []).slice().sort((left, right) => left.date.localeCompare(right.date));
+    const logs = (byEmployee.get(employee.id) || []).slice().sort((left, right) => (left.date || '').localeCompare(right.date || ''));
     const site = inputs.branches?.find(branch => branch.id === employee.branchId);
     const rule = establishmentRule(config, site?.establishmentType);
     const maxWeeklyOvertime = rule.maxWeeklyOvertimeHours ?? defaultMaxWeeklyOvertime;
@@ -134,7 +134,7 @@ export function complianceAlerts(inputs: ComplianceInputs): ComplianceAlert[] {
     }
   }
   const rank: Record<ComplianceSeverity, number> = { Critical: 0, Warning: 1, Info: 2 };
-  return alerts.sort((left, right) => rank[left.severity] - rank[right.severity] || left.employeeName.localeCompare(right.employeeName));
+  return alerts.sort((left, right) => rank[left.severity] - rank[right.severity] || (left.employeeName || '').localeCompare(right.employeeName || ''));
 }
 
 /** `strongScore` is the distance that counts as a 100% match (face embeddings never reach 0). */

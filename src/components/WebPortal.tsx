@@ -1506,7 +1506,7 @@ export function WebPortal({
       .map(group => ({ type: 'Bank account' as const, employees: group })),
   ];
   const payrollReleaseQueue = [...payrollRuns]
-    .sort((left, right) => (right.periodYear - left.periodYear) || (right.periodMonth - left.periodMonth) || right.createdAt.localeCompare(left.createdAt))
+    .sort((left, right) => (right.periodYear - left.periodYear) || (right.periodMonth - left.periodMonth) || (right.createdAt || '').localeCompare(left.createdAt || ''))
     .slice(0, 6)
     .map(run => {
       if (run.status === 'Cancelled') return { run, label: 'Cancelled', detail: run.cancellationReason || 'Cancelled before payment.', tone: 'slate' as const };
@@ -1543,7 +1543,7 @@ export function WebPortal({
       }
       return [];
     }),
-  ].sort((left, right) => left.type.localeCompare(right.type));
+  ].sort((left, right) => (left.type || '').localeCompare(right.type || ''));
 
   // Compute live payroll estimation
   const totalSalaries = employees.reduce((sum, emp) => {
@@ -3304,7 +3304,7 @@ export function WebPortal({
                                     <option value={selectedAttEmployeeId}>Selected employee is no longer available</option>
                                   )}
                                   {[...employees]
-                                    .sort((a, b) => a.fullName.localeCompare(b.fullName, undefined, { sensitivity: 'base' }))
+                                    .sort((a, b) => (a.fullName || '').localeCompare(b.fullName || '', undefined, { sensitivity: 'base' }))
                                     .map(emp => (
                                       <option key={emp.id} value={emp.id}>{emp.fullName} ({emp.employeeCode})</option>
                                     ))}

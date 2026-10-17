@@ -26,7 +26,7 @@ export function processedPayslips(runs: PayrollRun[], payslips: Payslip[]): Pays
 export function providentFundLedger(runs: PayrollRun[], payslips: Payslip[], taxYear: string): CsvReport {
   const sheets = processedPayslips(runs, payslips)
     .filter(sheet => taxYearOfPeriod(sheet.periodMonth!, sheet.periodYear!) === taxYear && (sheet.providentFundDeduction || sheet.providentFundEmployerContribution))
-    .sort((a, b) => a.employeeCode.localeCompare(b.employeeCode) || periodKey(a).localeCompare(periodKey(b)));
+    .sort((a, b) => (a.employeeCode || '').localeCompare(b.employeeCode || '') || periodKey(a).localeCompare(periodKey(b)));
   const balances = new Map<string, number>();
   const rows = sheets.map(sheet => {
     const contribution = sheet.providentFundDeduction + sheet.providentFundEmployerContribution;
@@ -45,7 +45,7 @@ export function gratuityProvision(employees: Employee[], asOf: string, config: P
   const asOfTime = Date.parse(`${asOf}T00:00:00Z`);
   const rows = employees
     .filter(employee => employee.gratuityOptIn && employee.status !== 'Terminated' && employee.dateOfJoining <= asOf)
-    .sort((a, b) => a.employeeCode.localeCompare(b.employeeCode))
+    .sort((a, b) => (a.employeeCode || '').localeCompare(b.employeeCode || ''))
     .map(employee => {
       const years = Math.max(0, (asOfTime - Date.parse(`${employee.dateOfJoining}T00:00:00Z`)) / (365.2425 * 86_400_000));
       const monthlyBasis = resolveWageBasis(employee, wageTypes) === 'Daily' ? employee.basicSalary * 26 : employee.basicSalary;
