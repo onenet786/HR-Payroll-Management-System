@@ -907,6 +907,12 @@ export function MobileApp({
                     { label: payslipLanguage === 'ur' ? 'بنیادی تنخواہ' : 'Basic Salary', val: selectedPayslip.basicEarnings, color: 'text-white', sign: '' },
                     { label: payslipLanguage === 'ur' ? 'گھر کرایہ' : 'House Rent', val: selectedPayslip.houseRentAllowance, color: 'text-white', sign: '' },
                     { label: payslipLanguage === 'ur' ? 'طبی الاؤنس' : 'Medical', val: selectedPayslip.medicalAllowance, color: 'text-white', sign: '' },
+                    ...(selectedPayslip.conveyanceAllowance > 0 ? [{ label: payslipLanguage === 'ur' ? 'آمد و رفت الاؤنس' : 'Conveyance', val: selectedPayslip.conveyanceAllowance, color: 'text-white', sign: '' }] : []),
+                    ...(selectedPayslip.otherAllowances > 0 ? [{ label: payslipLanguage === 'ur' ? 'دیگر الاؤنسز' : 'Other Allowances', val: selectedPayslip.otherAllowances, color: 'text-white', sign: '' }] : []),
+                    ...((selectedPayslip.bonusEarnings || 0) > 0 ? [{ label: payslipLanguage === 'ur' ? 'بونس' : 'Bonus', val: selectedPayslip.bonusEarnings || 0, color: 'text-emerald-400', sign: '+' }] : []),
+                    ...((selectedPayslip.commissionEarnings || 0) > 0 ? [{ label: payslipLanguage === 'ur' ? 'کمیشن' : 'Commission', val: selectedPayslip.commissionEarnings || 0, color: 'text-emerald-400', sign: '+' }] : []),
+                    ...((selectedPayslip.arrearsEarnings || 0) > 0 ? [{ label: payslipLanguage === 'ur' ? 'بقایا جات' : 'Arrears', val: selectedPayslip.arrearsEarnings || 0, color: 'text-emerald-400', sign: '+' }] : []),
+                    ...((selectedPayslip.reimbursements || 0) > 0 ? [{ label: payslipLanguage === 'ur' ? 'واپسی ادائیگیاں' : 'Reimbursements', val: selectedPayslip.reimbursements || 0, color: 'text-emerald-400', sign: '+' }] : []),
                     ...(selectedPayslip.overtimePay > 0 ? [{ label: payslipLanguage === 'ur' ? 'اوور ٹائم' : 'Overtime', val: selectedPayslip.overtimePay, color: 'text-emerald-400', sign: '+' }] : []),
                   ].map(({ label, val, color, sign }) => (
                     <div key={label} className="flex justify-between">
