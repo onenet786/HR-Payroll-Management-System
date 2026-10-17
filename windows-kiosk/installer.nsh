@@ -19,6 +19,12 @@
 ; Windows refuses to end them. Queued punches are kept on disk, so closing is safe.
 !macro customCheckAppRunning
   DetailPrint "Stopping ${PRODUCT_NAME} and the fingerprint bridge before removing the previous version..."
+  ; Switch off the service's restart-on-failure first, or Windows restarts the bridge seconds after it is
+  ; closed and it locks its files while the previous version is being removed. customInstall turns it back on.
+  nsExec::Exec `"$SYSDIR\sc.exe" failure ${BRIDGE_SERVICE} reset= 0 actions= ""`
+  Pop $0
+  nsExec::Exec `"$SYSDIR\sc.exe" config ${BRIDGE_SERVICE} start= demand`
+  Pop $0
   ${Do}
     ; PowerShell exits 0 once no kiosk or bridge process is left, 1 if some survive.
     nsExec::Exec `"$PowerShellPath" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Stop-Service -Name '${BRIDGE_SERVICE}' -Force -ErrorAction SilentlyContinue; $$n = @('${PRODUCT_FILENAME}', 'URU4500Bridge'); for ($$i = 0; $$i -lt 10; $$i++) { $$p = Get-Process -Name $$n -ErrorAction SilentlyContinue; if (-not $$p) { exit 0 }; $$p | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 700 }; if (Get-Process -Name $$n -ErrorAction SilentlyContinue) { exit 1 } else { exit 0 }"`
@@ -46,7 +52,52 @@
   ${Loop}
   ; Give Windows a moment to release file locks held by the closed processes.
   Sleep 1000
+  !ifndef BUILD_UNINSTALLER
+    !insertmacro removePreviousVersion
+  !endif
 !macroend
+
+!ifndef BUILD_UNINSTALLER
+; Uninstalls the previous all-users version by deleting its program folder (retrying while Windows releases
+; files) and clearing its uninstall entry, so electron-builder does not run the old uninstaller. That old
+; uninstaller moves every file aside and gives up on the first busy one, which setup then reported as
+; "cannot be closed". Punches, settings and the device key live in the user profile and are not touched;
+; shortcuts and the uninstall entry are written again by this setup.
+!macro removePreviousVersion
+  Var /GLOBAL previousDir
+  ReadRegStr $previousDir SHELL_CONTEXT "${INSTALL_REGISTRY_KEY}" InstallLocation
+  ${If} $previousDir == ""
+    StrCpy $previousDir "$INSTDIR"
+  ${EndIf}
+  ${If} ${FileExists} "$previousDir\${APP_EXECUTABLE_FILENAME}"
+    DetailPrint "Uninstalling the previous version from $previousDir..."
+    StrCpy $1 0
+    ${Do}
+      ClearErrors
+      RMDir /r "$previousDir"
+      ; Done only when the whole folder is gone: a file left behind would make copying the new version fail.
+      ${IfNot} ${FileExists} "$previousDir\*.*"
+        ${Break}
+      ${EndIf}
+      IntOp $1 $1 + 1
+      ${If} $1 >= 15
+        ${If} ${Cmd} `MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "Setup could not remove the previous version of ${PRODUCT_NAME} from:$\r$\n$previousDir$\r$\n$\r$\nA file there is in use. Restart the PC, then run setup again, or click Retry." /SD IDCANCEL IDCANCEL`
+          Quit
+        ${EndIf}
+        StrCpy $1 0
+      ${EndIf}
+      Sleep 1000
+    ${Loop}
+    DeleteRegValue SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" UninstallString
+    DeleteRegValue SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" QuietUninstallString
+    !ifdef UNINSTALL_REGISTRY_KEY_2
+      DeleteRegValue SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY_2}" UninstallString
+      DeleteRegValue SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY_2}" QuietUninstallString
+    !endif
+    DetailPrint "Previous version removed."
+  ${EndIf}
+!macroend
+!endif
 
 !macro customInstall
   Var /GLOBAL bridgeExe
