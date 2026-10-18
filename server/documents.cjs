@@ -411,8 +411,9 @@ async function authorizeWrite(client, name, table, id, identity, existing, next)
       } else return false;
     }
   }
-  if ((name === 'attendances' || table === 'attendances') && existing) {
-    const recordDate = next.date || existing.data.date;
+  // A locked month's attendance is certified: no new, changed or deleted records until the register is reopened.
+  if (name === 'attendances' || table === 'attendances') {
+    const recordDate = next.date || existing?.data?.date;
     if (typeof recordDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(recordDate)) {
       const periodId = `attendance-period-${recordDate.slice(0, 7)}`;
       const locked = await client.query(`SELECT 1 FROM attendance_periods WHERE id=$1 AND status='Locked'`, [periodId]);
@@ -683,6 +684,18 @@ router.delete('/:collection/:id', async (req, res, next) => {
     if (!canDelete || (table === 'attendances' && !req.identity.permissions.has('manage_attendance'))) return res.status(403).json({ error: 'Insufficient permission.' });
     // Certified registers and payroll history are corrected by reopening or cancellation, never deletion.
     if (['attendance_periods', 'payroll_runs', 'payroll_payslips', 'statutory_change_requests', 'lifecycle_requests', 'stat_config'].includes(table)) return res.status(403).json({ error: 'Payroll, statutory and approval records are immutable; cancel, reopen or reject them instead.' });
+    // Evidence behind a certified register or a paid run stays: attendance and leave of locked months, and
+    // adjustments already consumed by a payroll run.
+    if (table === 'attendances' && /^\d{4}-\d{2}-\d{2}$/.test(row.data?.date || '')) {
+      const locked = await pool.query(`SELECT 1 FROM attendance_periods WHERE id=$1 AND status='Locked'`, [`attendance-period-${row.data.date.slice(0, 7)}`]);
+      if (locked.rowCount) return res.status(403).json({ error: 'Attendance of a locked payroll month cannot be deleted.' });
+    }
+    if (table === 'leaves' && row.data?.startDate && row.data?.endDate) {
+      const locked = await pool.query(`SELECT 1 FROM attendance_periods WHERE status='Locked' AND id >= $1 AND id <= $2 LIMIT 1`,
+        [`attendance-period-${row.data.startDate.slice(0, 7)}`, `attendance-period-${row.data.endDate.slice(0, 7)}`]);
+      if (locked.rowCount) return res.status(403).json({ error: 'Leave in a locked payroll month cannot be deleted.' });
+    }
+    if (table === 'payroll_adjustments' && row.data?.payrollRunId) return res.status(403).json({ error: 'An adjustment already paid in a payroll run cannot be deleted.' });
     if (table === 'tax_slabs') {
       const latest = await pool.query(`SELECT data FROM statutory_change_requests WHERE status='Approved' AND data->>'reviewedById'=$1 ORDER BY updated_at DESC LIMIT 1`, [req.identity.uid]);
       const approved = latest.rows[0]?.data;

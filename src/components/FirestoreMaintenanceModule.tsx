@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { db, collection, doc, getDocs, setDoc, writeBatch } from '../data/postgresStore';
+import { db, collection, deleteDoc, doc, getDocs, setDoc, writeBatch } from '../data/postgresStore';
 import { AlertTriangle, CheckCircle, Database, Download, RefreshCw, RotateCcw, Trash2, Upload } from 'lucide-react';
 
 
@@ -72,7 +72,6 @@ const OPERATIONAL_COLLECTIONS: CollectionKey[] = [
   'jobApplications',
   'gratuitySettlements',
   'notifications',
-  'payrollRuns',
 ];
 
 const ALL_COLLECTIONS: CollectionKey[] = [...REQUIRED_COLLECTIONS, ...OPERATIONAL_COLLECTIONS];
@@ -167,33 +166,36 @@ async function readCollection(collectionName: CollectionKey): Promise<BackupDocu
   }));
 }
 
-async function deleteCollection(collectionName: CollectionKey): Promise<number> {
+// Records the server protects (payroll history, attendance and leave of locked months, paid adjustments) are
+// kept and counted instead of stopping the whole cleanup part-way.
+async function deleteCollection(collectionName: CollectionKey): Promise<{ deleted: number; kept: number }> {
   const snapshot = await getDocs(collection(db, collectionName));
-  let batch = writeBatch(db);
-  let batchCount = 0;
   let deleted = 0;
-
+  let kept = 0;
   for (const document of snapshot.docs) {
-    batch.delete(doc(db, collectionName, document.id));
-    batchCount += 1;
-
-    deleted += 1;
-
-    if (batchCount === 450) {
-      await batch.commit();
-      batch = writeBatch(db);
-      batchCount = 0;
+    try {
+      await deleteDoc(doc(db, collectionName, document.id));
+      deleted += 1;
+    } catch {
+      kept += 1;
     }
   }
-
-  if (batchCount > 0) await batch.commit();
-  return deleted;
+  return { deleted, kept };
 }
 
-async function writeDocuments(collectionName: CollectionKey, documents: BackupDocument[]): Promise<void> {
+// Records the server refuses (for example attendance of a locked payroll month) are counted, not fatal.
+async function writeDocuments(collectionName: CollectionKey, documents: BackupDocument[]): Promise<{ written: number; refused: number }> {
+  let written = 0;
+  let refused = 0;
   for (const backupDocument of documents) {
-    await setDoc(doc(db, collectionName, backupDocument.id), backupDocument.data);
+    try {
+      await setDoc(doc(db, collectionName, backupDocument.id), backupDocument.data);
+      written += 1;
+    } catch {
+      refused += 1;
+    }
   }
+  return { written, refused };
 }
 
 function clearLocalCache(collectionNames: CollectionKey[]): void {
@@ -303,14 +305,18 @@ export function FirestoreMaintenanceModule() {
     setStatus('Creating safety backup before cleanup...');
     try {
       await downloadBackup(ALL_COLLECTIONS, 'before-cleanup');
+      const keptNotes: string[] = [];
       for (const collectionName of OPERATIONAL_COLLECTIONS) {
-        const deleted = await deleteCollection(collectionName);
+        const { deleted, kept } = await deleteCollection(collectionName);
+        if (kept) keptNotes.push(`${kept} ${COLLECTION_LABELS[collectionName]}`);
         setStatus(`Deleted ${deleted} document(s) from ${COLLECTION_LABELS[collectionName]}...`);
       }
       clearLocalCache(OPERATIONAL_COLLECTIONS);
       await refreshCounts();
       setConfirmText('');
-      setStatus('Cleanup complete. No dummy data was inserted.');
+      setStatus(keptNotes.length
+        ? `Cleanup complete. Kept ${keptNotes.join(', ')}: payroll history and records of locked payroll months cannot be deleted. Payroll runs and locked registers are never deleted.`
+        : 'Cleanup complete. Payroll runs and locked registers are kept. No dummy data was inserted.');
     } catch (error) {
       setStatus('Cleanup failed. Check server logs.');
     } finally {
@@ -333,8 +339,8 @@ export function FirestoreMaintenanceModule() {
     try {
       await downloadBackup(selectedCollections, 'before-selected-delete');
       for (const collectionName of selectedCollections) {
-        const deleted = await deleteCollection(collectionName);
-        setStatus(`Deleted ${deleted} document(s) from ${COLLECTION_LABELS[collectionName]}...`);
+        const { deleted, kept } = await deleteCollection(collectionName);
+        setStatus(`Deleted ${deleted} document(s) from ${COLLECTION_LABELS[collectionName]}${kept ? ` (${kept} protected record(s) kept)` : ''}...`);
       }
       clearLocalCache(selectedCollections);
       await refreshCounts();
@@ -381,18 +387,22 @@ export function FirestoreMaintenanceModule() {
     setStatus('Creating safety backup before restore...');
     try {
       await downloadBackup(restoreCollections, 'before-restore');
+      const refusedNotes: string[] = [];
       for (const collectionName of restoreCollections) {
         const documents = restoreFile.collections[collectionName] ?? [];
         if (!mergeRestore) {
           await deleteCollection(collectionName);
         }
         clearLocalCache([collectionName]);
-        await writeDocuments(collectionName, documents);
-        setStatus(`Restored ${documents.length} document(s) into ${COLLECTION_LABELS[collectionName]}...`);
+        const { written, refused } = await writeDocuments(collectionName, documents);
+        if (refused) refusedNotes.push(`${refused} ${COLLECTION_LABELS[collectionName]}`);
+        setStatus(`Restored ${written} document(s) into ${COLLECTION_LABELS[collectionName]}...`);
       }
       await refreshCounts();
       setConfirmText('');
-      setStatus('Restore complete.');
+      setStatus(refusedNotes.length
+        ? `Restore complete, except ${refusedNotes.join(', ')} the server refused (locked payroll months, approved or paid records, or records your role cannot change).`
+        : 'Restore complete.');
     } catch (error) {
       setStatus('Restore failed. Check server logs.');
     } finally {

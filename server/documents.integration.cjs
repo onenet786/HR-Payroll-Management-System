@@ -273,3 +273,18 @@ test('a final settlement waits for asset clearance and needs three different use
   assert.equal(await put('u-checker', 'gratuitySettlements', 'set-1', paid), 403, 'processor cannot pay');
   assert.equal(await put('u-third', 'gratuitySettlements', 'set-1', { ...paid, paidById: 'u-third' }), 200);
 });
+
+test('evidence of a locked month and paid adjustments cannot be deleted', async () => {
+  await pool.query(`DELETE FROM attendance_periods`);
+  await seed('attendance_periods', 'attendance-period-2025-03', { periodMonth: 3, periodYear: 2025, status: 'Locked' }, { status: 'Locked' });
+  await seed('attendances', 'del-locked', { employeeId: 'e1', date: '2025-03-05', status: 'Present', method: 'Biometric' }, { employee_id: 'e1', date: '2025-03-05' });
+  await seed('attendances', 'del-open', { employeeId: 'e1', date: '2025-04-05', status: 'Present', method: 'Biometric' }, { employee_id: 'e1', date: '2025-04-05' });
+  await seed('leaves', 'del-leave', { employeeId: 'e1', leaveType: 'Casual', startDate: '2025-02-28', endDate: '2025-03-01', status: 'Approved' }, { employee_id: 'e1', status: 'Approved' });
+  await seed('payroll_adjustments', 'del-adj', { employeeId: 'e1', type: 'Bonus', amount: 1000, status: 'Approved', payrollRunId: 'run-x' }, { employee_id: 'e1', status: 'Approved' });
+  assert.equal(await del('u-maker', 'attendances', 'del-locked'), 403);
+  assert.equal(await del('u-maker', 'leaves', 'del-leave'), 403);
+  assert.equal(await del('u-maker', 'payrollAdjustments', 'del-adj'), 403);
+  assert.equal(await del('u-maker', 'attendances', 'del-open'), 204);
+  assert.equal(await put('u-hr', 'attendances', 'new-in-locked', { employeeId: 'e1', date: '2025-03-06', status: 'Present', method: 'Biometric', punchIn: '09:00', punchOut: '17:00', overtimeMinutes: 0 }), 403, 'no new attendance in a locked month');
+  await pool.query(`DELETE FROM attendance_periods`);
+});
