@@ -358,7 +358,9 @@ async function main() {
     const regularize = lastOpen('e12');
     if (regularize) Object.assign(regularize, { regularizationRequested: true, regularizationReason: 'Kiosk was offline at the gate; punched late by mistake', requestedAt: iso(regularize.date, '18:00:00'), requestedById: 'emp-e12' });
     const lowConfidence = lastOpen('e05');
-    if (lowConfidence) lowConfidence.biometricMatch = { kind: 'face', score: 0.43, threshold: 0.45, strengthPercent: 10, lowConfidence: true };
+    // The kiosk sends a weak face match to review, exactly like this.
+    if (lowConfidence) Object.assign(lowConfidence, { biometricMatch: { kind: 'face', score: 0.43, threshold: 0.45, strengthPercent: 10, lowConfidence: true },
+      regularizationRequested: true, requestedAt: iso(lowConfidence.date, lowConfidence.punchIn), regularizationReason: 'Low-confidence face match (10% strength); supervisor verification required.' });
 
     // ── Loans ──
     const loans: LoanAdvance[] = [

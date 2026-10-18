@@ -37,6 +37,7 @@ interface DeviceEmulatorProps {
   onApproveLeave: (id: string) => void;
   onRejectLeave: (id: string) => void;
   onApproveRegularization: (id: string, reviewComment: string) => void;
+  onCorrectPunchOut?: (id: string, punchOut: string, reason: string) => void;
   onRejectRegularization: (id: string, reviewComment: string) => void;
   onCreatePayrollRun: (title: string, month: number, year: number) => void;
   onLockAttendancePeriod: (month: number, year: number) => void;
@@ -130,6 +131,7 @@ export function DeviceEmulator({
   onApproveLeave,
   onRejectLeave,
   onApproveRegularization,
+  onCorrectPunchOut,
   onRejectRegularization,
   onCreatePayrollRun,
   onLockAttendancePeriod,
@@ -312,6 +314,7 @@ export function DeviceEmulator({
               onApproveLeave={onApproveLeave}
               onRejectLeave={onRejectLeave}
               onApproveRegularization={onApproveRegularization}
+              onCorrectPunchOut={onCorrectPunchOut}
               onRejectRegularization={onRejectRegularization}
               onCreatePayrollRun={onCreatePayrollRun}
               onLockAttendancePeriod={onLockAttendancePeriod}

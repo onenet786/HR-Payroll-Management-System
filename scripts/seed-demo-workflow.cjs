@@ -109,7 +109,7 @@ function findAttendanceLockIssues(attendances, month, year) {
     if (item.biometricMatch?.lowConfidence && item.regularizationApproved === void 0 && !item.regularizationRequested) {
       issues.push({ attendanceId: item.id, employeeId: item.employeeId, reason: "Low-confidence biometric match is not reviewed" });
     }
-    if (item.punchIn && !item.punchOut && !["On Leave", "Holiday"].includes(item.status)) {
+    if (item.punchIn && !item.punchOut && item.regularizationApproved !== false && !["On Leave", "Holiday"].includes(item.status)) {
       issues.push({ attendanceId: item.id, employeeId: item.employeeId, reason: "Punch-out is missing" });
     }
     return issues;
@@ -147,10 +147,10 @@ function buildAttendanceRegister(attendances, employees, leaves, holidays, month
     const weekday2 = (/* @__PURE__ */ new Date(`${date}T00:00:00`)).getDay();
     const workingDays = employee.shift?.workingDays?.length ? employee.shift.workingDays : [1, 2, 3, 4, 5, 6];
     if (attendance?.regularizationRequested && attendance.regularizationApproved === void 0) return { employeeId: employee.id, date, status: "Pending Review", attendanceId: attendance.id, source: attendance.method };
-    if (attendance?.punchIn && !attendance.punchOut && !["On Leave", "Holiday"].includes(attendance.status)) return { employeeId: employee.id, date, status: "Missing Punch", attendanceId: attendance.id, source: attendance.method };
+    if (attendance?.punchIn && !attendance.punchOut && attendance.regularizationApproved !== false && !["On Leave", "Holiday"].includes(attendance.status)) return { employeeId: employee.id, date, status: "Missing Punch", attendanceId: attendance.id, source: attendance.method };
     if (!attendance && date < employee.dateOfJoining) return { employeeId: employee.id, date, status: "Not Joined", source: "Roster" };
     if (attendance) {
-      const status = attendance.status === "On Leave" ? "Paid Leave" : attendance.status === "Holiday" ? "Holiday" : attendance.status;
+      const status = attendance.status === "On Leave" ? leave?.leaveType === "Unpaid" ? "Unpaid Leave" : "Paid Leave" : attendance.status === "Holiday" ? "Holiday" : attendance.status;
       return { employeeId: employee.id, date, status, attendanceId: attendance.id, source: attendance.method };
     }
     if (holidayDates.has(date)) return { employeeId: employee.id, date, status: "Holiday", source: "Holiday" };
@@ -1162,7 +1162,12 @@ Payroll needs the tax year written exactly as "${taxYear}". Propose it under Set
     const regularize = lastOpen("e12");
     if (regularize) Object.assign(regularize, { regularizationRequested: true, regularizationReason: "Kiosk was offline at the gate; punched late by mistake", requestedAt: iso(regularize.date, "18:00:00"), requestedById: "emp-e12" });
     const lowConfidence = lastOpen("e05");
-    if (lowConfidence) lowConfidence.biometricMatch = { kind: "face", score: 0.43, threshold: 0.45, strengthPercent: 10, lowConfidence: true };
+    if (lowConfidence) Object.assign(lowConfidence, {
+      biometricMatch: { kind: "face", score: 0.43, threshold: 0.45, strengthPercent: 10, lowConfidence: true },
+      regularizationRequested: true,
+      requestedAt: iso(lowConfidence.date, lowConfidence.punchIn),
+      regularizationReason: "Low-confidence face match (10% strength); supervisor verification required."
+    });
     const loans = [
       {
         id: "loan-e08",

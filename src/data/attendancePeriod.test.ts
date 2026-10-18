@@ -29,3 +29,29 @@ test('certified register creates explicit employee-day statuses', () => {
   assert.equal(rows.find(row => row.date === '2026-10-03')?.status, 'Holiday');
   assert.equal(rows.find(row => row.date === '2026-10-04')?.status, 'Weekly Off');
 });
+
+test('an "On Leave" entry on approved unpaid leave stays unpaid in the register', () => {
+  const employee = { id: 'e1', status: 'Active', dateOfJoining: '2025-01-01' } as Employee;
+  const onLeave = record({ id: 'att-auto-leave-l1-2026-10-05', date: '2026-10-05', punchIn: undefined, punchOut: undefined, method: 'Manual', status: 'On Leave', regularizationApproved: true, leaveRequestId: 'l1' });
+  const leave = (leaveType: 'Unpaid' | 'Casual') => [{ id: 'l1', employeeId: 'e1', leaveType, startDate: '2026-10-05', endDate: '2026-10-05', totalDays: 1, reason: 'x', status: 'Approved', appliedOn: '2026-10-01' }] as never;
+  const statusOn = (leaveType: 'Unpaid' | 'Casual') => buildAttendanceRegister([onLeave], [employee], leave(leaveType), [], 10, 2026).find(row => row.date === '2026-10-05')!.status;
+  assert.equal(statusOn('Unpaid'), 'Unpaid Leave');
+  assert.equal(statusOn('Casual'), 'Paid Leave');
+  assert.equal(findAttendanceLockIssues([onLeave], 10, 2026).length, 0, 'an approved leave day does not block the lock');
+});
+
+test('a day whose missing punch-out was reviewed and rejected no longer blocks the lock', () => {
+  const employee = { id: 'e1', status: 'Active', dateOfJoining: '2025-01-01' } as Employee;
+  const open = record({ id: 'm1', date: '2026-10-06', punchOut: undefined });
+  assert.equal(findAttendanceLockIssues([open], 10, 2026).length, 1);
+  const rejected = { ...open, regularizationRequested: true, regularizationApproved: false, status: 'Absent' as const };
+  assert.equal(findAttendanceLockIssues([rejected], 10, 2026).length, 0);
+  assert.equal(buildAttendanceRegister([rejected], [employee], [], [], 10, 2026).find(row => row.date === '2026-10-06')!.status, 'Absent');
+});
+
+test('a month still in progress cannot be locked', () => {
+  const records = [record()];
+  assert.throws(() => createAttendancePeriod(records, [] as Employee[], [], [], 10, 2026, 'admin', '2026-10-31T12:00:00.000Z'), /only after the month ends \(from 2026-11-01\)/);
+  assert.throws(() => createAttendancePeriod(records, [] as Employee[], [], [], 10, 2026, 'admin', '2026-10-31T18:30:00.000Z'), /only after the month ends/, 'still 31 Oct 23:30 in Pakistan');
+  assert.equal(createAttendancePeriod(records, [] as Employee[], [], [], 10, 2026, 'admin', '2026-10-31T19:30:00.000Z').status, 'Locked', '1 Nov 00:30 in Pakistan');
+});

@@ -175,6 +175,7 @@ export interface WebPortalProps {
   onApproveLeave: (id: string) => void;
   onRejectLeave: (id: string) => void;
   onApproveRegularization: (id: string, reviewComment: string) => void;
+  onCorrectPunchOut?: (id: string, punchOut: string, reason: string) => void;
   onRejectRegularization: (id: string, reviewComment: string) => void;
   onCreatePayrollRun: (title: string, month: number, year: number) => void;
   onLockAttendancePeriod: (month: number, year: number) => void;
@@ -508,6 +509,7 @@ export function WebPortal({
   onApproveLeave,
   onRejectLeave,
   onApproveRegularization,
+  onCorrectPunchOut,
   onRejectRegularization,
   onCreatePayrollRun,
   onLockAttendancePeriod,
@@ -3265,6 +3267,14 @@ export function WebPortal({
                                       }`}>
                                         {att.status}
                                       </span>
+                                      {onCorrectPunchOut && att.punchIn && !att.punchOut && !att.regularizationRequested && att.regularizationApproved === undefined && !['On Leave', 'Holiday'].includes(att.status) && (
+                                        <button type="button" className="mt-1 block text-[10px] font-bold text-indigo-700 underline" onClick={() => {
+                                          const time = window.prompt(`Punch-out was not recorded for ${employees.find(e => e.id === att.employeeId)?.fullName || 'this employee'} on ${att.date}. Enter the actual leaving time (HH:MM, 24-hour):`)?.trim();
+                                          if (!time) return;
+                                          const reason = window.prompt('Reason and evidence (e.g. gate register, supervisor confirmation) — at least 10 characters:')?.trim();
+                                          if (reason) onCorrectPunchOut(att.id, time, reason);
+                                        }}>Fix punch-out</button>
+                                      )}
                                     </td>
                                   </tr>
                                 );
@@ -7099,8 +7109,17 @@ export function WebPortal({
                     const file = renderExport(selectedBankTemplate, rows, { run: showBankFileModal, companyName: companyLegalName, valueDate: bankValueDate, batchReference, employees });
                     if (file.errors.length) { alert(`Bank file blocked — ${file.errors.length} problem(s):\n• ${file.errors.slice(0, 10).join('\n• ')}`); return; }
                     if (!selectedBankTemplate.verified && !window.confirm(`${file.warnings.join(' ')}\n\nDownload anyway for a test batch?`)) return;
-                    const checksum = await bankAdviceChecksum(rows);
-                    await onRecordBankAdvice(showBankFileModal.id, checksum, rows.length, rows.reduce((sum, row) => sum + row.netSalary, 0), selectedBankTemplate.name, { batchReference, controlHash: file.controlHash, verified: Boolean(selectedBankTemplate.verified) });
+                    // The checksum is recorded once, while the run awaits payment; a paid run's file can be downloaded
+                    // again for reconciliation without touching the run.
+                    if (showBankFileModal.status === 'Approved') {
+                      try {
+                        const checksum = await bankAdviceChecksum(rows);
+                        await onRecordBankAdvice(showBankFileModal.id, checksum, rows.length, rows.reduce((sum, row) => sum + row.netSalary, 0), selectedBankTemplate.name, { batchReference, controlHash: file.controlHash, verified: Boolean(selectedBankTemplate.verified) });
+                      } catch (error) {
+                        alert(`Bank file not generated: ${error instanceof Error ? error.message : 'the bank advice could not be recorded.'}`);
+                        return;
+                      }
+                    }
                     downloadText(file.content, file.filename);
                     setShowBankFileModal(null);
                     showToast(`Bank file generated · ${file.recordCount} rows · PKR ${file.totalAmount.toLocaleString()} · control ${file.controlHash}`);

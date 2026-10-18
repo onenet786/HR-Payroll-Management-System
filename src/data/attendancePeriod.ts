@@ -23,7 +23,7 @@ export function findAttendanceLockIssues(attendances: AttendanceLog[], month: nu
     if (item.biometricMatch?.lowConfidence && item.regularizationApproved === undefined && !item.regularizationRequested) {
       issues.push({ attendanceId: item.id, employeeId: item.employeeId, reason: 'Low-confidence biometric match is not reviewed' });
     }
-    if (item.punchIn && !item.punchOut && !['On Leave', 'Holiday'].includes(item.status)) {
+    if (item.punchIn && !item.punchOut && item.regularizationApproved !== false && !['On Leave', 'Holiday'].includes(item.status)) {
       issues.push({ attendanceId: item.id, employeeId: item.employeeId, reason: 'Punch-out is missing' });
     }
     return issues;
@@ -67,10 +67,11 @@ export function buildAttendanceRegister(attendances: AttendanceLog[], employees:
     const weekday = new Date(`${date}T00:00:00`).getDay();
     const workingDays = employee.shift?.workingDays?.length ? employee.shift.workingDays : [1, 2, 3, 4, 5, 6];
     if (attendance?.regularizationRequested && attendance.regularizationApproved === undefined) return { employeeId: employee.id, date, status: 'Pending Review', attendanceId: attendance.id, source: attendance.method };
-    if (attendance?.punchIn && !attendance.punchOut && !['On Leave', 'Holiday'].includes(attendance.status)) return { employeeId: employee.id, date, status: 'Missing Punch', attendanceId: attendance.id, source: attendance.method };
+    if (attendance?.punchIn && !attendance.punchOut && attendance.regularizationApproved !== false && !['On Leave', 'Holiday'].includes(attendance.status)) return { employeeId: employee.id, date, status: 'Missing Punch', attendanceId: attendance.id, source: attendance.method };
     if (!attendance && date < employee.dateOfJoining) return { employeeId: employee.id, date, status: 'Not Joined', source: 'Roster' };
     if (attendance) {
-      const status = attendance.status === 'On Leave' ? 'Paid Leave' : attendance.status === 'Holiday' ? 'Holiday' : attendance.status as AttendanceRegisterRow['status'];
+      // An "On Leave" entry for a day of approved unpaid leave stays unpaid.
+      const status = attendance.status === 'On Leave' ? (leave?.leaveType === 'Unpaid' ? 'Unpaid Leave' : 'Paid Leave') : attendance.status === 'Holiday' ? 'Holiday' : attendance.status as AttendanceRegisterRow['status'];
       return { employeeId: employee.id, date, status, attendanceId: attendance.id, source: attendance.method };
     }
     if (holidayDates.has(date)) return { employeeId: employee.id, date, status: 'Holiday', source: 'Holiday' };
@@ -93,6 +94,11 @@ export function createAttendancePeriod(
   const registerRows = buildAttendanceRegister(attendances, employees, leaves, holidays, month, year);
   const unresolved = registerRows.filter(row => row.status === 'Pending Review' || row.status === 'Missing Punch');
   if (unresolved.length) throw new Error(`Attendance period cannot be locked: ${unresolved.length} register day(s) require review.`);
+  // A month still in progress cannot be certified: its remaining workdays would count as absences and
+  // the lock would block every later punch of that month. Dates are Pakistan time (UTC+5).
+  const lastDate = dayKey(year, month, new Date(year, month, 0).getDate());
+  const lockDay = new Date(Date.parse(now) + 5 * 3_600_000).toISOString().slice(0, 10);
+  if (lockDay <= lastDate) throw new Error(`The attendance register for ${month}/${year} can be locked only after the month ends (from ${dayKey(month === 12 ? year + 1 : year, month === 12 ? 1 : month + 1, 1)}).`);
   return {
     id: attendancePeriodId(month, year), periodMonth: month, periodYear: year, status: 'Locked', lockedAt: now, lockedBy: actor,
     attendanceCount: records.length,

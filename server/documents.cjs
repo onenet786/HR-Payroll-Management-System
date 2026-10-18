@@ -115,6 +115,8 @@ async function validLockedRegister(client, id, next) {
     const rowKeys = new Set(rows.map(row => `${row?.employeeId}|${row?.date}`));
     const lastDay = new Date(next.periodYear, next.periodMonth, 0).getDate();
     const lastDate = `${prefix}-${String(lastDay).padStart(2, '0')}`;
+    // A month still in progress cannot be certified (Pakistan time, UTC+5).
+    if (new Date(Date.now() + 5 * 3_600_000).toISOString().slice(0, 10) <= lastDate) return false;
     const employeeResult = await client.query(`SELECT id, data FROM employees`);
     const eligibleEmployees = employeeResult.rows.map(row => ({ id: row.id, ...row.data }))
       .filter(employee => ['Active', 'On Leave'].includes(employee.status) && typeof employee.dateOfJoining === 'string' && employee.dateOfJoining <= lastDate);
@@ -320,7 +322,8 @@ async function authorizeWrite(client, name, table, id, identity, existing, next)
           if (previous.paymentStatus && previous.paymentStatus !== 'Paid') return false;
           if (next.paymentFailedById !== identity.uid || typeof next.paymentFailureReason !== 'string' || next.paymentFailureReason.trim().length < 5) return false;
         } else if (next.paymentStatus === 'Retried') {
-          if (previous.paymentStatus !== 'Failed' || next.paymentRetriedById !== identity.uid
+          // The retry pays the employee's current bank details: whoever recorded the return cannot release it.
+          if (previous.paymentStatus !== 'Failed' || next.paymentRetriedById !== identity.uid || previous.paymentFailedById === identity.uid
             || !/^[A-Za-z0-9][A-Za-z0-9\/_ .-]{2,99}$/.test(String(next.paymentRetryReference || ''))) return false;
         } else return false;
       }
@@ -439,7 +442,22 @@ async function authorizeWrite(client, name, table, id, identity, existing, next)
     }
   }
   if ((name === 'attendances' || table === 'attendances')) {
-    if (!existing && (next.method === 'Manual' || next.regularizationRequested === true)) {
+    // The "On Leave" entry for a day of an approved leave is not a manual punch: it is accepted as already
+    // reviewed, but only when an approved leave of that employee really covers that date.
+    let leaveDay = false;
+    if (!existing && next.method === 'Manual' && next.status === 'On Leave' && safeId(next.leaveRequestId) && !next.punchIn && !next.punchOut) {
+      const leave = (await client.query(`SELECT data FROM leaves WHERE id=$1`, [next.leaveRequestId])).rows[0]?.data;
+      leaveDay = leave?.status === 'Approved' && leave.employeeId === next.employeeId && leave.startDate <= next.date && leave.endDate >= next.date;
+      if (leaveDay) {
+        delete next.regularizationRequested;
+        next.requestedById = identity.uid;
+        next.regularizationApproved = true;
+        next.reviewedById = identity.uid;
+        next.reviewedAt = new Date().toISOString();
+        next.reviewComment = `Approved ${leave.leaveType} leave ${next.leaveRequestId}`;
+      }
+    }
+    if (!leaveDay && !existing && (next.method === 'Manual' || next.regularizationRequested === true)) {
       next.regularizationRequested = true;
       next.requestedById = identity.uid;
       delete next.regularizationApproved;

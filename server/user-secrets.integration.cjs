@@ -60,7 +60,12 @@ test('first-time setup cannot be replayed to take over an existing system', asyn
 });
 
 test('legacy plain-text passwords are hashed at start-up and still sign in', async () => {
-  const data = await stored('u-sec-legacy');
+  // Hashing runs in the background once the server is listening; give it a moment.
+  let data = await stored('u-sec-legacy');
+  for (let attempt = 0; attempt < 40 && data.password !== undefined; attempt += 1) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+    data = await stored('u-sec-legacy');
+  }
   assert.equal(data.password, undefined, 'plain text removed');
   assert.ok(await bcrypt.compare('Legacy-Plain-2026', data.passwordHash));
   assert.ok(await login('legacy@test.local', 'Legacy-Plain-2026'));

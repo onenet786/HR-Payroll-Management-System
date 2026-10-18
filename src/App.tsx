@@ -682,6 +682,13 @@ export default function App() {
     const today = todayStr();
     const approverName = loggedInUser?.username || 'HR Manager';
 
+    // The approval is saved first: the server accepts leave-day attendance only for an approved leave.
+    try {
+      await updateDoc(doc(db, 'leaves', id), { status: 'Approved', approvedBy: approverName, approvedOn: today });
+    } catch (err) {
+      alert('Leave approval could not be saved. Check the connection and try again.');
+      return;
+    }
     setLeaves(prev => {
       const updated = prev.map(l =>
         l.id === id ? { ...l, status: 'Approved', approvedBy: approverName, approvedOn: today } as LeaveRequest : l
@@ -690,42 +697,33 @@ export default function App() {
       return updated;
     });
 
-    // Auto-inject attendance logs for approved leave days
+    // One "On Leave" attendance entry per leave day, so the daily/monthly attendance reports show the leave.
     const targetLeave = leaves.find(l => l.id === id);
     if (targetLeave) {
-      const start = new Date(targetLeave.startDate);
-      const end = new Date(targetLeave.endDate);
       const autoLogs: AttendanceLog[] = [];
-      let d = new Date(start);
-
-      while (d <= end) {
-        const dateStr = d.toISOString().split('T')[0];
-        // Skip if log already exists
-        const alreadyExists = attendances.some(
-          (a: AttendanceLog) => a.employeeId === targetLeave.employeeId && a.date === dateStr
-        );
-        if (!alreadyExists) {
-          autoLogs.push({
-            id: `att-auto-leave-${targetLeave.id}-${dateStr}`,
-            employeeId: targetLeave.employeeId,
-            date: dateStr,
-            method: 'Manual',
-            status: 'On Leave',
-            overtimeMinutes: 0
-          });
-        }
-        d.setDate(d.getDate() + 1);
+      for (let d = new Date(`${targetLeave.startDate}T00:00:00Z`); d <= new Date(`${targetLeave.endDate}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + 1)) {
+        const dateStr = d.toISOString().slice(0, 10);
+        if (attendances.some((a: AttendanceLog) => a.employeeId === targetLeave.employeeId && a.date === dateStr)) continue;
+        autoLogs.push({
+          id: `att-auto-leave-${targetLeave.id}-${dateStr}`,
+          employeeId: targetLeave.employeeId,
+          date: dateStr,
+          method: 'Manual',
+          status: 'On Leave',
+          overtimeMinutes: 0,
+          leaveRequestId: targetLeave.id,
+          regularizationApproved: true,
+          reviewedAt: new Date().toISOString(),
+          reviewedBy: approverName,
+          reviewComment: `Approved ${targetLeave.leaveType} leave ${targetLeave.id}`,
+        });
       }
-
       if (autoLogs.length > 0) {
+        await Promise.all(autoLogs.map(log => setDoc(doc(db, 'attendances', log.id), log).catch(() =>
+          console.warn('PostgreSQL auto-attendance sync delayed:'))));
         setAttendances((prev: AttendanceLog[]) => {
           const updated = [...prev, ...autoLogs];
           privacyStorage.setItem('hr_attendances', JSON.stringify(updated));
-          for (const log of autoLogs) {
-            setDoc(doc(db, 'attendances', log.id), log).catch(err =>
-              console.warn('PostgreSQL auto-attendance sync delayed:')
-            );
-          }
           return updated;
         });
       }
@@ -743,16 +741,6 @@ export default function App() {
         priority: 'medium'
       });
     }
-
-    try {
-      await updateDoc(doc(db, 'leaves', id), {
-        status: 'Approved',
-        approvedBy: loggedInUser?.username || 'HR Manager',
-        approvedOn: today
-      });
-    } catch (err) {
-      console.warn('PostgreSQL leave approval delayed:');
-    }
   };
 
   const handleRejectLeave = async (id: string) => {
@@ -766,7 +754,7 @@ export default function App() {
       return updated;
     });
     try {
-      await updateDoc(doc(db, 'leaves', id), { status: 'Rejected' });
+      await updateDoc(doc(db, 'leaves', id), { status: 'Rejected', approvedBy: loggedInUser?.username, approvedOn: today });
     } catch (err) {
       console.warn('PostgreSQL leave rejection delayed:');
     }
@@ -817,10 +805,9 @@ export default function App() {
     const reviewedById = currentUserAccount.id;
     // Approval confirms the evidence; it must not upgrade a late, half-day or off-site punch to a clean Present.
     const employee = employees.find(item => item.id === attendance.employeeId);
-    const status: AttendanceLog['status'] = attendance.punchIn
-      ? evaluateAttendanceTimes(attendance.punchIn, attendance.punchOut, employee?.shift, attendance.breaks, attendance.date).status
-      : attendance.status === 'Absent' ? 'Present' : attendance.status;
-    const decision = { status, regularizationApproved: true, reviewedAt, reviewedBy, reviewedById, reviewComment: reviewComment.trim() };
+    const evaluated = attendance.punchIn ? evaluateAttendanceTimes(attendance.punchIn, attendance.punchOut, employee?.shift, attendance.breaks, attendance.date) : undefined;
+    const status: AttendanceLog['status'] = evaluated ? evaluated.status : attendance.status === 'Absent' ? 'Present' : attendance.status;
+    const decision = { status, ...(evaluated && attendance.punchOut && { overtimeMinutes: evaluated.overtimeMinutes }), regularizationApproved: true, reviewedAt, reviewedBy, reviewedById, reviewComment: reviewComment.trim() };
     setAttendances(prev => {
       const updated = prev.map(att =>
         att.id === id ? { ...att, ...decision } as AttendanceLog : att
@@ -833,6 +820,31 @@ export default function App() {
     } catch (err) {
       console.warn('PostgreSQL regularization approval delayed:');
     }
+  };
+
+  // A forgotten punch-out is corrected on the same record and goes to review; approval re-evaluates the day.
+  const handleCorrectPunchOut = async (id: string, punchOut: string, reason: string) => {
+    const attendance = attendances.find(item => item.id === id);
+    if (!attendance?.punchIn || attendance.punchOut) { alert('Only a day with a punch-in and no punch-out can be corrected here.'); return; }
+    const match = /^(\d{1,2}):(\d{2})$/.exec(punchOut.trim());
+    if (!match || Number(match[1]) > 23 || Number(match[2]) > 59) { alert('Enter the time as HH:MM in 24-hour format, for example 17:30.'); return; }
+    if (reason.trim().length < 10) { alert('Enter a reason of at least 10 characters describing the evidence.'); return; }
+    const time = `${match[1].padStart(2, '0')}:${match[2]}:00`;
+    const correction = {
+      punchOut: time, outReason: 'Corrected punch-out', regularizationRequested: true, requestedAt: new Date().toISOString(), requestedById: currentUserAccount.id,
+      regularizationReason: `Missing punch-out recorded as ${time.slice(0, 5)} by ${currentUserAccount.username}: ${reason.trim()}`,
+    };
+    try {
+      await updateDoc(doc(db, 'attendances', id), correction);
+    } catch (err) {
+      alert('The correction could not be saved (the month may be locked). Nothing was changed.');
+      return;
+    }
+    setAttendances(prev => {
+      const updated = prev.map(att => att.id === id ? { ...att, ...correction } as AttendanceLog : att);
+      privacyStorage.setItem('hr_attendances', JSON.stringify(updated));
+      return updated;
+    });
   };
 
   const handleRejectRegularization = async (id: string, reviewComment = '') => {
@@ -1524,12 +1536,21 @@ export default function App() {
   const handleRecordPaymentRetry = async (payslipIds: string[], reference: string) => {
     if (!/^[A-Za-z0-9][A-Za-z0-9/_ .-]{2,99}$/.test(reference.trim())) { alert('Enter the bank reference for the retry payment.'); return; }
     const now = new Date().toISOString();
-    const updates = payrollPayslips.filter(item => payslipIds.includes(item.id) && item.paymentStatus === 'Failed').map(item => {
+    const failed = payrollPayslips.filter(item => payslipIds.includes(item.id) && item.paymentStatus === 'Failed');
+    // The retry pays to the employee's current bank details, so the user who recorded the bank return cannot release it.
+    const ownFailures = failed.filter(item => item.paymentFailedById === currentUserAccount.id);
+    if (ownFailures.length) { alert(`Maker-checker control: you marked ${ownFailures.map(item => item.employeeName).join(', ')} as failed. Another payroll user must record the retry payment.`); return; }
+    const updates = failed.map(item => {
       const employee = employees.find(record => record.id === item.employeeId);
       return { ...item, paymentStatus: 'Retried' as const, paymentRetryReference: reference.trim(), paymentRetriedAt: now, paymentRetriedById: currentUserAccount.id,
         retryBankName: employee?.bankName, retryBankAccountNumber: employee?.bankAccountNumber, retryIban: employee?.iban };
     });
-    await Promise.all(updates.map(item => setDoc(doc(db, 'payrollPayslips', item.id), cleanData(item))));
+    try {
+      await Promise.all(updates.map(item => setDoc(doc(db, 'payrollPayslips', item.id), cleanData(item))));
+    } catch (error) {
+      alert('The retry could not be recorded. Nothing was changed.');
+      return;
+    }
     setPayrollPayslips(previous => previous.map(item => updates.find(next => next.id === item.id) || item));
   };
 
@@ -2222,6 +2243,7 @@ export default function App() {
       onApproveLeave={handleApproveLeave}
       onRejectLeave={handleRejectLeave}
       onApproveRegularization={handleApproveRegularization}
+      onCorrectPunchOut={handleCorrectPunchOut}
       onRejectRegularization={handleRejectRegularization}
       onCreatePayrollRun={handleCreatePayrollRun}
       onLockAttendancePeriod={handleLockAttendancePeriod}

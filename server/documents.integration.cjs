@@ -15,7 +15,7 @@ const express = require('express');
 const { pool } = require('./db.cjs');
 const documentRoutes = require('./documents.cjs');
 
-const TABLES = ['roles', 'users', 'companies', 'employees', 'branches', 'attendances', 'attendance_periods', 'payroll_runs', 'payroll_payslips', 'payroll_adjustments',
+const TABLES = ['leaves', 'roles', 'users', 'companies', 'employees', 'branches', 'attendances', 'attendance_periods', 'payroll_runs', 'payroll_payslips', 'payroll_adjustments',
   'stat_config', 'tax_slabs', 'statutory_change_requests', 'lifecycle_requests', 'salary_revisions', 'gratuity_settlements', 'hr_audit_log'];
 const PERIOD = { month: 9, year: 2026, prefix: '2026-09', days: 30 };
 let server;
@@ -172,6 +172,7 @@ test('payroll runs: regular uniqueness, supplementary, cancellation, approval, p
   const failed = { ...sheets[0], paymentStatus: 'Failed', paymentFailureReason: 'Account closed', paymentFailedById: 'u-maker', paymentFailedAt: 'now' };
   assert.equal(await put('u-maker', 'payrollPayslips', 'run-c-e1', { ...failed, paymentStatus: 'Retried' }), 403, 'retry needs a prior failure');
   assert.equal(await put('u-maker', 'payrollPayslips', 'run-c-e1', failed), 200);
+  assert.equal(await put('u-maker', 'payrollPayslips', 'run-c-e1', { ...failed, paymentStatus: 'Retried', paymentRetryReference: 'FT-RETRY-8', paymentRetriedById: 'u-maker', paymentRetriedAt: 'now' }), 403, 'whoever recorded the bank return cannot release the retry');
   assert.equal(await put('u-checker', 'payrollPayslips', 'run-c-e1', { ...failed, paymentStatus: 'Retried', paymentRetryReference: 'FT-RETRY-9', paymentRetriedById: 'u-checker', paymentRetriedAt: 'now' }), 200);
 
   const deposit = { cprNumber: 'CPR-2026-0001', amount: 5000, depositedOn: '2026-10-15', recordedAt: new Date().toISOString(), recordedById: 'u-maker', recordedBy: 'u-maker' };
@@ -229,4 +230,21 @@ test('employees see their payslips only once salary is disbursed', async () => {
   assert.equal((await read('u-emp', 'payrollPayslips/vis-draft-e1')).status, 404, 'a draft payslip cannot be opened directly');
   const payroll = (await read('u-maker', 'payrollPayslips')).body.documents.map(row => row.document_id).filter(id => id.startsWith('vis-'));
   assert.deepEqual(payroll.sort(), ['vis-draft-e1', 'vis-paid-e1'], 'payroll users still see every payslip');
+});
+
+test('a day of an approved leave is recorded as reviewed; a made-up leave day still needs review', async () => {
+  await seed('leaves', 'lv-ok', { employeeId: 'e1', leaveType: 'Unpaid', startDate: '2026-11-02', endDate: '2026-11-03', totalDays: 2, status: 'Approved' }, { employee_id: 'e1', status: 'Approved' });
+  await seed('leaves', 'lv-pending', { employeeId: 'e1', leaveType: 'Casual', startDate: '2026-11-10', endDate: '2026-11-10', totalDays: 1, status: 'Pending' }, { employee_id: 'e1', status: 'Pending' });
+  const day = (id, leaveRequestId, date) => ({ id, employeeId: 'e1', date, method: 'Manual', status: 'On Leave', overtimeMinutes: 0, leaveRequestId, regularizationApproved: true });
+  assert.equal(await put('u-hr', 'attendances', 'att-auto-leave-lv-ok-2026-11-02', day('att-auto-leave-lv-ok-2026-11-02', 'lv-ok', '2026-11-02')), 200);
+  const approved = await current('attendances', 'att-auto-leave-lv-ok-2026-11-02');
+  assert.equal(approved.regularizationApproved, true);
+  assert.equal(approved.regularizationRequested, undefined, 'not queued for regularization');
+  assert.match(approved.reviewComment, /Approved Unpaid leave lv-ok/);
+  for (const [id, leaveId, date] of [['fake-1', 'lv-pending', '2026-11-10'], ['fake-2', 'lv-ok', '2026-11-20'], ['fake-3', 'lv-missing', '2026-11-02']]) {
+    assert.equal(await put('u-hr', 'attendances', id, day(id, leaveId, date)), 200);
+    const stored = await current('attendances', id);
+    assert.equal(stored.regularizationRequested, true, `${id} must be reviewed`);
+    assert.equal(stored.regularizationApproved, undefined, `${id} cannot approve itself`);
+  }
 });

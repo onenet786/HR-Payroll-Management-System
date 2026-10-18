@@ -342,6 +342,8 @@ export interface AttendanceLog {
   escalatedAt?: string;
   biometricMatch?: BiometricMatchEvidence;
   locationRisk?: string;
+  /** Set on the "On Leave" entry created for each day of an approved leave. */
+  leaveRequestId?: string;
 }
 
 export interface BiometricMatchEvidence {
