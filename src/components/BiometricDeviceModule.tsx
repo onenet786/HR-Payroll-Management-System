@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { Employee, AttendanceLog } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
+import { matchesSearch } from '../data/listSearch';
 import './BiometricDeviceModule.css';
 import {
   FACE_MATCH_MARGIN,
@@ -145,6 +146,7 @@ export function BiometricDeviceModule({
 
   // ── Enrollment state ─────────────────────────────────────────────────────────
   const [enrollEmpId, setEnrollEmpId] = useState(employees[0]?.id || '');
+  const [enrollFilter, setEnrollFilter] = useState('');
   const [enrollSamples, setEnrollSamples] = useState<string[]>([]);
   const [enrollMsg, setEnrollMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const prevCapturedRef = useRef<string | null>(null);
@@ -160,6 +162,9 @@ export function BiometricDeviceModule({
 
   // ── Attendance state ─────────────────────────────────────────────────────────
   const [attEmpId, setAttEmpId] = useState(employees[0]?.id || '');
+  const [attFilter, setAttFilter] = useState('');
+  /** Active employees matching a picker filter; the current selection always stays listed. */
+  const pickerEmployees = (filter: string, selectedId: string) => employees.filter(e => e.status === 'Active' && (e.id === selectedId || matchesSearch(filter, e.fullName, e.employeeCode, e.cnic)));
   const [attResult, setAttResult] = useState<'pending' | 'verified' | 'failed' | null>(null);
   const [attSummary, setAttSummary] = useState<string | null>(null);
   const attPendingRef = useRef(false);
@@ -1294,13 +1299,21 @@ export function BiometricDeviceModule({
                 {/* Employee selector */}
                 <div>
                   <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Employee</label>
+                  <input
+                    type="search"
+                    value={enrollFilter}
+                    onChange={e => setEnrollFilter(e.target.value)}
+                    placeholder="Type a name, code or CNIC to narrow the list"
+                    aria-label="Filter employee list"
+                    className="mb-2 w-full bg-white border border-slate-300 text-slate-800 text-sm rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
                   <select
                     value={enrollEmpId}
                     onChange={e => { setEnrollEmpId(e.target.value); resetEnrollment(); }}
                     aria-label="Select employee to enroll"
                     className="w-full bg-white border border-slate-300 text-slate-800 text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   >
-                    {employees.filter(e => e.status === 'Active').map(e => (
+                    {pickerEmployees(enrollFilter, enrollEmpId).map(e => (
                       <option key={e.id} value={e.id}>
                         {e.fullName} — {e.employeeCode}
                         {(e.fingerprintTemplates?.length || 0) > 0 ? ' ✓ enrolled' : ''}
@@ -1685,13 +1698,21 @@ export function BiometricDeviceModule({
                 {/* Employee selector */}
                 <div>
                   <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Employee</label>
+                  <input
+                    type="search"
+                    value={attFilter}
+                    onChange={e => setAttFilter(e.target.value)}
+                    placeholder="Type a name, code or CNIC to narrow the list"
+                    aria-label="Filter employee list"
+                    className="mb-2 w-full bg-white border border-slate-300 text-slate-800 text-sm rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
                   <select
                     value={attEmpId}
                     onChange={e => { setAttEmpId(e.target.value); setAttResult(null); setAttSummary(null); }}
                     aria-label="Select employee for attendance"
                     className="w-full bg-white border border-slate-300 text-slate-800 text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   >
-                    {employees.filter(e => e.status === 'Active').map(e => {
+                    {pickerEmployees(attFilter, attEmpId).map(e => {
                       const enrolled = (e.fingerprintTemplates?.length || 0) > 0;
                       const todayLog = attendances.find(a => a.employeeId === e.id && a.date === todayStr());
                       const punchStatus = !todayLog ? 'OUT' : todayLog.punchOut ? 'OUT' : 'IN';

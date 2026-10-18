@@ -9,6 +9,8 @@ import { RequiredMark, RequiredNote } from './RequiredMark';
 import { Calculator, X } from 'lucide-react';
 import { GratuitySettlement, Employee, StatutoryConfig, UserAccount } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
+import ListSearch, { NoSearchResults } from './ListSearch';
+import { matchesSearch } from '../data/listSearch';
 import { gratuityEntitlement } from '../data/lifecycle';
 
 interface GratuityModuleProps {
@@ -43,6 +45,7 @@ function computeYears(joiningDate: string, lastWorkingDate: string) {
 
 export function GratuityModule({ settlements, employees, statConfig, canManage, currentUserAccount, onAddSettlement, onUpdateSettlement }: GratuityModuleProps) {
   const [showCalc, setShowCalc] = useState(false);
+  const [search, setSearch] = useState('');
 
   const [calcForm, setCalcForm] = useState({
     employeeId: employees[0]?.id || '',
@@ -104,6 +107,7 @@ export function GratuityModule({ settlements, employees, statConfig, canManage, 
   const getEmpName = (id: string) => employees.find(e => e.id === id)?.fullName || '—';
   const totalPaid = settlements.filter(s => s.status === 'Paid').reduce((sum, s) => sum + s.totalSettlementAmount, 0);
   const pendingCount = settlements.filter(s => s.status === 'Pending').length;
+  const shownSettlements = settlements.filter(s => { const emp = employees.find(e => e.id === s.employeeId); return matchesSearch(search, emp?.fullName, emp?.employeeCode, emp?.cnic, s.separationType, s.status, s.separationDate, s.lastWorkingDate, s.notes); });
 
   return (
     <div className="space-y-5">
@@ -136,6 +140,7 @@ export function GratuityModule({ settlements, employees, statConfig, canManage, 
       </div>
 
       {/* Settlements Table */}
+      {settlements.length > 0 && <ListSearch value={search} onChange={setSearch} placeholder="Search employee, code, separation type, status…" total={settlements.length} shown={shownSettlements.length} />}
       {settlements.length > 0 ? (
         <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden">
           <table className="w-full text-xs">
@@ -147,7 +152,8 @@ export function GratuityModule({ settlements, employees, statConfig, canManage, 
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {settlements.map(s => {
+              {search.trim() && !shownSettlements.length && <NoSearchResults query={search} colSpan={10} onClear={() => setSearch('')} />}
+              {shownSettlements.map(s => {
                 const sepColor = SEP_COLORS[s.separationType];
                 const statusColor = STATUS_COLORS[s.status];
                 return (

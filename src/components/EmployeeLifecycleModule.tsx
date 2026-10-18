@@ -3,6 +3,8 @@ import { CheckCircle, ClipboardList, FileText, UserCheck } from 'lucide-react';
 import { DateField } from './DateField';
 import { RequiredMark, RequiredNote } from './RequiredMark';
 import type { Branch, Company, Department, Designation, Employee, LeaveRequest, LifecycleRequest, LifecycleRequestType, OnboardingChecklistItem, StatutoryConfig } from '../types';
+import ListSearch from './ListSearch';
+import { matchesSearch } from '../data/listSearch';
 import { annualLeaveBalance, experienceLetterHtml, MANUAL_ONBOARDING_ITEMS, ONBOARDING_ITEMS, onboardingStatus, openPrintableHtml } from '../data/lifecycle';
 
 interface Props {
@@ -26,6 +28,9 @@ const emptyForm = { employeeId: '', type: 'Probation Confirmation' as LifecycleR
 export function EmployeeLifecycleModule({ employees, branches, departments, designations, companies, lifecycleRequests, currentUserId, onCreate, onReview, onUpdateOnboarding, leaves, statConfig }: Props) {
   const [view, setView] = useState<'requests' | 'onboarding' | 'letters'>('requests');
   const [form, setForm] = useState(emptyForm);
+  const [search, setSearch] = useState('');
+  const employeeMatches = (employee: Employee | undefined, ...extra: unknown[]) => matchesSearch(search, employee?.fullName, employee?.employeeCode, employee?.cnic, departmentName(employee?.departmentId), designationTitle(employee?.designationId), ...extra);
+  const requestMatches = (request: LifecycleRequest) => employeeMatches(employees.find(employee => employee.id === request.employeeId), request.type, request.status, request.effectiveDate, request.reason, request.createdBy, request.reviewedBy);
   const active = employees.filter(employee => employee.status !== 'Terminated');
   const name = (id?: string) => employees.find(employee => employee.id === id)?.fullName || 'Employee';
   const designationTitle = (id?: string) => designations.find(item => item.id === id)?.title || '—';
@@ -33,11 +38,12 @@ export function EmployeeLifecycleModule({ employees, branches, departments, desi
   const selected = employees.find(employee => employee.id === form.employeeId);
   const destinationDepartments = departments.filter(item => item.branchId === (form.newBranchId || selected?.branchId));
   const destinationDesignations = designations.filter(item => item.departmentId === (form.newDepartmentId || selected?.departmentId));
-  const pending = lifecycleRequests.filter(item => item.status === 'Pending').sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
-  const decided = lifecycleRequests.filter(item => item.status !== 'Pending').sort((a, b) => (b.reviewedAt || '').localeCompare(a.reviewedAt || '')).slice(0, 12);
+  const pending = lifecycleRequests.filter(item => item.status === 'Pending' && requestMatches(item)).sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
+  const decided = lifecycleRequests.filter(item => item.status !== 'Pending' && requestMatches(item)).sort((a, b) => (b.reviewedAt || '').localeCompare(a.reviewedAt || '')).slice(0, 12);
   const onboardingQueue = useMemo(() => active.map(employee => ({ employee, status: onboardingStatus(employee) }))
     .filter(item => Object.values(item.status).some(done => !done))
-    .sort((a, b) => (b.employee.dateOfJoining || '').localeCompare(a.employee.dateOfJoining || '')), [active]);
+    .filter(item => employeeMatches(item.employee))
+    .sort((a, b) => (b.employee.dateOfJoining || '').localeCompare(a.employee.dateOfJoining || '')), [active, search]);
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -77,6 +83,8 @@ export function EmployeeLifecycleModule({ employees, branches, departments, desi
         </div>
       </div>
 
+      <ListSearch value={search} onChange={setSearch} placeholder={view === 'letters' ? 'Search employee, code, designation…' : view === 'onboarding' ? 'Search employee, code, department…' : 'Search employee, request type, reason…'} />
+
       {view === 'requests' && <div className="grid gap-5 lg:grid-cols-[22rem_1fr]">
         <form onSubmit={submit} className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 text-xs shadow-sm">
           <h3 className="text-sm font-bold text-slate-900">Raise a request</h3>
@@ -105,7 +113,7 @@ export function EmployeeLifecycleModule({ employees, branches, departments, desi
         <div className="space-y-4">
           <section className="rounded-xl border border-amber-200 bg-amber-50/50 p-4 text-xs">
             <h3 className="text-sm font-bold text-slate-900">Awaiting approval ({pending.length})</h3>
-            {pending.length === 0 ? <p className="mt-2 text-slate-500">No pending lifecycle requests.</p> : <ul className="mt-3 space-y-2">
+            {pending.length === 0 ? <p className="mt-2 text-slate-500">{search.trim() ? `No pending requests match “${search.trim()}”.` : 'No pending lifecycle requests.'}</p> : <ul className="mt-3 space-y-2">
               {pending.map(request => <li key={request.id} className="rounded-lg border border-amber-200 bg-white p-3">
                 <div className="flex flex-wrap justify-between gap-2"><span className="font-bold text-slate-900">{request.type} — {name(request.employeeId)}</span><span className="font-mono text-slate-500">effective {request.effectiveDate}</span></div>
                 <p className="mt-1 text-slate-600">{detail(request)}</p>
@@ -119,7 +127,7 @@ export function EmployeeLifecycleModule({ employees, branches, departments, desi
           </section>
           <section className="rounded-xl border border-slate-200 bg-white p-4 text-xs">
             <h3 className="text-sm font-bold text-slate-900">Recent decisions</h3>
-            {decided.length === 0 ? <p className="mt-2 text-slate-500">No decisions yet.</p> : <ul className="mt-2 divide-y divide-slate-100">
+            {decided.length === 0 ? <p className="mt-2 text-slate-500">{search.trim() ? `No decisions match “${search.trim()}”.` : 'No decisions yet.'}</p> : <ul className="mt-2 divide-y divide-slate-100">
               {decided.map(request => <li key={request.id} className="flex flex-wrap justify-between gap-2 py-2"><span><strong>{request.type}</strong> — {name(request.employeeId)} ({request.effectiveDate})</span><span className={request.status === 'Approved' ? 'text-emerald-700' : 'text-rose-700'}>{request.status} by {request.reviewedBy}{request.settlementId ? ' · settlement created' : ''}{request.salaryRevisionId ? ' · salary revision drafted' : ''}</span></li>)}
             </ul>}
           </section>
@@ -128,7 +136,7 @@ export function EmployeeLifecycleModule({ employees, branches, departments, desi
 
       {view === 'onboarding' && <section className="rounded-xl border border-slate-200 bg-white p-4 text-xs shadow-sm">
         <p className="text-slate-500">Items marked “auto” are confirmed from the employee record and cannot be ticked by hand.</p>
-        {onboardingQueue.length === 0 ? <p className="mt-4 font-semibold text-emerald-700">All active employees have completed onboarding.</p> : <div className="mt-3 space-y-3">
+        {onboardingQueue.length === 0 ? (search.trim() ? <p className="mt-4 text-slate-500">No onboarding records match “{search.trim()}”.</p> : <p className="mt-4 font-semibold text-emerald-700">All active employees have completed onboarding.</p>) : <div className="mt-3 space-y-3">
           {onboardingQueue.slice(0, 40).map(({ employee, status }) => {
             const doneCount = Object.values(status).filter(Boolean).length;
             return <div key={employee.id} className="rounded-lg border border-slate-200 p-3">
@@ -150,7 +158,7 @@ export function EmployeeLifecycleModule({ employees, branches, departments, desi
       {view === 'letters' && <section className="rounded-xl border border-slate-200 bg-white p-4 text-xs shadow-sm">
         <p className="text-slate-500">Employment letters for current staff and experience certificates for separated staff open as printable pages.</p>
         <ul className="mt-3 divide-y divide-slate-100">
-          {employees.slice().sort((a, b) => (a.fullName || '').localeCompare(b.fullName || '')).map(employee => <li key={employee.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+          {employees.filter(employee => employeeMatches(employee, employee.status)).sort((a, b) => (a.fullName || '').localeCompare(b.fullName || '')).map(employee => <li key={employee.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
             <span><strong>{employee.fullName}</strong> · {designationTitle(employee.designationId)} · {employee.status}{employee.separationDate ? ` (left ${employee.separationDate})` : ''}</span>
             <button type="button" onClick={() => { try { openPrintableHtml(experienceLetterHtml(employee, designationTitle(employee.designationId), departmentName(employee.departmentId), companies.find(item => item.id === employee.companyId) || companies[0])); } catch (error) { alert(error instanceof Error ? error.message : 'Letter could not be opened.'); } }} className="rounded border border-emerald-300 px-3 py-1 font-semibold text-emerald-700 hover:bg-emerald-50">
               {employee.status === 'Terminated' ? 'Experience certificate' : 'Employment letter'}

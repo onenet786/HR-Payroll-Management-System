@@ -9,6 +9,8 @@ import { LoanAdvance, Employee } from '../types';
 import { empAvatarUrl } from '../utils/avatar';
 import { RequiredMark, RequiredNote } from './RequiredMark';
 import { motion, AnimatePresence } from 'motion/react';
+import ListSearch from './ListSearch';
+import { matchesSearch } from '../data/listSearch';
 
 interface LoansModuleProps {
   loanAdvances: LoanAdvance[];
@@ -35,6 +37,7 @@ export function LoansModule({
   const [showApplyForm, setShowApplyForm] = useState(false);
   const [filterStatus, setFilterStatus] = useState<string>('All');
   const [filterEmpId, setFilterEmpId] = useState<string>('All');
+  const [search, setSearch] = useState('');
 
   const [form, setForm] = useState({
     employeeId: currentUserEmployeeId || '',
@@ -72,7 +75,8 @@ export function LoansModule({
   const filtered = loanAdvances.filter(l => {
     const statusMatch = filterStatus === 'All' || l.status === filterStatus;
     const empMatch = filterEmpId === 'All' || l.employeeId === filterEmpId;
-    return statusMatch && empMatch;
+    const emp = employees.find(e => e.id === l.employeeId);
+    return statusMatch && empMatch && matchesSearch(search, emp?.fullName, emp?.employeeCode, emp?.cnic, l.type, l.status, l.reason, l.appliedOn, l.principalAmount);
   }).sort((a, b) => (b.appliedOn || '').localeCompare(a.appliedOn || ''));
 
   const totalActive = loanAdvances.filter(l => l.status === 'Active').length;
@@ -115,7 +119,8 @@ export function LoansModule({
       </div>
 
       {/* Filters */}
-      <div className="flex gap-3 flex-wrap">
+      <div className="flex gap-3 flex-wrap items-center">
+        <ListSearch value={search} onChange={setSearch} placeholder="Search employee, code, type, reason…" total={loanAdvances.length} shown={filtered.length} />
         <select value={filterEmpId} onChange={e => setFilterEmpId(e.target.value)}
           aria-label="Filter loans by employee"
           className="bg-white border border-slate-200 text-slate-900 text-xs rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500">
@@ -135,7 +140,7 @@ export function LoansModule({
       {/* Loan Records */}
       <div className="space-y-3">
         {filtered.length === 0 ? (
-          <div className="text-center py-12 text-slate-500 text-sm">No loan records found.</div>
+          <div className="text-center py-12 text-slate-500 text-sm">{search.trim() ? `No loan records match “${search.trim()}”.` : 'No loan records found.'}</div>
         ) : (
           filtered.map(loan => {
             const repaidPct = loan.principalAmount > 0 ? (loan.totalRepaid / loan.principalAmount) * 100 : 0;

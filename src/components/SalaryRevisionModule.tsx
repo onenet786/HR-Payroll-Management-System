@@ -9,6 +9,8 @@ import { RequiredMark, RequiredNote } from './RequiredMark';
 import { Plus, TrendingUp, ArrowUpRight } from 'lucide-react';
 import { SalaryRevision, Employee } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
+import ListSearch from './ListSearch';
+import { matchesSearch } from '../data/listSearch';
 
 interface SalaryRevisionModuleProps {
   salaryRevisions: SalaryRevision[];
@@ -27,6 +29,7 @@ const revisionTypeColors: Record<string, string> = {
 export function SalaryRevisionModule({ salaryRevisions, employees, currentUserAccount, onAddSalaryRevision }: SalaryRevisionModuleProps) {
   const [showForm, setShowForm] = useState(false);
   const [filterEmpId, setFilterEmpId] = useState<string>('All');
+  const [search, setSearch] = useState('');
 
   const [form, setForm] = useState({
     employeeId: employees[0]?.id || '',
@@ -68,6 +71,7 @@ export function SalaryRevisionModule({ salaryRevisions, employees, currentUserAc
 
   const filtered = salaryRevisions
     .filter(r => filterEmpId === 'All' || r.employeeId === filterEmpId)
+    .filter(r => { const emp = employees.find(e => e.id === r.employeeId); return matchesSearch(search, emp?.fullName, emp?.employeeCode, emp?.cnic, r.type, r.status, r.reason, r.effectiveDate); })
     .sort((a, b) => (b.effectiveDate || '').localeCompare(a.effectiveDate || ''));
 
   const approvedRevisions = salaryRevisions.filter(r => r.status !== 'Draft');
@@ -158,7 +162,8 @@ export function SalaryRevisionModule({ salaryRevisions, employees, currentUserAc
       </div>
 
       {/* Filter */}
-      <div className="flex gap-3">
+      <div className="flex gap-3 flex-wrap items-center">
+        <ListSearch value={search} onChange={setSearch} placeholder="Search employee, code, type, reason…" total={salaryRevisions.length} shown={filtered.length} />
         <select value={filterEmpId} onChange={e => setFilterEmpId(e.target.value)}
           aria-label="Filter salary revisions by employee"
           className="bg-white border border-slate-200 text-slate-900 text-xs rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500">
@@ -171,7 +176,7 @@ export function SalaryRevisionModule({ salaryRevisions, employees, currentUserAc
       <div className="space-y-3">
         <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest">Revision History</h3>
         {filtered.length === 0 ? (
-          <div className="text-center py-12 text-slate-500 text-sm">No salary revisions on record.</div>
+          <div className="text-center py-12 text-slate-500 text-sm">{search.trim() ? `No salary revisions match “${search.trim()}”.` : 'No salary revisions on record.'}</div>
         ) : (
           filtered.map(revision => (
             <div key={revision.id} className="bg-slate-50 border border-slate-200 rounded-2xl p-4">

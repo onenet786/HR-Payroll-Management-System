@@ -10,6 +10,8 @@ import { Plus, ChevronDown, ChevronUp } from 'lucide-react';
 import { PerformanceReview, KpiScore, Employee, SalaryRevision } from '../types';
 import { empAvatarUrl } from '../utils/avatar';
 import { motion, AnimatePresence } from 'motion/react';
+import ListSearch from './ListSearch';
+import { matchesSearch } from '../data/listSearch';
 
 interface PerformanceModuleProps {
   reviews: PerformanceReview[];
@@ -48,6 +50,7 @@ export function PerformanceModule({ reviews, employees, currentUserAccount, canM
   const [showForm, setShowForm] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [filterEmpId, setFilterEmpId] = useState('All');
+  const [search, setSearch] = useState('');
 
   const emptyKpis: KpiScore[] = DEFAULT_KPIS.map(k => ({ kpi: k, weight: 20, selfScore: 3, managerScore: 3 }));
   const [form, setForm] = useState({
@@ -119,6 +122,7 @@ export function PerformanceModule({ reviews, employees, currentUserAccount, canM
 
   const visibleReviews = canManage ? reviews : reviews.filter(r => r.employeeId === currentUserAccount.employeeId && ['Approved', 'Acknowledged'].includes(r.status));
   const filtered = visibleReviews.filter(r => filterEmpId === 'All' || r.employeeId === filterEmpId)
+    .filter(r => { const emp = employees.find(e => e.id === r.employeeId); return matchesSearch(search, emp?.fullName, emp?.employeeCode, r.period, r.status, r.reviewDate); })
     .sort((a, b) => (b.reviewDate || '').localeCompare(a.reviewDate || ''));
 
   const avgRating = reviews.length > 0
@@ -189,17 +193,20 @@ export function PerformanceModule({ reviews, employees, currentUserAccount, canM
       </div>
 
       {/* Filter */}
+      <div className="flex gap-3 flex-wrap items-center">
+      <ListSearch value={search} onChange={setSearch} placeholder="Search employee, code, period, status…" total={visibleReviews.length} shown={filtered.length} />
       <select value={filterEmpId} onChange={e => setFilterEmpId(e.target.value)}
         aria-label="Filter performance reviews by employee"
         className="bg-white border border-slate-200 text-slate-900 text-xs rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500">
         <option value="All">All Employees</option>
         {employees.map(e => <option key={e.id} value={e.id}>{e.fullName}</option>)}
       </select>
+      </div>
 
       {/* Review Cards */}
       <div className="space-y-3">
         {filtered.length === 0 ? (
-          <div className="text-center py-12 text-slate-500 text-sm">No performance reviews found.</div>
+          <div className="text-center py-12 text-slate-500 text-sm">{search.trim() ? `No performance reviews match “${search.trim()}”.` : 'No performance reviews found.'}</div>
         ) : filtered.map(review => {
           const isExpanded = expandedId === review.id;
           const emp = employees.find(e => e.id === review.employeeId);

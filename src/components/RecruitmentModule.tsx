@@ -10,6 +10,8 @@ import { formatDisplayDate } from '../utils/dateFormat';
 import { Plus, Briefcase, ChevronRight, X } from 'lucide-react';
 import { JobPosting, JobApplication, AppStage, Department, Branch } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
+import ListSearch from './ListSearch';
+import { matchesSearch } from '../data/listSearch';
 
 interface RecruitmentModuleProps {
   jobPostings: JobPosting[];
@@ -47,6 +49,7 @@ export function RecruitmentModule({
   const [showJobForm, setShowJobForm] = useState(false);
   const [showAppForm, setShowAppForm] = useState(false);
   const [appDetailId, setAppDetailId] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
 
   const emptyJob: Partial<JobPosting> = {
     title: '', departmentId: departments[0]?.id || '', branchId: branches[0]?.id || '',
@@ -67,9 +70,10 @@ export function RecruitmentModule({
   const getBranchName = (id: string) => branches.find(b => b.id === id)?.name || id;
   const getJobTitle = (id: string) => jobPostings.find(j => j.id === id)?.title || id;
 
-  const pipelineApps = selectedJobId
+  const pipelineApps = (selectedJobId
     ? applications.filter(a => a.jobPostingId === selectedJobId)
-    : applications;
+    : applications).filter(a => matchesSearch(search, a.applicantName, a.applicantEmail, a.applicantPhone, a.cnic, a.stage, getJobTitle(a.jobPostingId)));
+  const shownJobs = jobPostings.filter(job => matchesSearch(search, job.title, job.status, job.jobType, getDeptName(job.departmentId), getBranchName(job.branchId), job.qualificationRequired));
 
   const handleAddJob = () => {
     if (!jobForm.title || !jobForm.closingDate) return;
@@ -146,11 +150,19 @@ export function RecruitmentModule({
         ))}
       </div>
 
+      <ListSearch
+        value={search}
+        onChange={setSearch}
+        placeholder={activeTab === 'postings' ? 'Search job title, department, branch, status…' : 'Search applicant, email, phone, CNIC…'}
+        total={activeTab === 'postings' ? jobPostings.length : applications.length}
+        shown={activeTab === 'postings' ? shownJobs.length : pipelineApps.length}
+      />
+
       {activeTab === 'postings' && (
         <div className="space-y-3">
-          {jobPostings.length === 0 ? (
-            <div className="text-center py-12 text-slate-500 text-sm">No job postings yet.</div>
-          ) : jobPostings.map(job => {
+          {shownJobs.length === 0 ? (
+            <div className="text-center py-12 text-slate-500 text-sm">{search.trim() ? `No job postings match “${search.trim()}”.` : 'No job postings yet.'}</div>
+          ) : shownJobs.map(job => {
             const appCount = applications.filter(a => a.jobPostingId === job.id).length;
             const statusColor = STATUS_COLORS[job.status];
             return (

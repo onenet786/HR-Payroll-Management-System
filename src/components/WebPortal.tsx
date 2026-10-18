@@ -36,6 +36,8 @@ import { FirestoreMaintenanceModule } from './FirestoreMaintenanceModule';
 import { CompanySetupModule } from './CompanySetupModule';
 import { MasterDataModule } from './MasterDataModule';
 import { EmployeeDocumentVault } from './EmployeeDocumentVault';
+import ListSearch, { NoSearchResults } from './ListSearch';
+import { matchesSearch } from '../data/listSearch';
 import { motion, AnimatePresence } from 'motion/react';
 import type { FirestoreSyncStatus } from '../App';
 import { bankAdviceChecksum } from '../data/bankAdvice';
@@ -1423,6 +1425,33 @@ export function WebPortal({
   const [leavePeriodType, setLeavePeriodType] = useState<'daily' | 'weekly' | 'monthly' | 'yearly'>('daily');
   const [selectedLeaveDate, setSelectedLeaveDate] = useState(() => new Date().toISOString().split('T')[0]);
 
+  // List search, one box per page
+  const [employeeSearch, setEmployeeSearch] = useState('');
+  const [employeeStatusFilter, setEmployeeStatusFilter] = useState('all');
+  const [employeeDepartmentFilter, setEmployeeDepartmentFilter] = useState('all');
+  const [attendanceSearch, setAttendanceSearch] = useState('');
+  const [leaveSearch, setLeaveSearch] = useState('');
+  const [leaveStatusFilter, setLeaveStatusFilter] = useState('all');
+  const [payrollSearch, setPayrollSearch] = useState('');
+  const [userSearch, setUserSearch] = useState('');
+  /** Searchable text of an employee: name, code, CNIC, phone, IBAN, department, designation, branch. */
+  const employeeMatches = (emp: Employee | undefined, query: string, ...extra: unknown[]) => {
+    if (!query.trim()) return true;
+    if (!emp) return matchesSearch(query, ...extra);
+    return matchesSearch(
+      query,
+      emp.fullName, emp.employeeCode, emp.cnic, emp.contactNumber, emp.email, emp.iban, emp.status,
+      localDepartments.find(d => d.id === emp.departmentId)?.name,
+      localDesignations.find(ds => ds.id === emp.designationId)?.title,
+      localBranches.find(b => b.id === emp.branchId)?.name,
+      ...extra
+    );
+  };
+  const searchedEmployees = (query: string) => employees.filter(emp => employeeMatches(emp, query));
+  const filteredLeaves = leaves.filter(lv =>
+    (leaveStatusFilter === 'all' || lv.status === leaveStatusFilter) &&
+    employeeMatches(employees.find(e => e.id === lv.employeeId), leaveSearch, lv.leaveType, lv.startDate, lv.endDate, lv.reason, lv.status));
+
   // Manual Modals state
   const [showAddAttendanceModal, setShowAddAttendanceModal] = useState(false);
   const [newAttendanceForm, setNewAttendanceForm] = useState({
@@ -2707,6 +2736,28 @@ export function WebPortal({
                     </div>
                   )}
 
+                  {(() => {
+                    const filteredEmployees = searchedEmployees(employeeSearch).filter(emp =>
+                      (employeeStatusFilter === 'all' || emp.status === employeeStatusFilter) &&
+                      (employeeDepartmentFilter === 'all' || emp.departmentId === employeeDepartmentFilter));
+                    const filtersActive = Boolean(employeeSearch.trim()) || employeeStatusFilter !== 'all' || employeeDepartmentFilter !== 'all';
+                    const clearFilters = () => { setEmployeeSearch(''); setEmployeeStatusFilter('all'); setEmployeeDepartmentFilter('all'); };
+                    return (<>
+                  <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
+                    <ListSearch value={employeeSearch} onChange={setEmployeeSearch} placeholder="Search name, code, CNIC, phone, IBAN…" />
+                    <div className="flex flex-wrap items-center gap-2">
+                      <select aria-label="Filter by status" value={employeeStatusFilter} onChange={e => setEmployeeStatusFilter(e.target.value)} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-100">
+                        <option value="all">All statuses</option>
+                        {(['Active', 'On Leave', 'Suspended', 'Terminated'] as const).map(status => <option key={status} value={status}>{status}</option>)}
+                      </select>
+                      <select aria-label="Filter by department" value={employeeDepartmentFilter} onChange={e => setEmployeeDepartmentFilter(e.target.value)} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-100">
+                        <option value="all">All departments</option>
+                        {localDepartments.map(dept => <option key={dept.id} value={dept.id}>{dept.name}</option>)}
+                      </select>
+                      {filtersActive && <span className="text-xs text-slate-500" aria-live="polite">Showing {filteredEmployees.length} of {employees.length}</span>}
+                      {filtersActive && <button type="button" onClick={clearFilters} className="text-xs font-bold text-emerald-700 hover:underline">Reset</button>}
+                    </div>
+                  </div>
                   {empSubTab === 'list' || activeZones.length === 0 ? (
                     /* Grid or Table listing of employees */
                     <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
@@ -2723,7 +2774,8 @@ export function WebPortal({
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-200 text-slate-700">
-                            {employees.map(emp => {
+                            {filtersActive && filteredEmployees.length === 0 && <NoSearchResults query={employeeSearch.trim() || 'these filters'} colSpan={6} onClear={clearFilters} />}
+                            {filteredEmployees.map(emp => {
                               const branch = localBranches.find(b => b.id === emp.branchId);
                               const dept = localDepartments.find(d => d.id === emp.departmentId);
                               const desig = localDesignations.find(ds => ds.id === emp.designationId);
@@ -2927,7 +2979,7 @@ export function WebPortal({
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-slate-200 text-slate-700">
-                                {employees.filter(e => {
+                                {filteredEmployees.filter(e => {
                                   if (reportGrouping === 'uc') return (resolveUcTownName(e, ucTowns) || 'Unassigned') === selectedGroup;
                                   if (reportGrouping === 'zone') return (resolveZoneName(e, zones) || 'Unassigned') === selectedGroup;
                                   const supervisor = e.zoneInChargeName || (e.isZoneInCharge ? 'Zone In Charge (Self)' : 'Unassigned');
@@ -2960,6 +3012,8 @@ export function WebPortal({
 
                     </div>
                   )}
+                    </>);
+                  })()}
 
                 </motion.div>
               )}
@@ -2999,6 +3053,12 @@ export function WebPortal({
                       Daily / Weekly / Monthly / Yearly Registers
                     </button>
                   </div>
+
+                  <ListSearch
+                    value={attendanceSearch}
+                    onChange={setAttendanceSearch}
+                    placeholder={attSubTab === 'stream' ? 'Search employee, code, date, status, method…' : 'Search employee, code, department…'}
+                  />
 
                   {attSubTab === 'stream' ? (
                     <>
@@ -3126,7 +3186,14 @@ export function WebPortal({
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100 text-slate-700 font-sans">
-                              {attendances.slice().reverse().map(att => {
+                              {(() => {
+                                const streamRows = attendances.slice().reverse().filter(att => employeeMatches(
+                                  employees.find(e => e.id === att.employeeId), attendanceSearch,
+                                  att.date, att.status, att.method, att.punchIn, att.punchOut, att.address,
+                                  att.regularizationRequested && att.regularizationApproved === undefined ? 'pending review' : ''));
+                                return attendanceSearch.trim() && !streamRows.length
+                                  ? <NoSearchResults query={attendanceSearch} colSpan={8} onClear={() => setAttendanceSearch('')} />
+                                  : streamRows.map(att => {
                                 const emp = employees.find(e => e.id === att.employeeId);
                                 const legacyLocation = Number.isFinite(att.latitude) && Number.isFinite(att.longitude)
                                   ? {
@@ -3237,7 +3304,8 @@ export function WebPortal({
                                     </td>
                                   </tr>
                                 );
-                              })}
+                              });
+                              })()}
                             </tbody>
                           </table>
                         </div>
@@ -3309,9 +3377,9 @@ export function WebPortal({
                         <div className="space-y-4">
                           {/* Metrics summary */}
                           {(() => {
-                            const scopedEmployees = selectedAttEmployeeId === 'all'
+                            const scopedEmployees = (selectedAttEmployeeId === 'all'
                               ? employees
-                              : employees.filter(emp => emp.id === selectedAttEmployeeId);
+                              : employees.filter(emp => emp.id === selectedAttEmployeeId)).filter(emp => employeeMatches(emp, attendanceSearch));
                             const scopedEmployeeIds = new Set(scopedEmployees.map(emp => emp.id));
                             const dayPunches = attendances.filter(a => a.date === selectedAttDate && scopedEmployeeIds.has(a.employeeId));
                             const pCount = dayPunches.filter(a => a.status === 'Present').length;
@@ -3362,7 +3430,8 @@ export function WebPortal({
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-slate-200 text-slate-700">
-                                {employees
+                                {attendanceSearch.trim() && !searchedEmployees(attendanceSearch).some(emp => selectedAttEmployeeId === 'all' || emp.id === selectedAttEmployeeId) && <NoSearchResults query={attendanceSearch} colSpan={7} onClear={() => setAttendanceSearch('')} />}
+                                {searchedEmployees(attendanceSearch)
                                   .filter(emp => selectedAttEmployeeId === 'all' || emp.id === selectedAttEmployeeId)
                                   .map(emp => {
                                   const punch = attendances.find(a => a.employeeId === emp.id && a.date === selectedAttDate);
@@ -3456,7 +3525,7 @@ export function WebPortal({
                             { name: 'Week 3 (June 15 - June 21)', start: '2026-06-15', end: '2026-06-21' },
                             { name: 'Week 4 (June 22 - June 28)', start: '2026-06-22', end: '2026-06-28' }
                           ].map(wk => {
-                            const wkPunches = attendances.filter(a => a.date >= wk.start && a.date <= wk.end);
+                            const wkPunches = attendances.filter(a => a.date >= wk.start && a.date <= wk.end && employeeMatches(employees.find(e => e.id === a.employeeId), attendanceSearch));
                             const presents = wkPunches.filter(a => a.status === 'Present' || a.status === 'Late').length;
                             const halfDays = wkPunches.filter(a => a.status === 'Half Day').length;
                             const totalExpected = employees.length * 5; // 5 working days expected per employee
@@ -3509,7 +3578,7 @@ export function WebPortal({
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-slate-200 text-slate-700">
-                                {employees.map(emp => {
+                                {searchedEmployees(attendanceSearch).map(emp => {
                                   const monthPunches = attendances.filter(
                                     a => a.employeeId === emp.id && a.date.startsWith(selectedAttDate.slice(0, 7))
                                   );
@@ -3544,7 +3613,7 @@ export function WebPortal({
                       {/* YEARLY REGISTER VIEW */}
                       {attPeriodType === 'yearly' && (
                         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden p-5 space-y-4">
-                          <h3 className="font-bold text-slate-800 text-sm border-b pb-2">Annual Aggregate Register: Calendar Year 2026</h3>
+                          <h3 className="font-bold text-slate-800 text-sm border-b pb-2">Annual Aggregate Register: Calendar Year {selectedAttDate.slice(0, 4)}</h3>
                           <div className="overflow-x-auto">
                             <table className="min-w-full text-xs text-left">
                               <thead className="bg-slate-50 font-bold text-slate-500 uppercase tracking-wider">
@@ -3558,7 +3627,7 @@ export function WebPortal({
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-slate-200 text-slate-700">
-                                {employees.map(emp => {
+                                {searchedEmployees(attendanceSearch).map(emp => {
                                   const yrPunches = attendances.filter(a => a.employeeId === emp.id && a.date.startsWith(selectedAttDate.slice(0, 4)));
                                   const present = yrPunches.filter(a => a.status === 'Present').length;
                                   const late = yrPunches.filter(a => a.status === 'Late').length;
@@ -3628,6 +3697,23 @@ export function WebPortal({
                     </button>
                   </div>
 
+                  <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
+                    <ListSearch
+                      value={leaveSearch}
+                      onChange={setLeaveSearch}
+                      placeholder={leaveSubTab === 'list' ? 'Search employee, code, leave type, date, reason…' : 'Search employee, code, department…'}
+                      {...(leaveSubTab === 'list' ? { total: leaves.length, shown: filteredLeaves.length } : {})}
+                    />
+                    {leaveSubTab === 'list' && (
+                      <select aria-label="Filter leave by status" value={leaveStatusFilter} onChange={e => setLeaveStatusFilter(e.target.value)} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-100">
+                        <option value="all">All statuses</option>
+                        <option value="Pending">Pending</option>
+                        <option value="Approved">Approved</option>
+                        <option value="Rejected">Rejected</option>
+                      </select>
+                    )}
+                  </div>
+
                   {leaveSubTab === 'list' ? (
                     /* Grid of multi-step leaves status */
                     <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
@@ -3644,12 +3730,13 @@ export function WebPortal({
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-200 text-slate-700">
-                            {leaves.map(lv => {
-                              const emp = employees.find(e => e.id === lv.employeeId) || employees.find(e => e.fullName.toLowerCase().includes('aqeel'));
+                            {filteredLeaves.length === 0 && (leaveSearch.trim() || leaveStatusFilter !== 'all') && <NoSearchResults query={leaveSearch.trim() || `${leaveStatusFilter} leave`} colSpan={6} onClear={() => { setLeaveSearch(''); setLeaveStatusFilter('all'); }} />}
+                            {filteredLeaves.map(lv => {
+                              const emp = employees.find(e => e.id === lv.employeeId);
                               return (
                                 <tr key={lv.id} className="hover:bg-slate-50">
                                   <td className="px-6 py-4 whitespace-nowrap">
-                                    <div className="font-semibold text-slate-800">{emp?.fullName}</div>
+                                    <div className="font-semibold text-slate-800">{emp?.fullName || 'Former employee record'}</div>
                                     <div className="text-[11px] font-mono text-slate-400">{emp?.employeeCode}</div>
                                   </td>
                                   <td className="px-6 py-4 whitespace-nowrap text-xs">
@@ -3737,7 +3824,7 @@ export function WebPortal({
                         <div className="space-y-4">
                           {(() => {
                             const activeLeaves = leaves.filter(
-                              l => l.status === 'Approved' && selectedLeaveDate >= l.startDate && selectedLeaveDate <= l.endDate
+                              l => l.status === 'Approved' && selectedLeaveDate >= l.startDate && selectedLeaveDate <= l.endDate && employeeMatches(employees.find(e => e.id === l.employeeId), leaveSearch, l.leaveType)
                             );
                             const casual = activeLeaves.filter(l => l.leaveType === 'Casual').length;
                             const sick = activeLeaves.filter(l => l.leaveType === 'Sick').length;
@@ -3781,7 +3868,7 @@ export function WebPortal({
                                       </thead>
                                       <tbody className="divide-y divide-slate-200 text-slate-700">
                                         {activeLeaves.map(l => {
-                                          const emp = employees.find(e => e.id === l.employeeId) || employees.find(e => e.fullName.toLowerCase().includes('aqeel'));
+                                          const emp = employees.find(e => e.id === l.employeeId);
                                           return (
                                             <tr key={l.id} className="hover:bg-slate-50">
                                               <td className="px-3 py-2.5 font-medium flex items-center space-x-2">
@@ -3816,7 +3903,7 @@ export function WebPortal({
                             { name: 'Week 4 (June 22 - June 28)', start: '2026-06-22', end: '2026-06-28' }
                           ].map(wk => {
                             const wkLeaves = leaves.filter(
-                              l => l.status === 'Approved' && 
+                              l => l.status === 'Approved' && employeeMatches(employees.find(e => e.id === l.employeeId), leaveSearch, l.leaveType) && 
                                   ((l.startDate >= wk.start && l.startDate <= wk.end) || 
                                    (l.endDate >= wk.start && l.endDate <= wk.end))
                             );
@@ -3856,7 +3943,7 @@ export function WebPortal({
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-slate-200 text-slate-700">
-                                {employees.map(emp => {
+                                {searchedEmployees(leaveSearch).map(emp => {
                                   const monthLeaves = leaves.filter(
                                     l => l.employeeId === emp.id && l.status === 'Approved' && l.startDate.startsWith(selectedLeaveDate.slice(0, 7))
                                   );
@@ -3902,7 +3989,7 @@ export function WebPortal({
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-slate-200 text-slate-705">
-                                {employees.map(emp => {
+                                {searchedEmployees(leaveSearch).map(emp => {
                                   const yrLeaves = leaves.filter(
                                     l => l.employeeId === emp.id && l.status === 'Approved' && l.startDate.startsWith(selectedLeaveDate.slice(0, 4))
                                   );
@@ -4128,6 +4215,7 @@ export function WebPortal({
                           <p className="text-xs text-slate-400">Reflecting calculated deductions based on latest configured statutory parameters</p>
                         </div>
                       </div>
+                      <ListSearch value={payrollSearch} onChange={setPayrollSearch} placeholder="Search staff name, code, CNIC, department…" total={employees.length} shown={searchedEmployees(payrollSearch).length} />
 
                       <div className="overflow-x-auto">
                         <table className="min-w-full divide-y divide-slate-100 text-xs text-left">
@@ -4144,7 +4232,7 @@ export function WebPortal({
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-200 text-slate-700 font-mono">
-                            {employees.map(emp => {
+                            {searchedEmployees(payrollSearch).map(emp => {
                               const sheet = computePayslipDetails(
                                 emp, payrollMonth, payrollYear, attendances, leaves, statConfig, taxSlabs, departments, designations, branches, loanAdvances, wageTypes, holidays, payrollPayslips, payrollAdjustments
                               );
@@ -4549,7 +4637,15 @@ export function WebPortal({
                       <h3 className="font-bold text-slate-800 text-xs uppercase tracking-wide font-mono">System Users</h3>
 
                       <RolePermissionsPanel roles={roles} users={users} currentRoleId={loggedInUser.roleId} onUpdateRole={onUpdateRole} />
-                      
+
+                      {(() => {
+                        const userRowMatches = (u: typeof users[number]) => {
+                          const linked = employees.find(e => e.id === u.employeeId);
+                          return matchesSearch(userSearch, u.username, u.email, u.status, roles.find(role => role.id === u.roleId)?.name, linked?.fullName, linked?.employeeCode);
+                        };
+                        const shownUsers = users.filter(userRowMatches);
+                        return (<>
+                      <ListSearch value={userSearch} onChange={setUserSearch} placeholder="Search username, email, role, employee…" total={users.length} shown={shownUsers.length} />
                       <div className="overflow-x-auto">
                         <table className="min-w-full divide-y divide-slate-200 text-left text-xs">
                           <thead className="bg-slate-50 font-bold text-slate-550 uppercase tracking-wider">
@@ -4562,7 +4658,8 @@ export function WebPortal({
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100 text-slate-700">
-                            {users.map(u => {
+                            {userSearch.trim() && !shownUsers.length && <NoSearchResults query={userSearch} colSpan={5} onClear={() => setUserSearch('')} />}
+                            {shownUsers.map(u => {
                               const linkedEmp = employees.find(e => e.id === u.employeeId);
                               return (
                                 <tr key={u.id} className="hover:bg-slate-50/50">
@@ -4605,6 +4702,8 @@ export function WebPortal({
                           </tbody>
                         </table>
                       </div>
+                        </>);
+                      })()}
                     </div>
 
                     {/* Add User & Role Forms Sidebar */}

@@ -9,6 +9,8 @@ import { RequiredMark, RequiredNote } from './RequiredMark';
 import { Plus, Package, Laptop, Smartphone, Car, Wrench } from 'lucide-react';
 import { CompanyAsset, Employee } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
+import ListSearch from './ListSearch';
+import { matchesSearch } from '../data/listSearch';
 
 interface AssetModuleProps {
   assets: CompanyAsset[];
@@ -41,6 +43,7 @@ function PKR(n: number) { return 'PKR ' + n.toLocaleString('en-PK'); }
 export function AssetModule({ assets, employees, canManage, onAddAsset, onUpdateAsset }: AssetModuleProps) {
   const [filterCat, setFilterCat] = useState<'All' | CompanyAsset['category']>('All');
   const [filterStatus, setFilterStatus] = useState<'All' | CompanyAsset['status']>('All');
+  const [search, setSearch] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [assignModal, setAssignModal] = useState<CompanyAsset | null>(null);
   const [returnModal, setReturnModal] = useState<CompanyAsset | null>(null);
@@ -56,7 +59,8 @@ export function AssetModule({ assets, employees, canManage, onAddAsset, onUpdate
 
   const filtered = assets
     .filter(a => filterCat === 'All' || a.category === filterCat)
-    .filter(a => filterStatus === 'All' || a.status === filterStatus);
+    .filter(a => filterStatus === 'All' || a.status === filterStatus)
+    .filter(a => { const holder = employees.find(e => e.id === a.assignedTo); return matchesSearch(search, a.assetTag, a.name, a.serialNumber, a.category, a.status, a.condition, a.notes, holder?.fullName, holder?.employeeCode); });
 
   const totalValue = assets.reduce((s, a) => s + a.purchaseCost, 0);
   const assignedCount = assets.filter(a => a.status === 'Assigned').length;
@@ -121,7 +125,8 @@ export function AssetModule({ assets, employees, canManage, onAddAsset, onUpdate
       </div>
 
       {/* Filters */}
-      <div className="flex gap-3 flex-wrap">
+      <div className="flex gap-3 flex-wrap items-center">
+        <ListSearch value={search} onChange={setSearch} placeholder="Search tag, name, serial, holder…" total={assets.length} shown={filtered.length} />
         <div className="flex gap-1 flex-wrap">
           {(['All', ...CATEGORIES] as const).map(c => (
             <button key={c} onClick={() => setFilterCat(c)}
@@ -154,7 +159,7 @@ export function AssetModule({ assets, employees, canManage, onAddAsset, onUpdate
           </thead>
           <tbody className="divide-y divide-slate-100">
             {filtered.length === 0 ? (
-              <tr><td colSpan={9} className="text-center py-10 text-slate-500">No assets found.</td></tr>
+              <tr><td colSpan={9} className="text-center py-10 text-slate-500">{search.trim() ? `No assets match “${search.trim()}”.` : 'No assets found.'}</td></tr>
             ) : filtered.map(asset => {
               const catColor = CATEGORY_COLORS[asset.category];
               const statusColor = STATUS_COLORS[asset.status];

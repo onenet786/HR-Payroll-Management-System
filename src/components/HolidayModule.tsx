@@ -9,6 +9,8 @@ import { RequiredMark, RequiredNote } from './RequiredMark';
 import { Plus, Trash2, Edit2, Check, X, RefreshCw } from 'lucide-react';
 import { Holiday } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
+import ListSearch from './ListSearch';
+import { matchesSearch } from '../data/listSearch';
 
 interface HolidayModuleProps {
   holidays: Holiday[];
@@ -33,6 +35,7 @@ export function HolidayModule({ holidays, onAddHoliday, onUpdateHoliday, onDelet
   const [editingHoliday, setEditingHoliday] = useState<Holiday | null>(null);
   const [filterYear, setFilterYear] = useState(new Date().getFullYear());
   const [filterType, setFilterType] = useState<string>('All');
+  const [search, setSearch] = useState('');
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
   const emptyForm = {
@@ -85,7 +88,7 @@ export function HolidayModule({ holidays, onAddHoliday, onUpdateHoliday, onDelet
     .filter(h => {
       const yearMatch = h.date.startsWith(String(filterYear)) || h.isRecurring;
       const typeMatch = filterType === 'All' || h.type === filterType;
-      return yearMatch && typeMatch;
+      return yearMatch && typeMatch && matchesSearch(search, h.name, h.type, h.date, h.description);
     })
     .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 
@@ -135,14 +138,15 @@ export function HolidayModule({ holidays, onAddHoliday, onUpdateHoliday, onDelet
       </div>
 
       {/* Filters */}
-      <div className="flex gap-3">
+      <div className="flex gap-3 flex-wrap items-center">
+        <ListSearch value={search} onChange={setSearch} placeholder="Search holiday name, date, type…" />
         <select
           value={filterYear}
           onChange={e => setFilterYear(Number(e.target.value))}
           aria-label="Filter holidays by year"
           className="bg-white border border-slate-200 text-slate-900 text-xs rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500"
         >
-          {[2024, 2025, 2026, 2027].map(y => <option key={y} value={y}>{y}</option>)}
+          {Array.from(new Set([...[-2, -1, 0, 1, 2].map(offset => new Date().getFullYear() + offset), ...holidays.map(h => Number(h.date.slice(0, 4))).filter(Number.isFinite), filterYear])).sort((a, b) => a - b).map(y => <option key={y} value={y}>{y}</option>)}
         </select>
         <div className="flex gap-1">
           {['All', 'Public', 'Company', 'Optional'].map(t => (
@@ -158,7 +162,7 @@ export function HolidayModule({ holidays, onAddHoliday, onUpdateHoliday, onDelet
       <div className="space-y-4">
         {Object.keys(grouped).length === 0 ? (
           <div className="text-center py-12 text-slate-500 text-sm">
-            No holidays found for {filterYear}. Add holidays above.
+            {search.trim() ? `No holidays in ${filterYear} match “${search.trim()}”.` : `No holidays found for ${filterYear}. Add holidays above.`}
           </div>
         ) : (
           Object.entries(grouped).map(([monthIdx, monthHolidays]) => (
