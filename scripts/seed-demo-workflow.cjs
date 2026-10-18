@@ -135,11 +135,16 @@ var hashRows = (rows) => {
   }
   return `fnv1a-${(hash >>> 0).toString(16).padStart(8, "0")}`;
 };
+function employedDuring(employee, periodStart, periodEnd) {
+  if (!employee.dateOfJoining || employee.dateOfJoining > periodEnd) return false;
+  if (employee.separationDate && employee.separationDate < periodStart) return false;
+  return employee.status === "Active" || employee.status === "On Leave" || employee.status === "Terminated" && Boolean(employee.separationDate);
+}
 function buildAttendanceRegister(attendances, employees, leaves, holidays, month, year) {
   const attendanceByEmployeeDay = new Map(attendances.filter((item) => item.date.startsWith(`${year}-${String(month).padStart(2, "0")}`)).map((item) => [`${item.employeeId}|${item.date}`, item]));
   const holidayDates = new Set(holidays.map((item) => item.date));
   const lastDay = new Date(year, month, 0).getDate();
-  const eligible = employees.filter((employee) => (employee.status === "Active" || employee.status === "On Leave") && employee.dateOfJoining <= dayKey(year, month, lastDay));
+  const eligible = employees.filter((employee) => employedDuring(employee, dayKey(year, month, 1), dayKey(year, month, lastDay)));
   return eligible.flatMap((employee) => Array.from({ length: lastDay }, (_, offset) => {
     const date = dayKey(year, month, offset + 1);
     const attendance = attendanceByEmployeeDay.get(`${employee.id}|${date}`);
@@ -149,6 +154,7 @@ function buildAttendanceRegister(attendances, employees, leaves, holidays, month
     if (attendance?.regularizationRequested && attendance.regularizationApproved === void 0) return { employeeId: employee.id, date, status: "Pending Review", attendanceId: attendance.id, source: attendance.method };
     if (attendance?.punchIn && !attendance.punchOut && attendance.regularizationApproved !== false && !["On Leave", "Holiday"].includes(attendance.status)) return { employeeId: employee.id, date, status: "Missing Punch", attendanceId: attendance.id, source: attendance.method };
     if (!attendance && date < employee.dateOfJoining) return { employeeId: employee.id, date, status: "Not Joined", source: "Roster" };
+    if (!attendance && employee.separationDate && date > employee.separationDate) return { employeeId: employee.id, date, status: "Separated", source: "Roster" };
     if (attendance) {
       const status = attendance.status === "On Leave" ? leave?.leaveType === "Unpaid" ? "Unpaid Leave" : "Paid Leave" : attendance.status === "Holiday" ? "Holiday" : attendance.status;
       return { employeeId: employee.id, date, status, attendanceId: attendance.id, source: attendance.method };
@@ -169,6 +175,9 @@ function createAttendancePeriod(attendances, employees, leaves, holidays, month,
   const registerRows = buildAttendanceRegister(attendances, employees, leaves, holidays, month, year);
   const unresolved = registerRows.filter((row) => row.status === "Pending Review" || row.status === "Missing Punch");
   if (unresolved.length) throw new Error(`Attendance period cannot be locked: ${unresolved.length} register day(s) require review.`);
+  const lastDate = dayKey(year, month, new Date(year, month, 0).getDate());
+  const lockDay = new Date(Date.parse(now2) + 5 * 36e5).toISOString().slice(0, 10);
+  if (lockDay <= lastDate) throw new Error(`The attendance register for ${month}/${year} can be locked only after the month ends (from ${dayKey(month === 12 ? year + 1 : year, month === 12 ? 1 : month + 1, 1)}).`);
   return {
     id: attendancePeriodId(month, year),
     periodMonth: month,
@@ -177,7 +186,7 @@ function createAttendancePeriod(attendances, employees, leaves, holidays, month,
     lockedAt: now2,
     lockedBy: actor,
     attendanceCount: records.length,
-    employeeCount: employees.filter((item) => item.status === "Active" || item.status === "On Leave").length,
+    employeeCount: new Set(registerRows.map((row) => row.employeeId)).size,
     integrityHash: attendanceIntegrityHash(attendances, month, year),
     exceptionCount: 0,
     registerVersion: (previous?.registerVersion || 0) + 1,
@@ -195,10 +204,10 @@ function registerPayrollSummary(rows, employeeId) {
     else if (row.status === "Paid Leave") summary.paidLeaveDays += 1;
     else if (row.status === "Unpaid Leave") summary.unpaidLeaveDays += 1;
     else if (row.status === "Absent") summary.absentDays += 1;
-    else if (row.status === "Not Joined") summary.notJoinedDays += 1;
+    else if (row.status === "Not Joined" || row.status === "Separated") summary.notJoinedDays += 1;
     else if (row.status === "Holiday") summary.holidayDays += 1;
     else if (row.status === "Weekly Off") summary.weeklyOffDays += 1;
-    if (!["Holiday", "Weekly Off", "Not Joined"].includes(row.status)) summary.rosteredDays += 1;
+    if (!["Holiday", "Weekly Off", "Not Joined", "Separated"].includes(row.status)) summary.rosteredDays += 1;
   }
   return summary;
 }
