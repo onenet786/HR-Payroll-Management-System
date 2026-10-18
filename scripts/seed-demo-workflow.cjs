@@ -846,7 +846,11 @@ Back up first (npm run postgres:backup), then re-run with --yes-clear=${database
       created.push(`statutory configuration ${statConfig.id} (none existed)`);
     }
     if (!statConfig) {
-      throw new Error(`No statutory configuration covers Tax Year ${taxYearOf(openMonth.year, openMonth.month)}. Approve one under Settings \u2192 Statutory Governance first; nothing was changed.`);
+      const taxYear = taxYearOf(openMonth.year, openMonth.month);
+      const found = statConfigs.map((item) => `${item.id}: tax year "${item.taxYear ?? ""}", effective from ${item.effectiveFrom || "(blank)"}`).join("\n  ");
+      throw new Error(`No statutory configuration covers Tax Year ${taxYear} (July ${Number(taxYear) - 1} - June ${taxYear}). Found:
+  ${found}
+Payroll needs the tax year written exactly as "${taxYear}". Propose it under Settings \u2192 Statutory Config (tax year ${taxYear}, effective from ${Number(taxYear) - 1}-07-01) and have a second admin approve it; nothing was changed.`);
     }
     const config = statConfig;
     const missingRates = ["minimumWage", "eobiEmployerRate", "eobiEmployeeRate", "pessiEmployerRate", "gratuityRateDaysPerYear"].filter((field) => !Number.isFinite(Number(config[field])));
