@@ -819,11 +819,12 @@ export function WebPortal({
   const [userEditError, setUserEditError] = useState('');
   
   // Forms local state
-  const [newEmpForm, setNewEmpForm] = useState({
+  // Every new employee starts from a blank form: identity, bank and statutory numbers are never pre-filled.
+  const blankNewEmployeeForm = () => ({
     fullName: '',
     email: '',
-    contactNumber: '+923001234567',
-    cnic: '42101-1234567-3',
+    contactNumber: '',
+    cnic: '',
     cnicExpiryDate: '',
     drivingLicenceExpiryDate: '',
     professionalCertificationExpiryDate: '',
@@ -836,7 +837,7 @@ export function WebPortal({
     probationEndDate: '',
     probationConfirmed: false,
     gender: 'Male',
-    dateOfBirth: '1995-01-01',
+    dateOfBirth: '',
     branchId: 'b1',
     departmentId: 'd1',
     designationId: 'ds1',
@@ -844,28 +845,28 @@ export function WebPortal({
     ucTownId: '',
     wageTypeId: '',
     wageType: 'Salaried' as string,
-    basicSalary: 85000,
+    basicSalary: 0,
     shiftStartTime: '09:00', shiftEndTime: '17:00', shiftGraceMinutes: 15, shiftHalfDayMinutes: 120, shiftBreakMinutes: 0,
     ramadanStartDate: '', ramadanEndDate: '', ramadanStartTime: '09:00', ramadanEndTime: '15:00', fridayStartTime: '', fridayEndTime: '',
     providentFundOptIn: true,
     providentFundRate: 5.0,
     gratuityOptIn: true,
-    bankName: 'Habib Bank Limited (HBL)',
-    bankAccountNumber: '12345678901234',
-    iban: 'PK42HABB0012345678901234',
-    eobiNumber: '1090123000',
-    socialSecurityNumber: 'SS-42-000111',
+    bankName: '',
+    bankAccountNumber: '',
+    iban: '',
+    eobiNumber: '',
+    socialSecurityNumber: '',
     eobiExemptionReason: '', socialSecurityExemptionReason: '',
     ntn: '',
     // Custom onboarding fields
     pictureUrl: '',
     isZoneInCharge: false,
     zoneInChargeName: '',
-    zone: 'East Zone',
-    ucTown: 'UC-2 Clifton Town',
-    houseRentAllowance: 25500,
-    conveyanceAllowance: 8500,
-    medicalAllowance: 8500,
+    zone: '',
+    ucTown: '',
+    houseRentAllowance: 0,
+    conveyanceAllowance: 0,
+    medicalAllowance: 0,
     otherAllowances: 0,
     eobiEnabled: true,
     fbrEnabled: true,
@@ -874,6 +875,7 @@ export function WebPortal({
     employeeCode: '',
     maritalStatus: 'Single'
   });
+  const [newEmpForm, setNewEmpForm] = useState(blankNewEmployeeForm);
 
   const [editEmpForm, setEditEmpForm] = useState({
     fullName: '',
@@ -1565,6 +1567,13 @@ export function WebPortal({
     
     // CNIC Regex validation
     const cnicRegex = /^\d{5}-\d{7}-\d{1}$/;
+    const sameCnic = employees.find(item => item.status !== 'Terminated' && (item.cnic || '').replace(/\D/g, '') === newEmpForm.cnic.replace(/\D/g, ''));
+    if (sameCnic) { alert(`CNIC ${newEmpForm.cnic} already belongs to ${sameCnic.fullName} (${sameCnic.employeeCode}).`); return; }
+    const newIban = String(newEmpForm.iban || '').replace(/\s/g, '').toUpperCase();
+    if (newIban && !/^PK\d{2}[A-Z0-9]{20}$/.test(newIban)) { alert('IBAN must be a 24-character Pakistan IBAN (PK + 22 letters/digits).'); return; }
+    if (newIban && employees.some(item => item.status !== 'Terminated' && (item.iban || '').replace(/\s/g, '').toUpperCase() === newIban)) {
+      if (!window.confirm('This IBAN is already used by another employee. Save anyway (e.g. a shared family account)?')) return;
+    }
     if (!cnicRegex.test(newEmpForm.cnic)) {
       alert('CNIC format must be valid (e.g. 42101-1234567-3)');
       return;
@@ -1661,61 +1670,7 @@ export function WebPortal({
     onAddEmployee(newEmp);
     setShowAddEmpModal(false);
     setNewEmpTakeHome(false);
-    // Reset
-    setNewEmpForm({
-      fullName: '',
-      email: '',
-      contactNumber: '+923001234567',
-      cnic: '42101-1234567-3',
-      cnicExpiryDate: '',
-      drivingLicenceExpiryDate: '',
-      professionalCertificationExpiryDate: '',
-      workPermitExpiryDate: '',
-      workerCategory: 'Worker',
-      perquisiteVehicleMonthly: '',
-      perquisiteAccommodationMonthly: '',
-      perquisiteOtherMonthly: '',
-      contractEndDate: '',
-      probationEndDate: '',
-      probationConfirmed: false,
-      gender: 'Male',
-      dateOfBirth: '1995-01-01',
-      branchId: 'b1',
-      departmentId: 'd1',
-      designationId: 'ds1',
-      zoneId: '',
-      ucTownId: '',
-      wageTypeId: activeWageTypes[0]?.id ?? '',
-      wageType: 'Salaried',
-      basicSalary: 85000,
-      shiftStartTime: '09:00', shiftEndTime: '17:00', shiftGraceMinutes: 15, shiftHalfDayMinutes: 120, shiftBreakMinutes: 0,
-      ramadanStartDate: '', ramadanEndDate: '', ramadanStartTime: '09:00', ramadanEndTime: '15:00', fridayStartTime: '', fridayEndTime: '',
-      providentFundOptIn: true,
-      providentFundRate: 5.0,
-      gratuityOptIn: true,
-      bankName: 'Habib Bank Limited (HBL)',
-      bankAccountNumber: '12345678901234',
-      iban: 'PK42HABB0012345678901234',
-      eobiNumber: '1090123000',
-      socialSecurityNumber: 'SS-42-000111',
-      eobiExemptionReason: '', socialSecurityExemptionReason: '',
-      ntn: '',
-      pictureUrl: '',
-      isZoneInCharge: false,
-      zoneInChargeName: '',
-      zone: 'East Zone',
-      ucTown: 'UC-2 Clifton Town',
-      houseRentAllowance: 25500,
-      conveyanceAllowance: 8500,
-      medicalAllowance: 8500,
-      otherAllowances: 0,
-      eobiEnabled: true,
-      fbrEnabled: true,
-      priorEmployerTaxableIncome: 0,
-      priorEmployerTaxDeducted: 0,
-      employeeCode: '',
-      maritalStatus: 'Single'
-    });
+    setNewEmpForm(blankNewEmployeeForm());
   };
 
   const handleEditEmployeeSubmit = (e: React.SyntheticEvent<HTMLFormElement>) => {
@@ -2056,7 +2011,8 @@ export function WebPortal({
     const departmentId = availableDepartments.find(item => item.id === newEmpForm.departmentId)?.id ?? availableDepartments[0]?.id ?? '';
     const availableDesignations = localDesignations.filter(item => item.departmentId === departmentId);
     const designationId = availableDesignations.find(item => item.id === newEmpForm.designationId)?.id ?? availableDesignations[0]?.id ?? '';
-    const wageTypeId = activeWageTypes.find(item => item.id === newEmpForm.wageTypeId)?.id ?? activeWageTypes[0]?.id ?? '';
+    // Default to a monthly wage type: a daily rate entered as a monthly salary would pay it every day.
+    const wageTypeId = activeWageTypes.find(item => item.id === newEmpForm.wageTypeId)?.id ?? (activeWageTypes.find(item => item.calculationBasis === 'Monthly') || activeWageTypes[0])?.id ?? '';
     setNewEmpForm(previous => ({ ...previous, branchId, departmentId, designationId, wageTypeId }));
     setShowAddEmpModal(true);
   };
@@ -4960,6 +4916,7 @@ export function WebPortal({
                     onAddReview={onAddPerformanceReview}
                     onUpdateReview={onUpdatePerformanceReview}
                     onCreateSalaryRevision={onAddSalaryRevision}
+                    salaryRevisions={salaryRevisions}
                   />
                 </motion.div>
               )}
@@ -4990,6 +4947,17 @@ export function WebPortal({
                     onUpdatePosting={onUpdateJobPosting}
                     onAddApplication={onAddJobApplication}
                     onUpdateApplication={onUpdateJobApplication}
+                    onOnboardApplicant={(app, posting) => {
+                      // Carry what recruitment already knows into the onboarding form; HR completes the rest.
+                      const department = localDepartments.find(item => item.id === posting?.departmentId);
+                      const branchId = posting?.branchId || department?.branchId || '';
+                      const designationId = localDesignations.find(item => item.departmentId === department?.id)?.id || '';
+                      setNewEmpForm({ ...blankNewEmployeeForm(), fullName: app.applicantName, email: app.applicantEmail, contactNumber: app.applicantPhone || '',
+                        cnic: app.cnic || '', branchId, departmentId: department?.id || '', designationId,
+                        wageTypeId: (activeWageTypes.find(item => item.calculationBasis === 'Monthly') || activeWageTypes[0])?.id || '', basicSalary: app.offerAmount || app.expectedSalary || 0 });
+                      setActiveTab('employees');
+                      setShowAddEmpModal(true);
+                    }}
                   />
                 </motion.div>
               )}

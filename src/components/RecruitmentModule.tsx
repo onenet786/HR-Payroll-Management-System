@@ -21,6 +21,8 @@ interface RecruitmentModuleProps {
   onUpdatePosting: (posting: JobPosting) => void;
   onAddApplication: (app: JobApplication) => void;
   onUpdateApplication: (app: JobApplication) => void;
+  /** Opens employee onboarding pre-filled from a hired applicant. */
+  onOnboardApplicant?: (app: JobApplication, posting?: JobPosting) => void;
 }
 
 const STAGES: AppStage[] = ['Applied', 'Shortlisted', 'Interview Scheduled', 'Interviewed', 'Offer Extended', 'Hired', 'Rejected'];
@@ -38,7 +40,7 @@ function PKR(n?: number) { return n != null ? 'PKR ' + n.toLocaleString('en-PK')
 
 export function RecruitmentModule({
   jobPostings, applications, departments, branches, canManage,
-  onAddPosting, onUpdatePosting, onAddApplication, onUpdateApplication
+  onAddPosting, onUpdatePosting, onAddApplication, onUpdateApplication, onOnboardApplicant
 }: RecruitmentModuleProps) {
   const [activeTab, setActiveTab] = useState<'postings' | 'pipeline'>('postings');
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
@@ -219,6 +221,10 @@ export function RecruitmentModule({
                         <div className="text-slate-900 font-bold text-[10px] line-clamp-1">{app.applicantName}</div>
                         <div className="text-slate-500 text-[9px] mt-0.5 line-clamp-1">{getJobTitle(app.jobPostingId)}</div>
                         {app.expectedSalary && <div className="text-slate-500 text-[9px]">{PKR(app.expectedSalary)}</div>}
+                        {canManage && stage === 'Hired' && onOnboardApplicant && (
+                          <button onClick={e => { e.stopPropagation(); onOnboardApplicant(app, jobPostings.find(job => job.id === app.jobPostingId)); }}
+                            className="mt-1.5 w-full rounded bg-emerald-600 py-0.5 text-[9px] font-bold text-white hover:bg-emerald-700">Onboard as employee</button>
+                        )}
                         {canManage && stage !== 'Hired' && stage !== 'Rejected' && (
                           <div className="flex gap-1 mt-1.5">
                             <button onClick={e => { e.stopPropagation(); moveStage(app, -1); }}

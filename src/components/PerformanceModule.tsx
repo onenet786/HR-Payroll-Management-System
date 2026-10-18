@@ -19,6 +19,7 @@ interface PerformanceModuleProps {
   onAddReview: (review: PerformanceReview) => void;
   onUpdateReview: (review: PerformanceReview) => void;
   onCreateSalaryRevision: (revision: SalaryRevision) => void;
+  salaryRevisions?: SalaryRevision[];
 }
 
 const ratingLabels: Record<number, string> = { 1: 'Poor', 2: 'Below Average', 3: 'Average', 4: 'Good', 5: 'Excellent' };
@@ -43,7 +44,7 @@ function StarRating({ value, onChange, readOnly }: { value: number; onChange?: (
   );
 }
 
-export function PerformanceModule({ reviews, employees, currentUserAccount, canManage, onAddReview, onUpdateReview, onCreateSalaryRevision }: PerformanceModuleProps) {
+export function PerformanceModule({ reviews, employees, currentUserAccount, canManage, onAddReview, onUpdateReview, onCreateSalaryRevision, salaryRevisions = [] }: PerformanceModuleProps) {
   const [showForm, setShowForm] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [filterEmpId, setFilterEmpId] = useState('All');
@@ -126,6 +127,11 @@ export function PerformanceModule({ reviews, employees, currentUserAccount, canM
   const pendingCount = reviews.filter(r => r.status === 'Submitted' || r.status === 'Reviewed').length;
 
   const decideReview = (review: PerformanceReview, approved: boolean) => {
+    // Maker-checker: whoever wrote the review cannot decide its outcomes.
+    if (review.reviewerId === currentUserAccount.username || (currentUserAccount.employeeId && review.reviewerId === currentUserAccount.employeeId)) {
+      alert('Maker-checker control: you wrote this review. Another HR user must approve or reject its outcomes.');
+      return;
+    }
     const employee = employees.find(item => item.id === review.employeeId);
     const approvedOn = new Date().toISOString().split('T')[0];
     let salaryRevisionId = review.salaryRevisionId;
@@ -213,7 +219,7 @@ export function PerformanceModule({ reviews, employees, currentUserAccount, canM
                         review.status === 'Rejected' ? 'bg-rose-50 text-rose-700 border-rose-200' :
                         'bg-amber-50 text-amber-700 border-amber-200'}`}>{awaitingHrDecision ? 'Pending HR Approval' : review.status}</span>
                     </div>
-                    <p className="text-xs text-slate-500 mt-0.5">Reviewed by {review.reviewerId} on {review.reviewDate}</p>
+                    <p className="text-xs text-slate-500 mt-0.5">Reviewed by {employees.find(item => item.id === review.reviewerId)?.fullName || review.reviewerId} on {review.reviewDate}</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-4">
@@ -257,7 +263,9 @@ export function PerformanceModule({ reviews, employees, currentUserAccount, canM
                 {!review.incrementRecommended && !review.promotionRecommended && !review.trainingRecommended && !review.improvementPlanRequired
                   ? <p className="mt-2 rounded-lg border border-slate-200 bg-white p-2 text-[10px] text-slate-600">No salary, promotion, training, or improvement-plan action was recommended. Approval finalizes the rating and appraisal record only.</p>
                   : review.incrementRecommended
-                    ? <p className="mt-2 text-[10px] text-emerald-700">Salary impact: {review.salaryRevisionId ? 'a draft revision was created in Salary Revisions and still requires Approve & Apply.' : 'no draft revision is linked to this legacy approved review.'}</p>
+                    ? <p className="mt-2 text-[10px] text-emerald-700">Salary impact: {!review.salaryRevisionId ? 'no salary revision is linked to this review.'
+                      : salaryRevisions.find(item => item.id === review.salaryRevisionId)?.status === 'Approved' ? 'the linked salary revision has been approved and applied.'
+                      : 'a draft revision was created in Salary Revisions and still requires Approve & Apply.'}</p>
                     : <p className="mt-2 text-[10px] text-emerald-700">The approved non-payroll recommendations are recorded above for HR follow-up.</p>}
               </div>}
 
