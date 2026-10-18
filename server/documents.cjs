@@ -626,6 +626,22 @@ router.put('/:collection/:id', async (req, res, next) => {
           existing ? JSON.stringify(table === 'users' ? publicUserData(existing.data) : existing.data) : null,
           JSON.stringify(table === 'users' ? publicUserData(req.body) : req.body), req.correlationId, req.ip],
       );
+      // An approved salary revision (maker-checker checked above) sets the employee's salary in the same
+      // transaction, so payroll users can apply pay changes without general rights to edit employee records.
+      if (table === 'salary_revisions' && req.body.status === 'Approved' && existing?.data?.status !== 'Approved') {
+        const newSalary = Number(req.body.newSalary);
+        const subject = (await client.query(`SELECT data, version FROM employees WHERE id=$1 FOR UPDATE`, [req.body.employeeId])).rows[0];
+        if (!subject || !Number.isFinite(newSalary) || newSalary <= 0) {
+          const invalid = new Error('The employee of this salary revision was not found.'); invalid.status = 400; throw invalid;
+        }
+        const after = { ...subject.data, basicSalary: newSalary };
+        await client.query(`UPDATE employees SET data=$2::jsonb, version=version+1, updated_at=now() WHERE id=$1`, [req.body.employeeId, JSON.stringify(after)]);
+        await client.query(
+          `INSERT INTO hr_audit_log(actor_uid,actor_role_id,action,collection_name,document_id,previous_version,new_version,previous_data,new_data,correlation_id,source_ip)
+           VALUES($1,$2,'update','employees',$3,$4,$5,$6::jsonb,$7::jsonb,$8,$9)`,
+          [req.identity.uid, req.identity.roleId, req.body.employeeId, subject.version, Number(subject.version) + 1, JSON.stringify(subject.data), JSON.stringify(after), req.correlationId, req.ip],
+        );
+      }
       return version;
     });
     res.setHeader('ETag', `"${result}"`);

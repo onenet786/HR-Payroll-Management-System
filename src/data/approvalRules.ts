@@ -74,7 +74,12 @@ export function salaryRevisionApprovalError(revision: SalaryRevision, actorId: s
 }
 
 // Arrears cover payroll months that were already processed at the old salary on or after the effective date.
-export function salaryRevisionArrears(revision: SalaryRevision, payslips: Payslip[], runs: PayrollRun[]): { amount: number; months: string[] } {
+/**
+ * Difference owed for months already paid at the old salary. Only paid time earns arrears: each month is scaled
+ * by the share of the month the employee was paid (absences, unpaid leave and days before joining excluded),
+ * and a daily wager's rate difference is paid per paid day.
+ */
+export function salaryRevisionArrears(revision: SalaryRevision, payslips: Payslip[], runs: PayrollRun[], wageBasis: 'Monthly' | 'Daily' = 'Monthly'): { amount: number; months: string[] } {
   const difference = revision.newSalary - revision.previousSalary;
   if (difference <= 0) return { amount: 0, months: [] };
   const activeRunIds = new Set(runs.filter(run => run.status === 'Approved' || run.status === 'Disbursed').map(run => run.id));
@@ -88,7 +93,13 @@ export function salaryRevisionArrears(revision: SalaryRevision, payslips: Paysli
     const periodEnd = `${prefix}-${String(lastDay).padStart(2, '0')}`;
     if (periodEnd < effective) continue;
     const firstDay = effective > `${prefix}-01` ? Number(effective.slice(8, 10)) : 1;
-    amount += difference * (lastDay - firstDay + 1) / lastDay;
+    const coveredShare = (lastDay - firstDay + 1) / lastDay;
+    if (wageBasis === 'Daily') {
+      amount += difference * (sheet.paidDays ?? 0) * coveredShare;
+    } else {
+      const unpaidDays = Math.min(lastDay, (sheet.daysAbsent || 0) + (sheet.notJoinedDays || 0));
+      amount += difference * coveredShare * (lastDay - unpaidDays) / lastDay;
+    }
     months.push(prefix);
   }
   return { amount: Math.round(amount), months: months.sort() };

@@ -22,6 +22,7 @@ import { applyLifecycleRequest, lifecycleRequestError, lifecycleReviewError } fr
 import { leaveBalanceError } from './data/leavePolicy';
 import { computeFinalSettlementPayslip, computeSupplementaryPayslip, retroRecalculationAdjustment } from './data/offCyclePayroll';
 import { attendanceReviewError, isRegularizationOverdue, lineManagerReviewer, payrollCancellationError, payrollTransitionError, salaryRevisionApprovalError, salaryRevisionArrears, statutoryChangedFields, statutoryReviewError } from './data/approvalRules';
+import { resolveWageBasis } from './data/masterData';
 import { payrollPreflight } from './data/payrollPreflight';
 import { DeviceEmulator } from './components/DeviceEmulator';
 import {
@@ -1872,35 +1873,46 @@ export default function App() {
     }
   };
 
-  const handleApproveLoan = async (id: string) => {
+  // Loan decisions are saved first and the employee is told; nobody can decide their own application.
+  const decideLoan = async (id: string, status: 'Active' | 'Rejected') => {
+    const loan = loanAdvances.find(item => item.id === id);
+    if (!loan || loan.status !== 'Pending') return;
+    if (currentUserAccount.employeeId && currentUserAccount.employeeId === loan.employeeId) {
+      alert('Maker-checker control: you cannot approve or reject your own loan or advance.');
+      return;
+    }
     const today = todayStr();
     const approverName = loggedInUser?.username || 'HR Manager';
+    const decision: Partial<LoanAdvance> = status === 'Active'
+      ? { status, approvedAmount: loan.approvedAmount || loan.principalAmount, approvedBy: approverName, approvedOn: today, disbursedDate: today }
+      : { status, approvedBy: approverName, approvedOn: today };
+    try {
+      await updateDoc(doc(db, 'loanAdvances', id), decision);
+    } catch (err) {
+      alert('The decision could not be saved. Check the connection and try again.');
+      return;
+    }
     setLoanAdvances((prev: LoanAdvance[]) => {
-      const updated = prev.map((l: LoanAdvance) =>
-        l.id === id ? { ...l, status: 'Active' as LoanAdvance['status'], approvedBy: approverName, approvedOn: today, disbursedDate: today } : l
-      );
+      const updated = prev.map((l: LoanAdvance) => l.id === id ? { ...l, ...decision } as LoanAdvance : l);
       privacyStorage.setItem('hr_loans', JSON.stringify(updated));
       return updated;
     });
-    try {
-      await updateDoc(doc(db, 'loanAdvances', id), { status: 'Active', approvedBy: approverName, approvedOn: today, disbursedDate: today });
-    } catch (err) {
-      console.warn('Database loan approval delayed:');
-    }
-  };
-
-  const handleRejectLoan = async (id: string) => {
-    setLoanAdvances((prev: LoanAdvance[]) => {
-      const updated = prev.map((l: LoanAdvance) => l.id === id ? { ...l, status: 'Rejected' as LoanAdvance['status'] } : l);
-      privacyStorage.setItem('hr_loans', JSON.stringify(updated));
-      return updated;
+    const amount = (decision.approvedAmount || loan.principalAmount).toLocaleString();
+    await handleAddNotification({
+      id: `loan-${status === 'Active' ? 'approved' : 'rejected'}-${id}-${Date.now()}`,
+      type: status === 'Active' ? 'loan_approved' : 'loan_rejected',
+      title: status === 'Active' ? `${loan.type} approved` : `${loan.type} request not approved`,
+      message: status === 'Active'
+        ? `Your ${loan.type.toLowerCase()} of PKR ${amount} is approved. PKR ${loan.monthlyInstallment.toLocaleString()} will be deducted from salary for ${loan.totalInstallments} month(s).`
+        : `Your ${loan.type.toLowerCase()} request of PKR ${amount} was not approved. Contact HR for details.`,
+      targetEmployeeId: loan.employeeId,
+      createdAt: new Date().toISOString(),
+      readBy: [],
+      priority: 'medium',
     });
-    try {
-      await updateDoc(doc(db, 'loanAdvances', id), { status: 'Rejected' });
-    } catch (err) {
-      console.warn('Database loan rejection delayed:');
-    }
   };
+  const handleApproveLoan = (id: string) => decideLoan(id, 'Active');
+  const handleRejectLoan = (id: string) => decideLoan(id, 'Rejected');
 
   // ─── Salary Revision Handlers ─────────────────────────────────────────────
   const handleAddSalaryRevision = async (revision: SalaryRevision) => {
@@ -1912,9 +1924,8 @@ export default function App() {
       const approvalError = salaryRevisionApprovalError(previous || { ...revision, status: 'Draft' }, currentUserAccount.id);
       if (approvalError) { alert(`Maker-checker control: ${approvalError}`); return; }
       revision = { ...revision, approvedById: currentUserAccount.id, approvedBy: currentUserAccount.username, approvedOn: todayStr() };
-      if (employee) await handleUpdateEmployee({ ...employee, basicSalary: revision.newSalary });
       // Back-dated revisions owe the difference for payroll months already processed at the old salary.
-      const arrears = salaryRevisionArrears(revision, effectivePayslips, payrollRuns);
+      const arrears = salaryRevisionArrears(revision, effectivePayslips, payrollRuns, employee ? resolveWageBasis(employee, wageTypes) : 'Monthly');
       if (arrears.amount > 0) {
         const [currentYear, currentMonth] = todayStr().split('-').map(Number);
         const adjustment: PayrollAdjustment = {
@@ -1923,13 +1934,26 @@ export default function App() {
           reason: `Salary revision arrears effective ${revision.effectiveDate} for ${arrears.months.join(', ')}`.slice(0, 500),
           status: 'Pending', createdAt: new Date().toISOString(), createdById: currentUserAccount.id, createdBy: currentUserAccount.username,
         };
-        await handleCreatePayrollAdjustment(adjustment);
+        try {
+          await setDoc(doc(db, 'payrollAdjustments', adjustment.id), cleanData(adjustment));
+        } catch (err) {
+          alert(`Not approved: this back-dated revision owes PKR ${arrears.amount.toLocaleString()} arrears for ${arrears.months.join(', ')}, which only a payroll user can raise. Ask a payroll user to approve it.`);
+          return;
+        }
+        setPayrollAdjustments(previous => [...previous, adjustment]);
         revision = { ...revision, arrearsAdjustmentId: adjustment.id, arrearsAmount: arrears.amount };
       }
     } else if (!previous) {
       revision = { ...revision, createdById: revision.createdById || currentUserAccount.id, createdBy: revision.createdBy || currentUserAccount.username };
     }
 
+    // Saved first; on approval the server also sets the employee's basic salary in the same transaction.
+    try {
+      await setDoc(doc(db, 'salaryRevisions', revision.id), cleanData(revision));
+    } catch (err) {
+      alert(revision.status === 'Approved' ? 'The salary revision could not be approved. Nothing was changed.' : 'The salary revision could not be saved.');
+      return;
+    }
     setSalaryRevisions(prev => {
       const updated = prev.some(item => item.id === revision.id)
         ? prev.map(item => item.id === revision.id ? revision : item)
@@ -1937,10 +1961,12 @@ export default function App() {
       privacyStorage.setItem('hr_salary_revisions', JSON.stringify(updated));
       return updated;
     });
-    try {
-      await setDoc(doc(db, 'salaryRevisions', revision.id), cleanData(revision));
-    } catch (err) {
-      console.warn('Database salary revision delayed:');
+    if (revision.status === 'Approved' && employee) {
+      setEmployees(prev => {
+        const updated = prev.map(item => item.id === employee.id ? { ...item, basicSalary: revision.newSalary } : item);
+        privacyStorage.setItem('hr_employees', JSON.stringify(updated));
+        return updated;
+      });
     }
   };
 

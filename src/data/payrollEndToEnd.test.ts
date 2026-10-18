@@ -138,6 +138,13 @@ test('payroll cancellation, salary-revision maker-checker and arrears', () => {
   const arrears = salaryRevisionArrears(revision, [slip('aug', 8), slip('sep', 9), slip('oct', 10), slip('void', 10)], runs);
   assert.deepEqual(arrears.months, ['2026-09', '2026-10']);
   assert.equal(arrears.amount, Math.round(10000 * 15 / 30 + 10000));
+
+  // Unpaid days earn no arrears: one absence in a 30-day month pays 29/30 of the difference.
+  const absent = { ...slip('sep', 9), daysAbsent: 1 } as Payslip;
+  assert.equal(salaryRevisionArrears({ ...revision, effectiveDate: '2026-09-01' }, [absent], runs).amount, Math.round(10000 * 29 / 30));
+  // Daily wagers: rate difference × paid days.
+  const daily = { ...revision, previousSalary: 1600, newSalary: 1700, effectiveDate: '2026-09-01' } as SalaryRevision;
+  assert.equal(salaryRevisionArrears(daily, [{ ...slip('sep', 9), paidDays: 24 } as Payslip], runs, 'Daily').amount, 2400);
 });
 
 test('regularization deadline and two-minute duplicate punch window', () => {

@@ -81,7 +81,7 @@ test.before(async () => {
   for (const table of TABLES) await pool.query(`DELETE FROM ${table}`);
   const roles = { 'role-hr': ['manage_employees', 'manage_attendance'], 'role-payroll': ['manage_payroll'], 'role-settings': ['manage_settings', 'manage_employees', 'manage_payroll', 'manage_attendance'], 'role-employee': [] };
   for (const [id, permissions] of Object.entries(roles)) await seed('roles', id, { name: id, permissions });
-  const users = { 'u-maker': 'role-settings', 'u-checker': 'role-settings', 'u-third': 'role-settings', 'u-hr': 'role-hr', 'u-mgr': 'role-hr', 'u-emp': 'role-employee' };
+  const users = { 'u-maker': 'role-settings', 'u-checker': 'role-settings', 'u-third': 'role-settings', 'u-hr': 'role-hr', 'u-mgr': 'role-hr', 'u-emp': 'role-employee', 'u-pay-only': 'role-payroll' };
   for (const [id, roleId] of Object.entries(users)) await seed('users', id, { username: id, roleId, status: 'Active', ...(id === 'u-mgr' && { employeeId: 'e-mgr' }), ...(id === 'u-emp' && { employeeId: 'e1' }) });
   await seed('branches', 'b1', { name: 'HQ', province: 'Punjab' });
   for (const id of employees) {
@@ -194,6 +194,15 @@ test('lifecycle requests and salary revisions require a second user', async () =
   assert.equal(await put('u-maker', 'salaryRevisions', 'rev-1', revision), 200);
   assert.equal(await put('u-maker', 'salaryRevisions', 'rev-1', { ...revision, status: 'Approved', approvedById: 'u-maker' }), 403);
   assert.equal(await put('u-checker', 'salaryRevisions', 'rev-1', { ...revision, status: 'Approved', approvedById: 'u-checker' }), 200);
+  assert.equal((await current('employees', 'e1')).basicSalary, 110000, 'approval sets the salary');
+
+  // A payroll user without rights to edit employee records can still apply an approved revision.
+  const raise = { employeeId: 'e1', previousSalary: 110000, newSalary: 121000, effectiveDate: '2026-11-01', status: 'Draft', createdById: 'u-maker' };
+  assert.equal(await put('u-maker', 'salaryRevisions', 'rev-2', raise), 200);
+  assert.equal(await put('u-pay-only', 'employees', 'e1', { ...(await current('employees', 'e1')), basicSalary: 999999 }), 403, 'payroll cannot edit the employee directly');
+  assert.equal(await put('u-pay-only', 'salaryRevisions', 'rev-2', { ...raise, status: 'Approved', approvedById: 'u-pay-only' }), 200);
+  assert.equal((await current('employees', 'e1')).basicSalary, 121000);
+  await pool.query(`UPDATE employees SET data = data || '{"basicSalary":100000}'::jsonb WHERE id='e1'`);
 });
 
 test('a disbursed run accepts a parallel-run result from the recording user and nothing else', async () => {
