@@ -42,6 +42,15 @@ test('statutory changes are diffed and require an independent approver', () => {
   assert.match(statutoryReviewError({ ...request, changedFields: [] }, 'checker') || '', /does not change/);
 });
 
+test('statutory approval rejects a mistyped tax year or an effective date outside it', () => {
+  const request = { status: 'Pending', createdById: 'maker', changedFields: ['taxYear'], proposedConfig: { ...DEFAULT_STATUTORY_CONFIG, sourceReference: 'Finance Act 2026' } } as StatutoryChangeRequest;
+  assert.equal(statutoryReviewError(request, 'checker'), undefined);
+  const typo = { ...request, proposedConfig: { ...request.proposedConfig, taxYear: '1927', effectiveFrom: '2027-07-01' } };
+  assert.match(statutoryReviewError(typo, 'checker') || '', /Effective from 2027-07-01 is outside Tax Year 1927/);
+  assert.match(statutoryReviewError({ ...request, proposedConfig: { ...request.proposedConfig, taxYear: '2026-27' } }, 'checker') || '', /four-digit/);
+  assert.match(statutoryReviewError({ ...request, proposedConfig: { ...request.proposedConfig, effectiveFrom: '2027-07-01' } }, 'checker') || '', /outside Tax Year 2027/);
+});
+
 const point = (latitude: number, longitude: number, capturedAt: string): AttendanceLocation => ({ latitude, longitude, accuracyMeters: 10, capturedAt, source: 'device-gps' });
 
 test('impossible travel flags teleporting GPS but not a normal commute', () => {

@@ -114,5 +114,20 @@ export function statutoryReviewError(request: StatutoryChangeRequest, actorId: s
   if (request.createdById === actorId) return 'The user who proposed a statutory rate change cannot approve it.';
   if (!request.changedFields.length) return 'The request does not change any statutory value.';
   if (!request.proposedConfig.sourceReference?.trim()) return 'Record the official FBR / EOBI / provincial notification reference before approval.';
+  return statutoryPeriodError(request.proposedConfig);
+}
+
+/**
+ * Pakistan Tax Year N runs 1 July N-1 to 30 June N, and payroll only accepts the year written as four digits.
+ * A typo such as "1927" or an effective date a year late would silently block every payroll run.
+ */
+export function statutoryPeriodError(config: Pick<StatutoryConfig, 'taxYear' | 'effectiveFrom' | 'effectiveTo'>): string | undefined {
+  const taxYear = String(config.taxYear ?? '').trim();
+  if (!/^\d{4}$/.test(taxYear)) return `Tax year must be the four-digit year the period ends in (for July 2026 - June 2027 enter 2027), not "${taxYear}".`;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(config.effectiveFrom || '')) return 'Enter the effective-from date (YYYY-MM-DD).';
+  const start = `${Number(taxYear) - 1}-07-01`;
+  const end = `${taxYear}-06-30`;
+  if (config.effectiveFrom! < start || config.effectiveFrom! > end) return `Effective from ${config.effectiveFrom} is outside Tax Year ${taxYear} (${start} to ${end}).`;
+  if (config.effectiveTo && config.effectiveTo < config.effectiveFrom!) return 'Effective-to date is before the effective-from date.';
   return undefined;
 }
