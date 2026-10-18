@@ -2103,16 +2103,25 @@ export default function App() {
   };
 
   const handleUpdateGratuitySettlement = async (settlement: GratuitySettlement) => {
+    // Clearance: a final settlement is not processed or paid while company assets are still with the employee.
+    if (settlement.status === 'Processed' || settlement.status === 'Paid') {
+      const outstanding = companyAssets.filter(asset => asset.assignedTo === settlement.employeeId && asset.status === 'Assigned');
+      if (outstanding.length) {
+        alert(`Clearance pending: ${outstanding.map(asset => `${asset.name} (${asset.assetTag})`).join(', ')} must be returned under Asset Management before this settlement is ${settlement.status === 'Paid' ? 'paid' : 'processed'}.`);
+        return;
+      }
+    }
+    try {
+      await setDoc(doc(db, 'gratuitySettlements', settlement.id), cleanData(settlement));
+    } catch (err) {
+      alert('The settlement could not be saved. If company assets are still assigned to this employee, HR must record their return under Asset Management first. Nothing was changed.');
+      return;
+    }
     setGratuitySettlements((prev: GratuitySettlement[]) => {
       const updated = prev.map((s: GratuitySettlement) => s.id === settlement.id ? settlement : s);
       privacyStorage.setItem('hr_gratuity', JSON.stringify(updated));
       return updated;
     });
-    try {
-      await setDoc(doc(db, 'gratuitySettlements', settlement.id), cleanData(settlement));
-    } catch (err) {
-      console.warn('Database gratuity settlement update delayed:');
-    }
   };
 
   // ─── Notification Handlers ────────────────────────────────────────────────

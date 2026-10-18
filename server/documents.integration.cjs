@@ -15,7 +15,7 @@ const express = require('express');
 const { pool } = require('./db.cjs');
 const documentRoutes = require('./documents.cjs');
 
-const TABLES = ['leaves', 'roles', 'users', 'companies', 'employees', 'branches', 'attendances', 'attendance_periods', 'payroll_runs', 'payroll_payslips', 'payroll_adjustments',
+const TABLES = ['company_assets', 'leaves', 'roles', 'users', 'companies', 'employees', 'branches', 'attendances', 'attendance_periods', 'payroll_runs', 'payroll_payslips', 'payroll_adjustments',
   'stat_config', 'tax_slabs', 'statutory_change_requests', 'lifecycle_requests', 'salary_revisions', 'gratuity_settlements', 'hr_audit_log'];
 const PERIOD = { month: 9, year: 2026, prefix: '2026-09', days: 30 };
 let server;
@@ -256,4 +256,20 @@ test('a day of an approved leave is recorded as reviewed; a made-up leave day st
     assert.equal(stored.regularizationRequested, true, `${id} must be reviewed`);
     assert.equal(stored.regularizationApproved, undefined, `${id} cannot approve itself`);
   }
+});
+
+test('a final settlement waits for asset clearance and needs three different users', async () => {
+  const settlement = { employeeId: 'e1', separationType: 'Resignation', lastWorkingDate: '2026-10-31', separationDate: '2026-10-31', yearsOfService: 5, basicSalaryAtSeparation: 100000,
+    gratuityAmount: 500000, encashableLeaveDays: 0, leaveEncashmentAmount: 0, noticePayDays: 0, noticePayAmount: 0, pendingSalaryDays: 0, pendingSalaryAmount: 0,
+    totalSettlementAmount: 500000, status: 'Pending', createdAt: 'now', createdById: 'u-maker' };
+  assert.equal(await put('u-maker', 'gratuitySettlements', 'set-1', settlement), 200);
+  await seed('company_assets', 'ast-1', { name: 'Laptop', assetTag: 'LPT-1', assignedTo: 'e1', status: 'Assigned' }, { status: 'Assigned' });
+  const processed = { ...settlement, status: 'Processed', processedById: 'u-checker', processedAt: 'now' };
+  assert.equal(await put('u-checker', 'gratuitySettlements', 'set-1', processed), 403, 'asset not returned');
+  await pool.query(`UPDATE company_assets SET data = data || '{"status":"Available","assignedTo":null}'::jsonb WHERE id='ast-1'`);
+  assert.equal(await put('u-maker', 'gratuitySettlements', 'set-1', { ...processed, processedById: 'u-maker' }), 403, 'maker cannot process');
+  assert.equal(await put('u-checker', 'gratuitySettlements', 'set-1', processed), 200);
+  const paid = { ...processed, status: 'Paid', paidById: 'u-checker', paidDate: '2026-11-05' };
+  assert.equal(await put('u-checker', 'gratuitySettlements', 'set-1', paid), 403, 'processor cannot pay');
+  assert.equal(await put('u-third', 'gratuitySettlements', 'set-1', { ...paid, paidById: 'u-third' }), 200);
 });

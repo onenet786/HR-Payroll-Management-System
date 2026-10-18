@@ -387,6 +387,12 @@ async function authorizeWrite(client, name, table, id, identity, existing, next)
         && ((previous.createdById && previous.createdById === identity.uid) || next.approvedById !== identity.uid)) return false;
     }
   }
+  if ((name === 'gratuitySettlements' || table === 'gratuity_settlements') && ['Processed', 'Paid'].includes(next.status)
+    && existing?.data?.status !== next.status) {
+    // Clearance: no final settlement is processed or paid while company assets are still with the employee.
+    const assets = await client.query(`SELECT 1 FROM company_assets WHERE data->>'assignedTo'=$1 AND data->>'status'='Assigned' LIMIT 1`, [next.employeeId || existing?.data?.employeeId]);
+    if (assets.rowCount) return false;
+  }
   if (name === 'gratuitySettlements' || table === 'gratuity_settlements') {
     const numericFields = ['yearsOfService', 'basicSalaryAtSeparation', 'gratuityAmount', 'encashableLeaveDays', 'leaveEncashmentAmount', 'noticePayDays', 'noticePayAmount', 'pendingSalaryDays', 'pendingSalaryAmount', 'totalSettlementAmount'];
     if (!existing) {
