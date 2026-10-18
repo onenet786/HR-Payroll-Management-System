@@ -4,6 +4,9 @@
  */
 
 import React, { useState } from 'react';
+import { DateField } from './DateField';
+import { RequiredMark, RequiredNote } from './RequiredMark';
+import { formatDisplayDate } from '../utils/dateFormat';
 import { Plus, Briefcase, ChevronRight, X } from 'lucide-react';
 import { JobPosting, JobApplication, AppStage, Department, Branch } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
@@ -22,7 +25,7 @@ interface RecruitmentModuleProps {
 
 const STAGES: AppStage[] = ['Applied', 'Shortlisted', 'Interview Scheduled', 'Interviewed', 'Offer Extended', 'Hired', 'Rejected'];
 const STAGE_COLORS: Record<AppStage, string> = {
-  'Applied': 'slate', 'Shortlisted': 'blue', 'Interview Scheduled': 'violet',
+  'Applied': 'slate', 'Shortlisted': 'blue', 'Interview Scheduled': 'indigo',
   'Interviewed': 'amber', 'Offer Extended': 'emerald', 'Hired': 'green', 'Rejected': 'rose'
 };
 const JOB_TYPES: JobPosting['jobType'][] = ['Full Time', 'Part Time', 'Contract', 'Internship'];
@@ -97,17 +100,17 @@ export function RecruitmentModule({
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-bold text-white">Recruitment</h2>
-          <p className="text-xs text-slate-400 mt-0.5">Manage job postings and track applicants through the hiring pipeline</p>
+          <h2 className="text-lg font-bold text-slate-900">Recruitment</h2>
+          <p className="text-xs text-slate-500 mt-0.5">Manage job postings and track applicants through the hiring pipeline</p>
         </div>
         {canManage && (
           <div className="flex gap-2">
             <button onClick={() => { setShowAppForm(true); setAppForm({ ...emptyApp, jobPostingId: selectedJobId || jobPostings[0]?.id || '' }); }}
-              className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold px-3 py-2 rounded-xl transition">
+              className="flex items-center gap-2 bg-slate-100 hover:bg-slate-100 text-slate-900 text-xs font-bold px-3 py-2 rounded-xl transition">
               <Plus size={13} /> Add Applicant
             </button>
             <button onClick={() => setShowJobForm(true)}
-              className="flex items-center gap-2 bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold px-3 py-2 rounded-xl transition">
+              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3 py-2 rounded-xl transition">
               <Briefcase size={13} /> Post Job
             </button>
           </div>
@@ -119,23 +122,23 @@ export function RecruitmentModule({
         {[
           { label: 'Open Positions', val: openCount, color: 'emerald', icon: '📢' },
           { label: 'Total Applicants', val: totalApps, color: 'blue', icon: '👥' },
-          { label: 'Interviews Pending', val: pendingInterviews, color: 'violet', icon: '📅' },
+          { label: 'Interviews Pending', val: pendingInterviews, color: 'indigo', icon: '📅' },
           { label: 'Hired', val: hiredCount, color: 'amber', icon: '🎉' }
         ].map(({ label, val, color, icon }) => (
-          <div key={label} className={`bg-${color}-500/10 border border-${color}-500/20 rounded-2xl p-4`}>
+          <div key={label} className={`bg-${color}-50 border border-${color}-200 rounded-2xl p-4`}>
             <div className="text-xl mb-1">{icon}</div>
-            <div className={`text-2xl font-bold text-${color}-400`}>{val}</div>
-            <div className="text-xs text-slate-400">{label}</div>
+            <div className={`text-2xl font-bold text-${color}-700`}>{val}</div>
+            <div className="text-xs text-slate-500">{label}</div>
           </div>
         ))}
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-2 border-b border-slate-700/50 pb-0">
+      <div className="flex gap-2 border-b border-slate-200 pb-0">
         {(['postings', 'pipeline'] as const).map(t => (
           <button key={t} onClick={() => setActiveTab(t)}
             className={`pb-2 px-1 text-xs font-bold capitalize border-b-2 transition ${
-              activeTab === t ? 'border-violet-500 text-violet-300' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>
+              activeTab === t ? 'border-indigo-500 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-600'}`}>
             {t === 'postings' ? `Job Postings (${jobPostings.length})` : `Applicant Pipeline (${applications.length})`}
           </button>
         ))}
@@ -149,15 +152,15 @@ export function RecruitmentModule({
             const appCount = applications.filter(a => a.jobPostingId === job.id).length;
             const statusColor = STATUS_COLORS[job.status];
             return (
-              <div key={job.id} className="bg-slate-800/40 border border-slate-700/50 rounded-2xl p-4 hover:border-slate-600 transition">
+              <div key={job.id} className="bg-slate-50 border border-slate-200 rounded-2xl p-4 hover:border-slate-300 transition">
                 <div className="flex justify-between items-start">
                   <div className="flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <h3 className="text-sm font-bold text-white">{job.title}</h3>
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-lg bg-${statusColor}-500/20 text-${statusColor}-300 border border-${statusColor}-500/30`}>{job.status}</span>
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-lg bg-slate-700 text-slate-300">{job.jobType}</span>
+                      <h3 className="text-sm font-bold text-slate-900">{job.title}</h3>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-lg bg-${statusColor}-50 text-${statusColor}-700 border border-${statusColor}-200`}>{job.status}</span>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-lg bg-slate-100 text-slate-600">{job.jobType}</span>
                     </div>
-                    <div className="text-xs text-slate-400 mt-1">
+                    <div className="text-xs text-slate-500 mt-1">
                       {getDeptName(job.departmentId)} · {getBranchName(job.branchId)} · {job.vacancies} vacanc{job.vacancies === 1 ? 'y' : 'ies'} · {job.salaryRange}
                     </div>
                     <div className="text-xs text-slate-500 mt-0.5">
@@ -166,21 +169,21 @@ export function RecruitmentModule({
                     <div className="text-xs text-slate-500 mt-1 line-clamp-2">{job.description}</div>
                   </div>
                   <div className="ml-4 text-right flex-shrink-0">
-                    <div className="text-lg font-bold text-blue-400">{appCount}</div>
+                    <div className="text-lg font-bold text-blue-700">{appCount}</div>
                     <div className="text-[10px] text-slate-500">applicants</div>
-                    <div className="text-[10px] text-slate-500 mt-2">Closes {job.closingDate}</div>
+                    <div className="text-[10px] text-slate-500 mt-2">Closes {formatDisplayDate(job.closingDate)}</div>
                     {canManage && job.status === 'Open' && (
                       <div className="flex gap-1 mt-2 justify-end">
                         <button onClick={() => onUpdatePosting({ ...job, status: 'On Hold' })}
-                          className="text-[10px] font-bold text-amber-400 bg-amber-500/10 px-2 py-1 rounded-lg hover:bg-amber-500/20 transition">Hold</button>
+                          className="text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-1 rounded-lg hover:bg-amber-500/20 transition">Hold</button>
                         <button onClick={() => onUpdatePosting({ ...job, status: 'Filled' })}
-                          className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded-lg hover:bg-emerald-500/20 transition">Filled</button>
+                          className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-lg hover:bg-emerald-500/20 transition">Filled</button>
                       </div>
                     )}
                   </div>
                 </div>
                 <button onClick={() => { setActiveTab('pipeline'); setSelectedJobId(job.id); }}
-                  className="mt-3 text-[10px] font-bold text-violet-400 hover:text-violet-300 flex items-center gap-1 transition">
+                  className="mt-3 text-[10px] font-bold text-indigo-700 hover:text-indigo-700 flex items-center gap-1 transition">
                   View Pipeline <ChevronRight size={11} />
                 </button>
               </div>
@@ -193,7 +196,7 @@ export function RecruitmentModule({
         <div className="space-y-4">
           {/* Job filter */}
           <select value={selectedJobId || ''} onChange={e => setSelectedJobId(e.target.value || null)} aria-label="Filter by job posting"
-            className="bg-slate-800 border border-slate-700 text-white text-xs rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-500">
+            className="bg-white border border-slate-200 text-slate-900 text-xs rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500">
             <option value="">All Jobs</option>
             {jobPostings.map(j => <option key={j.id} value={j.id}>{j.title}</option>)}
           </select>
@@ -204,25 +207,25 @@ export function RecruitmentModule({
               const stageApps = pipelineApps.filter(a => a.stage === stage);
               const color = STAGE_COLORS[stage];
               return (
-                <div key={stage} className={`bg-${color}-500/5 border border-${color}-500/20 rounded-2xl p-2`}>
-                  <div className={`text-[10px] font-bold text-${color}-400 uppercase tracking-wider mb-2 text-center`}>
+                <div key={stage} className={`bg-${color}-50 border border-${color}-200 rounded-2xl p-2`}>
+                  <div className={`text-[10px] font-bold text-${color}-700 uppercase tracking-wider mb-2 text-center`}>
                     {stage} ({stageApps.length})
                   </div>
                   <div className="space-y-2">
                     {stageApps.map(app => (
                       <div key={app.id}
-                        className={`bg-slate-800 border border-${color}-500/30 rounded-xl p-2 cursor-pointer hover:border-${color}-400 transition text-xs`}
+                        className={`bg-white border border-${color}-200 rounded-xl p-2 cursor-pointer hover:border-${color}-400 transition text-xs`}
                         onClick={() => setAppDetailId(app.id)}>
-                        <div className="text-white font-bold text-[10px] line-clamp-1">{app.applicantName}</div>
+                        <div className="text-slate-900 font-bold text-[10px] line-clamp-1">{app.applicantName}</div>
                         <div className="text-slate-500 text-[9px] mt-0.5 line-clamp-1">{getJobTitle(app.jobPostingId)}</div>
-                        {app.expectedSalary && <div className="text-slate-400 text-[9px]">{PKR(app.expectedSalary)}</div>}
+                        {app.expectedSalary && <div className="text-slate-500 text-[9px]">{PKR(app.expectedSalary)}</div>}
                         {canManage && stage !== 'Hired' && stage !== 'Rejected' && (
                           <div className="flex gap-1 mt-1.5">
                             <button onClick={e => { e.stopPropagation(); moveStage(app, -1); }}
                               disabled={stage === 'Applied'}
-                              className="flex-1 text-[8px] bg-slate-700 hover:bg-slate-600 disabled:opacity-30 text-white py-0.5 rounded transition">←</button>
+                              className="flex-1 text-[8px] bg-slate-100 hover:bg-slate-100 disabled:opacity-30 text-slate-900 py-0.5 rounded transition">←</button>
                             <button onClick={e => { e.stopPropagation(); moveStage(app, 1); }}
-                              className="flex-1 text-[8px] bg-violet-700 hover:bg-violet-600 text-white py-0.5 rounded transition">→</button>
+                              className="flex-1 text-[8px] bg-emerald-600 hover:bg-emerald-700 text-white py-0.5 rounded transition">→</button>
                           </div>
                         )}
                       </div>
@@ -241,10 +244,10 @@ export function RecruitmentModule({
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
             <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }}
-              className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md p-6 space-y-4">
+              className="bg-white border border-slate-200 rounded-2xl w-full max-w-md p-6 space-y-4">
               <div className="flex justify-between items-start">
-                <h3 className="text-base font-bold text-white">{appDetail.applicantName}</h3>
-                <button onClick={() => setAppDetailId(null)} className="text-slate-500 hover:text-white transition" aria-label="Close applicant details"><X size={18} /></button>
+                <h3 className="text-base font-bold text-slate-900">{appDetail.applicantName}</h3>
+                <button onClick={() => setAppDetailId(null)} className="text-slate-500 hover:text-slate-900 transition" aria-label="Close applicant details"><X size={18} /></button>
               </div>
               <div className="space-y-2 text-sm">
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
@@ -253,34 +256,34 @@ export function RecruitmentModule({
                     ['Email', appDetail.applicantEmail],
                     ['Phone', appDetail.applicantPhone],
                     ['CNIC', appDetail.cnic || '—'],
-                    ['Applied', appDetail.appliedDate],
+                    ['Applied', formatDisplayDate(appDetail.appliedDate)],
                     ['Current Salary', PKR(appDetail.currentSalary)],
                     ['Expected Salary', PKR(appDetail.expectedSalary)],
-                    ['Interview Date', appDetail.interviewDate || '—']
+                    ['Interview Date', formatDisplayDate(appDetail.interviewDate) || '—']
                   ].map(([k, v]) => (
                     <div key={k}>
                       <span className="text-slate-500">{k}: </span>
-                      <span className="text-slate-200 font-medium">{v}</span>
+                      <span className="text-slate-800 font-medium">{v}</span>
                     </div>
                   ))}
                 </div>
                 {appDetail.interviewNotes && (
-                  <div className="bg-slate-800 rounded-xl p-3 text-xs">
+                  <div className="bg-white rounded-xl p-3 text-xs">
                     <div className="text-slate-500 mb-1">Interview Notes:</div>
-                    <div className="text-slate-300">{appDetail.interviewNotes}</div>
+                    <div className="text-slate-600">{appDetail.interviewNotes}</div>
                   </div>
                 )}
               </div>
               {canManage && (
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Move to Stage</label>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Move to Stage</label>
                   <div className="flex flex-wrap gap-1">
                     {STAGES.map(s => (
                       <button key={s} onClick={() => { onUpdateApplication({ ...appDetail, stage: s }); setAppDetailId(null); }}
                         className={`text-[10px] font-bold px-2 py-1 rounded-lg border transition ${
                           appDetail.stage === s
                             ? `bg-${STAGE_COLORS[s]}-500/30 text-${STAGE_COLORS[s]}-300 border-${STAGE_COLORS[s]}-500/50`
-                            : 'bg-slate-800 text-slate-400 border-slate-700 hover:border-slate-500'}`}>
+                            : 'bg-white text-slate-500 border-slate-200 hover:border-slate-500'}`}>
                         {s}
                       </button>
                     ))}
@@ -298,15 +301,16 @@ export function RecruitmentModule({
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4 overflow-y-auto">
             <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }}
-              className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl p-6 space-y-4 my-8">
-              <h3 className="text-base font-bold text-white">Post New Job</h3>
+              className="bg-white border border-slate-200 rounded-2xl w-full max-w-2xl p-6 space-y-4 my-8">
+              <h3 className="text-base font-bold text-slate-900">Post New Job</h3>
+              <RequiredNote />
               <div className="grid grid-cols-2 gap-3">
                 <div className="col-span-2">
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Job Title *</label>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Job Title<RequiredMark /></label>
                   <input value={jobForm.title || ''} onChange={e => setJobForm(p => ({ ...p, title: e.target.value }))}
-                    aria-label="Job Title"
+                    aria-label="Job Title" aria-required="true"
                     placeholder="Senior React Developer"
-                    className="w-full bg-slate-800 border border-slate-700 text-white text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-violet-500" />
+                    className="w-full bg-white border border-slate-200 text-slate-900 text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
                 </div>
                 {[
                   { label: 'Department', key: 'departmentId', type: 'select', opts: departments.map(d => ({ v: d.id, l: d.name })) },
@@ -315,9 +319,9 @@ export function RecruitmentModule({
                   { label: 'Status', key: 'status', type: 'select', opts: JOB_STATUSES.map(s => ({ v: s, l: s })) }
                 ].map(({ label, key, opts }) => (
                   <div key={key}>
-                    <label htmlFor={`job-${key}`} className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">{label}</label>
+                    <label htmlFor={`job-${key}`} className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">{label}</label>
                     <select id={`job-${key}`} value={(jobForm as any)[key] || ''} onChange={e => setJobForm(p => ({ ...p, [key]: e.target.value }))}
-                      className="w-full bg-slate-800 border border-slate-700 text-white text-sm rounded-xl px-3 py-2.5 focus:outline-none">
+                      className="w-full bg-white border border-slate-200 text-slate-900 text-sm rounded-xl px-3 py-2.5 focus:outline-none">
                       {opts?.map(o => <option key={o.v} value={o.v}>{o.l}</option>)}
                     </select>
                   </div>
@@ -328,29 +332,36 @@ export function RecruitmentModule({
                   { label: 'Experience Required', key: 'experienceRequired', placeholder: '2-4 years' },
                   { label: 'Qualification', key: 'qualificationRequired', placeholder: 'BS Computer Science' },
                   { label: 'Posted Date', key: 'postedDate', type: 'date' },
-                  { label: 'Closing Date *', key: 'closingDate', type: 'date' }
+                  { label: 'Closing Date', key: 'closingDate', type: 'date' }
                 ].map(({ label, key, type, placeholder }) => (
                   <div key={key}>
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">{label}</label>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">{label}{key === 'closingDate' && <RequiredMark />}</label>
+                    {type === 'date' ? (
+                      <DateField aria-label={label} required={key === 'closingDate'} aria-required={key === 'closingDate' || undefined}
+                        value={(jobForm as any)[key] || ''}
+                        onChange={e => setJobForm(p => ({ ...p, [key]: e.target.value }))}
+                        className="w-full bg-white border border-slate-300 text-slate-900 text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500" />
+                    ) : (
                     <input type={type || 'text'} placeholder={placeholder}
                       aria-label={label}
                       value={(jobForm as any)[key] || ''}
                       onChange={e => setJobForm(p => ({ ...p, [key]: type === 'number' ? Number(e.target.value) : e.target.value }))}
-                      className="w-full bg-slate-800 border border-slate-700 text-white text-sm rounded-xl px-3 py-2.5 focus:outline-none" />
+                      className="w-full bg-white border border-slate-300 text-slate-900 text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500" />
+                    )}
                   </div>
                 ))}
                 <div className="col-span-2">
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Job Description</label>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Job Description</label>
                   <textarea aria-label="Job Description" value={jobForm.description || ''} onChange={e => setJobForm(p => ({ ...p, description: e.target.value }))}
                     rows={3} placeholder="Describe responsibilities, requirements, and benefits..."
-                    className="w-full bg-slate-800 border border-slate-700 text-white text-sm rounded-xl px-3 py-2 focus:outline-none resize-none" />
+                    className="w-full bg-white border border-slate-200 text-slate-900 text-sm rounded-xl px-3 py-2 focus:outline-none resize-none" />
                 </div>
               </div>
               <div className="flex gap-3">
                 <button onClick={() => { setShowJobForm(false); setJobForm(emptyJob); }}
-                  className="flex-1 bg-slate-800 hover:bg-slate-700 text-white text-sm font-bold py-2.5 rounded-xl transition">Cancel</button>
-                <button onClick={handleAddJob}
-                  className="flex-1 bg-violet-600 hover:bg-violet-500 text-white text-sm font-bold py-2.5 rounded-xl transition">Post Job</button>
+                  className="flex-1 bg-white hover:bg-slate-100 text-slate-900 text-sm font-bold py-2.5 rounded-xl transition">Cancel</button>
+                <button onClick={handleAddJob} disabled={!jobForm.title || !jobForm.closingDate}
+                  className="flex-1 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white text-sm font-bold py-2.5 rounded-xl transition">Post Job</button>
               </div>
             </motion.div>
           </motion.div>
@@ -363,19 +374,21 @@ export function RecruitmentModule({
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4 overflow-y-auto">
             <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }}
-              className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-xl p-6 space-y-4 my-8">
-              <h3 className="text-base font-bold text-white">Add Applicant</h3>
+              className="bg-white border border-slate-200 rounded-2xl w-full max-w-xl p-6 space-y-4 my-8">
+              <h3 className="text-base font-bold text-slate-900">Add Applicant</h3>
+              <RequiredNote />
               <div className="grid grid-cols-2 gap-3">
                 <div className="col-span-2">
-                  <label htmlFor="app-job-posting" className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Job Posting *</label>
-                  <select id="app-job-posting" value={appForm.jobPostingId || ''} onChange={e => setAppForm(p => ({ ...p, jobPostingId: e.target.value }))}
-                    className="w-full bg-slate-800 border border-slate-700 text-white text-sm rounded-xl px-3 py-2.5 focus:outline-none">
+                  <label htmlFor="app-job-posting" className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Job Posting<RequiredMark /></label>
+                  <select id="app-job-posting" aria-required="true" value={appForm.jobPostingId || ''} onChange={e => setAppForm(p => ({ ...p, jobPostingId: e.target.value }))}
+                    className="w-full bg-white border border-slate-200 text-slate-900 text-sm rounded-xl px-3 py-2.5 focus:outline-none">
+                    <option value="">Select job posting</option>
                     {jobPostings.map(j => <option key={j.id} value={j.id}>{j.title}</option>)}
                   </select>
                 </div>
                 {[
-                  { label: 'Full Name *', key: 'applicantName', placeholder: 'Muhammad Ali' },
-                  { label: 'Email *', key: 'applicantEmail', placeholder: 'applicant@email.com' },
+                  { label: 'Full Name', key: 'applicantName', placeholder: 'Muhammad Ali' },
+                  { label: 'Email', key: 'applicantEmail', placeholder: 'applicant@email.com' },
                   { label: 'Phone', key: 'applicantPhone', placeholder: '0300-1234567' },
                   { label: 'CNIC', key: 'cnic', placeholder: '42101-XXXXXXX-X' },
                   { label: 'Current Salary (PKR)', key: 'currentSalary', type: 'number' },
@@ -384,24 +397,31 @@ export function RecruitmentModule({
                   { label: 'Interview Date', key: 'interviewDate', type: 'date' }
                 ].map(({ label, key, placeholder, type }) => (
                   <div key={key}>
-                    <label htmlFor={`app-${key}`} className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">{label}</label>
-                    <input id={`app-${key}`} type={type || 'text'} placeholder={placeholder}
+                    <label htmlFor={`app-${key}`} className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">{label}{key === 'applicantName' && <RequiredMark />}</label>
+                    {type === 'date' ? (
+                      <DateField id={`app-${key}`}
+                        value={(appForm as any)[key] || ''}
+                        onChange={e => setAppForm(p => ({ ...p, [key]: e.target.value }))}
+                        className="w-full bg-white border border-slate-300 text-slate-900 text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500" />
+                    ) : (
+                    <input id={`app-${key}`} type={type || 'text'} placeholder={placeholder} aria-required={key === 'applicantName' || undefined}
                       value={(appForm as any)[key] || ''}
                       onChange={e => setAppForm(p => ({ ...p, [key]: type === 'number' ? Number(e.target.value) : e.target.value }))}
-                      className="w-full bg-slate-800 border border-slate-700 text-white text-sm rounded-xl px-3 py-2.5 focus:outline-none" />
+                      className="w-full bg-white border border-slate-300 text-slate-900 text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500" />
+                    )}
                   </div>
                 ))}
                 <div className="col-span-2">
-                  <label htmlFor="app-interview-notes" className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Interview Notes</label>
+                  <label htmlFor="app-interview-notes" className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Interview Notes</label>
                   <textarea id="app-interview-notes" value={appForm.interviewNotes || ''} onChange={e => setAppForm(p => ({ ...p, interviewNotes: e.target.value }))}
-                    rows={2} className="w-full bg-slate-800 border border-slate-700 text-white text-sm rounded-xl px-3 py-2 focus:outline-none resize-none" />
+                    rows={2} className="w-full bg-white border border-slate-200 text-slate-900 text-sm rounded-xl px-3 py-2 focus:outline-none resize-none" />
                 </div>
               </div>
               <div className="flex gap-3">
                 <button onClick={() => setShowAppForm(false)}
-                  className="flex-1 bg-slate-800 hover:bg-slate-700 text-white text-sm font-bold py-2.5 rounded-xl transition">Cancel</button>
-                <button onClick={handleAddApp}
-                  className="flex-1 bg-violet-600 hover:bg-violet-500 text-white text-sm font-bold py-2.5 rounded-xl transition">Add Applicant</button>
+                  className="flex-1 bg-white hover:bg-slate-100 text-slate-900 text-sm font-bold py-2.5 rounded-xl transition">Cancel</button>
+                <button onClick={handleAddApp} disabled={!appForm.applicantName || !appForm.jobPostingId}
+                  className="flex-1 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white text-sm font-bold py-2.5 rounded-xl transition">Add Applicant</button>
               </div>
             </motion.div>
           </motion.div>

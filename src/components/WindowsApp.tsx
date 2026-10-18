@@ -64,8 +64,8 @@ export function WindowsApp({
         `Reader: ${result.device?.type || 'U.are.U 4500 / SecuGen Hamster Pro'}`,
         `Serial: ${result.device?.sn || 'Unknown'}`,
         `Quality: ${result.quality}%`,
-        `Template: ${result.template.length} chars`,
-        `Employee: ${emp.fullName} (${emp.employeeCode})`,
+        'Template: [REDACTED]',
+        'Employee: [REDACTED]',
         `Punch: ${isCheckIn ? 'IN' : 'OUT'} ${timeStr}`,
       ]);
       setHardwareMessage(`${emp.fullName} biometric ${isCheckIn ? 'check-in' : 'check-out'} committed at ${timeStr}.`);
@@ -74,8 +74,8 @@ export function WindowsApp({
         setHardwareStatus('IDLE');
         setHardwareMessage('URU 4500 / SecuGen Hamster Pro bridge ready on ws://127.0.0.1:15896');
       }, 3000);
-    } catch (error) {
-      const text = error instanceof Error ? error.message : String(error);
+    } catch {
+      const text = 'Biometric operation failed. Check the secured device log.';
       setHardwareStatus('ERROR');
       setHardwareMessage(text);
       setHardwareDetails(prev => [`Error: ${text}`, ...prev].slice(0, 6));
@@ -94,7 +94,7 @@ export function WindowsApp({
             B
           </div>
           <span className="font-sans font-medium text-xs tracking-wide">
-            Bin Ishaq Enterprise HR client v2.4.1 (64-bit) - [Production Node: 42.10.x]
+            Enterprise HR &amp; Payroll Client v2.4.1 (64-bit) - [Production Node: 42.10.x]
           </span>
         </div>
         
@@ -113,7 +113,7 @@ export function WindowsApp({
         <span className="hover:bg-slate-200 px-1.5 py-0.5 rounded cursor-pointer transition" onClick={() => alert('Connected Biometric machine is in full sync mode.')}>Tools</span>
         <span className="hover:bg-slate-200 px-1.5 py-0.5 rounded cursor-pointer transition">Config</span>
         <span className="hover:bg-slate-200 px-1.5 py-0.5 rounded cursor-pointer transition">View</span>
-        <span className="hover:bg-slate-200 px-1.5 py-0.5 rounded cursor-pointer transition" onClick={() => alert('Bin Ishaq Enterprise client builds on React framework for cross-system standardizations.')}>Help</span>
+        <span className="hover:bg-slate-200 px-1.5 py-0.5 rounded cursor-pointer transition" onClick={() => alert('Enterprise client builds on React framework for cross-system standardizations.')}>Help</span>
       </div>
 
       {/* 3. Classic High density Toolbar */}
@@ -218,7 +218,7 @@ export function WindowsApp({
                         <p>Default BanK: <strong className="text-slate-900 font-serif">{emp.bankName}</strong></p>
                         <p>IBAN: <strong className="text-slate-900 font-mono">{emp.iban}</strong></p>
                         <p>Provincial Region: <strong className="text-slate-900 font-sans">Sindh (Social Sec: {emp.socialSecurityNumber || 'No'})</strong></p>
-                        <p>Base Wage Constant: <strong className="text-emerald-700 font-mono">PKR {emp.basicSalary.toLocaleString()}</strong></p>
+                        <p>Base Wage Constant: <strong className="text-emerald-700 font-mono">PKR {(emp.basicSalary || 0).toLocaleString()}</strong></p>
                       </div>
 
                       {/* Quick action button for biometric on this employee */}
@@ -390,7 +390,7 @@ export function WindowsApp({
                 <p className="text-yellow-500">[SYSTEM_INFO] BI-HR client local runtime booted at {new Date().toISOString()}</p>
                 <p className="text-slate-400">[PORT_SETUP] Initializing Serial connection on default COM3...</p>
                 <p className="text-emerald-500">[PORT_OK] COM3 responding with baudrate 115200. ZKTeco firmware v4.11</p>
-                <p className="text-blue-400">[SOCKET] Established persistent websocket handshake to Firestore ai-studio-0ab7c3a1...</p>
+                <p className="text-blue-400">[SOCKET] Connected to the HR server.</p>
                 <p className="text-slate-500">[POLLING] Awaiting hardware signals... (No action required)</p>
                 {attendances.slice(-5).map((att, idx) => {
                   const emp = employees.find(e => e.id === att.employeeId);

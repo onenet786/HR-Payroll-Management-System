@@ -1,0 +1,44 @@
+# Deployment Security Gate
+
+Audit date: July 2026.
+
+## Status
+
+| Check | Status | Evidence / action |
+|---|---|---|
+| Required environment variables | PASS after fix | Vite refuses to build without all Firebase web values. Firebase initialization also fails closed. Kiosk and maintenance entrypoints reject missing Firebase values. The production server rejects missing `APP_URL`/`ALLOWED_ORIGIN`, placeholder values, or `DEBUG=true`. |
+| Debug/test artifacts | PASS | No hardcoded test credentials, security TODO/FIXME markers, test/debug/backdoor/seed endpoints, wildcard CORS, or commented-out executable blocks were found. Operational maintenance CLI output remains; it is not browser debug logging. Debug defaults to false in production. |
+| Client-facing errors | PASS after fix | Express errors and 404s use generic JSON plus `X-Correlation-ID`. Raw stacks remain server-side. Electron, kiosk renderer, React maintenance/biometric UI, and native bridge no longer return raw exception strings or file paths. Native bridge errors include a correlation ID. |
+| Security headers | PASS after fix | Helmet applies CSP, `nosniff`, `DENY`, one-year HSTS, referrer policy, and related headers. Firebase Hosting has equivalent headers. HTML contains a CSP fallback for hosts that ignore repository hosting configuration. |
+| Authentication rate limiting | BLOCKED for current auth; guards prepared | Express guards enforce 5/minute/IP for future login/signup/OTP routes and 3/hour/IP for password reset. Current login runs in the browser against Firestore and therefore cannot be protected by server/IP rate limiting. Replace it with Firebase Authentication or trusted server endpoints before launch. |
+| CORS | PASS for owned server | No wildcard origin exists. Production requires one exact `ALLOWED_ORIGIN`; absent or different origins receive 403. Firestore CORS is operated by Google and access authorization must be enforced by Security Rules. |
+| Database TLS and exposure | PASS for transport; rules added, migration BLOCKED | Every Firestore path uses TLS and no database port/default credential exists. Checked-in rules now deny unauthenticated access and enforce owner/permission checks. They must be deployed and emulator-tested; the legacy custom-login and kiosk flows require Firebase Auth migration before they can access Firestore. |
+
+## Go-live decision
+
+**NO-GO until both blockers are resolved:**
+
+1. Replace browser-side password verification with Firebase Authentication or trusted rate-limited server authentication.
+2. Provision Firebase Auth UID-keyed user profiles and emulator-test/deploy the checked-in Firestore rules without weakening them.
+
+The production web process should be started with `npm start` behind an HTTPS reverse proxy, or deployed using the checked-in Firebase Hosting configuration. HSTS is effective only over HTTPS.
+# Encrypted backup and recovery
+
+- Generate a dedicated 32-byte key with `openssl rand -base64 32` and store it outside the web root.
+- Set `BACKUP_DIR` to a restricted directory outside `/www/wwwroot/hr-payroll`.
+- Run `npm run postgres:backup` daily from the hosting scheduler.
+- Run `npm run postgres:backup:verify -- /absolute/path/to/file.dump.enc` after each backup or at least weekly.
+- Copy encrypted backups and manifests to a second server or object-storage account.
+- Test restoration quarterly on a separate staging database. Production restore requires `CONFIRM_DATABASE_RESTORE=RESTORE_HR_PAYROLL_DATABASE`.
+
+# MFA rollout and recovery
+
+- Set a unique `MFA_ENCRYPTION_KEY` before enabling authenticator MFA; losing it prevents recovery of enrolled MFA secrets.
+- Configure and test `SMTP_HOST`, `SMTP_USER`, `SMTP_PASS`, and `SMTP_FROM`; users may choose a six-digit email verification code instead of their authenticator-app code during MFA sign-in.
+- Enroll two trusted administrators first, then all payroll and access-control users.
+- Keep `MFA_ENFORCE_PRIVILEGED=false` until every privileged user has confirmed a successful MFA login.
+- Then set `MFA_ENFORCE_PRIVILEGED=true` and restart the service.
+- MFA recovery requires a reason and a different access administrator to approve the request. Approval revokes all sessions for the recovered account.
+# Private employee documents
+
+Set `DOCUMENT_STORAGE_PATH` to a directory outside the web root, for example `/www/hr-payroll-private/documents`. Create it with restrictive permissions for the user that runs the Node service; never place it under `dist`, `public`, or a directory served by Nginx. Employee document uploads accept only PDF, JPEG, and PNG files up to 10 MB and are downloaded only through authenticated, audited API requests.

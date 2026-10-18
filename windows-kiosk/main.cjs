@@ -1,15 +1,37 @@
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
-const { spawn } = require('child_process');
+const { app, BrowserWindow, ipcMain, dialog, session, safeStorage } = require('electron');
+const { execFile, spawn } = require('child_process');
 const fs = require('fs');
 const net = require('net');
 const path = require('path');
 const https = require('https');
+const http = require('http');
 const { pathToFileURL } = require('url');
+const dotenv = require('dotenv');
+const {
+  canReturnFromTemporaryExit,
+  resumeFromTemporaryExit,
+} = require('./attendance-state.cjs');
+const { createChallengeManager } = require('./liveness.cjs');
+const { authorizeCameraAttempt, requireSecureEnrollment } = require('./camera-authorization.cjs');
+const { LOW_CONFIDENCE_BIOMETRIC_PERCENT, biometricMatchEvidence, evaluateAttendanceTimes } = require('./attendance-rules.cjs');
+const { FACE_IDENTIFY_THRESHOLD, FACE_VERIFY_THRESHOLD, FACE_STRONG_DISTANCE, normalizeFaceDescriptor, identifyFace } = require('./face-match.cjs');
+
+dotenv.config({ quiet: true });
+
+// Load local or packaged environment
+const kioskEnvironmentPath = app.isPackaged
+  ? path.join(process.resourcesPath, 'kiosk.env')
+  : path.join(__dirname, '..', '.env.local');
+dotenv.config({ path: kioskEnvironmentPath, quiet: true, override: false });
+if (!process.env.PORTAL_URL) process.env.PORTAL_URL = process.env.VITE_API_BASE_URL || process.env.APP_URL || 'https://attendance.binishaqsoft.com';
+
 
 const bridgePort = 15896;
 let mainWindow;
 let splashWindow;
 let bridgeProcess = null;
+const cameraChallenges = createChallengeManager();
+const cameraReasonAuthorizations = new Map();
 let autoSyncTimer = null;
 let driverWatchTimer = null;
 
@@ -146,31 +168,8 @@ function closeSplashWindow() {
   splashWindow = null;
 }
 
-const firebaseConfig = {
-  apiKey: 'AIzaSyAA7uvWdIsP9CqFGJEk5SB0FvLFF97DNk4',
-  authDomain: 'gen-lang-client-0314098400.firebaseapp.com',
-  projectId: 'gen-lang-client-0314098400',
-  databaseId: 'ai-studio-0ab7c3a1-e4ca-49b5-86f4-6883897b9163',
-  storageBucket: 'gen-lang-client-0314098400.firebasestorage.app',
-  messagingSenderId: '279125201448',
-  appId: '1:279125201448:web:60c148c137e9fd60a2db1d',
-  portalUrl: 'https://attendance.binishaqsoft.com',
-};
+const kioskPortalUrl = (process.env.PORTAL_URL || process.env.VITE_API_BASE_URL || process.env.APP_URL || 'https://attendance.binishaqsoft.com').replace(/\/$/, '');
 
-let firebaseSdkPromise = null;
-
-const seedEmployees = [
-  { id: 'emp1', employeeCode: 'IND-KHI-001', fullName: 'Ali Raza Khan', departmentId: 'd1', designationId: 'ds1', branchId: 'b1', status: 'Active', fingerprintTemplates: [] },
-  { id: 'emp2', employeeCode: 'IND-KHI-002', fullName: 'Sara Ahmed', departmentId: 'd2', designationId: 'ds2', branchId: 'b1', status: 'Active', fingerprintTemplates: [] },
-  { id: 'emp3', employeeCode: 'IND-LHR-003', fullName: 'Muhammad Usman', departmentId: 'd4', designationId: 'ds3', branchId: 'b2', status: 'Active', fingerprintTemplates: [] },
-  { id: 'emp4', employeeCode: 'IND-LHR-004', fullName: 'Tariq Mahmood', departmentId: 'd3', designationId: 'ds4', branchId: 'b2', status: 'Active', fingerprintTemplates: [] },
-  { id: 'emp5', employeeCode: 'IND-LHR-WS01', fullName: 'Kamran Bashir', departmentId: 'd3', designationId: 'ds5', branchId: 'b2', status: 'Active', fingerprintTemplates: [] },
-  { id: 'emp6', employeeCode: 'BINISHAQ-IT-00002', fullName: 'Aqeel Ur Rehman', departmentId: 'd1', designationId: 'ds1', branchId: 'b1', status: 'Active', fingerprintTemplates: [] },
-];
-
-const seedBranches = { b1: 'Karachi HQ Office', b2: 'Lahore Distribution Hub' };
-const seedDepartments = { d1: 'Information Technology', d2: 'Human Resources', d3: 'Warehouse & Logistics', d4: 'Finance & Accounts' };
-const seedDesignations = { ds1: 'Senior Developer', ds2: 'HR Manager', ds3: 'Logistics Coordinator', ds4: 'Warehouse Supervisor', ds5: 'Warehouse Staff' };
 const checkoutReasons = [
   'End of Shift',
   'Lunch Break',
@@ -205,9 +204,13 @@ function defaultStore() {
     terminal: {
       id: 'KIOSK-WIN-01',
       location: 'Main Entrance Gate-1',
+      branchId: '',
       ipCameraUrl: '',
+      allowCodeOnlyPunch: false,
       requireCodeWithFingerprint: false,
-      requireCodeWithCamera: true,
+      requireCodeWithCamera: false,
+      autoCaptureCamera: true,
+      autoCaptureConfigVersion: 1,
       autoFullscreen: true,
     },
     employees: [],
@@ -224,17 +227,6 @@ function defaultStore() {
   };
 }
 
-function isDefaultSeedEmployeeList(employees) {
-  if (!Array.isArray(employees) || employees.length === 0) return false;
-  return employees.every(employee =>
-    seedEmployees.some(seed =>
-      seed.id === employee.id &&
-      seed.employeeCode === employee.employeeCode &&
-      seed.fullName === employee.fullName
-    )
-  );
-}
-
 function readStore() {
   try {
     const file = kioskStorePath();
@@ -242,11 +234,24 @@ function readStore() {
       const loaded = JSON.parse(fs.readFileSync(file, 'utf8'));
       const defaults = defaultStore();
       const store = { ...defaults, ...loaded, terminal: { ...defaults.terminal, ...(loaded.terminal || {}) } };
-      if (isDefaultSeedEmployeeList(store.employees)) store.employees = [];
+      // Earlier builds hardcoded auto-capture off and exposed no usable choice.
+      // Migrate that legacy value once; subsequent user changes are preserved.
+      if (!loaded.terminal?.autoCaptureConfigVersion) {
+        store.terminal.autoCaptureCamera = true;
+        store.terminal.autoCaptureConfigVersion = 1;
+      }
+      if (store.terminal?.branchId && Array.isArray(store.branches) && store.branches.length > 0) {
+        if (!store.branches.some(b => b.id === store.terminal.branchId)) {
+          store.terminal.branchId = '';
+        }
+      }
+      store.employees = (store.employees || []).map(kioskStoredEmployee);
+      // Legacy event details could contain names, identifiers, paths, or raw errors.
+      store.events = [];
       return store;
     }
   } catch (error) {
-    console.warn('Could not read kiosk store:', error);
+    console.warn('Could not read kiosk store. Starting with an empty local store.');
   }
   return defaultStore();
 }
@@ -282,9 +287,25 @@ function isBridgePortOpen() {
   });
 }
 
+// State of the URU4500Bridge Windows service registered by the installer ('RUNNING', 'STOPPED', ...), or
+// 'MISSING' when it is not installed. The kiosk cannot start a service without admin rights.
+function queryBridgeService() {
+  return new Promise(resolve => {
+    execFile('sc.exe', ['query', 'URU4500Bridge'], { windowsHide: true, timeout: 5000 }, (_error, stdout) => {
+      const match = /STATE\s*:\s*\d+\s+(\w+)/.exec(String(stdout || ''));
+      resolve(match ? match[1] : 'MISSING');
+    });
+  });
+}
+
 async function startUru4500Bridge() {
   if (process.platform !== 'win32') return { ok: false, message: 'Windows biometric driver host starts only on Windows.' };
   if (await isBridgePortOpen()) return { ok: true, message: 'Windows biometric driver host already running.' };
+  // A running service is still opening its port (or restarting after a crash); a second copy would fight it.
+  const serviceState = await queryBridgeService();
+  if (serviceState === 'RUNNING' || serviceState === 'START_PENDING') {
+    return { ok: true, message: 'Waiting for the URU4500Bridge Windows service to come online.' };
+  }
 
   const bridgePath = getBridgeExecutablePath();
   if (!fs.existsSync(bridgePath)) {
@@ -305,7 +326,7 @@ async function startUru4500Bridge() {
     bridgeProcess = null;
   });
   bridgeProcess.unref();
-  addEvent('device', 'Windows biometric driver host started', { bridgePath, logPath });
+  addEvent('device', 'Windows biometric driver host started');
   return { ok: true, message: 'Windows biometric driver host started.' };
 }
 
@@ -326,7 +347,7 @@ function startDriverWatchdog() {
         mainWindow.webContents.send('kiosk:driver-status', { running });
       }
     } catch (error) {
-      addEvent('device', 'Windows biometric driver host watchdog failed', error.message);
+      addEvent('device', 'Windows biometric driver host watchdog failed');
     }
   }, 15000);
 }
@@ -341,7 +362,7 @@ function createWindow() {
     kiosk: !!store.terminal.autoFullscreen,
     fullscreen: !!store.terminal.autoFullscreen,
     autoHideMenuBar: true,
-    title: 'Bin Ishaq Attendance Kiosk',
+    title: 'HR Attendance Kiosk',
     icon: getAppIconPath(),
     backgroundColor: '#020c17',
     show: false,
@@ -349,7 +370,7 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
       enableBlinkFeatures: 'FaceDetector',
     },
   });
@@ -361,72 +382,99 @@ function createWindow() {
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 }
 
-// ─── Firestore REST Helpers ─────────────────────────────────────────────────
+function configureCameraPermission() {
+  const rendererUrl = pathToFileURL(path.join(__dirname, 'renderer', 'index.html')).toString();
+  // Trust only the kiosk's own window showing the bundled renderer. Comparing the exact URL text failed when the
+  // app was installed under a path with spaces (e.g. C:\Program Files\...), which blocked the camera.
+  const normalizeFileUrl = url => {
+    try { return decodeURIComponent(new URL(url).pathname).replace(/\\/g, '/').toLowerCase(); } catch { return ''; }
+  };
+  const trustedPath = normalizeFileUrl(rendererUrl);
+  const isTrustedRenderer = webContents => {
+    if (!webContents || webContents.isDestroyed()) return false;
+    const url = webContents.getURL();
+    const trusted = url.startsWith('file:') && normalizeFileUrl(url) === trustedPath;
+    return trusted || (!!mainWindow && !mainWindow.isDestroyed() && webContents.id === mainWindow.webContents.id && url.startsWith('file:'));
+  };
 
-function firestoreUrl(collectionName, docId) {
-  const base = `/v1/projects/${firebaseConfig.projectId}/databases/${firebaseConfig.databaseId}/documents/${collectionName}`;
-  const suffix = docId ? `/${encodeURIComponent(docId)}` : '';
-  return `https://firestore.googleapis.com${base}${suffix}?key=${firebaseConfig.apiKey}`;
+  session.defaultSession.setPermissionCheckHandler((webContents, permission, _origin, details) =>
+    permission === 'media' &&
+    isTrustedRenderer(webContents) &&
+    (!details?.mediaType || details.mediaType === 'video')
+  );
+
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
+    const mediaTypes = Array.isArray(details?.mediaTypes) ? details.mediaTypes : [];
+    const requestsVideoOnly = mediaTypes.includes('video') && !mediaTypes.includes('audio');
+    const allowed = permission === 'media' && isTrustedRenderer(webContents) && requestsVideoOnly;
+    if (permission === 'media' && !allowed) {
+      addEvent('security', `Camera request refused (${isTrustedRenderer(webContents) ? 'audio or unknown media requested' : 'request did not come from the kiosk window'})`);
+    }
+    callback(allowed);
+  });
 }
 
-function fromFirestoreValue(value) {
-  if (!value || typeof value !== 'object') return undefined;
-  if ('stringValue' in value) return value.stringValue;
-  if ('integerValue' in value) return Number(value.integerValue);
-  if ('doubleValue' in value) return Number(value.doubleValue);
-  if ('booleanValue' in value) return Boolean(value.booleanValue);
-  if ('timestampValue' in value) return value.timestampValue;
-  if ('arrayValue' in value) return (value.arrayValue.values || []).map(fromFirestoreValue);
-  if ('mapValue' in value) return fromFirestoreFields(value.mapValue.fields || {});
-  if ('nullValue' in value) return null;
-  return undefined;
+// ─── Kiosk PostgreSQL API Helpers ──────────────────────────────────────────
+
+// Device key issued by /api/kiosk/register. Kept out of the main store and encrypted with the Windows user's
+// DPAPI key when available, so copying the store file to another PC does not copy the kiosk's access.
+function deviceKeyPath() {
+  return path.join(app.getPath('userData'), 'kiosk-device-key.json');
 }
 
-function fromFirestoreFields(fields) {
-  const out = {};
-  for (const [key, value] of Object.entries(fields || {})) out[key] = fromFirestoreValue(value);
-  return out;
-}
-
-function toFirestoreValue(value) {
-  if (value === null || value === undefined) return { nullValue: null };
-  if (Array.isArray(value)) return { arrayValue: { values: value.map(toFirestoreValue) } };
-  if (typeof value === 'boolean') return { booleanValue: value };
-  if (typeof value === 'number' && Number.isInteger(value)) return { integerValue: String(value) };
-  if (typeof value === 'number') return { doubleValue: value };
-  if (typeof value === 'object') {
-    const fields = {};
-    for (const [key, child] of Object.entries(value)) fields[key] = toFirestoreValue(child);
-    return { mapValue: { fields } };
+function readDeviceRegistration() {
+  try {
+    const saved = JSON.parse(fs.readFileSync(deviceKeyPath(), 'utf8'));
+    const key = saved.encrypted ? safeStorage.decryptString(Buffer.from(saved.key, 'base64')) : saved.key;
+    return key ? { key, name: saved.name || '', registeredAt: saved.registeredAt || null, portalUrl: saved.portalUrl || '' } : null;
+  } catch {
+    return null;
   }
-  return { stringValue: String(value) };
 }
 
-function toFirestoreDocument(obj) {
-  const fields = {};
-  for (const [key, value] of Object.entries(obj)) fields[key] = toFirestoreValue(value);
-  return { fields };
+function writeDeviceRegistration(registration) {
+  if (!registration) {
+    try { fs.unlinkSync(deviceKeyPath()); } catch { /* already removed */ }
+    return;
+  }
+  const encrypted = safeStorage.isEncryptionAvailable();
+  const key = encrypted ? safeStorage.encryptString(registration.key).toString('base64') : registration.key;
+  fs.writeFileSync(deviceKeyPath(), JSON.stringify({ ...registration, key, encrypted }), { mode: 0o600 });
+}
+
+function publicDeviceRegistration() {
+  const registration = readDeviceRegistration();
+  return registration
+    ? { registered: true, name: registration.name, registeredAt: registration.registeredAt, portalUrl: registration.portalUrl || kioskPortalUrl }
+    : { registered: false, portalUrl: kioskPortalUrl };
 }
 
 function requestJson(method, url, body) {
   return new Promise((resolve, reject) => {
+    const targetUrl = new URL(url);
+    const transport = targetUrl.protocol === 'http:' ? http : https;
     const payload = body ? Buffer.from(JSON.stringify(body), 'utf8') : null;
-    const req = https.request(url, {
-      method,
-      headers: payload
-        ? { 'Content-Type': 'application/json', 'Content-Length': payload.length }
-        : { 'Content-Type': 'application/json' },
-    }, res => {
+    const headers = { 'Content-Type': 'application/json' };
+    if (payload) headers['Content-Length'] = payload.length;
+    const deviceKey = readDeviceRegistration()?.key;
+    if (deviceKey) headers['X-Kiosk-Token'] = deviceKey;
+    const req = transport.request(targetUrl, { method, headers }, res => {
       let data = '';
       res.setEncoding('utf8');
       res.on('data', chunk => { data += chunk; });
       res.on('end', () => {
-        const parsed = data ? JSON.parse(data) : null;
-        if (res.statusCode >= 200 && res.statusCode < 300) resolve(parsed);
-        else {
-          const error = new Error(parsed?.error?.message || `HTTP ${res.statusCode}`);
+        let parsed = null;
+        try {
+          parsed = data ? JSON.parse(data) : null;
+        } catch (e) {
+          parsed = null;
+        }
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          resolve(parsed || {});
+        } else {
+          const error = new Error(parsed?.error?.message || parsed?.error || `HTTP ${res.statusCode}`);
           error.statusCode = res.statusCode;
-          error.url = url.replace(/([?&]key=)[^&]+/, '$1***');
+          error.url = url;
           reject(error);
         }
       });
@@ -437,111 +485,118 @@ function requestJson(method, url, body) {
   });
 }
 
-async function getFirebaseSdkDb() {
-  if (!firebaseSdkPromise) {
-    firebaseSdkPromise = Promise.all([
-      import('firebase/app'),
-      import('firebase/firestore'),
-    ]).then(([appMod, firestoreMod]) => {
-      const appConfig = {
-        apiKey: firebaseConfig.apiKey,
-        authDomain: firebaseConfig.authDomain,
-        projectId: firebaseConfig.projectId,
-        storageBucket: firebaseConfig.storageBucket,
-        messagingSenderId: firebaseConfig.messagingSenderId,
-        appId: firebaseConfig.appId,
-      };
-      const firebaseApp = appMod.getApps().length ? appMod.getApp() : appMod.initializeApp(appConfig);
-      return {
-        db: firestoreMod.getFirestore(firebaseApp, firebaseConfig.databaseId),
-        firestoreMod,
-      };
-    });
-  }
-  return firebaseSdkPromise;
-}
-
-async function fetchFirestoreCollectionViaSdk(collectionName) {
-  const { db, firestoreMod } = await getFirebaseSdkDb();
-  const snapshot = await firestoreMod.getDocs(firestoreMod.collection(db, collectionName));
-  return snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() }));
-}
-
-async function putFirestoreDocumentViaSdk(collectionName, docId, data) {
-  const { db, firestoreMod } = await getFirebaseSdkDb();
-  await firestoreMod.setDoc(firestoreMod.doc(db, collectionName, docId), data, { merge: true });
-}
-
 async function fetchFirestoreCollection(collectionName) {
+  const url = `${kioskPortalUrl}/api/kiosk/sync/${encodeURIComponent(collectionName)}`;
   try {
-    const result = await requestJson('GET', firestoreUrl(collectionName), null);
-    return (result.documents || []).map(doc => {
-      const id = String(doc.name || '').split('/').pop();
-      return { id, ...fromFirestoreFields(doc.fields || {}) };
-    });
-  } catch (restError) {
-    try {
-      const records = await fetchFirestoreCollectionViaSdk(collectionName);
-      addEvent('sync', `Firestore REST failed for ${collectionName}; Firebase SDK fallback succeeded`, {
-        restError: restError.message,
-        statusCode: restError.statusCode || null,
-        url: restError.url || null,
-        count: records.length,
-      });
-      return records;
-    } catch (sdkError) {
-      const error = new Error(`${restError.message}; SDK fallback: ${sdkError.message}`);
-      error.statusCode = restError.statusCode || null;
-      error.url = restError.url || null;
-      throw error;
-    }
+    const result = await requestJson('GET', url, null);
+    return (result?.documents || []).map(doc => ({ id: doc.id || doc.document_id, ...doc }));
+  } catch (error) {
+    console.warn(`[Kiosk Sync] PostgreSQL fetch failed for ${collectionName}:`, error.message);
+    throw error;
   }
+}
+
+async function fetchFirestoreCollectionByField(collectionName, fieldName, value) {
+  const all = await fetchFirestoreCollection(collectionName);
+  return all.filter(item => item[fieldName] === value);
+}
+
+async function fetchFirestoreCollectionByIds(collectionName, fieldName, values) {
+  const set = new Set((values || []).map(String).filter(Boolean));
+  const all = await fetchFirestoreCollection(collectionName);
+  return all.filter(item => set.has(String(item[fieldName])));
 }
 
 async function putFirestoreDocument(collectionName, docId, data) {
+  const url = `${kioskPortalUrl}/api/kiosk/punch`;
+  return await requestJson('POST', url, { collection: collectionName, documentId: docId, data });
+}
+
+async function findEmployeeForCrossBranchCamera(code, _currentBranchId) {
+  const allEmployees = await fetchFirestoreCollection('employees');
+  const employee = findEmployeeByCode(allEmployees.map(kioskStoredEmployee), code);
+  if (!employee) return null;
+
   try {
-    return await requestJson('PATCH', firestoreUrl(collectionName, docId), toFirestoreDocument(data));
-  } catch (restError) {
-    try {
-      await putFirestoreDocumentViaSdk(collectionName, docId, data);
-      addEvent('sync', `Firestore REST write failed for ${collectionName}/${docId}; Firebase SDK fallback succeeded`, {
-        restError: restError.message,
-        statusCode: restError.statusCode || null,
-        url: restError.url || null,
-      });
-    } catch (sdkError) {
-      const error = new Error(`${restError.message}; SDK fallback: ${sdkError.message}`);
-      error.statusCode = restError.statusCode || null;
-      error.url = restError.url || null;
-      throw error;
-    }
+    const templates = await fetchFirestoreCollection('biometricTemplates');
+    const matchedTemplates = templates.filter(t => String(t.employeeId) === String(employee.id));
+    return mergeEmployeeBiometricTemplates([employee], matchedTemplates)[0] || employee;
+  } catch {
+    return employee;
   }
 }
+
+async function loadCrossBranchAttendanceContext(store, employeeId) {
+  try {
+    const attendances = await fetchFirestoreCollection('attendances');
+    const employeeLogs = attendances.filter(a => String(a.employeeId) === String(employeeId));
+    const localById = new Map((store.attendances || []).map(item => [item.id, item]));
+    for (const log of employeeLogs) {
+      localById.set(log.id, { ...localById.get(log.id), ...log });
+    }
+    store.attendances = Array.from(localById.values());
+  } catch (error) {
+    console.warn('[Cross-Branch Context] Failed to fetch attendance context:', error.message);
+  }
+}
+
 
 // ─── Core Sync Logic ────────────────────────────────────────────────────────
 
 async function performSync() {
   const store = readStore();
   const report = { employees: 0, attendances: 0, branches: 0, departments: 0, designations: 0, biometricTemplates: 0, pushed: 0, changed: false, errors: [] };
+  // Without a device key the server refuses every download, so the kiosk keeps matching an old employee list.
+  report.notRegistered = !readDeviceRegistration();
 
   try {
-    const employees = await fetchFirestoreCollection('employees');
+    const records = await fetchFirestoreCollection('branches');
+    report.changed = report.changed || JSON.stringify(store.branches || []) !== JSON.stringify(records);
+    store.branches = records;
+    report.branches = records.length;
+  } catch (error) {
+    report.errors.push('branches: sync failed');
+  }
+
+  // Review cutoff for weak biometric matches comes from the approved statutory configuration.
+  try {
+    const configs = await fetchFirestoreCollection('statConfig');
+    const percent = Number(configs[0]?.lowConfidenceBiometricPercent);
+    store.biometricPolicy = { lowConfidencePercent: Number.isFinite(percent) && percent >= 0 && percent <= 100 ? percent : LOW_CONFIDENCE_BIOMETRIC_PERCENT };
+  } catch (error) {
+    report.errors.push('statConfig: sync failed (using last known biometric review cutoff)');
+  }
+
+  // Auto-heal invalid or stale branch assignment
+  if (store.terminal.branchId && Array.isArray(store.branches) && store.branches.length > 0) {
+    const branchExists = store.branches.some(b => b.id === store.terminal.branchId);
+    if (!branchExists) {
+      console.warn(`[Kiosk Sync] Assigned branchId '${store.terminal.branchId}' not found in database. Clearing to all branches.`);
+      store.terminal.branchId = '';
+    }
+  }
+
+  try {
+    const departments = await fetchFirestoreCollection('departments');
+    const designations = await fetchFirestoreCollection('designations');
+    report.changed = report.changed || JSON.stringify(store.departments || []) !== JSON.stringify(departments);
+    report.changed = report.changed || JSON.stringify(store.designations || []) !== JSON.stringify(designations);
+    store.departments = departments;
+    store.designations = designations;
+    report.departments = departments.length;
+    report.designations = designations.length;
+  } catch (error) {
+    report.errors.push('departments/designations: sync failed');
+  }
+
+  try {
+    const employeeRecords = await fetchFirestoreCollection('employees');
+    const employees = employeeRecords.map(kioskStoredEmployee);
     report.changed = report.changed || JSON.stringify(store.employees || []) !== JSON.stringify(employees);
     store.employees = employees;
     report.employees = employees.length;
   } catch (error) {
-    report.errors.push(`employees: ${error.message}`);
-  }
-
-  for (const collectionName of ['branches', 'departments', 'designations']) {
-    try {
-      const records = await fetchFirestoreCollection(collectionName);
-      report.changed = report.changed || JSON.stringify(store[collectionName] || []) !== JSON.stringify(records);
-      store[collectionName] = records;
-      report[collectionName] = records.length;
-    } catch (error) {
-      report.errors.push(`${collectionName}: ${error.message}`);
-    }
+    report.errors.push('employees: sync failed');
   }
 
   try {
@@ -550,19 +605,26 @@ async function performSync() {
     store.biometricTemplates = records;
     report.biometricTemplates = (store.biometricTemplates || []).length;
   } catch (error) {
-    report.errors.push(`biometricTemplates: ${error.message}`);
+    report.errors.push('biometricTemplates: sync failed');
   }
 
   try {
-    const attendances = await fetchFirestoreCollection('attendances');
-    if (attendances.length) {
-      const localById = new Map((store.attendances || []).map(item => [item.id, item]));
-      for (const log of attendances) localById.set(log.id, { ...localById.get(log.id), ...log });
-      store.attendances = Array.from(localById.values());
-      report.attendances = attendances.length;
+    const attendances = store.terminal.branchId
+      ? await fetchFirestoreCollectionByIds('attendances', 'employeeId', (store.employees || []).map(employee => employee.id))
+      : await fetchFirestoreCollection('attendances');
+    const localById = new Map((store.attendances || []).map(item => [item.id, item]));
+    const reconciledById = new Map(attendances.map(log => [log.id, { ...localById.get(log.id), ...log }]));
+    for (const item of store.pendingSync || []) {
+      if (item.collection !== 'attendances') continue;
+      const pendingLog = localById.get(item.id) || item.data;
+      if (pendingLog) reconciledById.set(item.id, pendingLog);
     }
+    const reconciled = Array.from(reconciledById.values());
+    report.changed = report.changed || JSON.stringify(store.attendances || []) !== JSON.stringify(reconciled);
+    store.attendances = reconciled;
+    report.attendances = attendances.length;
   } catch (error) {
-    report.errors.push(`attendances: ${error.message}`);
+    report.errors.push('attendances: sync failed');
   }
 
   const remaining = [];
@@ -571,13 +633,24 @@ async function performSync() {
       await putFirestoreDocument(item.collection, item.id, item.data);
       report.pushed += 1;
     } catch (error) {
-      remaining.push(item);
-      report.errors.push(`${item.id}: ${error.message}`);
+      // 400/403/404/409 mean the server will never accept this punch (too old, locked month, inactive
+      // employee, conflicting record). Keep it for HR review instead of retrying it forever.
+      const permanent = [400, 403, 404, 409].includes(Number(error?.statusCode));
+      const who = item.data?.employeeName || item.data?.employeeCode || item.data?.employeeId || 'employee';
+      if (permanent) {
+        store.rejectedSync = [...(store.rejectedSync || []), { ...item, rejectedAt: new Date().toISOString(), reason: error.message }].slice(-200);
+        addEvent('sync-error', `Punch for ${who} on ${item.data?.date || '?'} was not accepted by the server: ${error.message}`);
+        report.errors.push(`punch rejected: ${error.message}`);
+      } else {
+        remaining.push(item);
+        report.errors.push(`pending punch not sent: ${error.message || 'connection problem'}`);
+      }
     }
   }
   store.pendingSync = remaining;
   store.employees = mergeEmployeeBiometricTemplates(store.employees || [], store.biometricTemplates || []);
-  store.lastSync = new Date().toISOString();
+  // Only a sync that reached the server counts; otherwise "last synced" would hide that nothing downloaded.
+  if (!report.notRegistered) store.lastSync = new Date().toISOString();
   store.lastSyncReport = report;
   writeStore(store);
   addEvent('sync', 'Kiosk sync completed', report);
@@ -589,11 +662,30 @@ async function performSync() {
 function findEmployeeByCode(employees, rawCode) {
   const code = String(rawCode || '').trim().toLowerCase();
   if (!code) return null;
-  return employees.find(emp => {
-    const employeeCode = String(emp.employeeCode || '').toLowerCase();
-    const id = String(emp.id || '').toLowerCase();
-    return employeeCode === code || id === code || employeeCode.endsWith(code);
-  }) || null;
+  return employees.find(emp => String(emp.employeeCode || '').toLowerCase() === code) || null;
+}
+
+async function findEmployeeForCrossBranchCamera(rawCode, terminalBranchId) {
+  const code = String(rawCode || '').trim();
+  if (!code || !terminalBranchId) return null;
+  const variants = [...new Set([code, code.toUpperCase()])];
+  let matches = [];
+  for (const variant of variants) {
+    matches = await fetchFirestoreCollectionByField('employees', 'employeeCode', variant);
+    if (matches.length) break;
+  }
+  if (matches.length !== 1) return null;
+  const rawEmployee = matches[0];
+  if (!rawEmployee.branchId || rawEmployee.branchId === terminalBranchId) return null;
+  const storedEmployee = kioskStoredEmployee(rawEmployee);
+  const templates = await fetchFirestoreCollectionByField('biometricTemplates', 'employeeId', storedEmployee.id);
+  return mergeEmployeeBiometricTemplates([storedEmployee], templates)[0];
+}
+
+async function loadCrossBranchAttendanceContext(store, employeeId) {
+  const records = await fetchFirestoreCollectionByField('attendances', 'employeeId', employeeId);
+  const otherEmployeeLogs = (store.attendances || []).filter(log => log.employeeId !== employeeId);
+  store.attendances = [...otherEmployeeLogs, ...records];
 }
 
 function todayDate() { return new Date().toISOString().slice(0, 10); }
@@ -602,30 +694,48 @@ function nowTime() { return new Date().toTimeString().slice(0, 8); }
 function getDepartmentName(employee) {
   const store = readStore();
   const dept = (store.departments || []).find(item => item.id === employee.departmentId);
-  return dept?.name || dept?.departmentName || seedDepartments[employee.departmentId] || employee.departmentId || '';
+  return dept?.name || dept?.departmentName || employee.departmentId || '';
 }
 
 function getDesignationName(employee) {
   const store = readStore();
   const desig = (store.designations || []).find(item => item.id === employee.designationId);
-  return desig?.name || desig?.designationName || seedDesignations[employee.designationId] || employee.designationId || '';
+  return desig?.name || desig?.designationName || employee.designationId || '';
 }
 
 function getBranchName(employee) {
   const store = readStore();
   const branch = (store.branches || []).find(item => item.id === employee.branchId);
-  return branch?.name || branch?.branchName || seedBranches[employee.branchId] || employee.branchId || '';
+  return branch?.name || branch?.branchName || employee.branchId || '';
 }
 
 function kioskEmployee(employee) {
   if (!employee) return null;
   return {
-    ...employee,
-    fingerprintTemplates: getFingerprintTemplates(employee),
+    id: employee.id || employee.employeeCode || '',
+    employeeCode: employee.employeeCode,
+    fullName: employee.fullName,
+    status: employee.status,
     departmentName: getDepartmentName(employee),
     designationName: getDesignationName(employee),
     branchName: getBranchName(employee),
+    branchId: employee.branchId || '',
     pictureUrl: employee.pictureUrl || employee.photoUrl || employee.profileImage || employee.imageUrl || '',
+  };
+}
+
+function kioskStoredEmployee(employee) {
+  return {
+    id: employee.id,
+    employeeCode: employee.employeeCode,
+    fullName: employee.fullName,
+    status: employee.status,
+    branchId: employee.branchId,
+    departmentId: employee.departmentId,
+    designationId: employee.designationId,
+    pictureUrl: employee.pictureUrl || '',
+    fingerprintTemplates: getFingerprintTemplates(employee),
+    faceDescriptors: getFaceDescriptors(employee),
   };
 }
 
@@ -656,18 +766,6 @@ function getFingerprintTemplates(employee) {
   return list.map(normalizeFingerprintTemplate).filter(Boolean);
 }
 
-function normalizeFaceDescriptor(value) {
-  if (!value || typeof value !== 'object') return null;
-  const vector = Array.isArray(value.vector) ? value.vector.map(Number).filter(Number.isFinite) : [];
-  if (value.version !== 2 || vector.length !== 1280) return null;
-  return {
-    version: 2,
-    vector,
-    capturedAt: value.capturedAt || '',
-    source: value.source || '',
-  };
-}
-
 function getFaceDescriptors(employee) {
   const source =
     employee?.faceDescriptors ||
@@ -676,53 +774,8 @@ function getFaceDescriptors(employee) {
     employee?.biometric?.faceDescriptors ||
     [];
   const list = Array.isArray(source) ? source : [source];
+  // Only identity embeddings (version 4) count; older pixel-based profiles must be re-enrolled.
   return list.map(normalizeFaceDescriptor).filter(Boolean);
-}
-
-function compareFaceDescriptors(a, b) {
-  const length = a?.vector?.length || 0;
-  if (!length || length !== (b?.vector?.length || 0)) return Number.POSITIVE_INFINITY;
-  let sum = 0;
-  for (let i = 0; i < length; i++) {
-    const delta = Number(a.vector[i]) - Number(b.vector[i]);
-    sum += delta * delta;
-  }
-  return Math.sqrt(sum / length);
-}
-
-function identifyFaceDescriptor(employees, probe, threshold = 0.18) {
-  const normalizedProbe = normalizeFaceDescriptor(probe);
-  if (!normalizedProbe) return { ok: false, message: 'Camera face descriptor was invalid. Try another capture.' };
-
-  let best = null;
-  let secondScore = Number.POSITIVE_INFINITY;
-  let secondEmployeeId = '';
-  for (const employee of employees || []) {
-    for (const descriptor of getFaceDescriptors(employee)) {
-      const score = compareFaceDescriptors(normalizedProbe, descriptor);
-      if (!Number.isFinite(score)) continue;
-      if (!best || score < best.score) {
-        if (best && best.employee.id !== employee.id) {
-          secondScore = best.score;
-          secondEmployeeId = best.employee.id;
-        }
-        best = { employee, score };
-      } else if (employee.id !== best.employee.id && score < secondScore) {
-        secondScore = score;
-        secondEmployeeId = employee.id;
-      }
-    }
-  }
-
-  if (!best) return { ok: false, message: 'No v2 camera face profiles found. Re-enroll employee faces from HR biometric setup.' };
-  if (best.score > threshold) {
-    return { ok: false, message: 'Face not recognized. Improve lighting or re-enroll the employee camera profile.', score: best.score };
-  }
-  const margin = secondScore - best.score;
-  if (secondEmployeeId && Number.isFinite(secondScore) && secondScore < threshold && margin < 0.04) {
-    return { ok: false, message: 'Face match is not unique enough. Use full face, better light, or enter employee code with camera.', score: best.score, margin };
-  }
-  return { ok: true, employee: best.employee, score: best.score, margin };
 }
 
 function buildFingerprintGallery(employees) {
@@ -752,18 +805,20 @@ function mergeEmployeeBiometricTemplates(employees, biometricRecords) {
   });
 }
 
-function computePunch(existingLog, method, terminal, evidenceId, outReason, at) {
+function computePunch(existingLog, method, terminal, evidenceId, outReason, at, shift) {
   if (!existingLog) {
+    const evaluated = evaluateAttendanceTimes(at, undefined, shift);
     return {
       id: `att-kiosk-${Date.now()}`,
       date: todayDate(),
       punchIn: at,
       method,
-      status: at > '09:15:00' ? 'Late' : 'Present',
+      status: evaluated.status,
       overtimeMinutes: 0,
       terminalId: terminal.id,
       terminalLocation: terminal.location,
       evidenceId: evidenceId || '',
+      lastPunchAt: at,
       createdAt: new Date().toISOString(),
     };
   }
@@ -776,11 +831,11 @@ function computePunch(existingLog, method, terminal, evidenceId, outReason, at) 
     terminalId: terminal.id,
     terminalLocation: terminal.location,
     evidenceId: evidenceId || existingLog.evidenceId || '',
+    lastPunchAt: at,
   };
-  if (updated.punchIn && at > '18:00:00') {
-    const [h, m] = at.split(':').map(Number);
-    updated.overtimeMinutes = Math.max(0, (h * 60 + m) - 18 * 60);
-  }
+  const evaluated = evaluateAttendanceTimes(updated.punchIn, at, shift, updated.breaks);
+  updated.status = evaluated.status;
+  updated.overtimeMinutes = evaluated.overtimeMinutes;
   return updated;
 }
 
@@ -788,14 +843,32 @@ function savePunch(store, employee, method, evidence, meta) {
   const date = todayDate();
   const existing = (store.attendances || []).find(log => log.employeeId === employee.id && log.date === date);
   const at = nowTime();
-  const lastPunchTime = existing?.punchOut || existing?.punchIn || '';
+  const isReturningFromBreak = canReturnFromTemporaryExit(existing);
+  if (existing?.punchIn && existing?.punchOut && !isReturningFromBreak) {
+    return {
+      ok: false,
+      alreadyRecorded: true,
+      message: `Attendance is already completed today (${existing.punchIn} to ${existing.punchOut}). Contact HR if it needs correction.`,
+      employee: kioskEmployee(employee),
+      attendance: {
+        date: existing.date,
+        punchIn: existing.punchIn,
+        punchOut: existing.punchOut,
+        method: existing.method,
+        status: existing.status,
+      },
+      action: 'OUT',
+    };
+  }
+  const lastPunchTime = existing?.lastPunchAt || existing?.punchOut || existing?.punchIn || '';
   if (lastPunchTime) {
     const secondsSinceLastPunch = timeToSeconds(at) - timeToSeconds(lastPunchTime);
-    if (secondsSinceLastPunch >= 0 && secondsSinceLastPunch < 60) {
-      const remaining = 60 - secondsSinceLastPunch;
+    if (secondsSinceLastPunch >= 0 && secondsSinceLastPunch < 120) {
+      const remaining = 120 - secondsSinceLastPunch;
       return {
         ok: false,
-        message: `Please wait ${remaining} second${remaining === 1 ? '' : 's'} before punching again. Minimum delay is 1 minute between punches.`,
+        alreadyRecorded: true,
+        message: `Please wait ${remaining} second${remaining === 1 ? '' : 's'} before punching again. Minimum delay is 2 minutes between punches.`,
         cooldownSeconds: remaining,
         employee: kioskEmployee(employee),
       };
@@ -813,7 +886,31 @@ function savePunch(store, employee, method, evidence, meta) {
       reasons: checkoutReasons,
     };
   }
-  const log = { ...computePunch(existing, method, store.terminal, evidence?.id, outReason, at), employeeId: employee.id };
+  const matchKind = method === 'Camera' ? 'face' : method === 'Biometric' ? 'fingerprint' : null;
+  const biometricMatch = matchKind ? biometricMatchEvidence(matchKind, Number(meta?.score), Number(meta?.threshold), store.biometricPolicy?.lowConfidencePercent ?? LOW_CONFIDENCE_BIOMETRIC_PERCENT, matchKind === 'face' ? FACE_STRONG_DISTANCE : 0) : null;
+  const resumed = isReturningFromBreak
+    ? resumeFromTemporaryExit(existing, {
+        at,
+        method,
+        terminal: store.terminal,
+        evidenceId: evidence?.id,
+      })
+    : null;
+  const log = {
+    ...(resumed?.log || computePunch(existing, method, store.terminal, evidence?.id, outReason, at, employee.shift)),
+    ...(biometricMatch && { biometricMatch }),
+    ...(biometricMatch?.lowConfidence && existing?.regularizationApproved === undefined && {
+      regularizationRequested: true,
+      requestedAt: new Date().toISOString(),
+      regularizationReason: `Low-confidence ${biometricMatch.kind} match (${biometricMatch.strengthPercent}% strength); supervisor verification required.`,
+    }),
+    employeeId: employee.id,
+    employeeName: employee.fullName || '',
+    employeeCode: employee.employeeCode || '',
+    employeeBranchId: employee.branchId || '',
+    terminalBranchId: store.terminal.branchId || '',
+    crossBranch: !!(store.terminal.branchId && employee.branchId && store.terminal.branchId !== employee.branchId),
+  };
   const next = existing
     ? store.attendances.map(item => item.id === existing.id ? log : item)
     : [log, ...(store.attendances || [])];
@@ -823,7 +920,7 @@ function savePunch(store, employee, method, evidence, meta) {
     { id: log.id, collection: 'attendances', data: log, createdAt: new Date().toISOString() },
   ];
   store.events = [
-    { id: `evt-${Date.now()}`, at: new Date().toISOString(), type: 'punch', message: `${employee.fullName} ${log.punchOut ? 'OUT' : 'IN'} via ${method}`, detail: { employeeId: employee.id, ...meta } },
+    { id: `evt-${Date.now()}`, at: new Date().toISOString(), type: 'punch', message: `[REDACTED] ${log.punchOut ? 'OUT' : 'IN'} via ${method}`, detail: null },
     ...(store.events || []),
   ].slice(0, 500);
   writeStore(store);
@@ -835,13 +932,23 @@ function savePunch(store, employee, method, evidence, meta) {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('kiosk:punch-synced', { id: log.id });
     }
-  }).catch(error => addEvent('sync-error', `Firestore sync pending for ${log.id}`, error.message));
+  }).catch(() => addEvent('sync-error', 'Firestore attendance sync pending'));
 
   return {
     ok: true,
     employee: kioskEmployee(employee),
-    log,
-    action: log.punchOut ? 'OUT' : 'IN',
+    attendance: {
+      date: log.date,
+      punchIn: log.punchIn,
+      punchOut: log.punchOut,
+      method: log.method,
+      status: log.status,
+      terminalLocation: log.terminalLocation,
+    },
+    action: isReturningFromBreak ? 'IN' : (log.punchOut ? 'OUT' : 'IN'),
+    eventTime: at,
+    returnedFromBreak: isReturningFromBreak,
+    breakReason: resumed?.breakReason || '',
     outReason: log.punchOut ? (log.outReason || outReason) : '',
   };
 }
@@ -850,36 +957,44 @@ function savePunch(store, employee, method, evidence, meta) {
 
 ipcMain.handle('kiosk:get-state', async () => {
   const store = readStore();
-  const employees = mergeEmployeeBiometricTemplates(store.employees || [], store.biometricTemplates || []);
+  const branches = (store.branches || []).map(branch => ({
+    id: branch.id,
+    name: branch.name || branch.branchName || branch.id,
+    code: branch.code || '',
+    city: branch.city || '',
+  }));
   return {
-    ...store,
-    employees,
+    terminal: store.terminal,
+    lastSync: store.lastSync || null,
+    employees: (store.employees || []).map(kioskEmployee),
+    attendances: (store.attendances || []).map(log => {
+      const emp = (store.employees || []).find(e => (e.id && e.id === log.employeeId) || (e.employeeCode && e.employeeCode === log.employeeId));
+      return {
+        id: log.id,
+        employeeId: log.employeeId,
+        employeeName: log.employeeName || emp?.fullName || '',
+        employeeCode: log.employeeCode || emp?.employeeCode || '',
+        date: log.date,
+        punchIn: log.punchIn || '',
+        punchOut: log.punchOut || '',
+        outReason: log.outReason || '',
+        breaks: Array.isArray(log.breaks) ? log.breaks : [],
+        lastPunchAt: log.lastPunchAt || '',
+        method: log.method,
+        status: log.status,
+      };
+    }),
+    branches,
+    assignedBranch: branches.find(branch => branch.id === store.terminal.branchId) || null,
     syncTarget: {
-      portalUrl: firebaseConfig.portalUrl,
-      projectId: firebaseConfig.projectId,
-      databaseId: firebaseConfig.databaseId,
-      collections: ['employees', 'biometricTemplates', 'branches', 'departments', 'designations', 'attendances'],
+      portalUrl: kioskPortalUrl,
+      backend: 'PostgreSQL',
+      collections: ['employees', 'attendances', 'branches', 'departments', 'designations', 'biometricTemplates'],
     },
     platform: process.platform,
+    deviceRegistration: publicDeviceRegistration(),
+    appVersion: app.getVersion(),
     bridgeRunning: await isBridgePortOpen(),
-    storePath: kioskStorePath(),
-  };
-});
-
-ipcMain.handle('kiosk:lookup-employee', async (_event, code) => {
-  const store = readStore();
-  const employees = mergeEmployeeBiometricTemplates(store.employees || [], store.biometricTemplates || []);
-  const employee = findEmployeeByCode(employees, code);
-  if (!employee) return { found: false };
-  const date = todayDate();
-  const todayLog = (store.attendances || []).find(log => log.employeeId === employee.id && log.date === date) || null;
-  const action = todayLog?.punchIn && !todayLog?.punchOut ? 'OUT' : 'IN';
-  return {
-    found: true,
-    employee: kioskEmployee(employee),
-    todayLog,
-    action,
-    fingerprintCount: getFingerprintTemplates(employee).length,
   };
 });
 
@@ -905,32 +1020,123 @@ ipcMain.handle('kiosk:get-stats', async () => {
 
 ipcMain.handle('kiosk:get-events', async () => {
   const store = readStore();
-  return (store.events || []).slice(0, 100);
+  return store.events || [];
+});
+
+ipcMain.handle('kiosk:lookup-employee', async (_event, code) => {
+  const store = readStore();
+  const employees = mergeEmployeeBiometricTemplates(store.employees || [], store.biometricTemplates || []);
+  const employee = findEmployeeByCode(employees, code);
+  if (!employee) return { found: false };
+
+  const today = todayDate();
+  const todayLog = (store.attendances || []).find(l => l.employeeId === employee.id && l.date === today);
+  const isPunchedIn = todayLog?.punchIn && !todayLog?.punchOut;
+  const canReturn = canReturnFromTemporaryExit(todayLog);
+
+  return {
+    found: true,
+    employee: kioskEmployee(employee),
+    action: isPunchedIn ? 'OUT' : 'IN',
+    todayLog: todayLog ? {
+      punchIn: todayLog.punchIn || '',
+      punchOut: todayLog.punchOut || '',
+      outReason: todayLog.outReason || '',
+      canReturn,
+    } : null,
+    fingerprintCount: getFingerprintTemplates(employee).length,
+    hasCameraProfile: getFaceDescriptors(employee).length > 0,
+  };
+});
+
+ipcMain.handle('kiosk:clear-local-attendance-cache', async () => {
+  const store = readStore();
+  const clearedCount = (store.attendances || []).length;
+  const discardedPendingCount = (store.pendingSync || []).filter(item => item.collection === 'attendances').length;
+
+  store.attendances = [];
+  store.pendingSync = (store.pendingSync || []).filter(item => item.collection !== 'attendances');
+  writeStore(store);
+  addEvent('system', `Local attendance cache cleared: ${clearedCount} attendance records, ${discardedPendingCount} pending uploads`);
+
+  return {
+    ok: true,
+    clearedCount,
+    discardedPendingCount,
+  };
 });
 
 ipcMain.handle('kiosk:save-settings', async (_event, settings) => {
   const store = readStore();
-  store.terminal = { ...store.terminal, ...settings };
+  const prevUrl = store.terminal.ipCameraUrl;
+  const prevBranchId = store.terminal.branchId;
+
+  store.terminal = {
+    ...store.terminal,
+    id: settings.id || store.terminal.id,
+    location: settings.location || store.terminal.location,
+    branchId: settings.branchId ?? store.terminal.branchId,
+    ipCameraUrl: settings.ipCameraUrl || '',
+    allowCodeOnlyPunch: !!settings.allowCodeOnlyPunch,
+    requireCodeWithFingerprint: !!settings.requireCodeWithFingerprint,
+    requireCodeWithCamera: false,
+    autoCaptureCamera: settings.autoCaptureCamera !== false,
+    autoFullscreen: !!settings.autoFullscreen,
+  };
   writeStore(store);
-  if (mainWindow) {
-    mainWindow.setKiosk(!!store.terminal.autoFullscreen);
-    mainWindow.setFullScreen(!!store.terminal.autoFullscreen);
+
+  if (settings.branchId !== prevBranchId) {
+    addEvent('config', `Terminal branch changed to ${settings.branchId || 'unassigned'}`);
   }
-  addEvent('settings', 'Settings saved', settings);
+  if (settings.ipCameraUrl !== prevUrl) {
+    addEvent('config', settings.ipCameraUrl ? `IP camera configured: ${settings.ipCameraUrl}` : 'IP camera removed');
+  }
+
   return store.terminal;
+});
+
+ipcMain.handle('kiosk:device-status', async () => publicDeviceRegistration());
+
+ipcMain.handle('kiosk:register-device', async (_event, payload) => {
+  const email = String(payload?.email || '').trim();
+  const password = String(payload?.password || '');
+  if (!email || !password) return { ok: false, error: 'Enter the kiosk account email and password.' };
+  const store = readStore();
+  const terminalName = [store.terminal.id, store.terminal.location].filter(Boolean).join(' — ');
+  try {
+    const result = await requestJson('POST', `${kioskPortalUrl}/api/kiosk/register`, { email, password, terminalName });
+    if (!result?.deviceToken) return { ok: false, error: 'The server did not issue a device key.' };
+    writeDeviceRegistration({ key: result.deviceToken, name: result.name || terminalName, registeredAt: new Date().toISOString(), portalUrl: kioskPortalUrl });
+    addEvent('config', `Kiosk registered with the server as ${result.name || terminalName}`);
+    return { ok: true, ...publicDeviceRegistration() };
+  } catch (error) {
+    addEvent('config', `Kiosk registration failed: ${error.statusCode ? `HTTP ${error.statusCode} ` : ''}${error.message || ''}`);
+    if (error.statusCode === 429) return { ok: false, error: 'Too many sign-in attempts. Wait one minute, then try again.' };
+    if (!error.statusCode) return { ok: false, error: `Cannot reach the server at ${kioskPortalUrl} (${error.code || error.message}). Check the internet connection.` };
+    return { ok: false, error: error.message || 'Registration failed.' };
+  }
+});
+
+ipcMain.handle('kiosk:unregister-device', async () => {
+  writeDeviceRegistration(null);
+  addEvent('config', 'Kiosk device key removed from this PC');
+  return publicDeviceRegistration();
 });
 
 ipcMain.handle('kiosk:sync', async () => {
   try {
     const result = await performSync();
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('kiosk:sync-complete', { report: result.report, timestamp: result.store.lastSync });
+      mainWindow.webContents.send('kiosk:sync-complete', {
+        report: result.report,
+        timestamp: result.store.lastSync,
+      });
     }
-    return result;
+    return { report: result.report, lastSync: result.store.lastSync };
   } catch (error) {
     return {
       report: {
-        errors: [error.message],
+        errors: ['Kiosk sync failed: ' + (error?.message || error)],
         employees: 0,
         attendances: 0,
         branches: 0,
@@ -939,52 +1145,125 @@ ipcMain.handle('kiosk:sync', async () => {
         pushed: 0,
         changed: false,
       },
-      store: readStore(),
+      lastSync: null,
     };
   }
 });
 
 ipcMain.handle('kiosk:punch-by-code', async (_event, payload) => {
   const store = readStore();
-  const employee = findEmployeeByCode(store.employees || [], payload.code);
-  if (!employee) return { ok: false, message: 'Employee code not found in terminal database.' };
+  const allowCodeOnlyPunch = !!store.terminal.allowCodeOnlyPunch;
+  if (!allowCodeOnlyPunch) {
+    return { ok: false, message: 'Code-only attendance is disabled on this terminal for security. Scan fingerprint or face to punch.' };
+  }
+  const employees = mergeEmployeeBiometricTemplates(store.employees || [], store.biometricTemplates || []);
+  const employee = findEmployeeByCode(employees, payload.code);
+  if (!employee) return { ok: false, message: `No active employee found with code "${payload.code}".` };
   if (employee.status === 'Terminated') return { ok: false, message: 'This employee account is terminated.' };
   if (employee.status === 'Suspended') return { ok: false, message: 'This employee account is suspended.' };
   return savePunch(store, employee, payload.method || 'RFID', payload.evidence || null, payload.meta || {});
 });
 
+ipcMain.handle('kiosk:begin-camera-liveness', async () => {
+  const store = readStore();
+  if (store.terminal.ipCameraUrl) return { ok: false, message: 'IP camera attendance is blocked because still-image streams cannot prove liveness. Use the local webcam or fingerprint.' };
+  return cameraChallenges.begin(store.terminal.id || 'kiosk');
+});
+
+ipcMain.handle('kiosk:cancel-camera-liveness', async (_event, challengeId) => {
+  const store = readStore();
+  return cameraChallenges.cancel(store.terminal.id || 'kiosk', String(challengeId || ''));
+});
+
 ipcMain.handle('kiosk:punch-camera', async (_event, payload) => {
   const store = readStore();
-  const employees = mergeEmployeeBiometricTemplates(store.employees || [], store.biometricTemplates || []);
-  const typedEmployee = payload.code ? findEmployeeByCode(employees, payload.code) : null;
-  if (store.terminal.requireCodeWithCamera && !store.terminal.autoCaptureCamera && !typedEmployee) {
-    return { ok: false, message: 'Please enter your employee code before camera punch.' };
+  const terminalId = store.terminal.id || 'kiosk';
+  const authorization = authorizeCameraAttempt({ payload, terminal: store.terminal, terminalId, challengeManager: cameraChallenges, reasonAuthorizations: cameraReasonAuthorizations });
+  if (!authorization.ok) {
+    if (!authorization.liveness?.ok) addEvent('security', `Camera liveness rejected: ${authorization.liveness?.message || authorization.message}`);
+    const lockMessage = authorization.lockedUntil ? ` Camera is locked until ${new Date(authorization.lockedUntil).toLocaleTimeString()}; use fingerprint.` : '';
+    return { ok: false, message: `${authorization.message}${lockMessage}` };
   }
-  if (payload.code && !typedEmployee) return { ok: false, message: 'Employee code not found in terminal database.' };
+  const liveness = authorization.liveness;
+  const employees = mergeEmployeeBiometricTemplates(store.employees || [], store.biometricTemplates || []);
+  let typedEmployee = payload.code ? findEmployeeByCode(employees, payload.code) : null;
+  let crossBranch = false;
+  if (payload.code && !typedEmployee && store.terminal.branchId) {
+    try {
+      typedEmployee = await findEmployeeForCrossBranchCamera(payload.code, store.terminal.branchId);
+      if (typedEmployee) {
+        crossBranch = true;
+        await loadCrossBranchAttendanceContext(store, typedEmployee.id);
+      }
+    } catch {
+      return { ok: false, message: 'Cross-branch verification could not securely retrieve this employee. Check the full employee ID and network connection.' };
+    }
+  }
+  if (payload.code && !typedEmployee) {
+    if (payload.mode !== 'multi-face') cameraChallenges.recordFailure(terminalId);
+    return { ok: false, message: 'Employee ID was not found. Cross-branch attendance requires the complete employee ID and face verification.' };
+  }
 
   const candidates = typedEmployee ? [typedEmployee] : employees;
-  if (typedEmployee && !getFaceDescriptors(typedEmployee).length) {
-    return { ok: false, message: 'No camera face profile is enrolled for this employee. Enroll face from HR biometric setup first.' };
+  if (!candidates || candidates.length === 0) {
+    if (payload.mode !== 'multi-face') cameraChallenges.recordFailure(terminalId);
+    return { ok: false, message: 'No employees found in the local kiosk directory. Please sync the kiosk in Settings.' };
   }
-  const match = identifyFaceDescriptor(candidates, payload.descriptor);
-  if (!match.ok) return match;
+  const secureDescriptorCount = candidates.reduce((count, employee) => count + getFaceDescriptors(employee).length, 0);
+  if (secureDescriptorCount === 0) {
+    if (payload.mode !== 'multi-face') cameraChallenges.recordFailure(terminalId);
+    if (!readDeviceRegistration()) {
+      return { ok: false, message: 'This kiosk is not registered with the server, so enrolled faces cannot download. Open Settings → Server Registration and sign in with the kiosk account.' };
+    }
+    return { ok: false, message: 'No face profile enrolled with the current recognition model. Re-enroll this face in the HR portal (Biometric Devices).' };
+  }
+  // A typed code narrows the gallery; without one the same descriptor matcher
+  // searches every securely enrolled employee and enforces uniqueness margin.
+  const matchThreshold = typedEmployee ? FACE_VERIFY_THRESHOLD : FACE_IDENTIFY_THRESHOLD;
+  const match = identifyFace(candidates, payload.descriptor, {
+    threshold: matchThreshold,
+    excludeEmployeeIds: Array.isArray(payload.excludeEmployeeIds) ? payload.excludeEmployeeIds.slice(0, 20) : [],
+    getDescriptors: getFaceDescriptors,
+  });
+  if (!match.ok && (match.ambiguous || match.duplicate)) addEvent('security', `Camera match refused: ${match.message} (distance ${Number(match.score).toFixed(3)})`);
+  if (!match.ok) {
+    if (payload.mode !== 'multi-face') {
+      const failure = cameraChallenges.recordFailure(terminalId);
+      return { ...match, lockedUntil: failure.lockedUntil || undefined };
+    }
+    return match;
+  }
 
   const employee = match.employee;
   if (employee.status === 'Terminated') return { ok: false, message: 'This employee account is terminated.' };
   if (employee.status === 'Suspended') return { ok: false, message: 'This employee account is suspended.' };
 
-  return savePunch(store, employee, 'Camera', payload.evidence || null, {
+  const result = await savePunch(store, employee, 'Camera', payload.evidence || null, {
     ...(payload.meta || {}),
     camera: payload.meta?.camera || 'webcam',
     score: match.score,
-    recognizedBy: typedEmployee ? 'camera-code-confirmed' : 'camera-face',
+    threshold: matchThreshold,
+    recognizedBy: crossBranch ? 'cross-branch-code-face-liveness' : typedEmployee ? 'camera-code-face-liveness' : 'camera-face-liveness',
+    crossBranch,
+    livenessMethod: payload.mode === 'multi-face' ? 'multi-face-walkthrough' : 'active-turn-v1',
   });
+  if (result?.needsOutReason) {
+    const token = require('crypto').randomBytes(24).toString('hex');
+    cameraReasonAuthorizations.set(token, { terminalId, code: String(payload.code).trim(), expiresAt: Date.now() + 60_000, summary: liveness.summary });
+    return { ...result, cameraAuthorization: token };
+  }
+  if (result?.ok) cameraChallenges.reset(terminalId);
+  return result;
 });
 
 ipcMain.handle('kiosk:punch-fingerprint', async (_event, payload) => {
   const store = readStore();
   let employees = mergeEmployeeBiometricTemplates(store.employees || [], store.biometricTemplates || []);
   const typedEmployee = payload.code ? findEmployeeByCode(employees, payload.code) : null;
+
+  if (payload.code && !typedEmployee && store.terminal.branchId) {
+    return { ok: false, message: 'Cross-branch attendance is allowed only through Camera with the full employee ID and face verification.' };
+  }
 
   if (store.terminal.requireCodeWithFingerprint && !typedEmployee) {
     return { ok: false, message: 'Please enter your employee code before fingerprint scan.' };
@@ -1000,7 +1279,7 @@ ipcMain.handle('kiosk:punch-fingerprint', async (_event, payload) => {
       employees = syncedEmployees;
       gallery = buildFingerprintGallery(syncedTypedEmployee ? [syncedTypedEmployee] : syncedEmployees);
     } catch (error) {
-      addEvent('sync-error', 'Fingerprint scan could not refresh employee templates', error.message);
+      addEvent('sync-error', 'Fingerprint scan could not refresh employee templates');
     }
   }
 
@@ -1025,29 +1304,45 @@ ipcMain.handle('kiosk:punch-fingerprint', async (_event, payload) => {
     ...(payload.meta || {}),
     quality: match.quality,
     score: match.score,
+    threshold: FINGERPRINT_MATCH_THRESHOLD,
     device: match.device,
   });
 });
 
 ipcMain.handle('kiosk:test-fingerprint-scanner', async () => {
   const result = await testFingerprintScanner();
-  addEvent(result.ok ? 'device' : 'error', result.ok ? 'Fingerprint scanner test passed' : 'Fingerprint scanner test failed', result);
+  addEvent(result.ok ? 'device' : 'error', result.ok ? 'Fingerprint scanner test passed' : 'Fingerprint scanner test failed');
   return result;
 });
 
 ipcMain.handle('kiosk:save-evidence', async (_event, payload) => {
+  if (!payload || typeof payload !== 'object') throw new Error('Invalid evidence payload.');
   const store = readStore();
   const evidenceDir = path.join(app.getPath('userData'), 'evidence');
   fs.mkdirSync(evidenceDir, { recursive: true });
   const id = `ev-${Date.now()}`;
   const dataUrl = String(payload.dataUrl || '');
-  const base64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
+  const match = /^data:image\/jpeg;base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
+  if (!match) throw new Error('Evidence must be a JPEG image.');
+  const base64 = match[1];
+  if (base64.length > 2_800_000) throw new Error('Evidence image exceeds the 2 MB limit.');
+  const bytes = Buffer.from(base64, 'base64');
+  if (bytes.length > 2 * 1024 * 1024 || bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8 || bytes[2] !== 0xff) {
+    throw new Error('Evidence image is invalid.');
+  }
   const file = path.join(evidenceDir, `${id}.jpg`);
-  fs.writeFileSync(file, Buffer.from(base64, 'base64'));
-  const evidence = { id, file, type: payload.type || 'camera', at: new Date().toISOString(), source: payload.source || '' };
-  store.evidence = [evidence, ...(store.evidence || [])].slice(0, 1000);
+  fs.writeFileSync(file, bytes, { flag: 'wx' });
+  const evidence = { id, file, type: 'camera', at: new Date().toISOString(), source: payload.source === 'ip-camera' ? 'ip-camera' : 'webcam' };
+  const staleEvidence = (store.evidence || []).slice(99);
+  for (const stale of staleEvidence) {
+    try {
+      const stalePath = path.resolve(String(stale.file || ''));
+      if (stalePath.startsWith(path.resolve(evidenceDir) + path.sep)) fs.unlinkSync(stalePath);
+    } catch {}
+  }
+  store.evidence = [evidence, ...(store.evidence || [])].slice(0, 100);
   writeStore(store);
-  return evidence;
+  return { id: evidence.id, type: evidence.type, at: evidence.at, source: evidence.source };
 });
 
 ipcMain.handle('kiosk:start-bridge', ensureBiometricDriverHost);
@@ -1055,11 +1350,6 @@ ipcMain.handle('kiosk:start-bridge', ensureBiometricDriverHost);
 ipcMain.handle('kiosk:check-bridge', async () => {
   const status = await ensureBiometricDriverHost();
   return { running: !!status.running, message: status.running ? 'Windows biometric driver host is online.' : status.message };
-});
-
-ipcMain.handle('kiosk:open-store', async () => {
-  await shell.openPath(path.dirname(kioskStorePath()));
-  return true;
 });
 
 ipcMain.handle('kiosk:exit', async () => {
@@ -1074,6 +1364,9 @@ ipcMain.handle('kiosk:exit', async () => {
 
 // ─── Fingerprint Identification ─────────────────────────────────────────────
 
+// DigitalPersona dissimilarity threshold for a false-accept rate of 1 in 1,000,000 (0x7FFFFFFF / 1,000,000).
+const FINGERPRINT_MATCH_THRESHOLD = 2147;
+
 function identifyFingerprint(gallery) {
   return new Promise(resolve => {
     const socket = new WebSocketClient(`ws://127.0.0.1:${bridgePort}`);
@@ -1083,7 +1376,7 @@ function identifyFingerprint(gallery) {
     }, 45000);
 
     socket.on('open', () => {
-      socket.send(JSON.stringify({ action: 'Identify', threshold: 2147, gallery }));
+      socket.send(JSON.stringify({ action: 'Identify', threshold: FINGERPRINT_MATCH_THRESHOLD, gallery }));
     });
     socket.on('message', raw => {
       let msg;
@@ -1114,7 +1407,7 @@ function identifyFingerprint(gallery) {
     });
     socket.on('error', error => {
       clearTimeout(timeout);
-      resolve({ ok: false, message: `Fingerprint reader not connected: ${error.message}` });
+      resolve({ ok: false, message: 'Fingerprint reader is unavailable.', correlationId: require('crypto').randomUUID() });
     });
   });
 }
@@ -1164,7 +1457,7 @@ function testFingerprintScanner() {
     });
     socket.on('error', error => {
       clearTimeout(timeout);
-      resolve({ ok: false, message: `Scanner test could not connect to driver host: ${error.message}` });
+      resolve({ ok: false, message: 'Scanner test could not connect to the driver host.', correlationId: require('crypto').randomUUID() });
     });
   });
 }
@@ -1263,6 +1556,7 @@ if (!gotLock) {
   });
 
   app.whenReady().then(async () => {
+    configureCameraPermission();
     createSplashWindow();
     writeStore(readStore());
     if (process.platform === 'win32') {
@@ -1280,7 +1574,7 @@ if (!gotLock) {
       const result = await performSync();
       addEvent('sync', result.report.changed ? 'Startup sync updated local kiosk data' : 'Startup sync checked local kiosk data', result.report);
     } catch (err) {
-      addEvent('sync', 'Startup sync failed; kiosk will use local cache', err.message);
+      addEvent('sync', 'Startup sync failed; kiosk will use local cache');
     }
 
     createWindow();
@@ -1297,7 +1591,7 @@ if (!gotLock) {
             });
           }
         } catch (err) {
-          console.warn('Auto-sync error:', err.message);
+          console.warn('Auto-sync failed. Check local diagnostics and connectivity.');
         }
       }, 5 * 60 * 1000);
     });
@@ -1315,5 +1609,15 @@ app.on('window-all-closed', () => {
 });
 
 process.on('uncaughtException', error => {
-  dialog.showErrorBox('Attendance Kiosk Error', error.stack || error.message);
+  const correlationId = require('crypto').randomUUID();
+  console.error(`[${correlationId}] Kiosk process failure`, error);
+  try {
+    const logPath = path.join(app.getPath('userData'), 'kiosk-error.log');
+    fs.appendFileSync(logPath, `[${new Date().toISOString()}][${correlationId}] ${error?.stack || error}\n`);
+  } catch {}
+  dialog.showErrorBox('Attendance Kiosk Error', `An unexpected error occurred.\n\nError: ${error?.message || error}\nReference: ${correlationId}`);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.warn('[Kiosk Unhandled Rejection]', reason);
 });

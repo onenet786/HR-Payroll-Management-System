@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>HR, Payroll &amp; Attendance System — Complete User Guide</title>
+<style>
+  @page { size: A4; margin: 16mm 15mm 18mm 15mm; }
+  :root { --ink: #1f2937; --muted: #5b6574; --line: #d9dee5; --brand: #047857; --brand-soft: #ecfdf5; --warn: #b45309; --warn-soft: #fffbeb; --bad: #b91c1c; --bad-soft: #fef2f2; --info: #1d4ed8; --info-soft: #eff6ff; }
+  * { box-sizing: border-box; }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body { margin: 0; font-family: "Segoe UI", "Noto Sans", Arial, sans-serif; color: var(--ink); font-size: 10.6pt; line-height: 1.55; background: #fff; }
+  h1, h2, h3, h4 { color: #0f172a; line-height: 1.25; }
+  h2 { font-size: 19pt; margin: 0 0 10pt; padding-bottom: 6pt; border-bottom: 3px solid var(--brand); break-before: page; }
+  h2 .num { color: var(--brand); margin-right: 6pt; }
+  h3 { font-size: 13.5pt; margin: 18pt 0 6pt; break-after: avoid; }
+  h4 { font-size: 11.2pt; margin: 12pt 0 4pt; break-after: avoid; }
+  p { margin: 0 0 7pt; }
+  ul, ol { margin: 0 0 8pt; padding-left: 20pt; }
+  li { margin: 0 0 3pt; }
+  ol.steps { counter-reset: step; list-style: none; padding-left: 0; }
+  ol.steps > li { counter-increment: step; position: relative; padding-left: 27pt; margin-bottom: 5pt; }
+  ol.steps > li::before { content: counter(step); position: absolute; left: 0; top: 0; width: 18pt; height: 18pt; border-radius: 50%; background: var(--brand); color: #fff; font-weight: 700; font-size: 9pt; display: flex; align-items: center; justify-content: center; }
+  .ui { font-weight: 700; color: #0b3b2e; background: #eef6f2; border: 1px solid #cfe6db; border-radius: 3pt; padding: 0 3pt; white-space: nowrap; }
+  .msg { font-style: italic; color: #374151; }
+  .box { border-radius: 5pt; padding: 8pt 11pt; margin: 9pt 0; border-left: 4pt solid; break-inside: avoid; }
+  .box p:last-child, .box ul:last-child, .box ol:last-child { margin-bottom: 0; }
+  .box .t { font-weight: 800; display: block; margin-bottom: 2pt; }
+  .tip { background: var(--brand-soft); border-color: var(--brand); }
+  .tip .t { color: var(--brand); }
+  .important { background: var(--warn-soft); border-color: #d97706; }
+  .important .t { color: var(--warn); }
+  .danger { background: var(--bad-soft); border-color: var(--bad); }
+  .danger .t { color: var(--bad); }
+  .note { background: var(--info-soft); border-color: var(--info); }
+  .note .t { color: var(--info); }
+  figure { margin: 10pt 0 12pt; break-inside: avoid; text-align: center; }
+  figure img { max-width: 100%; max-height: 96mm; border: 1px solid var(--line); border-radius: 4pt; box-shadow: 0 1pt 4pt rgba(0,0,0,.08); }
+  figure.phone img { max-height: 104mm; }
+  figure.pair { display: flex; flex-wrap: wrap; gap: 10pt; justify-content: center; }
+  figure.pair > div { flex: 0 0 auto; }
+  figcaption { font-size: 9pt; color: var(--muted); margin-top: 4pt; }
+  figcaption b { color: var(--ink); }
+  table { width: 100%; border-collapse: collapse; margin: 6pt 0 10pt; font-size: 9.6pt; break-inside: auto; }
+  th, td { border: 1px solid var(--line); padding: 4pt 6pt; text-align: left; vertical-align: top; }
+  th { background: #f1f5f9; font-weight: 700; }
+  tr { break-inside: avoid; }
+  .part { break-before: page; height: 240mm; display: flex; flex-direction: column; justify-content: center; padding: 0 10mm; }
+  .part .label { color: var(--brand); font-weight: 800; letter-spacing: 2pt; font-size: 12pt; }
+  .part .title { font-size: 32pt; font-weight: 800; margin: 6pt 0 10pt; color: #0f172a; }
+  .part .lead { font-size: 12pt; color: var(--muted); max-width: 140mm; }
+  .part ul { font-size: 11pt; color: var(--ink); margin-top: 12pt; }
+  .cover { height: 255mm; display: flex; flex-direction: column; justify-content: space-between; padding: 12mm 6mm; background: linear-gradient(160deg, #052e25 0%, #064e3b 55%, #047857 100%); color: #fff; border-radius: 6pt; }
+  .cover h1 { color: #fff; font-size: 34pt; margin: 0; line-height: 1.1; }
+  .cover .sub { font-size: 14pt; color: #a7f3d0; margin-top: 10pt; }
+  .cover .meta { font-size: 10.5pt; color: #d1fae5; }
+  .cover .badge { display: inline-block; border: 1px solid #6ee7b7; color: #6ee7b7; border-radius: 20pt; padding: 3pt 10pt; font-size: 9pt; letter-spacing: 1.5pt; font-weight: 700; }
+  .cover .apps { display: flex; gap: 8pt; margin-top: 14pt; }
+  .cover .apps div { flex: 1; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.18); border-radius: 6pt; padding: 8pt 10pt; font-size: 9.5pt; }
+  .cover .apps b { display: block; font-size: 11pt; color: #fff; margin-bottom: 2pt; }
+  .toc { break-before: page; }
+  .toc h1 { font-size: 22pt; border-bottom: 3px solid var(--brand); padding-bottom: 6pt; }
+  .toc ol { list-style: none; padding: 0; columns: 2; column-gap: 12mm; font-size: 10pt; }
+  .toc li { margin: 0 0 2.5pt; break-inside: avoid; }
+  .toc li.part-row { font-weight: 800; color: var(--brand); margin-top: 7pt; }
+  .toc li.sub { padding-left: 10pt; color: #374151; display: flex; justify-content: space-between; gap: 6pt; }
+  .toc .pg { color: var(--brand); font-weight: 700; white-space: nowrap; }
+  .toc a { color: inherit; text-decoration: none; }
+  .kbd { font-family: Consolas, monospace; border: 1px solid #b6bec9; border-bottom-width: 2px; border-radius: 3pt; padding: 0 3pt; font-size: 9pt; background: #f8fafc; }
+  .flow { display: flex; flex-wrap: wrap; gap: 4pt; align-items: center; margin: 8pt 0 10pt; font-size: 9.3pt; }
+  .flow span.s { background: #f1f5f9; border: 1px solid var(--line); border-radius: 4pt; padding: 4pt 7pt; font-weight: 700; }
+  .flow span.a { color: var(--brand); font-weight: 800; }
+  .checklist li { list-style: none; position: relative; padding-left: 16pt; }
+  .checklist li::before { content: "☐"; position: absolute; left: 0; color: var(--brand); font-weight: 800; }
+  .small { font-size: 9pt; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<section class="cover">
+  <div>
+    <span class="badge">COMPLETE USER GUIDE · A TO Z</span>
+    <h1 style="margin-top:14pt">HR, Payroll &amp;<br>Attendance System</h1>
+    <div class="sub">Step-by-step instructions for everyone who uses it — written in plain language, with pictures of every screen.</div>
+    <div class="apps">
+      <div><b>Web portal</b>For HR, payroll and administrators, in any web browser.</div>
+      <div><b>Mobile app</b>For employees on Android phones: attendance, leave and payslips.</div>
+      <div><b>Attendance kiosk</b>For the entrance: Windows PC or tablet with face and fingerprint.</div>
+    </div>
+  </div>
+  <div class="meta">
+    Guide edition: 17-Oct-2026 · Kiosk app version 1.0.2 and later<br>
+    All names, codes and amounts in the pictures belong to an imaginary company ("Demo Textiles") and are examples only.
+  </div>
+</section>
+
+<section class="toc">
+  <h1>Contents</h1>
+  <!--TOC-->
+</section>

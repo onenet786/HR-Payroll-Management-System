@@ -59,12 +59,12 @@ https://attendance.binishaqsoft.com
 Sync target:
 
 ```text
-Firebase project: gen-lang-client-0314098400
-Firestore database: ai-studio-0ab7c3a1-e4ca-49b5-86f4-6883897b9163
+Backend: PostgreSQL Server API
+Endpoint: /api/kiosk/sync and /api/kiosk/punch
 Collections: employees, attendances
 ```
 
-When a punch is marked, the kiosk writes to the `attendances` collection. The live portal at `attendance.binishaqsoft.com` reads the same collection, so synced kiosk punches appear there. If internet is down, records remain in the local pending queue and sync later.
+When a punch is marked, the kiosk synchronizes with the server PostgreSQL database. The live portal at `attendance.binishaqsoft.com` reads the same data, so synced kiosk punches appear there. If internet is down, records remain in the local pending queue and sync automatically when connection restores.
 
 Local kiosk data is stored under Electron's app data folder. Use Settings > Open Local Store from the kiosk UI to inspect it.
 

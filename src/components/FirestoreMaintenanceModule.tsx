@@ -1,13 +1,17 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { collection, doc, getDocs, setDoc, writeBatch } from 'firebase/firestore';
+import { db, collection, doc, getDocs, setDoc, writeBatch } from '../data/postgresStore';
 import { AlertTriangle, CheckCircle, Database, Download, RefreshCw, RotateCcw, Trash2, Upload } from 'lucide-react';
-import { db } from '../firebase';
+
 
 type CollectionKey =
+  | 'companies'
   | 'employees'
   | 'branches'
   | 'departments'
   | 'designations'
+  | 'zones'
+  | 'ucTowns'
+  | 'wageTypes'
   | 'taxSlabs'
   | 'roles'
   | 'users'
@@ -42,10 +46,14 @@ type BackupFile = {
 };
 
 const REQUIRED_COLLECTIONS: CollectionKey[] = [
+  'companies',
   'employees',
   'branches',
   'departments',
   'designations',
+  'zones',
+  'ucTowns',
+  'wageTypes',
   'taxSlabs',
   'roles',
   'users',
@@ -70,10 +78,14 @@ const OPERATIONAL_COLLECTIONS: CollectionKey[] = [
 const ALL_COLLECTIONS: CollectionKey[] = [...REQUIRED_COLLECTIONS, ...OPERATIONAL_COLLECTIONS];
 
 const COLLECTION_LABELS: Record<CollectionKey, string> = {
+  companies: 'Companies',
   employees: 'Employees',
   branches: 'Branches',
   departments: 'Departments',
   designations: 'Designations',
+  zones: 'Zones',
+  ucTowns: 'UC/Towns',
+  wageTypes: 'Wage Types',
   taxSlabs: 'Tax Slabs',
   roles: 'Roles',
   users: 'Users',
@@ -93,10 +105,14 @@ const COLLECTION_LABELS: Record<CollectionKey, string> = {
 };
 
 const COLLECTION_STORAGE_KEYS: Record<CollectionKey, string[]> = {
+  companies: ['hr_companies'],
   employees: ['hr_employees'],
   branches: ['hr_branches'],
   departments: ['hr_departments'],
   designations: ['hr_designations'],
+  zones: ['hr_zones'],
+  ucTowns: ['hr_uc_towns'],
+  wageTypes: ['hr_wage_types'],
   taxSlabs: ['hr_tax_slabs'],
   roles: ['hr_roles'],
   users: ['hr_users', 'hr_logged_in_user', 'hr_current_user'],
@@ -158,8 +174,9 @@ async function deleteCollection(collectionName: CollectionKey): Promise<number> 
   let deleted = 0;
 
   for (const document of snapshot.docs) {
-    batch.delete(document.ref);
+    batch.delete(doc(db, collectionName, document.id));
     batchCount += 1;
+
     deleted += 1;
 
     if (batchCount === 450) {
@@ -215,7 +232,7 @@ export function FirestoreMaintenanceModule() {
       setCounts(nextCounts);
       setStatus('Collection counts updated.');
     } catch (error) {
-      setStatus(`Failed to refresh counts: ${error instanceof Error ? error.message : String(error)}`);
+      setStatus('Failed to refresh counts. Check server logs.');
     } finally {
       setIsBusy(false);
     }
@@ -228,9 +245,9 @@ export function FirestoreMaintenanceModule() {
   const buildBackup = async (collectionsToBackup: CollectionKey[]): Promise<BackupFile> => {
     const backup: BackupFile = {
       metadata: {
-        app: 'Bin Ishaq HR Suite',
-        projectId: 'gen-lang-client-0314098400',
-        databaseId: 'ai-studio-0ab7c3a1-e4ca-49b5-86f4-6883897b9163',
+        app: 'HR & Payroll Suite',
+        projectId: 'postgresql-primary',
+        databaseId: 'hr_payroll',
         createdAt: new Date().toISOString(),
         collections: collectionsToBackup,
       },
@@ -246,18 +263,18 @@ export function FirestoreMaintenanceModule() {
 
   const downloadBackup = async (collectionsToBackup: CollectionKey[], reason: string) => {
     const backup = await buildBackup(collectionsToBackup);
-    downloadJson(`firestore-backup-${timestampForFile()}-${reason}.json`, backup);
+    downloadJson(`database-backup-${timestampForFile()}-${reason}.json`, backup);
     return backup;
   };
 
   const handleBackupAll = async () => {
     setIsBusy(true);
-    setStatus('Creating full Firestore backup...');
+    setStatus('Creating full database backup...');
     try {
       await downloadBackup(ALL_COLLECTIONS, 'full');
       setStatus('Full backup downloaded.');
     } catch (error) {
-      setStatus(`Backup failed: ${error instanceof Error ? error.message : String(error)}`);
+      setStatus('Backup failed. Check server logs.');
     } finally {
       setIsBusy(false);
     }
@@ -270,7 +287,7 @@ export function FirestoreMaintenanceModule() {
       await downloadBackup(selectedCollections, 'selected');
       setStatus('Selected collection backup downloaded.');
     } catch (error) {
-      setStatus(`Backup failed: ${error instanceof Error ? error.message : String(error)}`);
+      setStatus('Backup failed. Check server logs.');
     } finally {
       setIsBusy(false);
     }
@@ -295,7 +312,7 @@ export function FirestoreMaintenanceModule() {
       setConfirmText('');
       setStatus('Cleanup complete. No dummy data was inserted.');
     } catch (error) {
-      setStatus(`Cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
+      setStatus('Cleanup failed. Check server logs.');
     } finally {
       setIsBusy(false);
     }
@@ -324,7 +341,7 @@ export function FirestoreMaintenanceModule() {
       setConfirmText('');
       setStatus('Selected delete complete. No dummy data was inserted.');
     } catch (error) {
-      setStatus(`Delete failed: ${error instanceof Error ? error.message : String(error)}`);
+      setStatus('Delete failed. Check server logs.');
     } finally {
       setIsBusy(false);
     }
@@ -344,7 +361,7 @@ export function FirestoreMaintenanceModule() {
         setRestoreCollections(availableCollections);
         setStatus(`Backup loaded: ${file.name}`);
       } catch (error) {
-        setStatus(`Invalid backup file: ${error instanceof Error ? error.message : String(error)}`);
+        setStatus('Invalid backup file.');
       }
     };
     reader.readAsText(file);
@@ -377,7 +394,7 @@ export function FirestoreMaintenanceModule() {
       setConfirmText('');
       setStatus('Restore complete.');
     } catch (error) {
-      setStatus(`Restore failed: ${error instanceof Error ? error.message : String(error)}`);
+      setStatus('Restore failed. Check server logs.');
     } finally {
       setIsBusy(false);
     }
@@ -405,7 +422,7 @@ export function FirestoreMaintenanceModule() {
         <div>
           <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
             <Database className="w-5 h-5 text-emerald-600" />
-            Firestore Backup & Restore
+            Database Backup & Restore
           </h2>
           <p className="text-sm text-slate-500 mt-1">Customer-safe tools for backup, restore, cleanup, and selected collection delete.</p>
         </div>
@@ -432,7 +449,7 @@ export function FirestoreMaintenanceModule() {
         <section className="bg-white border border-slate-200 rounded-lg p-5 space-y-4">
           <div>
             <h3 className="font-bold text-slate-900">Backup</h3>
-            <p className="text-xs text-slate-500 mt-1">Download all or selected Firestore collections.</p>
+            <p className="text-xs text-slate-500 mt-1">Download all or selected database collections.</p>
           </div>
           <button
             type="button"

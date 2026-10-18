@@ -32,7 +32,7 @@ const CHECKOUT_REASONS = [
 
 // ─── Application State ──────────────────────────────────────────────────────
 let kioskState = null;
-let activeMode = MODE.CODE;
+let activeMode = MODE.FP;
 let preview = null;          // from kiosk:lookup-employee
 let cameraStream = null;
 let ipCamRefreshTimer = null;
@@ -41,10 +41,22 @@ let resetTimer = null;
 let countdownRaf = null;
 let countdownStart = null;
 let fpBusy = false;
+let cameraPunchBusy = false;
 let autoCaptureTimer = null;
 let autoCaptureGoodFrames = 0;
 let autoCaptureIsPunching = false;
 let autoCaptureHoldUntil = 0;
+let autoCaptureAwaitingFaceExit = false;
+let kioskCamMode = 'multi';
+let multiFaceTimer = null;
+let multiFaceTrackers = new Map();
+const employeeSessions = new Map();
+let nextTrackId = 1;
+let messageResolver = null;
+let messagePreviousFocus = null;
+let maintenanceConfirmResolver = null;
+let maintenanceConfirmStep = 1;
+let maintenancePreviousFocus = null;
 
 // ─── DOM Cache ───────────────────────────────────────────────────────────────
 const el = {
@@ -56,8 +68,11 @@ const el = {
   pillOnline:     id('pillOnline'),
   pillSync:       id('pillSync'),
   settingsBtn:    id('settingsBtn'),
+  regBanner:      id('regBanner'),
+  regBannerBtn:   id('regBannerBtn'),
   exitBtn:        id('exitBtn'),
   modeNav:        id('modeNav'),
+  codeModeBtn:    id('codeModeBtn'),
   // stats
   statIn:         id('statIn'),
   statOut:        id('statOut'),
@@ -92,13 +107,22 @@ const el = {
   camCaptureBtn:  id('camCaptureBtn'),
   // center
   centerPanel:    id('centerPanel'),
+  cameraStack:    id('cameraStack'),
   cameraView:     id('cameraView'),
+  kioskCamModeBar:id('kioskCamModeBar'),
+  btnModeMultiFace:id('btnModeMultiFace'),
+  btnModeSingleFace:id('btnModeSingleFace'),
+  multiFaceCanvas:id('multiFaceCanvas'),
   webcamEl:       id('webcamEl'),
   ipcamEl:        id('ipcamEl'),
   snapCanvas:     id('snapCanvas'),
+  capturedPhotoCard:id('capturedPhotoCard'),
+  capturedPhotoImg:id('capturedPhotoImg'),
   camSourceBadge: id('camSourceBadge'),
   camAutoStatus:  id('camAutoStatus'),
   camAutoLabel:   id('camAutoLabel'),
+  livenessRail:   id('livenessRail'),
+  livenessAction: id('livenessAction'),
   resultCard:     id('resultCard'),
   resultIcon:     id('resultIcon'),
   resultState:    id('resultState'),
@@ -123,12 +147,36 @@ const el = {
   checkoutReasonCancel: id('checkoutReasonCancel'),
   checkoutReasonEmployee:id('checkoutReasonEmployee'),
   checkoutReasonList:   id('checkoutReasonList'),
+  messageOverlay: id('messageOverlay'),
+  messageDialog: id('messageDialog'),
+  messageClose: id('messageClose'),
+  messageEyebrow: id('messageEyebrow'),
+  messageTitle: id('messageTitle'),
+  messageText: id('messageText'),
+  messageDetail: id('messageDetail'),
+  messageCancel: id('messageCancel'),
+  messageConfirm: id('messageConfirm'),
+  maintenanceConfirmOverlay: id('maintenanceConfirmOverlay'),
+  maintenanceConfirmDialog: id('maintenanceConfirmDialog'),
+  maintenanceConfirmClose: id('maintenanceConfirmClose'),
+  maintenanceConfirmStep: id('maintenanceConfirmStep'),
+  maintenanceConfirmMessage: id('maintenanceConfirmMessage'),
+  maintenanceConfirmCancel: id('maintenanceConfirmCancel'),
+  maintenanceConfirmContinue: id('maintenanceConfirmContinue'),
   // settings
   settingsOverlay:id('settingsOverlay'),
   settingsClose:  id('settingsClose'),
+  stRegStatus:    id('stRegStatus'),
+  stRegForm:      id('stRegForm'),
+  stRegEmail:     id('stRegEmail'),
+  stRegPassword:  id('stRegPassword'),
+  stRegister:     id('stRegister'),
+  stUnregister:   id('stUnregister'),
   stTerminalId:   id('stTerminalId'),
   stLocation:     id('stLocation'),
+  stBranchId:     id('stBranchId'),
   stIpCamUrl:     id('stIpCamUrl'),
+  stAllowCodeOnlyPunch: id('stAllowCodeOnlyPunch'),
   stReqCodeFp:    id('stReqCodeFp'),
   stReqCodeCam:   id('stReqCodeCam'),
   stAutoCaptureCamera: id('stAutoCaptureCamera'),
@@ -137,7 +185,7 @@ const el = {
   stEventsLog:    id('stEventsLog'),
   stStartBridge:  id('stStartBridge'),
   stTestScanner:  id('stTestScanner'),
-  stOpenStore:    id('stOpenStore'),
+  stClearAttendanceCache: id('stClearAttendanceCache'),
   stSave:         id('stSave'),
 };
 
@@ -158,6 +206,7 @@ function startClock() {
 
 // ─── Mode Switching ──────────────────────────────────────────────────────────
 function setMode(mode) {
+  if (mode === MODE.CODE && !kioskState?.terminal?.allowCodeOnlyPunch) mode = MODE.FP;
   activeMode = mode;
 
   // Update tab active state
@@ -177,17 +226,17 @@ function setMode(mode) {
   el.fpArea.classList.toggle('hidden', !isFp);
   el.fpScanBtn.classList.toggle('hidden', !isFp);
   el.fpTestBtn.classList.toggle('hidden', !isFp);
-  el.camCaptureBtn.classList.toggle('hidden', !isCam || autoCapture);
-  el.cameraView.classList.toggle('hidden', !isCam);
+  el.camCaptureBtn.classList.toggle('hidden', !isCam);
+  el.cameraStack.classList.toggle('hidden', !isCam);
   el.centerPanel?.classList.toggle('camera-active', isCam);
 
   if (isCam) {
     startCamera();
-    if (autoCapture) startAutoCapture();
-    else stopAutoCapture();
+    setKioskCamMode(kioskCamMode || 'multi');
   } else {
     stopCamera();
     stopAutoCapture();
+    stopMultiFaceLoop();
   }
 
   if (!isFp) {
@@ -211,6 +260,17 @@ function setMode(mode) {
     resetResultToIdle();
   } else if (el.resultCard.classList.contains('idle')) {
     resetResultToIdle();
+  }
+}
+
+function applyModeSecurity() {
+  const allowCodeOnlyPunch = !!kioskState?.terminal?.allowCodeOnlyPunch;
+  el.codeModeBtn.classList.toggle('hidden', !allowCodeOnlyPunch);
+  el.codeModeBtn.setAttribute('aria-hidden', String(!allowCodeOnlyPunch));
+  if (!allowCodeOnlyPunch && activeMode === MODE.CODE) {
+    el.codeInput.value = '';
+    clearPreview();
+    setMode(MODE.FP);
   }
 }
 
@@ -245,8 +305,9 @@ function renderPreview(result) {
 
   // Avatar: photo or initials
   const initials = (employee.fullName || '?').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
-  if (employee.pictureUrl) {
-    el.empAvatar.innerHTML = `<img src="${esc(employee.pictureUrl)}" alt="" />`;
+  const pictureUrl = safeImageUrl(employee.pictureUrl);
+  if (pictureUrl) {
+    el.empAvatar.innerHTML = `<img src="${esc(pictureUrl)}" alt="" />`;
   } else {
     const color = action === 'OUT' ? 'var(--blue)' : 'var(--em)';
     el.avatarInitial.innerHTML = '';
@@ -264,8 +325,12 @@ function renderPreview(result) {
   // Punch state badge
   el.empPunchState.className = '';
   if (todayLog?.punchIn && !todayLog?.punchOut) {
+    const lastReturnAt = Array.isArray(todayLog.breaks) ? todayLog.breaks.at(-1)?.returnAt : '';
     el.empPunchState.className = 'emp-punch-state in-state';
-    el.empPunchState.textContent = `● IN since ${todayLog.punchIn?.slice(0,5)}`;
+    el.empPunchState.textContent = `● IN since ${(lastReturnAt || todayLog.punchIn)?.slice(0,5)}`;
+  } else if (todayLog?.punchOut && todayLog?.canReturn) {
+    el.empPunchState.className = 'emp-punch-state out-state';
+    el.empPunchState.textContent = `● ${todayLog.outReason?.toUpperCase()} since ${todayLog.punchOut?.slice(0,5)} — verify to return`;
   } else if (todayLog?.punchOut) {
     el.empPunchState.className = 'emp-punch-state out-state';
     el.empPunchState.textContent = `● OUT at ${todayLog.punchOut?.slice(0,5)}`;
@@ -453,21 +518,43 @@ async function startCamera() {
     return;
   }
 
+  const liveTrack = cameraStream?.getVideoTracks().find(track => track.readyState === 'live');
+  if (liveTrack) {
+    el.webcamEl.srcObject = cameraStream;
+    el.webcamEl.classList.add('active');
+    el.camSourceBadge.textContent = liveTrack.label || 'Webcam';
+    return;
+  }
+
+  if (cameraStream) {
+    cameraStream.getTracks().forEach(track => track.stop());
+    cameraStream = null;
+  }
+
   try {
     cameraStream = await navigator.mediaDevices.getUserMedia({
-      video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
+      video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
       audio: false,
     });
     el.webcamEl.srcObject = cameraStream;
     el.webcamEl.classList.add('active');
     el.camSourceBadge.textContent = 'Webcam';
   } catch (err) {
-    showResult('err', 'Camera Unavailable', err.message || 'Please allow camera access or configure an IP camera URL in Settings.');
+    const errorName = String(err?.name || '');
+    const errorMessage = errorName === 'NotReadableError'
+      ? 'Camera is already in use. Stop the HR enrollment camera and close Camera, Teams, Zoom, or browser tabs using the webcam, then retry.'
+      : errorName === 'NotAllowedError' || errorName === 'SecurityError'
+        ? 'Camera permission was denied. Allow desktop camera access in Windows Privacy settings, then restart the kiosk.'
+        : errorName === 'NotFoundError' || errorName === 'DevicesNotFoundError'
+          ? 'No webcam was detected. Connect or enable the camera, then retry.'
+          : `Could not open the webcam${err?.message ? `: ${err.message}` : '.'}`;
+    showResult('err', errorName === 'NotReadableError' ? 'Camera Is Busy' : 'Camera Unavailable', errorMessage);
   }
 }
 
 function stopCamera() {
   clearInterval(ipCamRefreshTimer);
+  stopMultiFaceLoop();
   if (cameraStream) {
     cameraStream.getTracks().forEach(t => t.stop());
     cameraStream = null;
@@ -476,6 +563,8 @@ function stopCamera() {
   el.webcamEl.classList.remove('active');
   el.ipcamEl.removeAttribute('src');
   el.ipcamEl.classList.remove('active');
+  clearCapturedPhoto();
+  resetLivenessUI();
 }
 
 async function captureEvidence() {
@@ -484,13 +573,31 @@ async function captureEvidence() {
   const source = kioskState?.terminal?.ipCameraUrl ? el.ipcamEl : el.webcamEl;
   const readiness = getCameraSourceReadiness(source);
   if (!readiness.ok) throw new Error(readiness.message);
+  const sourceWidth = source instanceof HTMLVideoElement ? source.videoWidth : source.naturalWidth;
+  const sourceHeight = source instanceof HTMLVideoElement ? source.videoHeight : source.naturalHeight;
+  const scale = Math.min(1, 1280 / sourceWidth, 720 / sourceHeight);
+  canvas.width = Math.max(1, Math.round(sourceWidth * scale));
+  canvas.height = Math.max(1, Math.round(sourceHeight * scale));
   ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
   const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+  showCapturedPhoto(dataUrl);
   return api.saveEvidence({
     dataUrl,
     type: 'camera',
     source: kioskState?.terminal?.ipCameraUrl ? 'ip-camera' : 'webcam',
   });
+}
+
+function showCapturedPhoto(dataUrl) {
+  if (!el.capturedPhotoCard || !el.capturedPhotoImg) return;
+  el.capturedPhotoImg.src = dataUrl;
+  el.capturedPhotoCard.classList.remove('hidden');
+}
+
+function clearCapturedPhoto() {
+  if (!el.capturedPhotoCard || !el.capturedPhotoImg) return;
+  el.capturedPhotoCard.classList.add('hidden');
+  el.capturedPhotoImg.removeAttribute('src');
 }
 
 function getCameraSourceReadiness(source) {
@@ -507,60 +614,51 @@ function getCameraSourceReadiness(source) {
   return { ok: true, message: '' };
 }
 
-function captureCameraDescriptor() {
-  const width = 16;
-  const height = 20;
+// Identity embedding (face-api, 128 numbers) for the face inside cropBox, or the most prominent face.
+async function captureCameraDescriptor(cropBox = null) {
   const source = kioskState?.terminal?.ipCameraUrl ? el.ipcamEl : el.webcamEl;
   const readiness = getCameraSourceReadiness(source);
   if (!readiness.ok) throw new Error(readiness.message);
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  ctx.drawImage(source, 0, 0, width, height);
-  const data = ctx.getImageData(0, 0, width, height).data;
-  const luma = [];
-  for (let i = 0; i < data.length; i += 4) {
-    luma.push((0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]) / 255);
-  }
-  const mean = luma.reduce((sum, value) => sum + value, 0) / luma.length;
-  const vector = [];
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const idx = y * width + x;
-      const base = idx * 4;
-      const r = data[base] / 255;
-      const g = data[base + 1] / 255;
-      const b = data[base + 2] / 255;
-      const gx = x > 0 && x < width - 1 ? luma[idx + 1] - luma[idx - 1] : 0;
-      const gy = y > 0 && y < height - 1 ? luma[idx + width] - luma[idx - width] : 0;
-      vector.push(
-        Number((luma[idx] - mean).toFixed(4)),
-        Number((r - g).toFixed(4)),
-        Number((b - (r + g) / 2).toFixed(4)),
-        Number(Math.sqrt(gx * gx + gy * gy).toFixed(4))
-      );
-    }
-  }
+  if (!window.computeFaceEmbedding) await window.faceEmbeddingReady;
+  const { vector } = await window.computeFaceEmbedding(source, cropBox);
   return {
-    version: 2,
+    version: 4,
     vector,
     capturedAt: new Date().toISOString(),
     source: kioskState?.terminal?.ipCameraUrl ? 'ip-camera' : 'webcam',
   };
 }
 
-async function detectFaceInsideGuide(source) {
-  const Detector = window.FaceDetector;
-  if (!Detector) return null;
+function descriptorDistance(a, b) {
+  let sum = 0;
+  for (let i = 0; i < a.length; i += 1) sum += (a[i] - b[i]) ** 2;
+  return Math.sqrt(sum);
+}
 
+// Two embeddings a moment apart, averaged. If they disagree the person moved or a different face slid into
+// the box, so nothing is matched.
+async function captureStableDescriptor(getBox) {
+  const first = await captureCameraDescriptor(getBox());
+  await new Promise(resolve => setTimeout(resolve, 120));
+  const second = await captureCameraDescriptor(getBox());
+  if (descriptorDistance(first.vector, second.vector) > 0.32) throw new Error('Hold still and look at the camera.');
+  return { ...second, vector: first.vector.map((value, i) => Math.round(((value + second.vector[i]) / 2) * 1e6) / 1e6) };
+}
+
+async function primaryFaceBox(source) {
+  if (!window.detectFaceGeometry) return null;
+  const faces = await window.detectFaceGeometry(source).catch(() => []);
+  return (faces || []).reduce((best, face) => (!best || face.box.width * face.box.height > best.box.width * best.box.height ? face : best), null)?.box || null;
+}
+
+async function detectFaceInsideGuide(source) {
   const width = source instanceof HTMLVideoElement ? source.videoWidth : source.naturalWidth;
   const height = source instanceof HTMLVideoElement ? source.videoHeight : source.naturalHeight;
   if (!width || !height) return { ok: false, message: 'Camera is not showing a live frame yet. Wait for the preview, then try again.' };
 
   try {
-    const detector = new Detector({ fastMode: true, maxDetectedFaces: 2 });
-    const faces = await detector.detect(source);
+    if (!window.detectFaceGeometry) await window.faceLandmarkerReady;
+    const faces = await window.detectFaceGeometry(source);
     if (!Array.isArray(faces) || faces.length === 0) {
       return { ok: false, message: 'No face detected. Put your full face inside the oval marker.' };
     }
@@ -568,22 +666,18 @@ async function detectFaceInsideGuide(source) {
       return { ok: false, message: 'More than one face detected. Only one employee should be inside the camera frame.' };
     }
 
-    const box = faces[0].boundingBox;
-    const faceCenterX = (box.x + box.width / 2) / width;
-    const faceCenterY = (box.y + box.height / 2) / height;
-    const faceWidth = box.width / width;
-    const faceHeight = box.height / height;
+    const { centerX: faceCenterX, centerY: faceCenterY, width: faceWidth, height: faceHeight } = faces[0];
 
     const centerIsInGuide =
-      faceCenterX >= 0.39 &&
-      faceCenterX <= 0.61 &&
-      faceCenterY >= 0.34 &&
-      faceCenterY <= 0.64;
+      faceCenterX >= 0.32 &&
+      faceCenterX <= 0.68 &&
+      faceCenterY >= 0.22 &&
+      faceCenterY <= 0.78;
     const sizeIsValid =
-      faceWidth >= 0.22 &&
-      faceWidth <= 0.58 &&
-      faceHeight >= 0.28 &&
-      faceHeight <= 0.74;
+      faceWidth >= 0.18 &&
+      faceWidth <= 0.64 &&
+      faceHeight >= 0.24 &&
+      faceHeight <= 0.82;
 
     if (!centerIsInGuide) {
       return { ok: false, message: 'Face is not inside the oval marker. Center your full face, then try again.' };
@@ -608,7 +702,8 @@ async function assessCameraFrame() {
   if (!readiness.ok) return { ok: false, descriptor: null, message: readiness.message };
   const guideFace = await detectFaceInsideGuide(source);
   if (guideFace && !guideFace.ok) return { ok: false, descriptor: null, message: guideFace.message };
-  const descriptor = captureCameraDescriptor();
+  const landmarkFaceIsReady = guideFace?.ok === true;
+  const descriptor = null;
   const ctx = brightnessCanvas.getContext('2d', { willReadFrequently: true });
   ctx.drawImage(source, 0, 0, 48, 60);
   const data = ctx.getImageData(0, 0, 48, 60).data;
@@ -750,7 +845,12 @@ async function assessCameraFrame() {
 
   if (brightness < 0.18) return { ok: false, descriptor, message: 'Face area is too dark. Add light and try again.' };
   if (brightness > 0.88) return { ok: false, descriptor, message: 'Face area is overexposed. Reduce glare and try again.' };
-  if (
+  // MediaPipe has already verified one complete, centered face using facial
+  // landmarks. Do not reject that result with the color/dark-pixel fallback:
+  // glasses, facial hair, skin tone, and exposure make those thresholds prone
+  // to false negatives. Retain the fallback for platforms where landmark
+  // detection is unavailable.
+  if (!landmarkFaceIsReady && (
     coreSkinPixels < 26 ||
     leftCoreSkinPixels < 9 ||
     rightCoreSkinPixels < 9 ||
@@ -759,22 +859,423 @@ async function assessCameraFrame() {
     leftEyeCoreDarkPixels < 3 ||
     rightEyeCoreDarkPixels < 3 ||
     mouthCoreDarkPixels < 3
-  ) {
+  )) {
     return { ok: false, descriptor, message: 'Bring your full face inside the oval before punching.' };
   }
   if (contrast < 0.03) return { ok: false, descriptor, message: 'No face detected in camera. Move closer and keep your face inside the oval.' };
-  if (skinRatio < 0.14 || skinRatio > 0.76) return { ok: false, descriptor, message: 'No face detected in camera. Put a full face inside the oval marker.' };
-  if (skinCenterX < 0.40 || skinCenterX > 0.60 || skinCenterY < 0.34 || skinCenterY > 0.66) return { ok: false, descriptor, message: 'Face is not inside the oval marker. Center your full face, then try again.' };
-  if (skinWidthRatio < 0.16 || skinWidthRatio > 0.88 || skinHeightRatio < 0.22 || skinHeightRatio > 0.92) return { ok: false, descriptor, message: 'Face is not fully visible. Move closer and keep the full face inside the oval.' };
-  if (centerSkinRatio < 0.18 || skinBalance < 0.35) return { ok: false, descriptor, message: 'No centered full face detected. Keep your face straight inside the oval.' };
-  if (leftEyeRatio < 0.003 || rightEyeRatio < 0.003 || mouthRatio < 0.004) return { ok: false, descriptor, message: 'No full face detected. Keep both eyes and mouth inside the oval.' };
-  if (symmetry > 0.32) return { ok: false, descriptor, message: 'Face is not centered. Look straight at the camera inside the oval.' };
+  if (!landmarkFaceIsReady && (skinRatio < 0.14 || skinRatio > 0.76)) return { ok: false, descriptor, message: 'No face detected in camera. Put a full face inside the oval marker.' };
+  if (!landmarkFaceIsReady && (skinCenterX < 0.40 || skinCenterX > 0.60 || skinCenterY < 0.34 || skinCenterY > 0.66)) return { ok: false, descriptor, message: 'Face is not inside the oval marker. Center your full face, then try again.' };
+  if (!landmarkFaceIsReady && (skinWidthRatio < 0.16 || skinWidthRatio > 0.88 || skinHeightRatio < 0.22 || skinHeightRatio > 0.92)) return { ok: false, descriptor, message: 'Face is not fully visible. Move closer and keep the full face inside the oval.' };
+  if (!landmarkFaceIsReady && (centerSkinRatio < 0.18 || skinBalance < 0.35)) return { ok: false, descriptor, message: 'No centered full face detected. Keep your face straight inside the oval.' };
+  // Dark-pixel eye/mouth thresholds vary heavily with glasses, facial hair,
+  // skin tone, camera exposure, and compression. Enrollment and descriptor
+  // matching provide identity verification; readiness should only reject an
+  // uncentered or incomplete face instead of guessing individual features.
+  // Pixel symmetry is not a reliable pose check: directional light, glasses,
+  // facial hair, and off-axis laptop cameras produce large differences even
+  // for a correctly centered employee. Descriptor matching remains mandatory.
   return { ok: true, descriptor, message: 'Face frame looks ready.' };
 }
 
 // ─── Auto-Capture (Face Recognition without Employee Code) ───────────────────
 function isAutoCaptureEnabled() {
-  return !!(kioskState?.terminal?.autoCaptureCamera);
+  return activeMode === MODE.CAM &&
+    !kioskState?.terminal?.ipCameraUrl &&
+    kioskState?.terminal?.autoCaptureCamera !== false;
+}
+
+function setAutoCaptureStatus(state, text) {
+  if (!el.camAutoStatus) return;
+  el.camAutoStatus.classList.remove('hidden');
+  el.camAutoStatus.dataset.state = state;
+  if (el.camAutoLabel) el.camAutoLabel.textContent = text;
+}
+
+// ─── Multi-Face Continuous HUD & Recognition ───────────────────────────────
+function drawKioskMultiFaceHUD(canvas, faces) {
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  const width = canvas.width;
+  const height = canvas.height;
+  ctx.clearRect(0, 0, width, height);
+  if (!faces || faces.length === 0) return;
+
+  const fontSizeSmall = Math.max(10, Math.round(11 * (width / 640)));
+  const fontSizeLarge = Math.max(12, Math.round(13 * (width / 640)));
+
+  for (const face of faces) {
+    const { box, status, employeeName, employeeCode, statusText } = face;
+    const rx = box.x * width;
+    const ry = box.y * height;
+    const rw = box.width * width;
+    const rh = box.height * height;
+
+    let primaryColor = '#3b82f6';
+    let glowColor = 'rgba(59, 130, 246, 0.4)';
+    let bgPillColor = 'rgba(15, 23, 42, 0.85)';
+
+    if (status === 'matched') {
+      primaryColor = '#10b981';
+      glowColor = 'rgba(16, 185, 129, 0.5)';
+      bgPillColor = 'rgba(6, 78, 59, 0.9)';
+    } else if (status === 'cooldown') {
+      primaryColor = '#06b6d4';
+      glowColor = 'rgba(6, 182, 212, 0.35)';
+      bgPillColor = 'rgba(8, 51, 68, 0.9)';
+    } else if (status === 'unknown') {
+      primaryColor = '#94a3b8';
+      glowColor = 'rgba(148, 163, 184, 0.25)';
+      bgPillColor = 'rgba(30, 41, 59, 0.85)';
+    } else if (status === 'verifying') {
+      primaryColor = '#f59e0b';
+      glowColor = 'rgba(245, 158, 11, 0.4)';
+      bgPillColor = 'rgba(120, 53, 15, 0.9)';
+    }
+
+    ctx.save();
+    // Glowing outer box
+    ctx.strokeStyle = glowColor;
+    ctx.lineWidth = 4;
+    ctx.strokeRect(rx, ry, rw, rh);
+
+    ctx.strokeStyle = primaryColor;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(rx, ry, rw, rh);
+
+    // High-tech corner brackets
+    const cornerLen = Math.min(22, Math.min(rw, rh) * 0.25);
+    ctx.lineWidth = 3.5;
+    ctx.strokeStyle = primaryColor;
+
+    ctx.beginPath();
+    ctx.moveTo(rx, ry + cornerLen);
+    ctx.lineTo(rx, ry);
+    ctx.lineTo(rx + cornerLen, ry);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(rx + rw - cornerLen, ry);
+    ctx.lineTo(rx + rw, ry);
+    ctx.lineTo(rx + rw, ry + cornerLen);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(rx, ry + rh - cornerLen);
+    ctx.lineTo(rx, ry + rh);
+    ctx.lineTo(rx + cornerLen, ry + rh);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(rx + rw - cornerLen, ry + rh);
+    ctx.lineTo(rx + rw, ry + rh);
+    ctx.lineTo(rx + rw, ry + rh - cornerLen);
+    ctx.stroke();
+
+    // Top Label
+    const topTitle = employeeName || (status === 'unknown' ? 'Unknown' : 'Scanning');
+    ctx.font = `bold ${fontSizeLarge}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+    const titleWidth = ctx.measureText(topTitle).width;
+    const topPillW = titleWidth + 20;
+    const topPillH = fontSizeLarge + 10;
+    const topPillX = rx + (rw - topPillW) / 2;
+    const topPillY = Math.max(8, ry - topPillH - 6);
+
+    ctx.fillStyle = bgPillColor;
+    ctx.beginPath();
+    ctx.roundRect(topPillX, topPillY, topPillW, topPillH, 6);
+    ctx.fill();
+    ctx.strokeStyle = primaryColor;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.fillStyle = primaryColor;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(topTitle, topPillX + topPillW / 2, topPillY + topPillH / 2);
+
+    // Bottom Pill
+    const bottomLabel = statusText || (employeeCode ? `ID: ${employeeCode}` : '');
+    if (bottomLabel) {
+      ctx.font = `600 ${fontSizeSmall}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+      const bottomW = ctx.measureText(bottomLabel).width;
+      const bottomPillW = bottomW + 16;
+      const bottomPillH = fontSizeSmall + 8;
+      const bottomPillX = rx + (rw - bottomPillW) / 2;
+      const bottomPillY = Math.min(height - bottomPillH - 8, ry + rh + 6);
+
+      ctx.fillStyle = bgPillColor;
+      ctx.beginPath();
+      ctx.roundRect(bottomPillX, bottomPillY, bottomPillW, bottomPillH, 6);
+      ctx.fill();
+      ctx.strokeStyle = primaryColor;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(bottomLabel, bottomPillX + bottomPillW / 2, bottomPillY + bottomPillH / 2);
+    }
+
+    ctx.restore();
+  }
+}
+
+function setKioskCamMode(mode) {
+  kioskCamMode = mode;
+  const isMulti = mode === 'multi';
+  el.cameraView?.classList.toggle('mode-multi-face', isMulti);
+  el.btnModeMultiFace?.classList.toggle('active', isMulti);
+  el.btnModeSingleFace?.classList.toggle('active', !isMulti);
+
+  if (isMulti) {
+    stopAutoCapture();
+    resetLivenessUI();
+    startMultiFaceLoop();
+  } else {
+    stopMultiFaceLoop();
+    if (isAutoCaptureEnabled()) {
+      startAutoCapture();
+    }
+  }
+  resetResultToIdle();
+}
+
+// Short on-face label for why a face was not matched (the full message is too long for the overlay).
+function shortFaceFailure(result) {
+  const message = String(result?.message || '');
+  if (result?.ambiguous) return 'Ambiguous · Enter Code';
+  if (result?.duplicate) return 'Not recognized';
+  if (/not registered/i.test(message)) return 'Kiosk not registered · Settings';
+  if (/re-enroll|no face profile|no enrolled faces/i.test(message)) return 'Face not enrolled · See HR';
+  if (/not recognized/i.test(message)) return 'Not recognized';
+  if (/hold still|no clear face|too small/i.test(message)) return 'Look at camera · Hold still';
+  if (/sync/i.test(message)) return 'Sync kiosk in Settings';
+  return message.slice(0, 30) || 'Unknown Person';
+}
+
+// One identification at a time, so two faces can never be matched in parallel against the same employee.
+let multiFaceQueue = Promise.resolve();
+function identifyInQueue(task) {
+  const run = multiFaceQueue.then(task, task);
+  multiFaceQueue = run.catch(() => undefined);
+  return run;
+}
+
+function startMultiFaceLoop() {
+  stopMultiFaceLoop();
+  multiFaceTrackers.clear();
+  multiFaceTimer = setInterval(runMultiFaceStep, 100);
+}
+
+function stopMultiFaceLoop() {
+  if (multiFaceTimer) {
+    clearInterval(multiFaceTimer);
+    multiFaceTimer = null;
+  }
+  multiFaceTrackers.clear();
+  if (el.multiFaceCanvas) {
+    const ctx = el.multiFaceCanvas.getContext('2d');
+    if (ctx) ctx.clearRect(0, 0, el.multiFaceCanvas.width, el.multiFaceCanvas.height);
+  }
+}
+
+async function runMultiFaceStep() {
+  if (activeMode !== MODE.CAM || kioskCamMode !== 'multi') return;
+  const video = el.webcamEl;
+  if (!video || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
+
+  const vw = video.videoWidth || 640;
+  const vh = video.videoHeight || 480;
+  if (el.multiFaceCanvas.width !== vw || el.multiFaceCanvas.height !== vh) {
+    el.multiFaceCanvas.width = vw;
+    el.multiFaceCanvas.height = vh;
+  }
+
+  let detectedFaces = [];
+  try {
+    if (!window.detectFaceGeometry) await window.faceLandmarkerReady;
+    if (window.detectFaceGeometry) {
+      detectedFaces = await window.detectFaceGeometry(video);
+    }
+  } catch {
+    return;
+  }
+
+  const now = Date.now();
+  const validFaces = (detectedFaces || []).filter(f => f && f.box && f.box.width >= 0.08 && f.box.height >= 0.08);
+
+  // Clean stale trackers (faces not seen for 800ms)
+  for (const [id, tracker] of multiFaceTrackers.entries()) {
+    if (now - tracker.lastSeen > 800) {
+      multiFaceTrackers.delete(id);
+    }
+  }
+
+  const renderList = [];
+
+  for (const face of validFaces) {
+    const box = face.box;
+    const centerX = box.x + box.width / 2;
+    const centerY = box.y + box.height / 2;
+
+    let matchedId = null;
+    let minDist = 0.14; // Tight continuity threshold between adjacent frames
+    for (const [id, tracker] of multiFaceTrackers.entries()) {
+      const tcX = tracker.box.x + tracker.box.width / 2;
+      const tcY = tracker.box.y + tracker.box.height / 2;
+      const dist = Math.hypot(centerX - tcX, centerY - tcY);
+      if (dist < minDist) {
+        minDist = dist;
+        matchedId = id;
+      }
+    }
+
+    let tracker;
+    if (matchedId !== null) {
+      tracker = multiFaceTrackers.get(matchedId);
+      tracker.box = box;
+      tracker.lastSeen = now;
+      tracker.stableFrames = (tracker.stableFrames || 0) + 1;
+    } else {
+      const id = nextTrackId++;
+      tracker = {
+        id,
+        box,
+        stableFrames: 1,
+        lastSeen: now,
+        status: 'verifying',
+        statusText: 'Aligning face…',
+        matchedEmployeeCode: null,
+        employeeName: '',
+        employeeCode: '',
+        isPunching: false,
+      };
+      multiFaceTrackers.set(id, tracker);
+    }
+
+    // Check if THIS tracker's recognized employee has an active cooldown
+    const session = tracker.matchedEmployeeCode ? employeeSessions.get(tracker.matchedEmployeeCode) : null;
+    const isCoolingDown = session && now < session.cooldownUntil;
+
+    if (isCoolingDown) {
+      tracker.status = 'cooldown';
+      tracker.employeeName = session.fullName || tracker.employeeName;
+      tracker.statusText = session.statusText || 'Already Recorded';
+    } else if (!tracker.isPunching) {
+      // If previous cooldown expired, reset matchedEmployeeCode so they can punch anew
+      if (tracker.matchedEmployeeCode && session && now >= session.cooldownUntil) {
+        tracker.matchedEmployeeCode = null;
+        tracker.status = 'verifying';
+      }
+
+      if (tracker.status !== 'matched' && tracker.status !== 'cooldown') {
+        if (tracker.stableFrames >= 3 && now >= (tracker.retryAfter || 0)) {
+          tracker.isPunching = true;
+          tracker.status = 'verifying';
+          tracker.statusText = 'Verifying…';
+
+          (async () => {
+            try {
+              const result = await identifyInQueue(async () => {
+                const descriptor = await captureStableDescriptor(() => tracker.box);
+                const evidence = await captureEvidence().catch(() => null);
+                const code = el.codeInput?.value?.trim() || '';
+                // Employees already shown on another face in view cannot be matched again.
+                const excludeEmployeeIds = [...multiFaceTrackers.values()]
+                  .filter(other => other !== tracker && other.matchedEmployeeId && Date.now() - other.lastSeen < 1500)
+                  .map(other => other.matchedEmployeeId);
+                const payload = { mode: 'multi-face', code, descriptor, evidence, excludeEmployeeIds, meta: { camera: 'webcam' } };
+                const response = await api.punchCamera(payload);
+                // Claim the employee before the next face is identified (a checkout-reason prompt may follow).
+                if (response?.employee) tracker.matchedEmployeeId = response.employee.id || response.employee.employeeCode;
+                return { payload, response };
+              });
+              const punchPayload = result.payload;
+              const finalResult = await resolveCheckoutReasonAndRetry(
+                result.response,
+                outReason => api.punchCamera({ ...punchPayload, cameraAuthorization: result.response.cameraAuthorization, meta: { ...punchPayload.meta, outReason } })
+              );
+
+              if (finalResult?.employee) {
+                const emp = finalResult.employee;
+                const empCode = emp.employeeCode || emp.id;
+                tracker.matchedEmployeeCode = empCode;
+                tracker.matchedEmployeeId = emp.id || empCode;
+                tracker.employeeName = emp.fullName || '';
+                tracker.employeeCode = emp.employeeCode || '';
+
+                const existingSession = employeeSessions.get(empCode);
+                const isAlreadyCooling = existingSession && Date.now() < existingSession.cooldownUntil;
+
+                if (finalResult.ok) {
+                  const timeStr = (finalResult.eventTime || '').slice(0, 5) || new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+                  employeeSessions.set(empCode, {
+                    cooldownUntil: Date.now() + (5 * 60 * 1000), // 5 min cooldown for THIS employee only
+                    statusText: `${finalResult.action === 'OUT' ? 'Punched Out' : 'Punched In'} · ${timeStr}`,
+                    fullName: emp.fullName,
+                  });
+                  tracker.status = 'matched';
+                  tracker.statusText = `${finalResult.action === 'OUT' ? 'PUNCHED OUT' : 'PUNCHED IN'} · ${timeStr}`;
+                  handlePunchResult(finalResult);
+                } else if (finalResult.alreadyRecorded || finalResult.cooldownSeconds || String(finalResult.message || '').toLowerCase().includes('before punching again') || String(finalResult.message || '').toLowerCase().includes('already completed') || isAlreadyCooling) {
+                  // This specific employee already punched today or is in their 1-minute guard
+                  employeeSessions.set(empCode, {
+                    cooldownUntil: Date.now() + (5 * 60 * 1000), // Cooldown ONLY for this employee
+                    statusText: 'Already Recorded',
+                    fullName: emp.fullName,
+                  });
+                  tracker.status = 'cooldown';
+                  tracker.statusText = 'Already Recorded';
+                } else {
+                  tracker.status = 'unknown';
+                  tracker.statusText = finalResult?.message?.slice(0, 30) || 'Unknown Person';
+                  tracker.matchedEmployeeCode = null;
+                }
+              } else {
+                tracker.status = 'unknown';
+                tracker.statusText = shortFaceFailure(finalResult);
+                tracker.matchedEmployeeCode = null;
+                tracker.matchedEmployeeId = null;
+                tracker.retryAfter = Date.now() + 2500;
+              }
+            } catch (error) {
+              tracker.status = 'unknown';
+              tracker.statusText = shortFaceFailure({ message: error?.message || 'Scan retry' });
+              tracker.matchedEmployeeCode = null;
+              tracker.matchedEmployeeId = null;
+              tracker.retryAfter = Date.now() + 1500;
+            } finally {
+              tracker.isPunching = false;
+            }
+          })();
+        } else if (!(tracker.status === 'unknown' && now < (tracker.retryAfter || 0))) {
+          // Keep the last failure reason on screen until the retry; otherwise show progress up to 3.
+          tracker.status = 'verifying';
+          tracker.statusText = `Verifying ${Math.min(tracker.stableFrames, 3)}/3…`;
+        }
+      }
+    }
+
+    renderList.push({
+      id: String(tracker.id),
+      box: tracker.box,
+      status: tracker.status,
+      statusText: tracker.statusText,
+      employeeName: tracker.employeeName,
+      employeeCode: tracker.employeeCode,
+    });
+  }
+
+  drawKioskMultiFaceHUD(el.multiFaceCanvas, renderList);
+}
+
+// ─── Auto-Capture (Face Recognition without Employee Code) ───────────────────
+function isAutoCaptureEnabled() {
+  return activeMode === MODE.CAM &&
+    !kioskState?.terminal?.ipCameraUrl &&
+    kioskState?.terminal?.autoCaptureCamera !== false;
 }
 
 function setAutoCaptureStatus(state, text) {
@@ -786,9 +1287,11 @@ function setAutoCaptureStatus(state, text) {
 
 function startAutoCapture() {
   stopAutoCapture();
+  if (kioskCamMode === 'multi') return;
   autoCaptureGoodFrames = 0;
   autoCaptureIsPunching = false;
   autoCaptureHoldUntil = 0;
+  autoCaptureAwaitingFaceExit = false;
   setAutoCaptureStatus('scanning', 'Scanning for face…');
   autoCaptureTimer = setInterval(runAutoCaptureStep, AUTO_LOOP_MS);
 }
@@ -798,11 +1301,28 @@ function stopAutoCapture() {
   autoCaptureTimer = null;
   autoCaptureGoodFrames = 0;
   autoCaptureIsPunching = false;
+  autoCaptureAwaitingFaceExit = false;
   if (el.camAutoStatus) el.camAutoStatus.classList.add('hidden');
 }
 
 async function runAutoCaptureStep() {
-  if (activeMode !== MODE.CAM || autoCaptureIsPunching) return;
+  if (activeMode !== MODE.CAM || kioskCamMode === 'multi' || autoCaptureIsPunching) return;
+
+  if (autoCaptureAwaitingFaceExit) {
+    try {
+      const frame = await assessCameraFrame();
+      if (!frame.ok) {
+        autoCaptureAwaitingFaceExit = false;
+        autoCaptureHoldUntil = Date.now() + 1000;
+        setAutoCaptureStatus('scanning', 'Ready for the next employee…');
+      } else {
+        setAutoCaptureStatus('hold', 'Attendance recorded — move away before the next scan.');
+      }
+    } catch {
+      autoCaptureAwaitingFaceExit = false;
+    }
+    return;
+  }
 
   const now = Date.now();
   if (now < autoCaptureHoldUntil) {
@@ -836,7 +1356,8 @@ async function runAutoCaptureStep() {
   autoCaptureIsPunching = true;
   setAutoCaptureStatus('punching', 'Identifying…');
   try {
-    await punchCamera();
+    const result = await punchCamera();
+    if (result?.ok) autoCaptureAwaitingFaceExit = true;
   } finally {
     autoCaptureIsPunching = false;
     autoCaptureHoldUntil = Date.now() + AUTO_PUNCH_COOLDOWN_MS;
@@ -936,9 +1457,11 @@ async function runPunchAction(action) {
   try {
     const result = await action();
     handlePunchResult(result);
+    return result;
   } catch (err) {
-    showResult('err', 'Attendance Failed', err.message || 'Could not mark attendance. Please try again or contact HR.');
+    showResult('err', 'Attendance Failed', 'Could not mark attendance. Please try again or contact HR.');
     scheduleReset();
+    return { ok: false, message: 'Could not mark attendance. Please try again or contact HR.' };
   }
 }
 
@@ -955,38 +1478,193 @@ async function punchByCode() {
   ));
 }
 
+function resetLivenessUI() {
+  if (!el.livenessRail) return;
+  el.livenessRail.classList.remove('failed');
+  if (el.livenessAction) el.livenessAction.textContent = 'Look at the camera, then start the live face check';
+  const steps = el.livenessRail.querySelectorAll('.liveness-steps span');
+  if (steps.length >= 5) {
+    steps[0].textContent = 'Center';
+    steps[1].textContent = 'Left';
+    steps[2].textContent = 'Center';
+    steps[3].textContent = 'Right';
+    steps[4].textContent = 'Verified';
+    steps.forEach(s => {
+      s.classList.remove('done', 'current');
+    });
+  }
+}
+
+function setLivenessProgress(phase, message, failed = false, order = null) {
+  if (!el.livenessRail) return;
+  el.livenessRail.classList.toggle('failed', failed);
+  el.livenessAction.textContent = message;
+  const steps = el.livenessRail.querySelectorAll('.liveness-steps span');
+  if (order && steps.length >= 5) {
+    steps[1].textContent = order[0] === 'left' ? 'Left' : 'Right';
+    steps[3].textContent = order[1] === 'left' ? 'Left' : 'Right';
+  }
+  steps.forEach((step, index) => {
+    step.classList.toggle('done', phase > index);
+    step.classList.toggle('current', phase === index && !failed);
+  });
+}
+
+async function captureLivenessObservation() {
+  const video = el.webcamEl;
+  const faces = await window.detectFaceGeometry(video);
+  if (!faces || faces.length === 0) throw new Error('Keep your face inside the oval.');
+  const plausible = faces.filter(f => f.width >= 0.12);
+  const pool = plausible.length > 0 ? plausible : faces;
+  const face = pool.length === 1 ? pool[0] : [...pool].sort((a, b) => {
+    return Math.hypot(a.centerX - 0.5, a.centerY - 0.48) - Math.hypot(b.centerX - 0.5, b.centerY - 0.48);
+  })[0];
+  return { at: Date.now(), yaw: face.yaw, centerX: face.centerX, centerY: face.centerY, scale: face.width };
+}
+
+async function runCameraLivenessChallenge() {
+  if (!window.detectFaceGeometry) await window.faceLandmarkerReady;
+  if (!window.detectFaceGeometry) throw new Error('The bundled face landmark model could not start.');
+  const issued = await api.beginCameraLiveness();
+  if (!issued?.ok) throw new Error(issued?.message || 'Could not start privileged liveness challenge.');
+  const targets = ['center', issued.order[0], 'center', issued.order[1], 'center'];
+  const labels = ['Center your face', `Turn ${issued.order[0].toUpperCase()}`, 'Return to center', `Turn ${issued.order[1].toUpperCase()}`, 'Return to center'];
+  const observations = [];
+  let phase = 0;
+  let consecutive = 0;
+  // Turns count from the person's own resting pose, so an off-centre webcam still passes (same rule as the main process).
+  let base = null;
+  let resting = [];
+  const stepMatches = (target, yaw) => base === null
+    ? Math.abs(yaw) <= 0.35
+    : target === 'center' ? Math.abs(yaw - base) <= 0.20 : target === 'left' ? yaw - base >= 0.27 : yaw - base <= -0.27;
+  try {
+    while (Date.now() <= issued.expiresAt) {
+      setLivenessProgress(phase, labels[phase], false, issued.order);
+      let observation = null;
+      try {
+        observation = await captureLivenessObservation();
+      } catch {
+        consecutive = 0;
+        await new Promise(resolve => setTimeout(resolve, 110));
+        continue;
+      }
+      observations.push(observation);
+      if (stepMatches(targets[phase], observation.yaw)) {
+        consecutive += 1;
+        if (base === null) resting.push(observation.yaw);
+      } else {
+        consecutive = 0;
+        if (base === null) resting = [];
+      }
+      if (consecutive >= 3) {
+        if (base === null) base = resting.slice(-3).reduce((sum, value) => sum + value, 0) / 3;
+        if (phase === 4) { setLivenessProgress(5, 'Live person verified', false, issued.order); return { challengeId: issued.id, observations }; }
+        phase += 1;
+        consecutive = 0;
+      }
+      await new Promise(resolve => setTimeout(resolve, 110));
+    }
+    throw new Error('Active liveness challenge expired. Start again.');
+  } catch (error) {
+    await api.cancelCameraLiveness(issued.id).catch(() => {});
+    throw error;
+  }
+}
+
 async function punchCamera() {
+  if (cameraPunchBusy) return { ok: false, message: 'Face verification is already in progress.' };
+  cameraPunchBusy = true;
+  el.camCaptureBtn.disabled = true;
+  try {
+    return await performCameraPunch();
+  } finally {
+    cameraPunchBusy = false;
+    el.camCaptureBtn.disabled = false;
+  }
+}
+
+async function performCameraPunch() {
   const code = el.codeInput.value.trim();
+  if (kioskState?.terminal?.ipCameraUrl) {
+    showResult('err', 'IP Camera Blocked', 'IP camera still images cannot prove liveness. Use the local webcam or fingerprint.');
+    return { ok: false, message: 'IP camera attendance is blocked for security.' };
+  }
+  clearCapturedPhoto();
   showResult('busy', 'Capturing Evidence…', 'Saving camera snapshot as attendance proof…');
   let evidence = null;
   let descriptor = null;
+  let livenessProof = null;
+
+  if (kioskCamMode === 'multi') {
+    try {
+      const source = el.webcamEl;
+      let targetBox = null;
+      if (window.detectFaceGeometry) {
+        const faces = await window.detectFaceGeometry(source).catch(() => []);
+        if (faces && faces.length > 0) {
+          targetBox = faces[0].box;
+        }
+      }
+      descriptor = await captureStableDescriptor(() => targetBox);
+      evidence = await captureEvidence();
+    } catch (err) {
+      const message = err?.message || 'Could not detect face in camera.';
+      showResult('err', 'Face Scan Failed', message);
+      return { ok: false, message };
+    }
+    const cameraPayload = {
+      mode: 'multi-face',
+      code,
+      descriptor,
+      evidence,
+      meta: { camera: 'webcam' },
+    };
+    return runPunchAction(async () => {
+      const firstResult = await api.punchCamera(cameraPayload);
+      return resolveCheckoutReasonAndRetry(
+        firstResult,
+        outReason => api.punchCamera({ ...cameraPayload, cameraAuthorization: firstResult.cameraAuthorization, meta: { ...cameraPayload.meta, outReason } })
+      );
+    });
+  }
+
   try {
+    livenessProof = await runCameraLivenessChallenge();
     let lastReadyFrame = null;
     for (let i = 0; i < 3; i += 1) {
       const frame = await assessCameraFrame();
       if (!frame.ok) {
         showResult('err', 'Face Not Ready', frame.message);
-        return;
+        return { ok: false, message: frame.message };
       }
       lastReadyFrame = frame;
       if (i < 2) await new Promise(resolve => setTimeout(resolve, 140));
     }
-    descriptor = lastReadyFrame.descriptor;
+    const source = kioskState?.terminal?.ipCameraUrl ? el.ipcamEl : el.webcamEl;
+    const box = await primaryFaceBox(source);
+    descriptor = await captureStableDescriptor(() => box);
     evidence = await captureEvidence();
   } catch (err) {
-    showResult('err', 'Capture Failed', err.message || 'Could not save camera image.');
-    return;
+    const message = err?.message || 'Could not complete active liveness.';
+    setLivenessProgress(-1, message, true);
+    showResult('err', 'Liveness Failed', message);
+    return { ok: false, message };
   }
   const cameraPayload = {
     code,
     descriptor,
     evidence,
+    livenessProof,
     meta: { camera: kioskState?.terminal?.ipCameraUrl ? 'ip-camera' : 'webcam' },
   };
-  await runPunchAction(async () => resolveCheckoutReasonAndRetry(
-    await api.punchCamera(cameraPayload),
-    outReason => api.punchCamera({ ...cameraPayload, meta: { ...cameraPayload.meta, outReason } })
-  ));
+  return runPunchAction(async () => {
+    const firstResult = await api.punchCamera(cameraPayload);
+    return resolveCheckoutReasonAndRetry(
+      firstResult,
+      outReason => api.punchCamera({ ...cameraPayload, livenessProof: null, cameraAuthorization: firstResult.cameraAuthorization, meta: { ...cameraPayload.meta, outReason } })
+    );
+  });
 }
 
 async function punchFingerprint() {
@@ -1006,7 +1684,7 @@ async function punchFingerprint() {
         outReason => api.punchFingerprint({ ...fpPayload, meta: { outReason } })
       );
     } catch (err) {
-      return { ok: false, message: err.message || 'Could not mark attendance. Please try again or contact HR.' };
+      return { ok: false, message: 'Could not mark attendance. Please try again or contact HR.' };
     } finally {
       fpBusy = false;
     }
@@ -1058,28 +1736,33 @@ async function testFingerprintScanner() {
 
 function handlePunchResult(result) {
   if (result.ok) {
-    const { employee, log, action } = result;
-    const timeStr = action === 'OUT' ? (log.punchOut || '').slice(0, 5) : (log.punchIn || '').slice(0, 5);
+    const { employee, action } = result;
+    const attendance = result.attendance || result.log || {};
+    const timeStr = (result.eventTime || (action === 'OUT' ? attendance.punchOut : attendance.punchIn) || '').slice(0, 5);
     const orgLine = [
       employee.departmentName,
       employee.designationName,
       employee.branchName,
     ].filter(Boolean).join(' · ');
-    const reasonLine = action === 'OUT'
-      ? `Out reason: ${result.outReason || 'Shift exit'}`
-      : 'Entry recorded';
+    const reasonLine = result.returnedFromBreak
+      ? `Returned from ${result.breakReason || 'break'}`
+      : action === 'OUT'
+        ? `Out reason: ${result.outReason || 'Shift exit'}`
+        : 'Entry recorded';
 
     showResult('ok',
-      `${action === 'OUT' ? 'Punch Out' : 'Punch In'} Recorded`,
+      result.returnedFromBreak ? 'Return from Break Recorded' : `${action === 'OUT' ? 'Punch Out' : 'Punch In'} Recorded`,
       employee.fullName,
       timeStr,
       [
         employee.employeeCode,
         employee.designationName,
         employee.departmentName,
-        action === 'OUT' ? (result.outReason || 'Shift exit') : log.status,
-        `${log.method}`,
-        log.terminalLocation || kioskState?.terminal?.location || '',
+        result.returnedFromBreak
+          ? `Returned from ${result.breakReason || 'break'}`
+          : action === 'OUT' ? (result.outReason || 'Shift exit') : attendance.status,
+        attendance.method,
+        attendance.terminalLocation || kioskState?.terminal?.location || '',
       ].filter(Boolean)
     );
     renderResultEmployee(employee, orgLine || reasonLine);
@@ -1161,8 +1844,9 @@ function renderResultEmployee(employee, metaLine) {
   const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
   el.resultEmpName.textContent = name;
   el.resultEmpMeta.textContent = metaLine || [employee.departmentName, employee.designationName].filter(Boolean).join(' · ');
-  if (employee.pictureUrl) {
-    el.resultAvatar.innerHTML = `<img src="${esc(employee.pictureUrl)}" alt="" />`;
+  const pictureUrl = safeImageUrl(employee.pictureUrl);
+  if (pictureUrl) {
+    el.resultAvatar.innerHTML = `<img src="${esc(pictureUrl)}" alt="" />`;
   } else {
     el.resultAvatar.textContent = initials || '?';
   }
@@ -1178,18 +1862,31 @@ function clearResultEmployee() {
 
 function resetResultToIdle() {
   el.resultCard.className = 'result-card idle';
+  clearCapturedPhoto();
   clearResultEmployee();
+  resetLivenessUI();
   el.resultState.textContent = 'TERMINAL READY';
   el.resultName.textContent = 'Attendance Kiosk Online';
   if (activeMode === MODE.CAM) {
-    const auto = isAutoCaptureEnabled();
-    el.resultDetail.innerHTML = [
-      '<span class="guide-line"><b>1.</b> Keep face inside the oval marker.</span>',
-      '<span class="guide-line"><b>2.</b> Look straight and hold still.</span>',
-      auto
-        ? '<span class="guide-line"><b>3.</b> Auto-capture will punch automatically.</span>'
-        : '<span class="guide-line"><b>3.</b> Tap Capture &amp; Punch.</span>',
-    ].join('');
+    if (kioskCamMode === 'multi') {
+      el.resultDetail.innerHTML = [
+        '<span class="guide-line"><b>1.</b> Look directly towards the camera.</span>',
+        '<span class="guide-line"><b>2.</b> AI recognizes faces and marks attendance instantly.</span>',
+        '<span class="guide-line"><b>3.</b> Continuous multi-person detection is active.</span>',
+      ].join('');
+    } else {
+      const auto = isAutoCaptureEnabled();
+      el.resultDetail.innerHTML = [
+        '<span class="guide-line"><b>1.</b> Keep face inside the oval marker.</span>',
+        '<span class="guide-line"><b>2.</b> Look straight and hold still.</span>',
+        auto
+          ? '<span class="guide-line"><b>3.</b> Auto-capture will punch automatically.</span>'
+          : '<span class="guide-line"><b>3.</b> Tap Capture &amp; Punch.</span>',
+        kioskState?.terminal?.branchId
+          ? '<span class="guide-line"><b>4.</b> Visiting from another branch? Enter your complete employee ID first.</span>'
+          : '',
+      ].filter(Boolean).join('');
+    }
   } else {
     el.resultDetail.textContent = 'Select a punch method, then enter employee code or scan fingerprint.';
   }
@@ -1266,9 +1963,9 @@ function refreshTodayOnlyFeedLegacy() {
 
   const employees = kioskState.employees || [];
   el.todayFeed.innerHTML = logs.map(log => {
-    const emp = employees.find(e => e.id === log.employeeId);
-    const name = emp?.fullName || log.employeeId;
-    const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+    const emp = employees.find(e => (e.id && e.id === log.employeeId) || (e.employeeCode && e.employeeCode === log.employeeId) || (e.employeeCode && log.employeeCode && e.employeeCode === log.employeeCode));
+    const name = emp?.fullName || log.employeeName || log.employeeCode || log.employeeId;
+    const initials = name.split(' ').filter(Boolean).map(w => w[0]).join('').slice(0, 2).toUpperCase() || 'E';
     const isOut = log.punchOut;
     const isLate = log.status === 'Late';
     const rowClass = isOut ? 'row-out' : isLate ? 'row-late' : 'row-ok';
@@ -1298,6 +1995,26 @@ function refreshTodayFeed() {
   const transactions = (kioskState.attendances || []).flatMap(log => {
     const items = [];
     if (log.punchIn) items.push({ log, action: 'IN', at: `${log.date || ''}T${log.punchIn}` });
+    for (const attendanceBreak of Array.isArray(log.breaks) ? log.breaks : []) {
+      if (attendanceBreak.outAt) {
+        items.push({
+          log,
+          action: 'OUT',
+          at: `${log.date || ''}T${attendanceBreak.outAt}`,
+          eventTime: attendanceBreak.outAt,
+          reason: attendanceBreak.reason,
+        });
+      }
+      if (attendanceBreak.returnAt) {
+        items.push({
+          log,
+          action: 'IN',
+          at: `${log.date || ''}T${attendanceBreak.returnAt}`,
+          eventTime: attendanceBreak.returnAt,
+          reason: `Returned from ${attendanceBreak.reason || 'break'}`,
+        });
+      }
+    }
     if (log.punchOut) items.push({ log, action: 'OUT', at: `${log.date || ''}T${log.punchOut}` });
     return items;
   }).sort((a, b) => String(b.at).localeCompare(String(a.at))).slice(0, 10);
@@ -1309,17 +2026,17 @@ function refreshTodayFeed() {
 
   el.todayFeed.innerHTML = transactions.map(item => {
     const { log, action } = item;
-    const emp = employees.find(e => e.id === log.employeeId);
-    const name = emp?.fullName || log.employeeId;
-    const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
-    const pictureUrl = emp?.pictureUrl || emp?.photoUrl || emp?.profileImage || emp?.imageUrl || '';
+    const emp = employees.find(e => (e.id && e.id === log.employeeId) || (e.employeeCode && e.employeeCode === log.employeeId) || (e.employeeCode && log.employeeCode && e.employeeCode === log.employeeCode));
+    const name = emp?.fullName || log.employeeName || log.employeeCode || log.employeeId;
+    const initials = name.split(' ').filter(Boolean).map(w => w[0]).join('').slice(0, 2).toUpperCase() || 'E';
+    const pictureUrl = safeImageUrl(emp?.pictureUrl || emp?.photoUrl || emp?.profileImage || emp?.imageUrl || '');
     const isOut = action === 'OUT';
     const isLate = action === 'IN' && log.status === 'Late';
     const rowClass = isOut ? 'row-out' : isLate ? 'row-late' : 'row-ok';
     const badge = isOut ? `<span class="feed-badge badge-out">OUT</span>`
       : isLate ? `<span class="feed-badge badge-late">LATE</span>`
       : `<span class="feed-badge badge-in">IN</span>`;
-    const time = action === 'OUT' ? log.punchOut : log.punchIn;
+    const time = item.eventTime || (action === 'OUT' ? log.punchOut : log.punchIn);
     const dateLabel = log.date ? new Date(`${log.date}T00:00:00`).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : '';
     const avatar = pictureUrl ? `<img src="${esc(pictureUrl)}" alt="" />` : esc(initials);
 
@@ -1327,7 +2044,7 @@ function refreshTodayFeed() {
       <div class="feed-avatar-sm">${avatar}</div>
       <div class="feed-info">
         <div class="feed-name">${esc(name)}</div>
-        <div class="feed-sub">${esc(dateLabel)} · ${esc(log.method || 'Code')} · ${esc(log.status || '')}</div>
+        <div class="feed-sub">${esc([dateLabel, item.reason || log.method || 'Code', log.status || ''].filter(Boolean).join(' · '))}</div>
       </div>
       <div class="feed-times">
         <div class="${isOut ? 'feed-out' : 'feed-in'}">${esc(time?.slice(0,5) || '--')}</div>
@@ -1358,13 +2075,14 @@ function renderDirectory(filter) {
   el.dirList.innerHTML = list.map(emp => {
     const templates = getFingerprintTemplates(emp);
     const hasFp = templates.length > 0;
-    const log = todayLogs.find(l => l.employeeId === emp.id);
+    const log = todayLogs.find(l => (l.employeeId && (l.employeeId === emp.id || l.employeeId === emp.employeeCode)));
     const punchedIn = log?.punchIn && !log?.punchOut;
     const classes = [hasFp ? 'has-fp' : '', punchedIn ? 'punched-in' : ''].filter(Boolean).join(' ');
+    const lastReturnAt = Array.isArray(log?.breaks) ? log.breaks.at(-1)?.returnAt : '';
     const status = punchedIn
-      ? `In since ${log.punchIn?.slice(0,5)}`
+      ? `In since ${(lastReturnAt || log.punchIn)?.slice(0,5)}`
       : log?.punchOut
-        ? `Out ${log.punchOut?.slice(0,5)}`
+        ? `${log.outReason || 'Out'} ${log.punchOut?.slice(0,5)}`
         : hasFp ? `${templates.length} FP template${templates.length > 1 ? 's' : ''}` : 'No fingerprint';
     return `<div class="dir-row ${classes}" data-code="${esc(emp.employeeCode)}">
       <div class="dir-dot"></div>
@@ -1425,19 +2143,25 @@ async function performSync() {
   el.syncBtn.classList.add('spinning');
   el.syncStatus.textContent = 'Syncing…';
   try {
-    const { report, store } = await api.sync();
-    kioskState = store;
+    const { report } = await api.sync();
+    kioskState = await api.getState();
+    updateRegistrationBanner();
+    applyModeSecurity();
     const errs = report.errors?.length || 0;
-    el.syncStatus.textContent = errs
-      ? `${errs} sync warning(s)`
-      : `Synced: ${report.employees} emp, ${report.biometricTemplates || 0} bio, ${report.departments || 0} dept, ${report.pushed} pushed`;
-    setPill(el.pillOnline, 'online');
+    el.syncStatus.textContent = report.notRegistered
+      ? 'Not registered — open Settings to register this kiosk'
+      : errs
+        ? `${errs} sync warning(s)`
+        : `Synced: ${report.employees} emp, ${report.biometricTemplates || 0} bio, ${report.departments || 0} dept, ${report.pushed} pushed`;
+    setPill(el.pillOnline, report.notRegistered ? 'offline' : 'online');
     renderDirectory(el.dirSearch.value);
     refreshTodayFeed();
     refreshStats();
     renderEventLog();
   } catch (err) {
-    el.syncStatus.textContent = 'Sync failed — offline mode';
+    el.syncStatus.textContent = kioskState?.deviceRegistration?.registered === false
+      ? 'Not registered — open Settings to register this kiosk'
+      : 'Sync failed — offline mode';
     setPill(el.pillOnline, 'offline');
   } finally {
     el.syncBtn.classList.remove('spinning');
@@ -1455,25 +2179,88 @@ function openSettings() {
   const t = kioskState.terminal;
   el.stTerminalId.value     = t.id || '';
   el.stLocation.value       = t.location || '';
+  el.stBranchId.innerHTML = [
+    '<option value="">Select a branch…</option>',
+    ...(kioskState.branches || []).map(branch => {
+      const label = [branch.code, branch.name, branch.city].filter(Boolean).join(' · ');
+      return `<option value="${esc(branch.id)}">${esc(label)}</option>`;
+    }),
+  ].join('');
+  el.stBranchId.value = t.branchId || '';
   el.stIpCamUrl.value       = t.ipCameraUrl || '';
+  el.stAllowCodeOnlyPunch.checked = !!t.allowCodeOnlyPunch;
   el.stReqCodeFp.checked    = !!t.requireCodeWithFingerprint;
-  el.stReqCodeCam.checked   = !!t.requireCodeWithCamera;
-  el.stAutoCaptureCamera.checked = !!t.autoCaptureCamera;
+  el.stReqCodeCam.checked   = false;
+  el.stAutoCaptureCamera.checked = t.autoCaptureCamera !== false;
   el.stAutoFullscreen.checked = !!t.autoFullscreen;
 
   const st = kioskState.syncTarget;
   if (st) {
     el.stSyncInfo.textContent = [
+      `Kiosk version: ${kioskState.appVersion || 'unknown'}`,
       `Portal: ${st.portalUrl}`,
-      `Project: ${st.projectId}`,
-      `Database: ${st.databaseId}`,
       `Collections: ${(st.collections || []).join(', ')}`,
       `Store: ${kioskState.storePath || '—'}`,
     ].join('\n');
   }
 
   renderSettingsEvents();
+  renderRegistration(kioskState.deviceRegistration);
   el.settingsOverlay.classList.remove('hidden');
+}
+
+function updateRegistrationBanner() {
+  el.regBanner?.classList.toggle('hidden', kioskState?.deviceRegistration?.registered !== false);
+}
+
+function renderRegistration(registration) {
+  const registered = !!registration?.registered;
+  updateRegistrationBanner();
+  el.stRegStatus.textContent = registered
+    ? `Registered as "${registration.name}" on ${new Date(registration.registeredAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })} with ${registration.portalUrl}.`
+    : `Not registered. This kiosk cannot download employees or upload punches until it is registered with ${registration?.portalUrl || 'the server'}.`;
+  el.stRegStatus.style.color = registered ? 'var(--em)' : 'var(--red)';
+  el.stRegForm.classList.toggle('hidden', registered);
+  el.stRegister.classList.toggle('hidden', registered);
+  el.stUnregister.classList.toggle('hidden', !registered);
+  el.stRegPassword.value = '';
+}
+
+async function registerKiosk() {
+  el.stRegister.disabled = true;
+  el.stRegStatus.textContent = 'Registering…';
+  try {
+    const result = await api.registerDevice({ email: el.stRegEmail.value, password: el.stRegPassword.value });
+    el.stRegPassword.value = '';
+    if (!result.ok) {
+      el.stRegStatus.textContent = result.error || 'Registration failed.';
+      el.stRegStatus.style.color = 'var(--red)';
+      return;
+    }
+    if (kioskState) kioskState.deviceRegistration = result;
+    renderRegistration(result);
+    renderSettingsEvents();
+    performSync();
+  } finally {
+    el.stRegister.disabled = false;
+  }
+}
+
+async function unregisterKiosk() {
+  const confirmed = await showMessageDialog({
+    tone: 'danger',
+    eyebrow: 'Server Registration',
+    title: 'Remove this kiosk\'s device key?',
+    message: 'The kiosk will stop syncing until it is registered again. Punches stay queued on this PC.',
+    detail: 'To block a lost or stolen kiosk, also revoke it from the web portal.',
+    confirmLabel: 'Remove Key',
+    cancelLabel: 'Keep',
+    showCancel: true,
+  });
+  if (!confirmed) return;
+  const registration = await api.unregisterDevice();
+  if (kioskState) kioskState.deviceRegistration = registration;
+  renderRegistration(registration);
 }
 
 async function renderSettingsEvents() {
@@ -1496,27 +2283,161 @@ function closeSettings() {
 }
 
 async function saveSettings() {
+  if (!el.stBranchId.value) {
+    el.stBranchId.focus();
+    el.stBranchId.style.borderColor = 'var(--red)';
+    el.stSyncInfo.textContent = 'Assign this kiosk to a branch before saving. This limits the local employee and biometric cache.';
+    return;
+  }
+  el.stBranchId.style.borderColor = '';
+  const enablingCodeOnly = el.stAllowCodeOnlyPunch.checked && !kioskState?.terminal?.allowCodeOnlyPunch;
+  if (enablingCodeOnly) {
+    const confirmed = await showMessageDialog({
+      tone: 'danger',
+      eyebrow: 'Security Exception',
+      title: 'Enable code-only attendance?',
+      message: 'This removes biometric proof from the Employee Code tab and can allow one person to punch for another employee.',
+      detail: 'Enable it only as a controlled temporary fallback. Fingerprint or Camera verification is strongly recommended.',
+      confirmLabel: 'Enable High-Risk Mode',
+      cancelLabel: 'Keep Disabled',
+      showCancel: true,
+    });
+    if (!confirmed) {
+      el.stAllowCodeOnlyPunch.checked = false;
+      return;
+    }
+  }
   const terminal = await api.saveSettings({
     id: el.stTerminalId.value.trim() || 'KIOSK-WIN-01',
     location: el.stLocation.value.trim() || 'Main Entrance Gate-1',
+    branchId: el.stBranchId.value,
     ipCameraUrl: el.stIpCamUrl.value.trim(),
+    allowCodeOnlyPunch: el.stAllowCodeOnlyPunch.checked,
     requireCodeWithFingerprint: el.stReqCodeFp.checked,
-    requireCodeWithCamera: el.stReqCodeCam.checked,
+    requireCodeWithCamera: false,
     autoCaptureCamera: el.stAutoCaptureCamera.checked,
     autoFullscreen: el.stAutoFullscreen.checked,
   });
   if (kioskState) kioskState.terminal = terminal;
+  applyModeSecurity();
   closeSettings();
-  el.terminalLine.textContent = `${terminal.location} · ${terminal.id}`;
+  await performSync();
+  const branchName = kioskState?.assignedBranch?.name || 'Branch not assigned';
+  el.terminalLine.textContent = `${branchName} · ${terminal.location} · ${terminal.id}`;
   if (activeMode === MODE.CAM) {
     const autoCapture = !!terminal.autoCaptureCamera;
-    el.camCaptureBtn.classList.toggle('hidden', autoCapture);
+    el.camCaptureBtn.classList.remove('hidden');
     if (autoCapture) startAutoCapture();
     else stopAutoCapture();
     resetResultToIdle();
   }
   showResult('ok', 'SETTINGS SAVED', 'Kiosk configuration updated successfully.');
   scheduleReset();
+}
+
+// ─── Local Maintenance Confirmation ──────────────────────────────────────────
+function closeMessageDialog(confirmed = false) {
+  if (!messageResolver) return;
+  const resolve = messageResolver;
+  messageResolver = null;
+  el.messageOverlay.classList.add('hidden');
+  el.messageOverlay.setAttribute('aria-hidden', 'true');
+  resolve(confirmed);
+  const focusTarget = messagePreviousFocus;
+  messagePreviousFocus = null;
+  if (focusTarget?.isConnected) focusTarget.focus();
+}
+
+function showMessageDialog({ tone = 'info', eyebrow = 'Kiosk Notice', title = 'Confirm action', message = '', detail = '', confirmLabel = 'OK', cancelLabel = 'Cancel', showCancel = false } = {}) {
+  if (messageResolver) return Promise.resolve(false);
+  el.messageDialog.dataset.tone = ['info', 'warning', 'danger', 'success'].includes(tone) ? tone : 'info';
+  el.messageEyebrow.textContent = eyebrow;
+  el.messageTitle.textContent = title;
+  el.messageText.textContent = message;
+  el.messageDetail.textContent = detail;
+  el.messageDetail.classList.toggle('hidden', !detail);
+  el.messageConfirm.textContent = confirmLabel;
+  el.messageCancel.textContent = cancelLabel;
+  el.messageCancel.classList.toggle('hidden', !showCancel);
+  messagePreviousFocus = document.activeElement;
+  el.messageOverlay.classList.remove('hidden');
+  el.messageOverlay.setAttribute('aria-hidden', 'false');
+  requestAnimationFrame(() => (showCancel ? el.messageCancel : el.messageConfirm).focus());
+  return new Promise(resolve => { messageResolver = resolve; });
+}
+
+function messageDialogFocusableButtons() {
+  return [...el.messageDialog.querySelectorAll('button:not([disabled])')].filter(button => !button.classList.contains('hidden'));
+}
+
+const MAINTENANCE_CONFIRM_MESSAGES = [
+  'This clears attendance records stored locally on this kiosk only. It does not delete attendance already stored in Firestore.',
+  'Pending offline attendance uploads will also be permanently discarded. Employees, settings, evidence, and Firestore remain protected.',
+  'Final irreversible warning: unsynced attendance cannot be recovered after the local cache and queued uploads are cleared.',
+];
+
+function renderMaintenanceConfirmStep() {
+  const step = maintenanceConfirmStep;
+  el.maintenanceConfirmDialog.dataset.step = String(step);
+  el.maintenanceConfirmStep.textContent = `Step ${step} of 3`;
+  el.maintenanceConfirmMessage.textContent = MAINTENANCE_CONFIRM_MESSAGES[step - 1];
+  el.maintenanceConfirmContinue.textContent = step === 3 ? 'Clear Local Attendance' : 'Continue';
+  [...el.maintenanceConfirmDialog.querySelectorAll('[data-maintenance-step]')].forEach((node, index) => {
+    const nodeStep = index + 1;
+    node.classList.toggle('is-complete', nodeStep < step);
+    node.classList.toggle('is-current', nodeStep === step);
+  });
+  [...el.maintenanceConfirmDialog.querySelectorAll('.maintenance-rail')]
+    .forEach((rail, index) => rail.classList.toggle('is-complete', index + 1 < step));
+}
+
+function closeMaintenanceConfirm(confirmed = false) {
+  if (!maintenanceConfirmResolver) return;
+  const resolve = maintenanceConfirmResolver;
+  maintenanceConfirmResolver = null;
+  el.maintenanceConfirmOverlay.classList.add('hidden');
+  el.maintenanceConfirmOverlay.setAttribute('aria-hidden', 'true');
+  resolve(confirmed);
+  const focusTarget = maintenancePreviousFocus;
+  maintenancePreviousFocus = null;
+  if (focusTarget?.isConnected) focusTarget.focus();
+}
+
+function openMaintenanceConfirm() {
+  if (maintenanceConfirmResolver) return Promise.resolve(false);
+  maintenanceConfirmStep = 1;
+  maintenancePreviousFocus = document.activeElement;
+  renderMaintenanceConfirmStep();
+  el.maintenanceConfirmOverlay.classList.remove('hidden');
+  el.maintenanceConfirmOverlay.setAttribute('aria-hidden', 'false');
+  requestAnimationFrame(() => el.maintenanceConfirmContinue.focus());
+  return new Promise(resolve => { maintenanceConfirmResolver = resolve; });
+}
+
+async function clearLocalAttendanceCache() {
+  const confirmed = await openMaintenanceConfirm();
+  if (!confirmed) return;
+
+  el.stClearAttendanceCache.disabled = true;
+  el.stClearAttendanceCache.textContent = 'Clearing...';
+  try {
+    const result = await api.clearLocalAttendanceCache();
+    await performSync();
+    closeSettings();
+    showResult(
+      'ok',
+      'LOCAL CACHE CLEARED',
+      `${result.clearedCount} cached record${result.clearedCount === 1 ? '' : 's'} and ${result.discardedPendingCount} queued upload${result.discardedPendingCount === 1 ? '' : 's'} removed. Firestore sync completed.`
+    );
+    scheduleReset();
+  } catch {
+    closeSettings();
+    showResult('err', 'LOCAL CACHE NOT CLEARED', 'The local attendance cache could not be cleared. No Firestore records were deleted.');
+    scheduleReset();
+  } finally {
+    el.stClearAttendanceCache.disabled = false;
+    el.stClearAttendanceCache.textContent = 'Clear Local Cache';
+  }
 }
 
 // ─── Keypad ───────────────────────────────────────────────────────────────────
@@ -1547,7 +2468,13 @@ function bindEvents() {
   });
 
   // Code input
-  el.codeInput.addEventListener('input', scheduleEmployeeLookup);
+  el.codeInput.addEventListener('input', () => {
+    if (el.codeInput.value.trim()) {
+      autoCaptureAwaitingFaceExit = false;
+      autoCaptureHoldUntil = 0;
+    }
+    scheduleEmployeeLookup();
+  });
   el.codeInput.addEventListener('keydown', e => {
     if (e.key === 'Enter') {
       e.preventDefault();
@@ -1573,13 +2500,85 @@ function bindEvents() {
   el.fpTestBtn.addEventListener('click', testFingerprintScanner);
   el.camCaptureBtn.addEventListener('click', punchCamera);
 
+  // Camera Mode Toggle (Multi-Face Stream vs 1-on-1 Challenge)
+  el.btnModeMultiFace?.addEventListener('click', () => setKioskCamMode('multi'));
+  el.btnModeSingleFace?.addEventListener('click', () => setKioskCamMode('single'));
+
   // Sync
   el.syncBtn.addEventListener('click', performSync);
 
   // Settings
   el.settingsBtn.addEventListener('click', openSettings);
+  el.regBannerBtn?.addEventListener('click', () => {
+    openSettings();
+    el.stRegEmail?.focus();
+  });
   el.settingsClose.addEventListener('click', closeSettings);
   el.stSave.addEventListener('click', saveSettings);
+  el.stClearAttendanceCache.addEventListener('click', clearLocalAttendanceCache);
+  el.messageCancel.addEventListener('click', () => closeMessageDialog(false));
+  el.messageClose.addEventListener('click', () => closeMessageDialog(false));
+  el.messageConfirm.addEventListener('click', () => closeMessageDialog(true));
+  el.messageOverlay.addEventListener('click', e => {
+    if (e.target === el.messageOverlay) closeMessageDialog(false);
+  });
+  el.messageOverlay.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      closeMessageDialog(false);
+      return;
+    }
+    if (e.key !== 'Tab') return;
+    const focusable = messageDialogFocusableButtons();
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  });
+  el.maintenanceConfirmCancel.addEventListener('click', () => closeMaintenanceConfirm(false));
+  el.maintenanceConfirmClose.addEventListener('click', () => closeMaintenanceConfirm(false));
+  el.maintenanceConfirmContinue.addEventListener('click', () => {
+    if (maintenanceConfirmStep < 3) {
+      maintenanceConfirmStep += 1;
+      renderMaintenanceConfirmStep();
+      el.maintenanceConfirmContinue.focus();
+      return;
+    }
+    closeMaintenanceConfirm(true);
+  });
+  el.maintenanceConfirmOverlay.addEventListener('click', e => {
+    if (e.target === el.maintenanceConfirmOverlay) closeMaintenanceConfirm(false);
+  });
+  el.maintenanceConfirmOverlay.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      closeMaintenanceConfirm(false);
+      return;
+    }
+    if (e.key !== 'Tab') return;
+    const focusable = [...el.maintenanceConfirmDialog.querySelectorAll('button:not([disabled])')];
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  });
+  el.stRegister.addEventListener('click', registerKiosk);
+  el.stRegPassword.addEventListener('keydown', e => { if (e.key === 'Enter') registerKiosk(); });
+  el.stUnregister.addEventListener('click', unregisterKiosk);
   el.stStartBridge.addEventListener('click', async () => {
     const result = await api.startBridge();
     await refreshStats();
@@ -1607,11 +2606,20 @@ function bindEvents() {
     scheduleReset();
     setTimeout(() => { el.stTestScanner.textContent = 'Test Scanner'; }, 3000);
   });
-  el.stOpenStore.addEventListener('click', () => api.openStore());
 
   // Exit
-  el.exitBtn.addEventListener('click', () => {
-    if (confirm('Close the attendance kiosk?')) api.exit();
+  el.exitBtn.addEventListener('click', async () => {
+    const confirmed = await showMessageDialog({
+      tone: 'danger',
+      eyebrow: 'Secure Session',
+      title: 'Exit attendance kiosk?',
+      message: 'Attendance capture will stop on this terminal until the kiosk is started again.',
+      detail: 'Employees will not be able to record fingerprint, camera, or authorized code punches on this device.',
+      confirmLabel: 'Exit Kiosk',
+      cancelLabel: 'Cancel',
+      showCancel: true,
+    });
+    if (confirmed) api.exit();
   });
 
   // Directory search
@@ -1620,7 +2628,7 @@ function bindEvents() {
   // Keyboard shortcuts
   document.addEventListener('keydown', e => {
     if (el.settingsOverlay.classList.contains('hidden')) {
-      if (e.key === 'F1') { e.preventDefault(); setMode(MODE.CODE); }
+      if (e.key === 'F1' && kioskState?.terminal?.allowCodeOnlyPunch) { e.preventDefault(); setMode(MODE.CODE); }
       if (e.key === 'F2') { e.preventDefault(); setMode(MODE.FP); }
       if (e.key === 'F3') { e.preventDefault(); setMode(MODE.CAM); }
       if (e.key === 'F5') { e.preventDefault(); performSync(); }
@@ -1645,6 +2653,7 @@ function bindEvents() {
     // Refresh state after auto-sync
     api.getState().then(s => {
       kioskState = s;
+      applyModeSecurity();
       refreshTodayFeed();
       renderDirectory(el.dirSearch.value);
     }).catch(() => {});
@@ -1668,6 +2677,11 @@ function esc(v) {
   }[c]));
 }
 
+function safeImageUrl(value) {
+  const url = String(value || '');
+  return /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/i.test(url) && url.length <= 700000 ? url : '';
+}
+
 function todayStr() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -1684,9 +2698,11 @@ async function boot() {
 
   try {
     kioskState = await api.getState();
+    updateRegistrationBanner();
 
     // Terminal info
-    el.terminalLine.textContent = `${kioskState.terminal.location} · ${kioskState.terminal.id}`;
+    const branchName = kioskState.assignedBranch?.name || 'Branch not assigned';
+    el.terminalLine.textContent = `${branchName} · ${kioskState.terminal.location} · ${kioskState.terminal.id}`;
 
     // Initial UI
     setPill(el.pillBridge, kioskState.bridgeRunning ? 'online' : 'offline');
@@ -1697,7 +2713,8 @@ async function boot() {
     renderDirectory('');
     renderEventLog();
     resetFingerprintPreview();
-    setMode(MODE.CODE);
+    applyModeSecurity();
+    setMode(MODE.FP);
 
     // Kick off initial sync
     performSync().catch(() => {});
@@ -1706,10 +2723,8 @@ async function boot() {
     setInterval(refreshStats, 30000);
 
   } catch (err) {
-    showResult('err', 'Startup Error', err.message || 'Failed to load kiosk state. Restart the terminal.');
+    showResult('err', 'Startup Error', 'Failed to load kiosk state. Restart the terminal.');
   }
 }
 
 boot();
-
-

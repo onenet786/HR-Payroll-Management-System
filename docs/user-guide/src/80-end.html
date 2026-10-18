@@ -1,0 +1,121 @@
+
+<div class="part"><div class="label">PART H</div><div class="title">Looking after your data</div>
+<div class="lead">Backups and restoring. For administrators only.</div></div>
+
+<h2 id="backup"><span class="num">H1</span>Data Backup</h2>
+<figure><img src="shots/60-backup.png"><figcaption><b>Database Backup &amp; Restore.</b></figcaption></figure>
+<h3>Make a backup (do this at least weekly, and before any big change)</h3>
+<ol class="steps">
+  <li>Open <span class="ui">Data Backup</span> (under SYSTEM).</li>
+  <li>Click <span class="ui">Backup All Data</span>. A file named <i>database-backup-…-full.json</i> is downloaded.</li>
+  <li>Store it somewhere safe and private (for example an encrypted company drive), because it contains salaries and CNICs.</li>
+</ol>
+<p>To back up only some lists, tick them in <b>Collections</b> (or use the Operational / All / None buttons) and click <span class="ui">Backup Selected Collections</span>.</p>
+<div class="box note"><span class="t">Good to know</span><p>This screen backs up the main lists (employees, attendance, leave, loans, payroll runs and so on). Your IT person should also keep full server backups of the database, which include everything (payslips, approval history, audit log).</p></div>
+<h3>Restore from a backup</h3>
+<ol class="steps">
+  <li>Click <span class="ui">Choose Backup File</span> and pick the backup file.</li>
+  <li>Tick the lists to restore. Tick <span class="ui">Merge backup without deleting current documents first</span> if you only want to add back missing items.</li>
+  <li>Type the word <b>RESTORE</b> in the confirmation box and click <span class="ui">Restore Backup</span>.</li>
+</ol>
+<div class="box danger"><span class="t">Warning — Clear and Delete buttons</span><p><span class="ui">Clear Operational Data</span> (type CLEANUP) and <span class="ui">Delete Selected Collections</span> (type DELETE) remove data permanently. A safety backup is taken first, but only use these with your IT person, for example when removing test data before going live. Payroll runs, payslips and approval records can never be deleted.</p></div>
+
+<div class="part"><div class="label">PART I</div><div class="title">Help &amp; answers</div>
+<div class="lead">Quick answers to common questions and problems, and the meaning of words used in this guide.</div></div>
+
+<h2 id="faq"><span class="num">I1</span>Frequently asked questions</h2>
+<h4>I changed a tax rate but payroll still uses the old one.</h4>
+<p>Rate changes are proposals until a second person approves them in 1. Statutory Config (section B1).</p>
+<h4>The Approve button is grey.</h4>
+<p>You prepared this item, so someone else must approve it. Move the mouse over the button to read why.</p>
+<h4>Payroll says the register must be locked, but I locked it.</h4>
+<p>Something changed after locking (new attendance, leave, a holiday). Click Reopen Register, give the reason, check, and lock again.</p>
+<h4>An employee is missing from payroll.</h4>
+<p>Only Active and On-Leave employees are included. Check their status, and that their joining date is before the month ends.</p>
+<h4>An employee's tax looks wrong.</h4>
+<p>Check the tax slabs (rates typed as percentages, e.g. 11 for 11%), the tax year and effective date, the employee's prior-employer income and tax (for mid-year joiners), and their perquisites. Use the payslip's tax panel (taxable income so far, projected yearly income) to follow the calculation.</p>
+<h4>A kiosk does not recognise someone.</h4>
+<p>Check the face box label (section G4). Most often the face needs enrolling again (section D2), the kiosk needs a Sync, or the light is poor.</p>
+<h4>Two people were recognised as the same person.</h4>
+<p>This was a problem with the old face method and is fixed by the October 2026 upgrade. Make sure every kiosk runs version 1.0.2 or later and that every face has been enrolled again.</p>
+<h4>An employee cannot see the Attend tab in the app.</h4>
+<p>Phone attendance needs a mobile-duty assignment for that day (section D3). On normal days they use the kiosk.</p>
+<h4>An employee cannot see their payslip in the app.</h4>
+<p>Payslips appear only after the month's payroll is marked <b>Disbursed</b>, and only if their login is linked to their employee record.</p>
+<h4>Someone forgot their password.</h4>
+<p>An administrator resets it in User Management → Edit → Reset password, after confirming their identity (section B5).</p>
+<h4>Someone lost the phone with their authenticator app.</h4>
+<p>Two administrators reset their MFA in User Management → MFA recovery requests (section B5). Then the person sets it up again.</p>
+<h4>How do I give a new employee a mobile login?</h4>
+<p>Add them in 3. Employee Directory, then in User Management create a login with role Employee and link it to their name (section B5).</p>
+<h4>Where do I change working hours, Ramadan or Friday timings?</h4>
+<p>On each employee's record (3. Employee Directory → Edit Record). Enter Ramadan dates every year.</p>
+<h4>Can I import employees from Excel?</h4>
+<p>Not at present; employees are added one by one with Onboard Employee.</p>
+
+<h2 id="troubleshooting"><span class="num">I2</span>Common messages and what to do</h2>
+<table>
+<tr><th style="width:44%">Message</th><th>Meaning and action</th></tr>
+<tr><td><span class="msg">Your secure session expired. Please sign in again.</span></td><td>You were inactive too long. Sign in again.</td></tr>
+<tr><td><span class="msg">Access Denied</span></td><td>Your role does not include this page. Ask your administrator.</td></tr>
+<tr><td><span class="msg">Maker-checker control: …</span></td><td>You cannot approve your own work, or the item was already decided. Ask a colleague.</td></tr>
+<tr><td><span class="msg">Kindly fill in all required fields.</span></td><td>A required box (marked *) is empty.</td></tr>
+<tr><td><span class="msg">CNIC format must be valid (e.g. 42101-1234567-3)</span></td><td>Type the 13 CNIC digits.</td></tr>
+<tr><td><span class="msg">Mobile Contact must start with +923…</span></td><td>Type the mobile as +923XXXXXXXXX.</td></tr>
+<tr><td><span class="msg">Employee code must start with … (company prefix).</span></td><td>Tick Auto, or start the code with your company prefix.</td></tr>
+<tr><td><span class="msg">IBAN must be a valid 24-character Pakistan IBAN.</span></td><td>Copy the IBAN from the bank letter — PK + 22 characters.</td></tr>
+<tr><td><span class="msg">Approval blocked: … leave balance …</span></td><td>Not enough leave days. Record the extra as Unpaid leave.</td></tr>
+<tr><td><span class="msg">Attendance period cannot be locked: N exception(s) require review.</span></td><td>Clear the review box in 7. Attendance.</td></tr>
+<tr><td><span class="msg">Payroll refused: …</span></td><td>See the table in section E4, step 3.</td></tr>
+<tr><td><span class="msg">Configure a bank file template in Statutory Config first.</span></td><td>Set up your bank's file layout (section B1).</td></tr>
+<tr><td><span class="msg">Sync Warning</span> in the top bar</td><td>Some data did not load. Refresh the page; if it continues, tell your IT person.</td></tr>
+<tr><td><span class="msg">Allow pop-ups to open the printable document.</span></td><td>Allow pop-ups for this site in your browser, then click again.</td></tr>
+</table>
+
+<h2 id="routines"><span class="num">I3</span>Routines at a glance</h2>
+<h4>Every day</h4>
+<ul class="checklist"><li>Check the dashboard's Manager Approval Inbox and Compliance alerts.</li><li>Decide attendance corrections and leave requests.</li><li>Check that each kiosk's Online and Synced lights are green.</li></ul>
+<h4>Every month</h4>
+<ul class="checklist"><li>Follow the month-end checklist (section E1).</li><li>File FBR, EOBI and social-security returns; record the FBR CPR.</li><li>Make a backup (section H1).</li></ul>
+<h4>Every year</h4>
+<ul class="checklist"><li>Before July payroll: new tax year, tax slabs and rates — proposed and approved (section B1).</li><li>Add next year's public holidays, including Eid dates when announced (section B4).</li><li>Update Ramadan dates on employee records.</li><li>Issue section 149 salary tax certificates (section E4).</li></ul>
+<h4>When people join or leave</h4>
+<ul class="checklist"><li>Joiner: add the employee, enroll face/fingerprint, create a mobile login if needed, complete the onboarding checklist.</li><li>Leaver: Trigger Exit → second-person approval → collect assets → process and pay the settlement → switch their login to Inactive.</li></ul>
+
+<h2 id="glossary"><span class="num">I4</span>Words used in this guide</h2>
+<table>
+<tr><th style="width:26%">Word</th><th>Meaning</th></tr>
+<tr><td>Approve / maker-checker</td><td>One person prepares a change, a different person checks and approves it.</td></tr>
+<tr><td>Attendance register</td><td>The day-by-day record of each employee for a month, used by payroll.</td></tr>
+<tr><td>Lock (certify) register</td><td>Freeze a month's attendance so payroll can use it and nobody can change it silently.</td></tr>
+<tr><td>Payroll run</td><td>The salary calculation for all employees for one month.</td></tr>
+<tr><td>Draft / Approved / Disbursed</td><td>A payroll run that is prepared / checked by a second person / actually paid.</td></tr>
+<tr><td>Bank advice / bank file</td><td>The list of salary payments uploaded to the bank's portal.</td></tr>
+<tr><td>Punch</td><td>Recording arrival (IN) or departure (OUT).</td></tr>
+<tr><td>Kiosk</td><td>A PC or tablet at the entrance where employees punch with face or fingerprint.</td></tr>
+<tr><td>Liveness check</td><td>Turning the head left and right so the system knows a real person is present, not a photo.</td></tr>
+<tr><td>Enroll</td><td>Saving someone's face or fingerprint so they can be recognised.</td></tr>
+<tr><td>Sync</td><td>The kiosk exchanging data with the server.</td></tr>
+<tr><td>Geofence</td><td>The area around a branch where phone punches count as on-site.</td></tr>
+<tr><td>Mobile duty</td><td>Permission for an employee to punch from their phone on given dates.</td></tr>
+<tr><td>Regularization</td><td>A request to correct a missed or wrong punch.</td></tr>
+<tr><td>MFA / two-step verification</td><td>Signing in with a password plus a 6-digit code from your phone or email.</td></tr>
+<tr><td>CNIC</td><td>Computerised National Identity Card number (13 digits).</td></tr>
+<tr><td>NTN</td><td>National Tax Number from FBR.</td></tr>
+<tr><td>IBAN</td><td>International bank account number — 24 characters starting with PK.</td></tr>
+<tr><td>EOBI</td><td>Employees' Old-Age Benefits Institution — pension contributions (employee 1%, employer 5% of the minimum wage, by default).</td></tr>
+<tr><td>PESSI / SESSI / provincial social security</td><td>Provincial employee social-security contributions (Punjab, Sindh, KP, Balochistan, ICT).</td></tr>
+<tr><td>FBR</td><td>Federal Board of Revenue — income tax.</td></tr>
+<tr><td>CPR / PSID</td><td>Payment receipt number for tax deposited with FBR.</td></tr>
+<tr><td>Section 149 certificate</td><td>The yearly certificate of salary and tax deducted, given to each employee.</td></tr>
+<tr><td>Gratuity</td><td>A lump sum paid when an employee leaves, based on years of service.</td></tr>
+<tr><td>Final settlement</td><td>Everything owed to a leaving employee: gratuity, leave encashment, notice pay, pending salary, minus loans.</td></tr>
+<tr><td>Arrears</td><td>Money owed for past months (for example a back-dated increase), paid in the current month.</td></tr>
+<tr><td>Provident fund (PF)</td><td>Savings fund; employee and employer each contribute a percentage of basic pay.</td></tr>
+<tr><td>Perquisite</td><td>A taxable benefit such as a company car or accommodation.</td></tr>
+</table>
+
+<div class="box note" style="margin-top:16pt"><span class="t">About this guide</span>
+<p>Edition 17-Oct-2026, written for the web portal, mobile app and kiosk version 1.0.2 and later. The screenshots show an imaginary company with made-up people and amounts. If a screen looks different from this guide, your system may be newer — ask your administrator for the latest edition.</p></div>
+</body>
+</html>

@@ -44,3 +44,158 @@
     opacity: 1;
   }
 }
+
+/* ── Kiosk-Matched Web Enrollment Camera View ── */
+.enroll-camera-box {
+  position: relative;
+  width: min(100%, 640px);
+  aspect-ratio: 4 / 3;
+  margin: 0 auto;
+  border-radius: 1rem;
+  overflow: hidden;
+  background: #000;
+  border: 1px solid #334155;
+  box-shadow: 0 12px 30px -6px rgba(0, 0, 0, 0.6), 0 4px 12px -2px rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.enroll-cam-hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.enroll-cam-source-badge {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.65);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  color: #6ee7b7;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 14px;
+  border-radius: 20px;
+  border: 1px solid rgba(52, 211, 153, 0.35);
+  letter-spacing: 0.08em;
+  z-index: 10;
+}
+
+.enroll-cam-face-guide {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 47%;
+  height: 80%;
+  border: 2px solid rgba(52, 211, 153, 0.92);
+  border-radius: 50%;
+  box-shadow: 0 0 0 999px rgba(2, 6, 23, 0.36), 0 0 28px rgba(52, 211, 153, 0.26);
+  pointer-events: none;
+}
+
+.enroll-cam-face-guide::before,
+.enroll-cam-face-guide::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  height: 1px;
+  background: rgba(167, 243, 208, 0.82);
+}
+
+.enroll-cam-face-guide::before {
+  top: 38%;
+  width: 58%;
+}
+
+.enroll-cam-face-guide::after {
+  bottom: 24%;
+  width: 34%;
+}
+
+.enroll-cam-status {
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  background: rgba(2, 6, 23, 0.85);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(52, 211, 153, 0.28);
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #cbd5e1;
+  white-space: nowrap;
+  letter-spacing: 0.03em;
+  pointer-events: none;
+  z-index: 20;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+}
+
+.enroll-liveness-rail {
+  width: min(100%, 640px);
+  margin: 12px auto 0;
+  border: 1px solid #334155;
+  background: #071525;
+  padding: 12px 16px;
+  color: #dbeafe;
+  border-radius: 12px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+}
+
+.enroll-liveness-kicker {
+  color: #fbbf24;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.enroll-liveness-action {
+  margin: 6px 0 10px;
+  font-size: 18px;
+  line-height: 1.25;
+  font-weight: 900;
+  color: #ffffff;
+}
+
+.enroll-liveness-steps {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+}
+
+.enroll-liveness-steps span {
+  padding: 6px 4px;
+  border: 1px solid #334155;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 800;
+  color: #64748b;
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.6);
+  transition: all 0.2s ease;
+}
+
+.enroll-liveness-steps span.current {
+  border-color: #f59e0b;
+  background: #78350f;
+  color: #fef3c7;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.4);
+}
+
+.enroll-liveness-steps span.done {
+  border-color: #10b981;
+  background: #064e3b;
+  color: #d1fae5;
+}

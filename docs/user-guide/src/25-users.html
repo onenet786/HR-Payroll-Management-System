@@ -1,0 +1,52 @@
+
+<h2 id="users"><span class="num">B5</span>Logins, roles and kiosks — User Management</h2>
+<p>Here you create a login for each person, decide what each role may do, reset passwords, approve two-step-verification resets and manage attendance kiosks. Only people with the "Users &amp; roles" permission can open this page.</p>
+
+<h3>Create a login for a person</h3>
+<figure><img src="shots/61b-kiosk-terminals.png"><figcaption><b>User Management.</b> Kiosk terminals at the top, the Roles &amp; permissions table, the user list, and <b>Onboard System User</b> on the right.</figcaption></figure>
+<ol class="steps">
+  <li>In <span class="ui">ONBOARD SYSTEM USER</span> fill <span class="ui">USERNAME</span> (for example <i>ayesha.hr</i>), <span class="ui">EMAIL</span> and <span class="ui">PASSWORD</span> (at least 12 characters).</li>
+  <li>Choose the role in <span class="ui">ASSIGN INITIAL ROLE</span>.</li>
+  <li>For an <b>employee who will use the mobile app</b>, choose their name in <span class="ui">LINK EMPLOYEE (REQUIRED FOR MOBILE)</span>. Each employee can be linked to only one login. (Add the employee in 3. Employee Directory first.)</li>
+  <li>Click <span class="ui">Create Account</span>. Give the person their email and password privately and ask them to set up two-step verification after their first sign-in.</li>
+</ol>
+<div class="box note"><span class="t">Good to know</span><p>Passwords are stored in scrambled (encrypted) form. Nobody — not even the administrator — can read a person's password. If it is forgotten, set a new one as shown below.</p></div>
+
+<h3>Change a login or reset a password</h3>
+<figure><img src="shots/61e-edit-user.png"><figcaption><b>Edit User Account</b> — change role, switch the account off, link an employee or reset the password.</figcaption></figure>
+<ol class="steps">
+  <li>In the user list, click <span class="ui">Edit</span> next to the person.</li>
+  <li>Change <span class="ui">Username</span>, <span class="ui">Role</span>, <span class="ui">Account Status</span> (Inactive stops the person signing in) or <span class="ui">Linked Employee</span>. The email cannot be changed.</li>
+  <li><b>To reset a forgotten password:</b> first confirm the person's identity (in person or by a call to their known number). Then type a new password of at least 12 characters in <span class="ui">Reset password (optional)</span>. Leave it empty to keep the current password.</li>
+  <li>Click <span class="ui">Save User</span>. After a password reset the person is signed out everywhere and must sign in with the new password.</li>
+</ol>
+<div class="box danger"><span class="t">Warning — Delete data</span><p><span class="ui">Delete data</span> permanently removes the login <b>and</b> the linked employee's personal records (attendance, leave, loans, reviews, settlements, profile, fingerprints). Payslips are kept but names, CNIC and bank details are replaced by "[REDACTED]". Use it only when the law or the person requires their data to be erased. To stop someone signing in, set <b>Account Status</b> to <b>Inactive</b> instead.</p></div>
+
+<h3>Roles &amp; permissions</h3>
+<figure><img src="shots/61c-roles.png"><figcaption><b>Roles &amp; permissions.</b> Tick what each role may do. Grey rows are fixed.</figcaption></figure>
+<ul>
+  <li>Each row is a role; each column is a permission: Dashboard, Employees, Attendance, Mobile duty, Leaves, Payroll, Settings, Users &amp; roles, Use kiosk. Under each role you see how many users have it.</li>
+  <li>Tick or untick a box to change what <b>every</b> user with that role may do. People see the change the next time their page loads.</li>
+  <li><b>Super Admin</b>, <b>Employee</b> and <b>Kiosk Terminal</b> are fixed and cannot be changed.</li>
+  <li>You cannot remove "Users &amp; roles" from your own role (you would lock yourself out), and "Use kiosk" cannot be given to a staff role.</li>
+</ul>
+<p><b>Create a new role:</b> in <span class="ui">CREATE CUSTOM ROLE</span> type a name (for example "Auditor") and description, tick the permissions and click <span class="ui">Create Custom Role</span>. You can adjust it later in the table.</p>
+
+<h3>Attendance kiosks</h3>
+<p>Each kiosk PC or tablet signs in with its own <b>Kiosk Terminal</b> account. This account can only record attendance — it cannot open any other data.</p>
+<ol class="steps">
+  <li>Create a login with role <span class="ui">Kiosk Terminal</span> (for example username <i>kiosk.gate1</i>, email <i>kiosk.gate1@yourcompany.com</i>). Do not link an employee.</li>
+  <li>On the kiosk PC, open <b>Settings → Server Registration</b> and sign in once with that account (section G3). For a tablet, sign in to the mobile app with it (section G7).</li>
+  <li>The kiosk now appears under <span class="ui">KIOSK TERMINALS</span> with its last sync time.</li>
+  <li>If a kiosk is lost, stolen or replaced, click <span class="ui">Disconnect</span> next to it. It stops syncing immediately and must be registered again. Switching the kiosk account to Inactive disconnects every kiosk using it.</li>
+</ol>
+<div class="box important"><span class="t">Important</span><p>Never sign in to a kiosk with an administrator or HR account — the system refuses, because kiosks are shared machines.</p></div>
+
+<h3>Two-step verification (MFA) resets</h3>
+<p>Under <span class="ui">MFA recovery requests</span>:</p>
+<ol class="steps">
+  <li><b>To raise a request for someone who lost their phone:</b> choose them in <span class="ui">Select user for recovery</span>, type how you verified their identity (at least 10 characters) in <span class="ui">Identity-verification reason</span> and click <span class="ui">Request reset</span>.</li>
+  <li><b>A second administrator</b> reads the reason and clicks <span class="ui">Approve</span> or <span class="ui">Reject</span>. (The person who raised a request cannot decide it.)</li>
+  <li>After approval, the user's two-step verification is switched off, they are signed out everywhere, and they sign in with their password only. Ask them to set up MFA again immediately.</li>
+</ol>
+<div class="box tip"><span class="t">Tip — verify identity outside the system</span><p>Approve only after checking identity through another channel: a video call, meeting in person, or calling the phone number on their employee record.</p></div>
