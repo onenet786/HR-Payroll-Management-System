@@ -420,9 +420,24 @@ async function authorizeWrite(client, name, table, id, identity, existing, next)
       if (locked.rowCount) return false;
     }
   }
-  if ((name === 'attendances' || table === 'attendances') && next.method === 'Mobile GPS') {
-    const location = next.punchOutLocation || next.punchInLocation;
-    if (!validGpsEvidence(location)) return false;
+  // GPS evidence is checked when it is captured. A punch is written several times in a day (start, visits,
+  // finish, then the manager's decision), so only fixes added by this write must be fresh; fixes already on the
+  // record are history and may not be replaced. Saves that add no fix (e.g. an approval) skip re-evaluation.
+  const gpsFixes = record => [
+    record?.punchInLocation, record?.punchOutLocation,
+    ...(record?.fieldVisits || []).flatMap(visit => [visit?.checkInLocation, visit?.checkOutLocation]),
+  ];
+  const addedFixes = next.method === 'Mobile GPS' ? (() => {
+    const before = gpsFixes(existing?.data);
+    const keyOf = (record, index) => index < 2 ? index : `v${record?.fieldVisits?.[Math.floor((index - 2) / 2)]?.id}-${index % 2}`;
+    const beforeByKey = new Map(before.map((fix, index) => [keyOf(existing?.data, index), fix]));
+    return gpsFixes(next).map((fix, index) => ({ fix, was: beforeByKey.get(keyOf(next, index)) })).filter(item => item.fix && !sameJson(item.fix, item.was));
+  })() : [];
+  if ((name === 'attendances' || table === 'attendances') && next.method === 'Mobile GPS' && existing
+    && addedFixes.some(item => item.was)) return false;
+  if ((name === 'attendances' || table === 'attendances') && next.method === 'Mobile GPS' && (!existing || addedFixes.length)) {
+    if (!addedFixes.length || !addedFixes.every(item => validGpsEvidence(item.fix))) return false;
+    const location = addedFixes[addedFixes.length - 1].fix;
     const travel = impossibleTravel([next.punchInLocation, ...(next.fieldVisits || []).flatMap(visit => [visit.checkInLocation, visit.checkOutLocation]), next.punchOutLocation]);
     if (travel && existing?.data?.regularizationApproved === undefined) {
       next.locationRisk = travel;
@@ -696,6 +711,15 @@ router.delete('/:collection/:id', async (req, res, next) => {
       if (locked.rowCount) return res.status(403).json({ error: 'Leave in a locked payroll month cannot be deleted.' });
     }
     if (table === 'payroll_adjustments' && row.data?.payrollRunId) return res.status(403).json({ error: 'An adjustment already paid in a payroll run cannot be deleted.' });
+    if (table === 'salary_revisions' && row.data?.status === 'Approved') return res.status(403).json({ error: 'An approved salary revision is pay history and cannot be deleted.' });
+    if (table === 'gratuity_settlements' && ['Processed', 'Paid'].includes(row.data?.status)) return res.status(403).json({ error: 'A processed or paid settlement cannot be deleted.' });
+    if (table === 'users') {
+      if (id === req.identity.uid) return res.status(403).json({ error: 'You cannot delete your own account.' });
+      if (row.data?.roleId === 'role-admin') {
+        const admins = await pool.query(`SELECT count(*)::int AS n FROM users WHERE data->>'roleId'='role-admin' AND COALESCE(data->>'status','Active')='Active' AND id<>$1`, [id]);
+        if (admins.rows[0].n === 0) return res.status(403).json({ error: 'The last active Super Admin cannot be deleted.' });
+      }
+    }
     if (table === 'tax_slabs') {
       const latest = await pool.query(`SELECT data FROM statutory_change_requests WHERE status='Approved' AND data->>'reviewedById'=$1 ORDER BY updated_at DESC LIMIT 1`, [req.identity.uid]);
       const approved = latest.rows[0]?.data;

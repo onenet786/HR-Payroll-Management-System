@@ -364,7 +364,8 @@ export function FirestoreMaintenanceModule() {
         const availableCollections = Object.keys(parsed.collections ?? {}) as CollectionKey[];
         setRestoreFile(parsed);
         setRestoreFileName(file.name);
-        setRestoreCollections(availableCollections);
+        // Operational data only by default; accounts, roles and settings must be chosen deliberately.
+        setRestoreCollections(availableCollections.filter(name => OPERATIONAL_COLLECTIONS.includes(name)));
         setStatus(`Backup loaded: ${file.name}`);
       } catch (error) {
         setStatus('Invalid backup file.');
@@ -390,7 +391,9 @@ export function FirestoreMaintenanceModule() {
       const refusedNotes: string[] = [];
       for (const collectionName of restoreCollections) {
         const documents = restoreFile.collections[collectionName] ?? [];
-        if (!mergeRestore) {
+        // Set-up and security collections are only ever merged: backups carry no password hashes, so deleting
+        // and re-creating users would lock everybody out.
+        if (!mergeRestore && !REQUIRED_COLLECTIONS.includes(collectionName)) {
           await deleteCollection(collectionName);
         }
         clearLocalCache([collectionName]);

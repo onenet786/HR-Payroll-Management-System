@@ -285,6 +285,41 @@ test('evidence of a locked month and paid adjustments cannot be deleted', async 
   assert.equal(await del('u-maker', 'leaves', 'del-leave'), 403);
   assert.equal(await del('u-maker', 'payrollAdjustments', 'del-adj'), 403);
   assert.equal(await del('u-maker', 'attendances', 'del-open'), 204);
+  await seed('salary_revisions', 'del-rev', { employeeId: 'e1', previousSalary: 1, newSalary: 2, status: 'Approved' }, { employee_id: 'e1', status: 'Approved' });
+  assert.equal(await del('u-maker', 'salaryRevisions', 'del-rev'), 403, 'approved revision is pay history');
   assert.equal(await put('u-hr', 'attendances', 'new-in-locked', { employeeId: 'e1', date: '2025-03-06', status: 'Present', method: 'Biometric', punchIn: '09:00', punchOut: '17:00', overtimeMinutes: 0 }), 403, 'no new attendance in a locked month');
   await pool.query(`DELETE FROM attendance_periods`);
+});
+
+test('nobody can delete their own account or the last Super Admin', async () => {
+  await seed('roles', 'role-admin', { name: 'Super Admin', permissions: ['manage_access'] });
+  await seed('roles', 'role-access', { name: 'Access', permissions: ['manage_access'] });
+  await seed('users', 'u-root', { username: 'root', roleId: 'role-admin', status: 'Active' });
+  await seed('users', 'u-access', { username: 'access', roleId: 'role-access', status: 'Active' });
+  await seed('users', 'u-spare', { username: 'spare', roleId: 'role-access', status: 'Active' });
+  assert.equal(await del('u-access', 'users', 'u-access'), 403, 'own account');
+  assert.equal(await del('u-access', 'users', 'u-root'), 403, 'last Super Admin');
+  assert.equal(await del('u-access', 'users', 'u-spare'), 204);
+  await pool.query(`DELETE FROM users WHERE id IN ('u-root','u-access') `);
+  await pool.query(`DELETE FROM roles WHERE id IN ('role-admin','role-access')`);
+});
+
+test('an off-site GPS punch can still be visited, completed and approved hours later', async () => {
+  await pool.query(`UPDATE branches SET data = data || '{"geofenceLatitude":31.52,"geofenceLongitude":74.35,"geofenceRadiusMeters":200}'::jsonb WHERE id='b1'`);
+  const at = (minutesAgo, lat) => ({ latitude: lat, longitude: 74.36, accuracyMeters: 12, capturedAt: new Date(Date.now() - minutesAgo * 60_000).toISOString(), source: 'device-gps' });
+  const punch = { employeeId: 'e1', date: '2026-11-20', method: 'Mobile GPS', status: 'Present', punchIn: '09:00:00', overtimeMinutes: 0, punchInLocation: at(0, 31.56) };
+  assert.equal(await put('u-hr', 'attendances', 'gps-1', punch), 200);
+  assert.equal((await current('attendances', 'gps-1')).geofenceStatus, 'authorized-offsite');
+  // Two hours later: the morning fix is old, the visit's fix is fresh.
+  await pool.query(`UPDATE attendances SET data = jsonb_set(data, '{punchInLocation,capturedAt}', to_jsonb($1::text)) WHERE id='gps-1'`, [new Date(Date.now() - 120 * 60_000).toISOString()]);
+  const morning = await current('attendances', 'gps-1');
+  const visit = { id: 'v1', clientName: 'Shop 1', checkIn: '11:00:00', checkInReasonCategory: 'Client visit', checkInReasonNote: 'Order', checkInLocation: at(0, 31.561), method: 'Mobile GPS', verificationMethod: 'Camera' };
+  assert.equal(await put('u-hr', 'attendances', 'gps-1', { ...morning, fieldVisits: [visit] }), 200, 'visit check-in with a fresh fix');
+  assert.equal(await put('u-hr', 'attendances', 'gps-1', { ...morning, fieldVisits: [visit], punchInLocation: at(0, 31.6) }), 403, 'the morning fix cannot be replaced');
+  const withVisit = await current('attendances', 'gps-1');
+  await pool.query(`UPDATE attendances SET data = jsonb_set(data, '{fieldVisits,0,checkInLocation,capturedAt}', to_jsonb($1::text)) WHERE id='gps-1'`, [new Date(Date.now() - 60 * 60_000).toISOString()]);
+  const later = await current('attendances', 'gps-1');
+  assert.equal(await put('u-mgr', 'attendances', 'gps-1', { ...later, regularizationApproved: true, reviewedById: 'u-mgr', reviewedAt: new Date().toISOString(), reviewComment: 'Confirmed client visit' }), 200, 'manager approves without new GPS evidence');
+  assert.equal((await current('attendances', 'gps-1')).regularizationApproved, true);
+  assert.ok(withVisit.fieldVisits.length === 1);
 });
