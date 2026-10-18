@@ -4671,7 +4671,9 @@ export function WebPortal({
                           </div>
                           <div>
                             <label htmlFor="roleId" className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Assign Initial Role:<RequiredMark /></label>
-                            <select id="roleId" name="roleId" required aria-required="true" className="w-full text-xs p-2 bg-white border border-slate-300 rounded focus:ring-1">
+                            <select id="roleId" name="roleId" required aria-required="true" defaultValue="" className="w-full text-xs p-2 bg-white border border-slate-300 rounded focus:ring-1">
+                              {/* No default: the first role is Super Admin, which must never be granted by accident. */}
+                              <option value="" disabled>Select a role…</option>
                               {roles.map(r => (
                                 <option key={r.id} value={r.id}>{r.name}</option>
                               ))}

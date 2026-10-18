@@ -1771,10 +1771,19 @@ export default function App() {
     batch.set(doc(db, 'branches', payload.branch.id), cleanData(payload.branch), { merge: true });
     payload.departments.forEach(item => batch.set(doc(db, 'departments', item.id), cleanData(item), { merge: true }));
     payload.designations.forEach(item => batch.set(doc(db, 'designations', item.id), cleanData(item), { merge: true }));
-    batch.set(doc(db, 'statConfig', payload.statutoryConfig.id), cleanData(payload.statutoryConfig), { merge: true });
+    // Live statutory rates change only through maker-checker: written directly on first setup only; later
+    // edits made in this wizard become a statutory change proposal for another user to approve.
+    const firstSetup = !statConfig.id || !statConfig.effectiveFrom;
+    const statutoryChanges = firstSetup ? [] : statutoryChangedFields(statConfig, { ...payload.statutoryConfig, id: statConfig.id }, taxSlabs, taxSlabs);
+    if (firstSetup) batch.set(doc(db, 'statConfig', payload.statutoryConfig.id), cleanData(payload.statutoryConfig), { merge: true });
     await batch.commit();
+    if (statutoryChanges.length) {
+      await proposeStatutoryChange({ ...payload.statutoryConfig, id: statConfig.id }, taxSlabs);
+      alert(`Company details saved. Statutory changes (${statutoryChanges.join(', ')}) were submitted as a proposal; another authorized user must approve them under Statutory Config before payroll uses them.`);
+    }
 
-    setCompanies(nextCompanies); setBranches(nextBranches); setDepartments(nextDepartments); setDesignations(nextDesignations); setStatConfig(payload.statutoryConfig);
+    setCompanies(nextCompanies); setBranches(nextBranches); setDepartments(nextDepartments); setDesignations(nextDesignations);
+    if (firstSetup) setStatConfig(payload.statutoryConfig);
     const activeName = (payload.company?.legalName?.trim() || payload.company?.name?.trim());
     if (activeName) {
       setBrandTitle(activeName);
