@@ -11,8 +11,18 @@ let cropCanvas: HTMLCanvasElement | null = null;
 
 export interface FaceBox { x: number; y: number; width: number; height: number }
 
+const LOAD_TIMEOUT_MS = 120_000;
+
+/** A download that never finishes reports an error instead of leaving the camera screen loading forever. */
 export function loadFaceEmbedder(): Promise<FaceApi> {
-  loading ||= (async () => {
+  loading ||= Promise.race([loadModels(), new Promise<never>((_, reject) => setTimeout(() => reject(new Error(
+    'The face recognition model did not finish downloading. Check the internet connection and press Ctrl+F5 to reload, then try again.',
+  )), LOAD_TIMEOUT_MS))]).catch(error => { loading = null; throw error; });
+  return loading;
+}
+
+function loadModels(): Promise<FaceApi> {
+  return (async () => {
     const faceapi = await import('@vladmandic/face-api');
     // The bundled TensorFlow build exposes these at runtime but its type declarations omit them.
     const tf = faceapi.tf as unknown as { setBackend(name: string): Promise<boolean>; ready(): Promise<void> };
@@ -24,8 +34,13 @@ export function loadFaceEmbedder(): Promise<FaceApi> {
       faceapi.nets.faceRecognitionNet.loadFromUri(modelUrl()),
     ]);
     return faceapi;
-  })().catch(error => { loading = null; throw error; });
-  return loading;
+  })().catch(error => {
+    // Empty weights mean something between the server and the browser blocked the model files.
+    if (error instanceof Error && /tensor should have \d+ values but has/.test(error.message)) {
+      throw new Error('The face recognition model files were blocked or arrived empty. Press Ctrl+F5 to reload; if it persists, allow this site\'s /face-models/ files in the antivirus or proxy.');
+    }
+    throw error;
+  });
 }
 
 function cropAround(video: HTMLVideoElement, box?: FaceBox | null): HTMLCanvasElement {

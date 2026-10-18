@@ -685,6 +685,9 @@ export function BiometricDeviceModule({
   const startFaceCamera = useCallback(async () => {
     try {
       setFaceMsg(null);
+      // A retry must not leave the previous camera stream running.
+      faceStreamRef.current?.getTracks().forEach(track => track.stop());
+      faceStreamRef.current = null;
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
         audio: false,
@@ -1547,21 +1550,32 @@ export function BiometricDeviceModule({
               <div className="enroll-camera-box">
                 <video ref={faceVideoRef} className="w-full h-full object-cover scale-x-[-1]" playsInline muted />
                 {!faceCameraReady && (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-500 text-xs bg-slate-950/90 pointer-events-none">
-                    <VideoOff className="w-12 h-12 mb-2 text-slate-600" />
-                    <span className="font-semibold text-slate-400">Camera preview idle</span>
-                  </div>
+                  faceModelsLoading ? (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center text-xs bg-slate-950/40 pointer-events-none">
+                      <RefreshCw className="w-10 h-10 mb-2 text-emerald-300 animate-spin" />
+                      <span className="font-semibold text-emerald-100">Loading face recognition…</span>
+                    </div>
+                  ) : (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-500 text-xs bg-slate-950/90 pointer-events-none">
+                      <VideoOff className="w-12 h-12 mb-2 text-slate-600" />
+                      <span className="font-semibold text-slate-400">{faceStreamRef.current ? 'Face recognition is not ready' : 'Camera preview idle'}</span>
+                    </div>
+                  )
                 )}
                 <div className="enroll-cam-hud">
                   <div className="enroll-cam-source-badge">
-                    {faceCameraReady ? 'Webcam' : 'Camera Off'}
+                    {faceCameraReady ? 'Webcam' : faceModelsLoading ? 'Loading…' : faceStreamRef.current ? 'Not ready' : 'Camera Off'}
                   </div>
                   <div className="enroll-cam-face-guide"></div>
                   <div className="enroll-cam-status">
                     <span className={`w-2 h-2 rounded-full ${faceCameraReady ? (livenessBusy ? 'bg-amber-400 animate-ping' : 'bg-emerald-400 animate-pulse') : 'bg-slate-500'}`} />
                     <span>
                       {!faceCameraReady
-                        ? 'Camera is not showing a live frame yet. Click Start Camera.'
+                        ? (faceModelsLoading
+                          ? 'Camera is on. Loading face recognition (first time can take up to a minute)…'
+                          : faceStreamRef.current
+                          ? 'Face recognition did not load. See the message below, then click Start Camera again.'
+                          : 'Camera is not showing a live frame yet. Click Start Camera.')
                         : livenessBusy
                         ? (faceMsg?.text || (livenessPhase === 0 ? 'Center face inside oval' : livenessPhase === 1 ? `Turn head ${livenessOrder[0].toUpperCase()}` : livenessPhase === 2 ? 'Return to center' : livenessPhase === 3 ? `Turn head ${livenessOrder[1].toUpperCase()}` : 'Return to center'))
                         : 'Keep face centered inside the oval guide'}
