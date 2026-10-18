@@ -263,6 +263,8 @@ export function DeviceEmulator({
   if (isNativeMobileEmployee) {
     return (
       <MobileApp
+        notifications={notifications}
+        onMarkNotificationRead={onMarkNotificationRead}
         leaveConfig={statConfig}
         employees={employees}
         attendances={attendances}

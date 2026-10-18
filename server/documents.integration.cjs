@@ -15,7 +15,7 @@ const express = require('express');
 const { pool } = require('./db.cjs');
 const documentRoutes = require('./documents.cjs');
 
-const TABLES = ['company_assets', 'leaves', 'roles', 'users', 'companies', 'employees', 'branches', 'attendances', 'attendance_periods', 'payroll_runs', 'payroll_payslips', 'payroll_adjustments',
+const TABLES = ['notifications', 'company_assets', 'leaves', 'roles', 'users', 'companies', 'employees', 'branches', 'attendances', 'attendance_periods', 'payroll_runs', 'payroll_payslips', 'payroll_adjustments',
   'stat_config', 'tax_slabs', 'statutory_change_requests', 'lifecycle_requests', 'salary_revisions', 'gratuity_settlements', 'hr_audit_log'];
 const PERIOD = { month: 9, year: 2026, prefix: '2026-09', days: 30 };
 let server;
@@ -322,4 +322,19 @@ test('an off-site GPS punch can still be visited, completed and approved hours l
   assert.equal(await put('u-mgr', 'attendances', 'gps-1', { ...later, regularizationApproved: true, reviewedById: 'u-mgr', reviewedAt: new Date().toISOString(), reviewComment: 'Confirmed client visit' }), 200, 'manager approves without new GPS evidence');
   assert.equal((await current('attendances', 'gps-1')).regularizationApproved, true);
   assert.ok(withVisit.fieldVisits.length === 1);
+});
+
+test('employees see and mark their own and company-wide notifications only', async () => {
+  const note = (id, targetEmployeeId) => seed('notifications', id, { type: 'system', title: id, message: id, targetEmployeeId, readBy: [], createdAt: 'now', priority: 'low' });
+  await note('n-mine', 'e1'); await note('n-other', 'e-mgr'); await note('n-all', undefined);
+  const read = async (uid, path) => { const r = await fetch(`${base}/${path}`, { headers: { 'x-test-user': uid } }); return { status: r.status, body: await r.json().catch(() => ({})) }; };
+  const visible = (await read('u-emp', 'notifications')).body.documents.map(row => row.document_id).sort();
+  assert.deepEqual(visible, ['n-all', 'n-mine']);
+  assert.equal((await read('u-emp', 'notifications/n-mine')).status, 200);
+  assert.equal((await read('u-emp', 'notifications/n-other')).status, 403);
+  const mine = await current('notifications', 'n-mine');
+  assert.equal(await put('u-emp', 'notifications', 'n-mine', { ...mine, readBy: ['e1'] }), 200, 'mark own as read');
+  assert.equal(await put('u-emp', 'notifications', 'n-all', { ...(await current('notifications', 'n-all')), readBy: ['e1'] }), 200, 'mark broadcast as read');
+  assert.equal(await put('u-emp', 'notifications', 'n-other', { ...(await current('notifications', 'n-other')), readBy: ['e1'] }), 403, "not someone else's");
+  assert.equal(await put('u-emp', 'notifications', 'n-mine', { ...mine, readBy: ['e1'], title: 'changed' }), 403, 'only readBy may change');
 });

@@ -2062,7 +2062,10 @@ export function WebPortal({
     return { className: 'todo', statusText: 'next' };
   };
 
-  const unreadNotificationCount = notifications.filter(n => !n.readBy.includes(currentUserAccount?.employeeId || currentUserAccount?.username || '')).length;
+  // The bell counts what is addressed to this user (or to everyone); other employees' personal notices
+  // (e.g. "your salary was paid") stay in the Notification Center for HR but are not this user's to-do.
+  const readerKey = currentUserAccount?.employeeId || currentUserAccount?.username || '';
+  const unreadNotificationCount = notifications.filter(n => (!n.targetEmployeeId || n.targetEmployeeId === currentUserAccount?.employeeId) && !(n.readBy || []).includes(readerKey)).length;
 
   const searchFilteredPages = SEARCHABLE_PAGES.filter(p =>
     !searchQuery || p.label.toLowerCase().includes(searchQuery.toLowerCase()) || p.category.toLowerCase().includes(searchQuery.toLowerCase())

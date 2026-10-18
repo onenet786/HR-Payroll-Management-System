@@ -13,7 +13,7 @@ import { uploadEmployeeDocument } from '../utils/employeeDocuments';
 import { downloadPayslipPdf } from '../data/payslipPdf';
 import { leaveBalanceError, leaveBalances } from '../data/leavePolicy';
 import type { StatutoryConfig } from '../types';
-import { Employee, AttendanceLog, LeaveRequest, Payslip, PayrollRun, UserAccount, MobileAttendanceAction, MobilePunchDetails, MobileDutyAuthorization } from '../types';
+import { Employee, AttendanceLog, LeaveRequest, Payslip, PayrollRun, UserAccount, MobileAttendanceAction, MobilePunchDetails, MobileDutyAuthorization, AppNotification } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 import { assessBrowserFaceDetection, createFaceDescriptorFromVideo, findBestFaceMatch, hasFaceEnrollment, FACE_VERIFY_THRESHOLD } from '../utils/faceRecognition';
 import { performActiveLiveness, randomLivenessOrder } from '../utils/faceLiveness';
@@ -42,6 +42,8 @@ interface MobileAppProps {
   payrollPayslips?: Payslip[];
   leaveConfig?: Pick<StatutoryConfig, 'leaveEntitlements' | 'annualLeaveDaysPerYear'>;
   payrollRuns?: PayrollRun[];
+  notifications?: AppNotification[];
+  onMarkNotificationRead?: (id: string) => void;
 }
 
 type PunchStep = 'preview' | 'done';
@@ -80,7 +82,9 @@ export function MobileApp({
   onLogout,
   payrollPayslips = [],
   leaveConfig,
-  payrollRuns = []
+  payrollRuns = [],
+  notifications = [],
+  onMarkNotificationRead
 }: MobileAppProps) {
   const [mobileTab, setMobileTab] = useState<'home' | 'punch' | 'leave' | 'payslips'>('home');
   const [selectedPayslipId, setSelectedPayslipId] = useState('');
@@ -589,6 +593,30 @@ export function MobileApp({
                 </div>
               ))}
             </div>
+
+            {currentEmp && (() => {
+              // Leave decisions, salary payments and company notices addressed to this employee (or everyone).
+              const mine = notifications
+                .filter(item => !item.targetEmployeeId || item.targetEmployeeId === currentEmp.id)
+                .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
+                .slice(0, 5);
+              if (!mine.length) return null;
+              return <div className="rounded-2xl border border-slate-700 bg-slate-800/60 p-3 text-[10px]">
+                <div className="mb-2 font-bold uppercase tracking-wide text-slate-400">Notifications</div>
+                <div className="space-y-2">
+                  {mine.map(item => {
+                    const unread = !(item.readBy || []).includes(currentEmp.id);
+                    return <button key={item.id} type="button" onClick={() => unread && onMarkNotificationRead?.(item.id)}
+                      className={`block w-full rounded-xl p-2 text-left ${unread ? 'bg-emerald-500/10 ring-1 ring-emerald-500/40' : 'bg-slate-900/40'}`}>
+                      <div className="flex items-center gap-1.5 font-bold text-slate-100">{unread && <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />}{item.title}</div>
+                      <div className="mt-0.5 text-slate-300">{item.message}</div>
+                      {item.messageUrdu && <div dir="rtl" className="mt-0.5 text-slate-400">{item.messageUrdu}</div>}
+                      <div className="mt-0.5 text-[9px] text-slate-500">{String(item.createdAt).slice(0, 10)}</div>
+                    </button>;
+                  })}
+                </div>
+              </div>;
+            })()}
 
             {activeMobileDuty && <div className="rounded-2xl border border-indigo-500/30 bg-indigo-500/10 p-3 text-[10px] text-indigo-200">
               <div className="font-bold">Assigned Mobile Duty: {activeMobileDuty.dutyType}</div>

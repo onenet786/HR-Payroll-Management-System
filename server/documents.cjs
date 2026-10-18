@@ -136,6 +136,14 @@ async function validLockedRegister(client, id, next) {
 async function authorizeWrite(client, name, table, id, identity, existing, next) {
   const policy = policyFor(name);
   const employeeId = employeeIdOf(next) || (name === 'employees' || name === 'biometricTemplates' || table === 'employees' || table === 'biometric_templates' ? id : null);
+  // An employee may mark a notification addressed to them (or to everyone) as read, and change nothing else.
+  if ((name === 'notifications' || table === 'notifications') && existing && identity.employeeId && policy && !allowed(policy.write, identity, id, '__not_self__')) {
+    const before = existing.data;
+    const mine = [identity.employeeId, undefined, null, ''].includes(before.targetEmployeeId);
+    const added = (next.readBy || []).filter(item => !(before.readBy || []).includes(item));
+    return mine && onlyChanged(before, next, ['readBy']) && (before.readBy || []).every(item => (next.readBy || []).includes(item))
+      && added.length === 1 && added[0] === identity.employeeId;
+  }
   if (!policy || !allowed(policy.write, identity, id, employeeId)) return false;
   if ((name === 'attendancePeriods' || table === 'attendance_periods') && !existing) {
     if (!await validLockedRegister(client, id, next)) return false;
@@ -544,7 +552,11 @@ router.get('/:collection', async (req, res, next) => {
     if (!allowed(policy.read, req.identity, '', employeeFilter)) return res.status(403).json({ error: 'Insufficient permission.' });
     const params = [];
     let sql = `SELECT id AS document_id, data, version, updated_at FROM ${table}`;
-    if (employeeFilter) {
+    if (employeeFilter && table === 'notifications' && !canReadAll && !managedRead) {
+      // Notifications address their reader as targetEmployeeId; company-wide ones have none.
+      params.push(employeeFilter);
+      sql += ` WHERE (data->>'targetEmployeeId'=$1 OR COALESCE(data->>'targetEmployeeId','')='')`;
+    } else if (employeeFilter) {
       params.push(employeeFilter);
       sql += ` WHERE (employee_id=$1 OR data->>'employeeId'=$1)`;
       // Employees cannot read payroll runs, so the server releases their payslips only once salary is paid.
@@ -565,7 +577,9 @@ router.get('/:collection/:id', async (req, res, next) => {
     const result = await pool.query(`SELECT id AS document_id, employee_id, data, version, updated_at FROM ${table} WHERE id=$1`, [id]);
     const row = result.rows[0];
     if (!row) return res.status(404).json({ error: 'Resource not found.' });
-    if (!allowed(policy.read, req.identity, id, row.employee_id)) return res.status(403).json({ error: 'Insufficient permission.' });
+    const notificationReader = table === 'notifications' && req.identity.employeeId
+      && [req.identity.employeeId, undefined, null, ''].includes(row.data?.targetEmployeeId);
+    if (!notificationReader && !allowed(policy.read, req.identity, id, row.employee_id)) return res.status(403).json({ error: 'Insufficient permission.' });
     if (table === 'payroll_payslips' && !allowed(policy.read, req.identity, '', '__not_self__')) {
       const run = await pool.query(`SELECT status FROM payroll_runs WHERE id=$1`, [row.data?.payrollRunId || null]);
       if (run.rows[0]?.status !== 'Disbursed') return res.status(404).json({ error: 'Resource not found.' });
