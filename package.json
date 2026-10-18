@@ -19,6 +19,8 @@
     "docs:pdf": "node scripts/build-complete-pdf-guide.mjs",
     "postgres:migrate": "node scripts/postgres-migrate.cjs",
     "postgres:seed": "node scripts/seed-local-db.cjs",
+    "seed:demo": "node scripts/seed-demo-workflow.cjs",
+    "seed:demo:build": "esbuild scripts/seed-demo-workflow.ts --bundle --platform=node --target=node20 --format=cjs --external:pg --external:bcryptjs --external:dotenv --outfile=scripts/seed-demo-workflow.cjs",
     "postgres:backup": "node scripts/postgres-backup.cjs",
     "postgres:backup:verify": "node scripts/postgres-backup-verify.cjs",
     "postgres:restore": "node scripts/postgres-restore.cjs",
