@@ -3077,7 +3077,7 @@ export function WebPortal({
                                       {isRegularizationOverdue(att) ? 'OVERDUE — escalate to department head. ' : ''}Review due by {new Date(regularizationDueAt(att.requestedAt)!).toLocaleDateString('en-PK')}
                                     </p>}
                                     <p className="text-slate-550 italic bg-amber-50/50 p-2 rounded">
-                                      "Reason: {att.regularizationReason || 'Forgot card contact error'}"
+                                      "Reason: {att.regularizationReason || 'No reason given'}"
                                     </p>
                                     <div className="flex justify-end space-x-2 pt-2 border-t border-slate-100">
                                       <button 

@@ -244,7 +244,7 @@ export function KioskTerminal({
     const checkoutDetails: MobilePunchDetails | undefined = !isClockIn && confirmedOutReason
       ? { action: 'workday-out', reasonCategory: 'Kiosk checkout', reasonNote: confirmedOutReason, verificationMethod: 'Camera' }
       : undefined;
-    await onSimulatePunch(emp.id, isClockIn ? timeStr : '', isClockIn ? '' : timeStr, nativeMobileKiosk ? 'Mobile Kiosk' : punchMethod, undefined, undefined, undefined, undefined, undefined, checkoutDetails);
+    await onSimulatePunch(emp.id, isClockIn ? timeStr : '', isClockIn ? '' : timeStr, punchMethod === 'Manual' ? 'Manual' : nativeMobileKiosk ? 'Mobile Kiosk' : punchMethod, undefined, undefined, undefined, undefined, undefined, checkoutDetails);
     
     playPunchChime();
 
@@ -256,10 +256,10 @@ export function KioskTerminal({
     } else {
       setMatchedEmp(emp);
       setStatus('success');
-      setMessage(isClockIn 
+      setMessage((isClockIn
         ? `${isReturningFromTemporaryExit ? `Welcome back ${emp.fullName}! Return` : `Welcome ${emp.fullName}! Check-In`} registered at ${timeStr}.`
-        : `Goodbye ${emp.fullName}! Check-Out registered at ${timeStr}.`
-      );
+        : `Goodbye ${emp.fullName}! Check-Out registered at ${timeStr}.`)
+        + (punchMethod === 'Manual' ? ' Entered by code only, so a supervisor will review it. Use Face ID or fingerprint next time.' : ''));
 
       setTimeout(() => {
         setStatus('idle');
@@ -279,17 +279,24 @@ export function KioskTerminal({
     setTimeout(() => {
       const cleanInput = empIdInput.trim();
       const cleanDigits = cleanInput.replace(/\D/g, '');
-      const emp = employees.find(
-        e => (e.status ?? 'Active') === 'Active' && (
-          e.employeeCode.toUpperCase() === cleanInput.toUpperCase() ||
-          e.employeeCode.toLowerCase().endsWith(cleanInput.toLowerCase()) ||
-          (cleanDigits.length >= 5 && e.cnic && e.cnic.replace(/\D/g, '') === cleanDigits) ||
-          (e.email && e.email.toLowerCase() === cleanInput.toLowerCase())
-        )
-      );
+      const active = employees.filter(e => (e.status ?? 'Active') === 'Active');
+      // An exact code wins; any shorter entry must point to exactly one person, never "the first match".
+      const exact = active.filter(e => e.employeeCode.toUpperCase() === cleanInput.toUpperCase());
+      const partial = active.filter(e =>
+        e.employeeCode.toLowerCase().endsWith(cleanInput.toLowerCase()) ||
+        (cleanDigits.length >= 5 && e.cnic && e.cnic.replace(/\D/g, '') === cleanDigits) ||
+        (e.email && e.email.toLowerCase() === cleanInput.toLowerCase()));
+      const candidates = exact.length ? exact : partial;
+      const emp = candidates.length === 1 ? candidates[0] : undefined;
 
       if (emp) {
-        void triggerPunch(emp, 'RFID'); // Kiosk counts as RFID/card terminal check-in
+        // A typed code proves nothing about who is standing at the kiosk: it is recorded as a manual punch for
+        // supervisor review, never as card or biometric evidence.
+        void triggerPunch(emp, 'Manual');
+      } else if (candidates.length > 1) {
+        setStatus('error');
+        setMessage(`${candidates.length} employees match "${cleanInput}". Enter the full employee code.`);
+        setTimeout(() => setStatus('idle'), 3500);
       } else {
         setStatus('error');
         setMessage('Invalid Employee Code. Please verify and try again.');
@@ -647,7 +654,7 @@ export function KioskTerminal({
                       type="text"
                       aria-label="Employee ID Code"
                       required
-                      placeholder="e.g. IND-KHI-001"
+                      placeholder={`e.g. ${employees.find(item => (item.status ?? 'Active') === 'Active')?.employeeCode || 'ABC-HR-00001'}`}
                       value={empIdInput}
                       onChange={(e) => setEmpIdInput(e.target.value)}
                       className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-center text-sm font-mono text-white tracking-widest focus:outline-none focus:border-emerald-500 flex-1"
@@ -661,7 +668,7 @@ export function KioskTerminal({
                   </form>
                 </div>
                 <p className="text-[10px] text-slate-400 italic">
-                  Tip: typable inputs match codes like <code>IND-KHI-001</code>, <code>002</code>, etc.
+                  Tip: type the full employee code, e.g. <code>{employees.find(item => (item.status ?? 'Active') === 'Active')?.employeeCode || 'ABC-HR-00001'}</code>. Code-only punches go to a supervisor for review.
                 </p>
               </div>
 

@@ -1065,6 +1065,8 @@ export default function App() {
         method: method as AttendanceLog['method'],
         status,
         overtimeMinutes: 0,
+        ...(method === 'Manual' && { regularizationRequested: true, requestedAt: punchTimestamp,
+          regularizationReason: 'Code-only punch at a kiosk (no face or fingerprint verification); supervisor confirmation required.' }),
         ...(lat !== undefined && { latitude: lat }),
         ...(lon !== undefined && { longitude: lon }),
         ...(locationAccuracyMeters !== undefined && { locationAccuracyMeters }),
