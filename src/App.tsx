@@ -15,10 +15,10 @@ import {
   PerformanceReview, CompanyAsset, JobPosting, JobApplication, GratuitySettlement, AppNotification, Company, CompanySetupPayload, Zone, UcTown, WageType, NewUserAccount, MobileDutyAuthorization,
   StatutoryChangeRequest, LifecycleRequest, ParallelRunRecord
 } from './types';
-import { attendancePeriodId, createAttendancePeriod, isAttendancePeriodValid, reopenAttendancePeriod } from './data/attendancePeriod';
+import { attendancePeriodId, createAttendancePeriod, employedDuring, isAttendancePeriodValid, reopenAttendancePeriod } from './data/attendancePeriod';
 import { evaluateAttendanceTimes, isDuplicatePunch } from './data/attendanceRules';
 import { attendanceLocations, evaluateBranchGeofence, impossibleTravel, validateLocationEvidence } from './data/geofence';
-import { applyLifecycleRequest, lifecycleRequestError, lifecycleReviewError } from './data/lifecycle';
+import { applyLifecycleRequest, dueSeparations, lifecycleRequestError, lifecycleReviewError } from './data/lifecycle';
 import { leaveBalanceError } from './data/leavePolicy';
 import { computeFinalSettlementPayslip, computeSupplementaryPayslip, retroRecalculationAdjustment } from './data/offCyclePayroll';
 import { attendanceReviewError, isRegularizationOverdue, lineManagerReviewer, payrollCancellationError, payrollTransitionError, salaryRevisionApprovalError, salaryRevisionArrears, statutoryChangedFields, statutoryReviewError } from './data/approvalRules';
@@ -616,6 +616,16 @@ export default function App() {
     }
   };
 
+  // A resignation or termination takes effect after the last working day: the next HR/admin session marks it.
+  const canManageEmployees = currentUserAccount.roleId === 'role-admin' || Boolean(roles.find(role => role.id === currentUserAccount.roleId)?.permissions.includes('manage_employees'));
+  useEffect(() => {
+    if (!canManageEmployees) return;
+    for (const employee of dueSeparations(employees, todayStr())) {
+      handleUpdateEmployee({ ...employee, status: 'Terminated' }).catch(() => console.warn('Separation status update delayed:'));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canManageEmployees, employees]);
+
   // ─── Statutory Config Handlers ────────────────────────────────────────────
   // Statutory rates are maker-checker controlled: edits accumulate in one pending change request and
   // only reach the live configuration after a different authorized user approves them.
@@ -1166,7 +1176,8 @@ export default function App() {
     }
 
     const lastDay = new Date(year, month, 0).getDate();
-    const eligibleEmployees = employees.filter(emp => emp.status === 'Active' || emp.status === 'On Leave');
+    // Includes staff who left during the month: their final salary is paid up to the last working day.
+    const eligibleEmployees = employees.filter(emp => employedDuring(emp, `${year}-${String(month).padStart(2, '0')}-01`, `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`));
     const runId = `run-${month}-${year}-${Date.now()}`;
 
     const sheets = eligibleEmployees.map(emp => ({

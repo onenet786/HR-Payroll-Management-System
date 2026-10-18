@@ -111,7 +111,7 @@ async function validLockedRegister(client, id, next) {
     );
     const records = result.rows.map(row => row.data);
     const rows = Array.isArray(next.registerRows) ? next.registerRows : [];
-    const allowedStatuses = new Set(['Working Day', 'Present', 'Late', 'Half Day', 'Paid Leave', 'Unpaid Leave', 'Holiday', 'Weekly Off', 'Absent', 'Not Joined', 'Missing Punch', 'Pending Review']);
+    const allowedStatuses = new Set(['Working Day', 'Present', 'Late', 'Half Day', 'Paid Leave', 'Unpaid Leave', 'Holiday', 'Weekly Off', 'Absent', 'Not Joined', 'Separated', 'Missing Punch', 'Pending Review']);
     const rowKeys = new Set(rows.map(row => `${row?.employeeId}|${row?.date}`));
     const lastDay = new Date(next.periodYear, next.periodMonth, 0).getDate();
     const lastDate = `${prefix}-${String(lastDay).padStart(2, '0')}`;
@@ -119,7 +119,10 @@ async function validLockedRegister(client, id, next) {
     if (new Date(Date.now() + 5 * 3_600_000).toISOString().slice(0, 10) <= lastDate) return false;
     const employeeResult = await client.query(`SELECT id, data FROM employees`);
     const eligibleEmployees = employeeResult.rows.map(row => ({ id: row.id, ...row.data }))
-      .filter(employee => ['Active', 'On Leave'].includes(employee.status) && typeof employee.dateOfJoining === 'string' && employee.dateOfJoining <= lastDate);
+      // Mirrors employedDuring() in src/data/attendancePeriod.ts: separated staff stay in the months they worked.
+      .filter(employee => typeof employee.dateOfJoining === 'string' && employee.dateOfJoining <= lastDate
+        && !(employee.separationDate && employee.separationDate < `${prefix}-01`)
+        && (['Active', 'On Leave'].includes(employee.status) || (employee.status === 'Terminated' && Boolean(employee.separationDate))));
     const expectedKeys = new Set(eligibleEmployees.flatMap(employee => Array.from({ length: lastDay }, (_, offset) => `${employee.id}|${prefix}-${String(offset + 1).padStart(2, '0')}`)));
     if (!records.length || next.attendanceCount !== records.length || next.integrityHash !== attendanceIntegrityHash(records)
       || !Number.isInteger(next.registerVersion) || next.registerVersion < 1 || !rows.length

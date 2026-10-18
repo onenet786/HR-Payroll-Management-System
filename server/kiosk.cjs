@@ -103,6 +103,7 @@ router.post('/punch', requireKiosk, async (req, res, next) => {
     if (ageDays > 8 || ageDays < -2) return res.status(400).json({ error: 'Punch date is outside the allowed window.' });
     const employee = (await pool.query(`SELECT data FROM employees WHERE id=$1`, [data.employeeId])).rows[0]?.data;
     if (!employee || !['Active', 'On Leave'].includes(employee.status)) return res.status(403).json({ error: 'Employee is not active.' });
+    if (employee.separationDate && data.date > employee.separationDate) return res.status(403).json({ error: `Employee's last working day was ${employee.separationDate}.` });
     const locked = await pool.query(`SELECT 1 FROM attendance_periods WHERE id=$1 AND status='Locked'`, [`attendance-period-${data.date.slice(0, 7)}`]);
     if (locked.rowCount) return res.status(409).json({ error: 'That month is locked for payroll.' });
     const existing = (await pool.query(`SELECT data FROM attendances WHERE id=$1`, [documentId])).rows[0]?.data;

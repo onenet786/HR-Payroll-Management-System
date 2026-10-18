@@ -55,3 +55,31 @@ test('a month still in progress cannot be locked', () => {
   assert.throws(() => createAttendancePeriod(records, [] as Employee[], [], [], 10, 2026, 'admin', '2026-10-31T18:30:00.000Z'), /only after the month ends/, 'still 31 Oct 23:30 in Pakistan');
   assert.equal(createAttendancePeriod(records, [] as Employee[], [], [], 10, 2026, 'admin', '2026-10-31T19:30:00.000Z').status, 'Locked', '1 Nov 00:30 in Pakistan');
 });
+
+test('separating an employee keeps earlier locked registers valid and stops the register after the last day', async () => {
+  const { applyLifecycleRequest, dueSeparations } = await import('./lifecycle');
+  const { registerPayrollSummary } = await import('./attendancePeriod');
+  const active = { id: 'e1', status: 'Active', dateOfJoining: '2020-01-01', basicSalary: 60000, gratuityOptIn: true } as Employee;
+  const records = [record({ id: 'a-sep', date: '2026-09-01' }), record({ id: 'a-oct', date: '2026-10-01' })];
+  const september = createAttendancePeriod(records, [active], [], [], 9, 2026, 'hr', '2026-10-02T00:00:00.000Z');
+  const rules = { gratuityRateDaysPerYear: 30, settlementDailyRateDivisor: 30, gratuityMinimumServiceYears: 1 };
+  const request = { id: 'r1', employeeId: 'e1', type: 'Resignation', effectiveDate: '2026-10-15', reason: 'Moving abroad for studies', status: 'Pending' } as never;
+
+  // Approved before the last working day: still active (can punch, is paid) until then.
+  const early = applyLifecycleRequest(request, active, { id: 'hr2', username: 'hr2' }, '2026-10-05T09:00:00.000Z', rules);
+  assert.equal(early.employee.status, 'Active');
+  assert.equal(early.employee.separationDate, '2026-10-15');
+  assert.deepEqual(dueSeparations([early.employee], '2026-10-15').length, 0);
+  assert.deepEqual(dueSeparations([early.employee], '2026-10-16').map(item => item.id), ['e1']);
+
+  // Once separated, September's register is unchanged and October stops after the 15th.
+  const separated = { ...early.employee, status: 'Terminated' } as Employee;
+  assert.equal(isAttendancePeriodValid(september, records, { employees: [separated], leaves: [], holidays: [] }), true);
+  const october = buildAttendanceRegister(records, [separated], [], [], 10, 2026);
+  assert.equal(october.find(row => row.date === '2026-10-16')!.status, 'Separated');
+  assert.equal(registerPayrollSummary(october, 'e1').notJoinedDays, 16, 'days after the last working day are unpaid');
+  assert.equal(buildAttendanceRegister(records, [separated], [], [], 11, 2026).length, 0, 'not on later registers');
+
+  // Approved after the last working day: separated at once.
+  assert.equal(applyLifecycleRequest(request, active, { id: 'hr2', username: 'hr2' }, '2026-10-20T09:00:00.000Z', rules).employee.status, 'Terminated');
+});

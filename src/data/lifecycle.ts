@@ -28,6 +28,7 @@ export const MANUAL_ONBOARDING_ITEMS: OnboardingChecklistItem[] = ['cnicCopy', '
 export function lifecycleRequestError(request: Partial<LifecycleRequest>, employee: Employee | undefined): string | undefined {
   if (!employee) return 'Select an employee.';
   if (employee.status === 'Terminated') return 'This employee has already separated.';
+  if ((request.type === 'Resignation' || request.type === 'Termination') && employee.separationDate) return `A separation is already recorded for this employee (last working day ${employee.separationDate}).`;
   if (!request.effectiveDate || !/^\d{4}-\d{2}-\d{2}$/.test(request.effectiveDate)) return 'Enter a valid effective date.';
   if (!request.reason || request.reason.trim().length < 10) return 'Enter a reason of at least 10 characters.';
   if (request.type === 'Transfer' && !request.newBranchId && !request.newDepartmentId) return 'Choose the destination branch or department.';
@@ -127,12 +128,20 @@ export function applyLifecycleRequest(
         ...calculateFinalSettlement(employee, request.type, request.effectiveDate, request.leaveEncashDays || 0, request.noticeDays || 0, statConfig, wageTypes),
         id: `settlement-${employee.id}-${request.id}`, status: 'Pending', notes: request.reason, createdAt: now, createdById: approver.id,
       };
+      // The employee keeps working (and punching) until the last working day; the status changes once it has
+      // passed (see dueSeparations). Payroll pays the final month up to that day.
+      const separatedNow = request.effectiveDate < now.slice(0, 10);
       return {
-        employee: { ...employee, status: 'Terminated', separationType: request.type, separationDate: request.effectiveDate, separationReason: request.reason },
+        employee: { ...employee, ...(separatedNow && { status: 'Terminated' as const }), separationType: request.type, separationDate: request.effectiveDate, separationReason: request.reason },
         settlement,
       };
     }
   }
+}
+
+/** Employees whose last working day has passed but who are still marked as working. */
+export function dueSeparations(employees: Employee[], today: string): Employee[] {
+  return employees.filter(employee => (employee.status === 'Active' || employee.status === 'On Leave') && employee.separationDate && employee.separationDate < today);
 }
 
 const escapeHtml = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!);

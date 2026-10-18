@@ -385,7 +385,7 @@ export interface AttendancePeriodHistoryEvent {
   reason?: string;
 }
 
-export type AttendanceRegisterStatus = 'Working Day' | 'Present' | 'Late' | 'Half Day' | 'Paid Leave' | 'Unpaid Leave' | 'Holiday' | 'Weekly Off' | 'Absent' | 'Not Joined' | 'Missing Punch' | 'Pending Review';
+export type AttendanceRegisterStatus = 'Working Day' | 'Present' | 'Late' | 'Half Day' | 'Paid Leave' | 'Unpaid Leave' | 'Holiday' | 'Weekly Off' | 'Absent' | 'Not Joined' | 'Separated' | 'Missing Punch' | 'Pending Review';
 
 export interface AttendanceRegisterRow {
   employeeId: string;
