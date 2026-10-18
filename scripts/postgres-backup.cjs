@@ -21,7 +21,7 @@ const pgEnvironment = { ...process.env, PGHOST: parsed.hostname, PGPORT: parsed.
 
 try {
   const dump = spawnSync(process.env.PG_DUMP_PATH || 'pg_dump', ['--format=custom', '--no-owner', '--no-acl', '--file', temporary], { env: pgEnvironment, stdio: 'inherit' });
-  if (dump.status !== 0) throw new Error(`pg_dump failed with exit code ${dump.status}.`);
+  if (dump.status !== 0) throw new Error(`${dump.error ? `could not start pg_dump at "${process.env.PG_DUMP_PATH || 'pg_dump'}" (${dump.error.code || dump.error.message}). Check PG_DUMP_PATH in .env points to an existing pg_dump that matches the server's PostgreSQL version.` : dump.signal ? `pg_dump was stopped by signal ${dump.signal}.` : `pg_dump failed with exit code ${dump.status}.`}`);
   encryptFile(temporary, encrypted);
   const stats = fs.statSync(encrypted);
   const manifest = { format: 'HRPBK001', createdAt: new Date().toISOString(), database: parsed.pathname.slice(1), host: parsed.hostname, encryptedFile: path.basename(encrypted), bytes: stats.size, sha256: sha256File(encrypted) };

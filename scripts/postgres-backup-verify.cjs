@@ -15,6 +15,7 @@ const temporary = path.join(os.tmpdir(), `hr-payroll-verify-${process.pid}-${Dat
 try {
   decryptFile(source, temporary);
   const verify = spawnSync(process.env.PG_RESTORE_PATH || 'pg_restore', ['--list', temporary], { encoding: 'utf8' });
+  if (verify.error) throw new Error(`${verify.error ? `could not start pg_restore at "${process.env.PG_RESTORE_PATH || 'pg_restore'}" (${verify.error.code || verify.error.message}). Check PG_RESTORE_PATH in .env points to an existing pg_restore that matches the server's PostgreSQL version.` : verify.signal ? `pg_restore was stopped by signal ${verify.signal}.` : `pg_restore failed with exit code ${verify.status}.`}`);
   if (verify.status !== 0 || !verify.stdout?.includes('TABLE')) throw new Error(`pg_restore validation failed: ${verify.stderr || 'invalid archive'}`);
   console.log(`Backup verified: ${source}`);
   console.log(`Created: ${manifest.createdAt}; encrypted bytes: ${manifest.bytes}; archive entries validated.`);

@@ -18,7 +18,7 @@ const env = { ...process.env, PGHOST: parsed.hostname, PGPORT: parsed.port || '5
 try {
   decryptFile(source, temporary);
   const restore = spawnSync(process.env.PG_RESTORE_PATH || 'pg_restore', ['--clean', '--if-exists', '--no-owner', '--no-acl', '--dbname', parsed.pathname.slice(1), temporary], { env, stdio: 'inherit' });
-  if (restore.status !== 0) throw new Error(`pg_restore failed with exit code ${restore.status}.`);
+  if (restore.status !== 0) throw new Error(`${restore.error ? `could not start pg_restore at "${process.env.PG_RESTORE_PATH || 'pg_restore'}" (${restore.error.code || restore.error.message}). Check PG_RESTORE_PATH in .env points to an existing pg_restore that matches the server's PostgreSQL version.` : restore.signal ? `pg_restore was stopped by signal ${restore.signal}.` : `pg_restore failed with exit code ${restore.status}.`}`);
   console.log(`Database restored from ${source}. Run npm run postgres:migrate before starting the application.`);
 } finally {
   if (fs.existsSync(temporary)) fs.rmSync(temporary);
