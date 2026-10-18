@@ -214,3 +214,19 @@ test('employee codes must start with the company prefix (OneNet Solutions -> ONS
   assert.equal(await put('u-hr', 'employees', 'emp-legacy', { fullName: 'Legacy Staff (renamed)', status: 'Active', companyId: 'co-ons', employeeCode: 'ONENET-HR-00007' }), 200, 'existing codes stay editable');
   assert.equal(await put('u-hr', 'employees', 'emp-legacy', { fullName: 'Legacy Staff', status: 'Active', companyId: 'co-ons', employeeCode: 'XYZ-HR-00007' }), 403, 'a changed code must follow the rule');
 });
+
+test('employees see their payslips only once salary is disbursed', async () => {
+  await seed('payroll_runs', 'vis-paid', { ...run('vis-paid'), periodMonth: 5, status: 'Disbursed' }, { status: 'Disbursed' });
+  await seed('payroll_runs', 'vis-draft', { ...run('vis-draft'), periodMonth: 6 }, { status: 'Draft' });
+  for (const runId of ['vis-paid', 'vis-draft']) await seed('payroll_payslips', `${runId}-e1`, payslip(runId), { payroll_run_id: runId, employee_id: 'e1' });
+  const read = async (uid, path) => {
+    const response = await fetch(`${base}/${path}`, { headers: { 'x-test-user': uid } });
+    return { status: response.status, body: await response.json().catch(() => ({})) };
+  };
+  const own = (await read('u-emp', 'payrollPayslips')).body.documents.map(row => row.document_id).filter(id => id.startsWith('vis-'));
+  assert.deepEqual(own, ['vis-paid-e1'], 'draft and approved payslips stay hidden from the employee');
+  assert.equal((await read('u-emp', 'payrollPayslips/vis-paid-e1')).status, 200);
+  assert.equal((await read('u-emp', 'payrollPayslips/vis-draft-e1')).status, 404, 'a draft payslip cannot be opened directly');
+  const payroll = (await read('u-maker', 'payrollPayslips')).body.documents.map(row => row.document_id).filter(id => id.startsWith('vis-'));
+  assert.deepEqual(payroll.sort(), ['vis-draft-e1', 'vis-paid-e1'], 'payroll users still see every payslip');
+});

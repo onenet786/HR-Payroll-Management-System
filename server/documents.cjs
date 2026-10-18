@@ -504,6 +504,8 @@ router.get('/:collection', async (req, res, next) => {
     if (employeeFilter) {
       params.push(employeeFilter);
       sql += ` WHERE (employee_id=$1 OR data->>'employeeId'=$1)`;
+      // Employees cannot read payroll runs, so the server releases their payslips only once salary is paid.
+      if (table === 'payroll_payslips' && !canReadAll && !managedRead) sql += ` AND payroll_run_id IN (SELECT id FROM payroll_runs WHERE status='Disbursed')`;
     }
     sql += ` ORDER BY id LIMIT 10000`;
     const result = await pool.query(sql, params);
@@ -521,6 +523,10 @@ router.get('/:collection/:id', async (req, res, next) => {
     const row = result.rows[0];
     if (!row) return res.status(404).json({ error: 'Resource not found.' });
     if (!allowed(policy.read, req.identity, id, row.employee_id)) return res.status(403).json({ error: 'Insufficient permission.' });
+    if (table === 'payroll_payslips' && !allowed(policy.read, req.identity, '', '__not_self__')) {
+      const run = await pool.query(`SELECT status FROM payroll_runs WHERE id=$1`, [row.data?.payrollRunId || null]);
+      if (run.rows[0]?.status !== 'Disbursed') return res.status(404).json({ error: 'Resource not found.' });
+    }
     res.setHeader('ETag', `"${row.version}"`);
     res.json(table === 'users' ? { ...row, data: publicUserData(row.data) } : row);
   } catch (error) { next(error); }

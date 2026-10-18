@@ -4116,7 +4116,7 @@ export function WebPortal({
                                 <span>Net Total:</span>
                                 <span>PKR {run.totalNetPay.toLocaleString()}</span>
                               </div>
-                              {(run.preflightWarningCount || 0) > 0 && <div className="rounded bg-amber-50 px-2 py-1 text-amber-800 font-semibold">{run.preflightWarningCount} material pay variance warning(s)</div>}
+                              {(run.preflightWarningCount || 0) > 0 && <div className="rounded bg-amber-50 px-2 py-1 text-amber-800 font-semibold">{run.preflightWarningCount} preflight warning(s)</div>}
                               {run.status === 'Cancelled' && <div className="rounded bg-rose-50 px-2 py-1 text-rose-800">Cancelled by {run.cancelledBy} on {run.cancelledAt?.slice(0, 10)}: {run.cancellationReason}</div>}
                               {run.status === 'Cancelled' && run.statusBeforeCancellation === 'Approved' && <button type="button" onClick={() => downloadAccountingJournal(run)} className="text-[10px] font-semibold text-rose-700 hover:underline">Reversal journal CSV</button>}
                               {run.taxDeposit && <div className="text-[10px] text-slate-500">FBR deposit CPR {run.taxDeposit.cprNumber} · PKR {run.taxDeposit.amount.toLocaleString()} on {run.taxDeposit.depositedOn}</div>}

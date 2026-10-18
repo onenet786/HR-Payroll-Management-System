@@ -144,10 +144,12 @@ export function MobileApp({
     : activeVisit ? 'visit-out'
     : isWorkdayActive ? (authorizationAllowsVisits ? 'visit-in' : 'workday-out')
     : null;
-  const disbursedPayrollRunIds = new Set(payrollRuns.filter(run => run.status === 'Disbursed').map(run => run.id));
+  // Employees cannot read payroll runs; the server then sends only payslips of disbursed runs. Staff who can
+  // read runs (previewing the app) still see disbursed payslips only.
+  const disbursedPayrollRunIds = payrollRuns.length ? new Set(payrollRuns.filter(run => run.status === 'Disbursed').map(run => run.id)) : null;
   const myPayslips = currentEmp
     ? payrollPayslips
-      .filter(payslip => disbursedPayrollRunIds.has(payslip.payrollRunId))
+      .filter(payslip => !disbursedPayrollRunIds || disbursedPayrollRunIds.has(payslip.payrollRunId))
       .filter(payslip => payslip.employeeId === currentEmp.id)
       .sort((left, right) => (right.periodYear || 0) - (left.periodYear || 0) || (right.periodMonth || 0) - (left.periodMonth || 0))
     : [];
