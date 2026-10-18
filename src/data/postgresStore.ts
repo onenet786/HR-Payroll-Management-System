@@ -49,6 +49,14 @@ async function request(path: string, init: RequestInit = {}) {
   }
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
+    const method = String(init.method || 'GET').toUpperCase();
+    if (method !== 'GET' && response.status !== 401 && typeof window !== 'undefined') {
+      const what = path.split('/')[1] ? decodeURIComponent(path.split('/')[1]).replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase() : 'record';
+      const message = response.status === 403
+        ? `Not saved: your role is not allowed to make this change (${what}), or a rule blocks it (for example a locked month or an approval by the same person). The screen will refresh.`
+        : `Not saved (${what}): ${body.error || `server error ${response.status}`}. The screen will refresh.`;
+      window.dispatchEvent(new CustomEvent('hr:save-failed', { detail: { message, status: response.status } }));
+    }
     throw new Error(body.error || `API request failed (${response.status}).`);
   }
   return response.status === 204 ? null : response.json();

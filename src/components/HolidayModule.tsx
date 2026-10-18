@@ -15,6 +15,8 @@ interface HolidayModuleProps {
   onAddHoliday: (holiday: Holiday) => void;
   onUpdateHoliday: (holiday: Holiday) => void;
   onDeleteHoliday: (id: string) => void;
+  /** Holidays change paid days in the attendance register, so only settings administrators edit them. */
+  canManage?: boolean;
 }
 
 const HOLIDAY_TYPES = ['Public', 'Company', 'Optional'] as const;
@@ -26,7 +28,7 @@ const typeColors: Record<string, string> = {
   Optional: 'bg-amber-50 text-amber-700 border-amber-200'
 };
 
-export function HolidayModule({ holidays, onAddHoliday, onUpdateHoliday, onDeleteHoliday }: HolidayModuleProps) {
+export function HolidayModule({ holidays, onAddHoliday, onUpdateHoliday, onDeleteHoliday, canManage = true }: HolidayModuleProps) {
   const [showForm, setShowForm] = useState(false);
   const [editingHoliday, setEditingHoliday] = useState<Holiday | null>(null);
   const [filterYear, setFilterYear] = useState(new Date().getFullYear());
@@ -107,12 +109,14 @@ export function HolidayModule({ holidays, onAddHoliday, onUpdateHoliday, onDelet
           <h2 className="text-lg font-bold text-slate-900">Holiday Calendar</h2>
           <p className="text-xs text-slate-500 mt-0.5">Manage public and company holidays that affect payroll and attendance</p>
         </div>
-        <button
-          onClick={openAdd}
-          className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-4 py-2 rounded-xl transition"
-        >
-          <Plus size={14} /> Add Holiday
-        </button>
+        {canManage ? (
+          <button
+            onClick={openAdd}
+            className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-4 py-2 rounded-xl transition"
+          >
+            <Plus size={14} /> Add Holiday
+          </button>
+        ) : <p className="max-w-xs text-right text-[11px] text-slate-500">Holidays are maintained by a settings administrator because they change paid days in payroll.</p>}
       </div>
 
       {/* Summary Cards */}
@@ -189,7 +193,7 @@ export function HolidayModule({ holidays, onAddHoliday, onUpdateHoliday, onDelet
                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded-lg border ${typeColors[holiday.type]}`}>
                         {holiday.type}
                       </span>
-                      <button onClick={() => openEdit(holiday)}
+                      {canManage && <><button onClick={() => openEdit(holiday)}
                         className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-slate-500 hover:text-blue-700 hover:bg-blue-500/10 transition" aria-label="Edit holiday">
                         <Edit2 size={13} />
                       </button>
@@ -209,7 +213,7 @@ export function HolidayModule({ holidays, onAddHoliday, onUpdateHoliday, onDelet
                             className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-slate-500 hover:text-rose-700 hover:bg-rose-500/10 transition" aria-label="Delete holiday">
                             <Trash2 size={13} />
                           </button>
-                      )}
+                      )}</>}
                     </div>
                   </div>
                 ))}

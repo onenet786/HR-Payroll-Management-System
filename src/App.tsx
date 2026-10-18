@@ -314,6 +314,20 @@ export default function App() {
     return () => window.removeEventListener('hr:session-expired', expire);
   }, []);
 
+  // Any save the server refuses or that fails is reported here, so a change never silently disappears on the
+  // next refresh (many screens update first and save in the background).
+  const [saveNotice, setSaveNotice] = useState('');
+  useEffect(() => {
+    let timer: number | undefined;
+    const failed = (event: Event) => {
+      setSaveNotice((event as CustomEvent<{ message: string }>).detail.message);
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => setSaveNotice(''), 10_000);
+    };
+    window.addEventListener('hr:save-failed', failed);
+    return () => { window.removeEventListener('hr:save-failed', failed); window.clearTimeout(timer); };
+  }, []);
+
   useEffect(() => {
     if (!loggedInUser) return;
     setCurrentUserAccount(prev => {
@@ -2269,6 +2283,13 @@ export default function App() {
 
 
   return (
+    <>
+    {saveNotice && (
+      <div role="alert" className="fixed bottom-4 left-1/2 z-[9999] w-[min(92vw,560px)] -translate-x-1/2 rounded-xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800 shadow-2xl">
+        {saveNotice}
+        <button type="button" onClick={() => setSaveNotice('')} className="ml-3 text-rose-500 underline">Dismiss</button>
+      </div>
+    )}
     <DeviceEmulator
       employees={employeesWithFingerprints}
       attendances={attendances}
@@ -2368,6 +2389,7 @@ export default function App() {
       onDeleteNotification={handleDeleteNotification}
       firestoreSyncStatus={firestoreSyncStatus}
     />
+    </>
   );
 }
 

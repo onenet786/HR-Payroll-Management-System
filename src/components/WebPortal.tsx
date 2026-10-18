@@ -4874,6 +4874,7 @@ export function WebPortal({
                     onAddHoliday={onAddHoliday}
                     onUpdateHoliday={onUpdateHoliday}
                     onDeleteHoliday={onDeleteHoliday}
+                    canManage={userPermissions.includes('manage_settings')}
                   />
                 </motion.div>
               )}
