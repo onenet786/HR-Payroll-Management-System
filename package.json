@@ -24,6 +24,7 @@
     "postgres:backup": "node scripts/postgres-backup.cjs",
     "postgres:backup:verify": "node scripts/postgres-backup-verify.cjs",
     "postgres:restore": "node scripts/postgres-restore.cjs",
+    "server:bundle": "node deploy/installer/build-bundle.mjs",
     "windows:run": "npm run build && electron .",
     "windows:build": "npm run build && electron-builder --win",
     "prekiosk:run": "node scripts/sync-face-models.cjs",

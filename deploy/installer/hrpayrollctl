@@ -1,0 +1,283 @@
+#!/usr/bin/env bash
+# hrpayrollctl — manage HR & Payroll Suite installations on this server.
+# Installed to /usr/local/bin by the setup bundle. Run `hrpayrollctl help`.
+set -Eeuo pipefail
+
+LIB=/usr/local/lib/hrpayroll
+# shellcheck source=branding.conf
+[[ -f "$LIB/branding.conf" ]] && source "$LIB/branding.conf"
+# shellcheck source=lib/common.sh
+source "$LIB/common.sh"
+
+usage() {
+  cat <<EOF
+${C_BOLD}hrpayrollctl${C_RESET} — manage $PRODUCT_NAME installations
+
+  list                              All installations on this server
+  status   <id>                     Service, health, version, certificate
+  logs     <id> [-f] [-n N]         Application log (journal)
+  start|stop|restart <id>
+  backup   <id>                     Encrypted database backup now
+  restore  <id> <file.dump.enc> [--yes]
+                                    Replace the database with a backup
+  update   <id> <bundle.run|app.tar.gz> [--skip-backup]
+                                    Deploy a new version (backup → migrate →
+                                    switch → health check → auto-rollback)
+  rollback <id>                     Switch back to the previous release
+  ssl      <id> [--email EMAIL]     Issue/repair the HTTPS certificate
+  edit     <id>                     Edit settings (app.env), then restart
+  uninstall <id> [--purge] [--delete-backups] [--yes]
+                                    Remove service + website. --purge also
+                                    deletes the database, files and documents.
+EOF
+}
+
+need_slug() { [[ -n "${1:-}" ]] || { usage; exit 1; }; load_instance "$1"; HRP_LOG="$HRP_LOG_DIR/$SLUG-ctl.log"; install -d -m 0755 "$HRP_LOG_DIR"; touch "$HRP_LOG"; chmod 0600 "$HRP_LOG"; }
+
+confirm() {
+  local prompt="$1" expect="$2" a
+  [[ "${ASSUME_YES:-0}" == 1 ]] && return 0
+  read -rp "$prompt " a </dev/tty
+  [[ "$a" == "$expect" ]]
+}
+
+current_release() { basename "$(readlink -f "$APP_ROOT/current")"; }
+
+cmd_list() {
+  local s found=0
+  printf '%s\n' "${C_BOLD}$(printf '%-18s %-34s %-6s %-9s %s' ID DOMAIN PORT STATE RELEASE)${C_RESET}"
+  for s in $(list_instances || true); do
+    found=1
+    (
+      load_instance "$s"
+      local state; state="$(systemctl is-active "$SERVICE" 2>/dev/null || true)"
+      printf '%-18s %-34s %-6s %-9s %s\n' "$SLUG" "$DOMAIN" "$PORT" "$state" "$(current_release)"
+    )
+  done
+  (( found )) || echo "No installations yet. Run the setup bundle to create one."
+}
+
+cmd_status() {
+  need_slug "$1"
+  local state health="${C_RED}failing${C_RESET}" cert="none"
+  state="$(systemctl is-active "$SERVICE" 2>/dev/null || true)"
+  curl -fsS -m 3 "http://127.0.0.1:$PORT/api/health" 2>/dev/null | grep -q '"ok":true' && health="${C_GREEN}ok${C_RESET}"
+  if [[ -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ]]; then
+    cert="$(openssl x509 -enddate -noout -in "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" | cut -d= -f2)"
+  fi
+  local last_backup; last_backup="$(ls -1t "$BACKUP_DIR"/*.dump.enc 2>/dev/null | head -n1 || true)"
+  cat <<EOF
+  ${C_BOLD}$PRODUCT_NAME — $SLUG${C_RESET}
+  Website:      $( [[ "$SSL_ENABLED" == 1 ]] && echo https || echo http )://$DOMAIN
+  Service:      $SERVICE ($state)   health: $health
+  Release:      $(current_release)
+  Port:         127.0.0.1:$PORT
+  Certificate:  $cert
+  Last backup:  ${last_backup:-none} $( [[ -n "$last_backup" ]] && date -r "$last_backup" '+(%F %T)')
+  Config:       $(env_file "$SLUG")
+EOF
+}
+
+cmd_logs() {
+  need_slug "$1"; shift
+  journalctl -u "$SERVICE" --no-pager -n 200 "$@"
+}
+
+cmd_svc() { need_slug "$2"; systemctl "$1" "$SERVICE"; [[ "$1" == stop ]] || { health_wait "$PORT" 60 && ok "$SERVICE is healthy." || die "$SERVICE did not become healthy — hrpayrollctl logs $SLUG"; }; }
+
+cmd_backup() {
+  need_slug "$1"
+  install -d -o "$APP_USER" -g "$APP_USER" -m 0700 "$BACKUP_DIR"
+  app_run "$APP_ROOT/current" "$(node_bin)" scripts/postgres-backup.cjs
+}
+
+cmd_restore() {
+  local slug="${1:-}" file="${2:-}"
+  [[ "${3:-}" == --yes ]] && ASSUME_YES=1
+  [[ -n "$slug" && -n "$file" ]] || { usage; exit 1; }
+  need_slug "$slug"
+  file="$(readlink -f "$file")"; [[ -f "$file" ]] || die "Backup not found: $file"
+  printf '%s\n' "${C_RED}${C_BOLD}This replaces ALL data of $DOMAIN with $(basename "$file").${C_RESET}"
+  confirm "Type the instance id '$SLUG' to confirm:" "$SLUG" || die "Not confirmed."
+  # The service user must be able to read the file (backups dir is its own).
+  local tmp=""
+  if ! runuser -u "$APP_USER" -- test -r "$file"; then
+    tmp="$BACKUP_DIR/.restore-$$-$(basename "$file")"; cp "$file" "$tmp"; chown "$APP_USER" "$tmp"
+    [[ -f "$file.manifest.json" ]] && { cp "$file.manifest.json" "$tmp.manifest.json"; chown "$APP_USER" "$tmp.manifest.json"; }
+    file="$tmp"
+  fi
+  systemctl stop "$SERVICE"
+  local rc=0
+  app_run "$APP_ROOT/current" env CONFIRM_DATABASE_RESTORE=RESTORE_HR_PAYROLL_DATABASE "$(node_bin)" scripts/postgres-restore.cjs "$file" || rc=$?
+  [[ -n "$tmp" ]] && rm -f "$tmp" "$tmp.manifest.json"
+  if (( rc == 0 )); then run_migrations "$APP_ROOT/current" || rc=$?; fi
+  systemctl start "$SERVICE"
+  (( rc == 0 )) || die "Restore failed — see the output above. The service was started again."
+  health_wait "$PORT" 60 && ok "Restored and healthy." || die "Restored, but the service is unhealthy — hrpayrollctl logs $SLUG"
+}
+
+# Extract a .run bundle (or accept a plain app tarball). Sets PKG and BUNDLE_DIR.
+resolve_package() {
+  local src="$1"
+  [[ -f "$src" ]] || die "Package not found: $src"
+  BUNDLE_DIR=""
+  case "$src" in
+    *.run)
+      BUNDLE_DIR="$(mktemp -d)"
+      bash "$src" --extract-only "$BUNDLE_DIR" >/dev/null || die "Could not unpack $src"
+      PKG="$BUNDLE_DIR/installer/app.tar.gz" ;;
+    *.tar.gz|*.tgz) PKG="$src" ;;
+    *) die "Expected a .run bundle or .tar.gz app package." ;;
+  esac
+  [[ -f "$PKG" ]] || die "No app.tar.gz inside $src"
+  NEW_VERSION="$(tar -xzOf "$PKG" ./VERSION 2>/dev/null || tar -xzOf "$PKG" VERSION 2>/dev/null || echo unknown)"
+  NEW_VERSION="$(printf '%s' "$NEW_VERSION" | tr -cd 'A-Za-z0-9._-' | cut -c1-40)"
+}
+
+u_extract() {
+  install -d -m 0750 "$NEW_REL"
+  tar -xzf "$PKG" -C "$NEW_REL" --no-same-owner
+  [[ -f "$NEW_REL/server.cjs" && -d "$NEW_REL/dist" ]] || { echo "Package is missing server.cjs or dist/."; return 1; }
+  npm_install_release "$NEW_REL"
+  link_release_env "$NEW_REL"
+}
+u_migrate() { run_migrations "$NEW_REL"; }
+u_activate() { activate_release "$NEW_REL"; }
+u_rollback() { activate_release "$PREV_REL"; }
+u_backup() { cmd_backup "$SLUG"; }
+u_tooling() {
+  [[ -n "$BUNDLE_DIR" && -f "$BUNDLE_DIR/installer/lib/common.sh" ]] || return 0
+  install -m 0644 "$BUNDLE_DIR/installer/lib/common.sh" "$HRP_LIB/common.sh"
+  [[ -f "$BUNDLE_DIR/installer/branding.conf" ]] && install -m 0644 "$BUNDLE_DIR/installer/branding.conf" "$HRP_LIB/branding.conf"
+  install -m 0755 "$BUNDLE_DIR/installer/hrpayrollctl" /usr/local/bin/hrpayrollctl
+}
+
+cmd_update() {
+  local slug="${1:-}" src="${2:-}" skip_backup=0
+  [[ -n "$slug" && -n "$src" ]] || { usage; exit 1; }
+  [[ "${3:-}" == --skip-backup ]] && skip_backup=1
+  need_slug "$slug"
+  resolve_package "$src"
+  PREV_REL="$(readlink -f "$APP_ROOT/current")"
+  NEW_REL="$APP_ROOT/releases/${NEW_VERSION}-$(date +%Y%m%d%H%M%S)"
+  banner "Updating $DOMAIN → $NEW_VERSION"
+  STEP_TOTAL=5
+  if (( skip_backup )); then STEP_NO=$((STEP_NO + 1)); warn "Skipping the pre-update backup."
+  else step "Backing up the database" u_backup; fi
+  step "Unpacking $NEW_VERSION and installing dependencies" u_extract
+  step "Applying database migrations" u_migrate
+  STEP_SOFT=1 step "Switching to the new release" u_activate
+  if (( STEP_RC != 0 )); then
+    step "Rolling back to $(basename "$PREV_REL")" u_rollback
+    die "The new release failed its health check and was rolled back. Database migrations (if any) stayed applied; the pre-update backup is in $BACKUP_DIR."
+  fi
+  step "Refreshing hrpayrollctl" u_tooling
+  prune_releases 3
+  [[ -n "$BUNDLE_DIR" ]] && rm -rf "$BUNDLE_DIR"
+  ok "$DOMAIN now runs $(current_release)."
+}
+
+cmd_rollback() {
+  need_slug "$1"
+  local cur prev
+  cur="$(readlink -f "$APP_ROOT/current")"
+  prev="$(ls -1dt "$APP_ROOT"/releases/*/ 2>/dev/null | sed 's#/$##' | while read -r r; do [[ "$(readlink -f "$r")" == "$cur" ]] || { echo "$r"; break; }; done)"
+  [[ -n "$prev" ]] || die "No earlier release to roll back to."
+  PREV_REL="$prev"
+  STEP_TOTAL=1
+  step "Switching to $(basename "$prev")" u_rollback
+  warn "Code rolled back. Database migrations from the newer release are not undone."
+}
+
+s_ssl() {
+  detect_nginx
+  write_vhost http
+  nginx_reload
+  acme_self_check || echo "Warning: http://$DOMAIN did not reach this server from itself; trying anyway."
+  issue_certificate "$SSL_EMAIL"
+  write_vhost https
+  nginx_reload
+  apply_urls https "$(env_file "$SLUG")"
+  systemctl restart "$SERVICE"
+  health_wait "$PORT" 60
+}
+
+cmd_ssl() {
+  need_slug "$1"; shift
+  [[ "${1:-}" == --email && -n "${2:-}" ]] && SSL_EMAIL="$2"
+  STEP_TOTAL=1
+  step "Issuing HTTPS certificate for $DOMAIN" s_ssl
+  SSL_ENABLED=1; write_instance_conf
+  ok "https://$DOMAIN is live; renewals are automatic (certbot.timer)."
+}
+
+cmd_edit() {
+  need_slug "$1"
+  "${EDITOR:-nano}" "$(env_file "$SLUG")"
+  chown root:"$APP_USER" "$(env_file "$SLUG")"; chmod 0640 "$(env_file "$SLUG")"
+  systemctl restart "$SERVICE"
+  health_wait "$PORT" 60 && ok "Restarted with the new settings." || die "Service unhealthy after the change — hrpayrollctl logs $SLUG"
+}
+
+cmd_uninstall() {
+  local slug="${1:-}"; shift || true
+  local purge=0 delete_backups=0 a
+  for a in "$@"; do
+    case "$a" in --purge) purge=1 ;; --delete-backups) delete_backups=1 ;; --yes) ASSUME_YES=1 ;; *) die "Unknown option $a" ;; esac
+  done
+  need_slug "$slug"
+  local what="the service and website (data, database and backups are kept)"
+  (( purge )) && what="EVERYTHING for $DOMAIN: service, website, database $DB_NAME, documents$( (( delete_backups )) && echo ', backups')"
+  printf '%s\n' "${C_RED}${C_BOLD}This removes $what.${C_RESET}"
+  confirm "Type the instance id '$SLUG' to confirm:" "$SLUG" || die "Not confirmed. Nothing was removed."
+
+  if (( purge )); then
+    [[ "$APP_ROOT" == /www/wwwroot/?* || "$APP_ROOT" == "$HRP_OPT"/apps/?* ]] || die "Refusing to delete unexpected app folder '$APP_ROOT'."
+    [[ "$DATA_DIR" == /var/lib/hrpayroll/?*/documents && "$BACKUP_DIR" == /var/backups/hrpayroll/?* ]] || die "Refusing to delete unexpected data folders."
+    [[ -x "$PG_BIN_DIR/psql" ]] || detect_postgres
+    [[ -x "${PG_BIN_DIR:-}/psql" ]] || die "PostgreSQL tools not found."
+    if ! probe_pg_super; then
+      read -rsp "PostgreSQL 'postgres' password: " PG_SUPER_PASSWORD </dev/tty; echo
+      probe_pg_super || die "Cannot reach PostgreSQL as superuser."
+    fi
+    STEP_SOFT=1 step "Final backup before removal" u_backup
+  fi
+  systemctl disable --now "$SERVICE" 2>/dev/null || true
+  rm -f "/etc/systemd/system/$SERVICE.service" "/etc/cron.d/$SERVICE"
+  systemctl daemon-reload
+  detect_nginx
+  if [[ -n "$NGINX_CONF" && -f "$NGINX_CONF" ]]; then rm -f "$NGINX_CONF"; nginx_reload || warn "nginx reload failed; check its config."; fi
+  ok "Service and website removed."
+
+  if (( purge )); then
+    pg_super -d postgres -v dbname="$DB_NAME" -v dbuser="$DB_USER" <<'SQL'
+SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = :'dbname';
+SELECT format('DROP DATABASE IF EXISTS %I', :'dbname') \gexec
+SELECT format('DROP ROLE IF EXISTS %I', :'dbuser') \gexec
+SQL
+    rm -rf "$APP_ROOT" "$(dirname "$DATA_DIR")" "/var/cache/hrpayroll/$SLUG"
+    (( delete_backups )) && rm -rf "$BACKUP_DIR"
+    userdel "$APP_USER" 2>/dev/null || true
+    if [[ "$SSL_ENABLED" == 1 ]] && command -v certbot >/dev/null; then certbot delete --cert-name "$DOMAIN" --non-interactive 2>/dev/null || true; fi
+    rm -rf "$(instance_dir "$SLUG")"
+    ok "Database, files and settings deleted.$( (( delete_backups )) || echo " Backups kept in $BACKUP_DIR.")"
+  fi
+}
+
+[[ $EUID -eq 0 ]] || { echo "Run as root: sudo hrpayrollctl $*" >&2; exit 1; }
+cmd="${1:-help}"; shift || true
+case "$cmd" in
+  list|ls) cmd_list ;;
+  status) cmd_status "${1:-}" ;;
+  logs) cmd_logs "$@" ;;
+  start|stop|restart) cmd_svc "$cmd" "${1:-}" ;;
+  backup) cmd_backup "${1:-}" ;;
+  restore) cmd_restore "$@" ;;
+  update|upgrade) cmd_update "$@" ;;
+  rollback) cmd_rollback "${1:-}" ;;
+  ssl) cmd_ssl "$@" ;;
+  edit|config) cmd_edit "${1:-}" ;;
+  uninstall|remove) cmd_uninstall "$@" ;;
+  help|-h|--help) usage ;;
+  *) usage; exit 1 ;;
+esac

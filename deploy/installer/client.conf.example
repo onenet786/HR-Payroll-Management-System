@@ -1,0 +1,38 @@
+# Answers for an unattended install. Copy per client, fill in, then run:
+#   sudo bash hrpayroll-setup-<version>.run --config acme.conf --yes
+# Keep this file private (it holds passwords) and delete it after installing.
+# Plain KEY=VALUE lines; the file is parsed, never executed.
+
+# --- required ---
+DOMAIN=hr.acme-traders.com
+COMPANY_NAME="Acme Traders (Pvt) Ltd"
+ADMIN_EMAIL=admin@acme-traders.com
+
+# --- recommended ---
+ADMIN_NAME="System Administrator"
+# At least 12 characters. Leave empty to generate one (printed at the end).
+ADMIN_PASSWORD=
+SSL=yes
+SSL_EMAIL=it@acme-traders.com
+
+# --- optional ---
+# Short id used for the service, database and folders (default: first label of DOMAIN)
+SLUG=
+# Internal port (default: first free from 8080)
+PORT=
+# Other origins allowed to call the API, comma-separated
+EXTRA_ORIGINS=
+# Pakistan FBR salaried tax slabs: yes / no
+SEED_TAX_SLABS=yes
+# Only if 'sudo -u postgres psql' does not work on this server (aaPanel root password)
+PG_SUPER_PASSWORD=
+# Backup schedule in cron syntax (default 02:15 daily)
+BACKUP_CRON=
+
+# --- email (payslips, sign-in codes); can be set later with hrpayrollctl edit ---
+SMTP_HOST=
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=
+SMTP_PASS=
+SMTP_FROM=
