@@ -33,6 +33,11 @@ installs.
   --config FILE          Read answers from FILE (KEY=VALUE lines)
   --domain NAME          Public host name, e.g. hr.client.com
   --company NAME         Company name shown in the app
+  --edition full|lite    full = complete Pakistan compliance (FBR, EOBI, social
+                         security, PF, gratuity, bank payroll, maker-checker);
+                         lite = small shops of 10-15 staff (attendance, leave,
+                         salary, advances, payslips). Default: full
+  --no-vendor-console    Disable the OneNet edition console on the sign-in page
   --admin-name NAME      First administrator's full name
   --admin-email EMAIL    First administrator's sign-in email
   --admin-password PW    At least 12 characters (prefer the config file or
@@ -61,9 +66,10 @@ SSL="${HRP_SSL:-}"; SSL_EMAIL="${HRP_SSL_EMAIL:-}"; PORT="${HRP_PORT:-}"; EXTRA_
 SEED_TAX_SLABS="${HRP_SEED_TAX_SLABS:-}"; PG_SUPER_PASSWORD="${HRP_PG_SUPER_PASSWORD:-}"
 SMTP_HOST="${HRP_SMTP_HOST:-}"; SMTP_PORT="${HRP_SMTP_PORT:-}"; SMTP_SECURE="${HRP_SMTP_SECURE:-}"
 SMTP_USER="${HRP_SMTP_USER:-}"; SMTP_PASS="${HRP_SMTP_PASS:-}"; SMTP_FROM="${HRP_SMTP_FROM:-}"
-BACKUP_CRON="${HRP_BACKUP_CRON:-}"; REUSE_DB=0; ASSUME_YES=0; CONFIG_FILE=""
+BACKUP_CRON="${HRP_BACKUP_CRON:-}"; EDITION="${HRP_EDITION:-}"; VENDOR_CONSOLE="${HRP_VENDOR_CONSOLE:-}"
+REUSE_DB=0; ASSUME_YES=0; CONFIG_FILE=""
 
-CONFIG_KEYS=" DOMAIN SLUG COMPANY_NAME ADMIN_NAME ADMIN_EMAIL ADMIN_PASSWORD SSL SSL_EMAIL PORT EXTRA_ORIGINS SEED_TAX_SLABS PG_SUPER_PASSWORD SMTP_HOST SMTP_PORT SMTP_SECURE SMTP_USER SMTP_PASS SMTP_FROM BACKUP_CRON "
+CONFIG_KEYS=" DOMAIN SLUG COMPANY_NAME EDITION VENDOR_CONSOLE ADMIN_NAME ADMIN_EMAIL ADMIN_PASSWORD SSL SSL_EMAIL PORT EXTRA_ORIGINS SEED_TAX_SLABS PG_SUPER_PASSWORD SMTP_HOST SMTP_PORT SMTP_SECURE SMTP_USER SMTP_PASS SMTP_FROM BACKUP_CRON "
 
 # KEY=VALUE parser — never sources the file. Values already given on the
 # command line win over the file.
@@ -88,6 +94,8 @@ while [[ $# -gt 0 ]]; do
     --config) need_arg "$@"; CONFIG_FILE="$2"; shift 2 ;;
     --domain) need_arg "$@"; DOMAIN="$2"; shift 2 ;;
     --company) need_arg "$@"; COMPANY_NAME="$2"; shift 2 ;;
+    --edition) need_arg "$@"; EDITION="$2"; shift 2 ;;
+    --no-vendor-console) VENDOR_CONSOLE=disabled; shift ;;
     --admin-name) need_arg "$@"; ADMIN_NAME="$2"; shift 2 ;;
     --admin-email) need_arg "$@"; ADMIN_EMAIL="$2"; shift 2 ;;
     --admin-password) need_arg "$@"; ADMIN_PASSWORD="$2"; shift 2 ;;
@@ -173,6 +181,21 @@ ui_password() {
     read -rsp "> " a </dev/tty; echo >&2; printf '%s' "$a"
   fi
 }
+# ui_menu "Title" "Text" default tag1 "desc1" tag2 "desc2" …  → prints the chosen tag
+ui_menu() {
+  local title="$1" text="$2" def="$3"; shift 3
+  if [[ $UI == whiptail ]]; then
+    whiptail --backtitle "$BACKTITLE" --title "$title" --default-item "$def" --menu "$text" 18 74 $(($# / 2)) "$@" 3>&1 1>&2 2>&3
+  else
+    local -a tags=() a i=1
+    printf '\n%s\n%b\n' "${C_BOLD}$title${C_RESET}" "$text" >&2
+    while (( $# )); do tags+=("$1"); printf '  %d) %-6s %s\n' "$i" "$1" "$2" >&2; shift 2; i=$((i + 1)); done
+    read -rp "> [$def] " a </dev/tty
+    if [[ -z "$a" ]]; then printf '%s' "$def"
+    elif [[ "$a" =~ ^[0-9]+$ ]] && (( a >= 1 && a <= ${#tags[@]} )); then printf '%s' "${tags[a-1]}"
+    else printf '%s' "$a"; fi
+  fi
+}
 cancelled() { clear 2>/dev/null || true; die "Setup cancelled. Nothing was changed."; }
 
 ask_until() {
@@ -231,6 +254,11 @@ gather() {
     while [[ -f "$(instance_conf "$SLUG")" ]]; do SLUG="${SLUG:0:20}-$((RANDOM % 90 + 10))"; done
     ask_until SLUG valid_slug "Instance id" "Short id for this installation (lowercase letters, digits, dashes). Used for the service, database and folders." "$SLUG"
     ask_until COMPANY_NAME nonempty "Company" "Company name as it should appear in the app:"
+    while [[ "$EDITION" != full && "$EDITION" != lite ]]; do
+      EDITION="$(ui_menu "Edition" "Which edition does $COMPANY_NAME need?\n(OneNet can switch it later from the edition console; no data is lost.)" full \
+        full "Full — FBR tax, EOBI, social security, PF, gratuity, bank payroll, approvals" \
+        lite "Lite — small shop (10-15 staff): attendance, leave, salary, advances")" || cancelled
+    done
     ask_until ADMIN_NAME nonempty "Administrator" "Full name of the first Super Admin:" "System Administrator"
     ask_until ADMIN_EMAIL valid_email "Administrator" "Sign-in email of the first Super Admin:"
     if [[ -z "$ADMIN_PASSWORD" ]]; then
@@ -257,7 +285,8 @@ gather() {
       SMTP_PASS="$(ui_password "SMTP" "SMTP password or app password:")" || cancelled
       ask_until SMTP_FROM nonempty "SMTP" "From address shown on emails:" "Payroll <$SMTP_USER>"
     fi
-    if [[ -z "$SEED_TAX_SLABS" ]]; then
+    # Lite switches income tax off, so the slabs would only be unused data.
+    if [[ -z "$SEED_TAX_SLABS" && "$EDITION" == full ]]; then
       if ui_yesno "Payroll tax" "Load the Pakistan FBR salaried-individual income-tax slabs?\n\nChoose No for clients outside Pakistan; slabs can be edited in the app." yes 12; then SEED_TAX_SLABS=yes; else SEED_TAX_SLABS=no; fi
     fi
   fi
@@ -278,7 +307,12 @@ gather() {
   (( ${#ADMIN_PASSWORD} >= 12 )) || die "The administrator password needs at least 12 characters."
   SSL="${SSL:-yes}"; [[ "${SSL,,}" == y* || "${SSL,,}" == true || "$SSL" == 1 ]] && SSL=yes || SSL=no
   [[ -z "$SSL_EMAIL" ]] || valid_email "$SSL_EMAIL" || die "Invalid --ssl-email."
-  SEED_TAX_SLABS="${SEED_TAX_SLABS:-yes}"
+  EDITION="${EDITION:-full}"; EDITION="${EDITION,,}"
+  [[ "$EDITION" == full || "$EDITION" == lite ]] || die "--edition must be 'full' or 'lite' (got '$EDITION')."
+  if [[ "$EDITION" == lite ]]; then SEED_TAX_SLABS="${SEED_TAX_SLABS:-no}"; else SEED_TAX_SLABS="${SEED_TAX_SLABS:-yes}"; fi
+  [[ "${SEED_TAX_SLABS,,}" == y* || "${SEED_TAX_SLABS,,}" == true ]] && SEED_TAX_SLABS=yes || SEED_TAX_SLABS=no
+  VENDOR_CONSOLE="${VENDOR_CONSOLE:-enabled}"
+  [[ "${VENDOR_CONSOLE,,}" == disabled || "${VENDOR_CONSOLE,,}" == no || "${VENDOR_CONSOLE,,}" == false ]] && VENDOR_CONSOLE=disabled || VENDOR_CONSOLE=enabled
   [[ -z "$PORT" || "$PORT" =~ ^[0-9]{2,5}$ ]] || die "Invalid --port."
   [[ -f "$(instance_conf "$SLUG")" ]] && die "An installation named '$SLUG' already exists. Upgrade it with: hrpayrollctl update $SLUG <package>"
 
@@ -318,6 +352,7 @@ gather() {
     ui_yesno "Ready to install" "Please confirm:\n
   Website:        $scheme://$DOMAIN
   Company:        $COMPANY_NAME
+  Edition:        ${EDITION^}
   Super Admin:    $ADMIN_NAME <$ADMIN_EMAIL>
   Instance id:    $SLUG   (service $SERVICE, port $PORT)
   App folder:     $APP_ROOT
@@ -415,6 +450,12 @@ BACKUP_RETENTION_COUNT=14
 SESSION_IDLE_MINUTES=30
 SESSION_ABSOLUTE_HOURS=12
 DOCUMENT_STORAGE_PATH=$DATA_DIR
+
+# Vendor edition console (login "onenet", password OneNet + DDMonYYYY) switches
+# the full / lite edition. "hrpayrollctl edition $SLUG lite|full" also works.
+# VENDOR_LOGIN=onenet
+# VENDOR_PASSWORD_PREFIX=OneNet
+VENDOR_CONSOLE_DISABLED=$([[ $VENDOR_CONSOLE == disabled ]] && echo true || echo false)
 EOF
   umask 022
   chown root:"$APP_USER" "$f"; chmod 0640 "$f"
@@ -434,6 +475,7 @@ s_release() {
 
 s_migrate() {
   run_migrations "$APP_ROOT/current"
+  set_edition "$APP_ROOT/current" "$EDITION"
   if [[ "$SEED_TAX_SLABS" == yes && -f "$APP_ROOT/current/scripts/seed-tax-slabs.cjs" ]]; then
     app_run "$APP_ROOT/current" "$(node_bin)" scripts/seed-tax-slabs.cjs
   fi
@@ -525,7 +567,7 @@ main() {
   step "Creating service account and folders" s_user_dirs
   step "Writing configuration and secrets"   s_config
   step "Deploying application $BUNDLE_VERSION" s_release
-  step "Applying database migrations"        s_migrate
+  step "Applying migrations, ${EDITION^} edition" s_migrate
   step "Starting service $SERVICE"           s_service
   step "Configuring nginx for $DOMAIN"       s_nginx
   detect_nginx; NGINX_CONF="$NGINX_VHOST_DIR/hrpayroll-$SLUG.conf"
@@ -554,6 +596,8 @@ $PRODUCT_NAME — installation summary
 Installed:      $INSTALLED_AT  (bundle $BUNDLE_VERSION)
 Website:        $url
 Company:        $COMPANY_NAME
+Edition:        ${EDITION^}  (switch: hrpayrollctl edition $SLUG lite|full)
+Vendor console: $VENDOR_CONSOLE
 Super Admin:    $ADMIN_EMAIL
 Instance id:    $SLUG
 Service:        $SERVICE  (systemctl status $SERVICE)
@@ -575,6 +619,7 @@ EOF
     Open:        ${C_BOLD}$url${C_RESET}
     Sign in:     $ADMIN_EMAIL
     $pw_line
+    Edition:     ${EDITION^}
 
     Kiosk & mobile apps:  set the server address to $url
     Manage:      hrpayrollctl status $SLUG | logs $SLUG | backup $SLUG | update $SLUG <bundle.run>

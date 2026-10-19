@@ -24,6 +24,7 @@ ${C_BOLD}hrpayrollctl${C_RESET} — manage $PRODUCT_NAME installations
                                     Deploy a new version (backup → migrate →
                                     switch → health check → auto-rollback)
   rollback <id>                     Switch back to the previous release
+  edition  <id> [full|lite]         Show or switch the product edition
   ssl      <id> [--email EMAIL]     Issue/repair the HTTPS certificate
   edit     <id>                     Edit settings (app.env), then restart
   uninstall <id> [--purge] [--delete-backups] [--yes]
@@ -71,6 +72,7 @@ cmd_status() {
   Website:      $( [[ "$SSL_ENABLED" == 1 ]] && echo https || echo http )://$DOMAIN
   Service:      $SERVICE ($state)   health: $health
   Release:      $(current_release)
+  Edition:      $(get_edition "$APP_ROOT/current" 2>/dev/null || echo unknown)
   Port:         127.0.0.1:$PORT
   Certificate:  $cert
   Last backup:  ${last_backup:-none} $( [[ -n "$last_backup" ]] && date -r "$last_backup" '+(%F %T)')
@@ -211,6 +213,16 @@ cmd_ssl() {
   ok "https://$DOMAIN is live; renewals are automatic (certbot.timer)."
 }
 
+cmd_edition() {
+  need_slug "${1:-}"
+  local want="${2:-}"
+  if [[ -z "$want" ]]; then get_edition "$APP_ROOT/current"; return; fi
+  [[ "$want" == full || "$want" == lite ]] || die "Edition must be 'full' or 'lite'."
+  release_has_editions "$APP_ROOT/current" || die "This installation's release predates editions. Update it first."
+  set_edition "$APP_ROOT/current" "$want"
+  ok "Users see the ${want} edition on their next page load (within ~5 seconds). No data was changed."
+}
+
 cmd_edit() {
   need_slug "$1"
   "${EDITOR:-nano}" "$(env_file "$SLUG")"
@@ -275,6 +287,7 @@ case "$cmd" in
   restore) cmd_restore "$@" ;;
   update|upgrade) cmd_update "$@" ;;
   rollback) cmd_rollback "${1:-}" ;;
+  edition) cmd_edition "$@" ;;
   ssl) cmd_ssl "$@" ;;
   edit|config) cmd_edit "${1:-}" ;;
   uninstall|remove) cmd_uninstall "$@" ;;

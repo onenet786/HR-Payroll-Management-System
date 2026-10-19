@@ -21,6 +21,8 @@ The frontend is built with an **empty `VITE_API_BASE_URL`**, so the browser call
 
 To re-brand the wizard (product and vendor name), edit `branding.conf`.
 
+The illustrated PDF guide for setting up new clients, `docs/New-Client-Server-Setup-Guide.pdf`, is built with `npm run docs:setup-guide`. Run it after `server:bundle` so the PDF shows the new version; it is also copied into `dist/`.
+
 ## 2. Install for a new client (on their server)
 
 1. Point the client's DNS, e.g. `hr.client.com`, at the server (an A record).
@@ -52,6 +54,20 @@ Everything else happens automatically:
 | Web | An nginx vhost (aaPanel's nginx or system nginx), a Let's Encrypt certificate with auto-renewal, and an HTTP→HTTPS redirect. |
 | First admin | Created through the app's own `/api/auth/setup`, so the client can sign in straight away. |
 | Backups | An encrypted `pg_dump` every night at 02:15 to `/var/backups/hrpayroll/<id>` (14 kept), plus one right after install. |
+
+### Choosing the edition
+
+| Edition | For | Switched on |
+| --- | --- | --- |
+| **Full** (default) | Companies that need complete Pakistan compliance | FBR withholding and tax slabs, EOBI, social security, provident fund, gratuity, bank payroll, maker-checker approvals, recruitment, performance, assets, parallel run, go-live checklist |
+| **Lite** | Shops and small businesses with 10–15 staff | Attendance, leave, salaries, advances/loans, salary revisions, payslips. Cash salaries; employee email and bank account optional; one owner can prepare, approve and pay payroll. |
+
+The wizard asks for the edition. Unattended installs take `EDITION=` or `--edition lite`. For Lite, the FBR tax slabs are skipped unless you ask for them. The edition is stored in the database, and you can change it at any time without losing data, in either of two ways:
+
+- `sudo hrpayrollctl edition <id> lite|full` on the server
+- the OneNet vendor console on the sign-in screen (login `onenet`, password `OneNet` + today's date as `DDMonYYYY`)
+
+Pass `--no-vendor-console` (or `VENDOR_CONSOLE=disabled`) to switch that console off for a client.
 
 ### Unattended install (repeatable per client)
 
@@ -85,6 +101,7 @@ sudo hrpayrollctl update acme hrpayroll-setup-1.6.0.run   # backup → migrate �
 sudo hrpayrollctl rollback acme
 sudo hrpayrollctl backup acme
 sudo hrpayrollctl restore acme /var/backups/hrpayroll/acme/hr-payroll-<time>.dump.enc
+sudo hrpayrollctl edition acme        # show; add "lite" or "full" to switch
 sudo hrpayrollctl ssl acme            # after DNS is fixed, if HTTPS was skipped
 sudo hrpayrollctl edit acme           # SMTP, Twilio/WhatsApp, MFA enforcement… then restart
 sudo hrpayrollctl uninstall acme [--purge] [--delete-backups]

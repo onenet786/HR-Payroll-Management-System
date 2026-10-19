@@ -515,6 +515,36 @@ link_release_env() {
 
 run_migrations() { app_run "$1" "$(node_bin)" scripts/postgres-migrate.cjs; }
 
+# Product edition (full / lite) lives in the app_settings table. These use the
+# app's own server/edition.cjs so validation and the audit-log entry stay identical
+# to a switch made from the vendor console. Releases older than editions lack it.
+release_has_editions() { [[ -f "$1/server/edition.cjs" ]]; }
+
+set_edition() {
+  local dir="$1" id="$2"
+  release_has_editions "$dir" || { echo "This release has no editions; skipping."; return 0; }
+  app_run "$dir" env HRP_EDITION="$id" "$(node_bin)" -e '
+    require("dotenv").config({ path: ".env", quiet: true });
+    const e = require("./server/edition.cjs");
+    const { pool } = require("./server/db.cjs");
+    e.saveEdition(pool, { id: process.env.HRP_EDITION, note: "Set by the server installer" }, "installer:hrpayrollctl")
+      .then(ed => console.log(`Edition: ${ed.label}`))
+      .catch(err => { console.error(err.message); process.exitCode = 1; })
+      .finally(() => pool.end());'
+}
+
+get_edition() {
+  local dir="$1"
+  release_has_editions "$dir" || { echo "n/a (release predates editions)"; return 0; }
+  app_run "$dir" "$(node_bin)" -e '
+    require("dotenv").config({ path: ".env", quiet: true });
+    const e = require("./server/edition.cjs");
+    const { pool } = require("./server/db.cjs");
+    e.loadEdition(pool).then(ed => console.log(`${ed.id} — ${ed.label}`))
+      .catch(err => { console.error(err.message); process.exitCode = 1; })
+      .finally(() => pool.end());'
+}
+
 write_systemd_unit() {
   cat >"/etc/systemd/system/$SERVICE.service" <<EOF
 [Unit]
