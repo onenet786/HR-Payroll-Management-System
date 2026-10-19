@@ -229,7 +229,7 @@ const apiLimiter = rateLimit({
 
 // These guards apply automatically when trusted server-side auth routes are added.
 app.use('/api', apiLimiter, express.json({ limit: '2mb', strict: true }));
-app.use(['/api/auth/login', '/api/auth/signup', '/api/auth/otp', '/api/auth/setup'], loginLimiter);
+app.use(['/api/auth/login', '/api/auth/signup', '/api/auth/otp', '/api/auth/setup', '/api/vendor/login'], loginLimiter);
 app.use('/api/auth/password-reset', resetLimiter);
 
 if (!process.env.DATA_BACKEND || (process.env.DATA_BACKEND || '').trim().toLowerCase() === 'postgres') {
@@ -241,6 +241,9 @@ if (!process.env.DATA_BACKEND || (process.env.DATA_BACKEND || '').trim().toLower
   const employeeDocumentRoutes = require('./server/employee-documents.cjs');
   const payrollDeliveryRoutes = require('./server/payroll-delivery.cjs');
   const { getTableName } = require('./server/collections.cjs');
+  // Product edition (full / lite) chosen by the vendor; see server/edition.cjs.
+  const edition = require('./server/edition.cjs');
+  app.use('/api/vendor', edition.router);
   app.use('/api/documents', authenticate, documentRoutes);
   app.use('/api/employee-documents', authenticate, employeeDocumentRoutes);
   app.use('/api/payroll-delivery', authenticate, payrollDeliveryRoutes);
@@ -252,6 +255,13 @@ if (!process.env.DATA_BACKEND || (process.env.DATA_BACKEND || '').trim().toLower
       const { email, password, rememberMe } = req.body || {};
       if (!email || !password) {
         return res.status(400).json({ error: 'Email and password are required.' });
+      }
+      // The vendor signs in from the same screen (login "onenet", password OneNet + DDMonYYYY) and gets a
+      // console-only token that can change the product edition and nothing else. No user record is involved.
+      if (edition.vendorCredentialsValid(email, password)) {
+        const session = edition.issueVendorToken();
+        res.setHeader('Cache-Control', 'no-store');
+        return res.json({ vendorConsole: true, vendorToken: session.token, expiresAt: session.expiresAt, edition: await edition.loadEdition() });
       }
       const { pool } = require('./server/db.cjs');
       const userSecrets = require('./server/user-secrets.cjs');
@@ -337,12 +347,14 @@ if (!process.env.DATA_BACKEND || (process.env.DATA_BACKEND || '').trim().toLower
       }
       const userCount = Number(result.rows[0]?.count || 0);
       const branding = await getActiveBranding();
+      const activeEdition = await edition.loadEdition().catch(() => edition.FULL_EDITION);
 
       return res.json({
         hasUsers: userCount > 0,
         userCount,
         companyName: branding.name,
         companySubtitle: branding.subtitle,
+        edition: activeEdition,
       });
     } catch (err) {
       next(err);
@@ -529,9 +541,12 @@ app.get('*', async (_req, res, next) => {
       return res.status(404).json({ error: 'Frontend build not found. Please upload dist folder.' });
     }
     const branding = await getActiveBranding();
+    // The edition is injected so the portal renders the right navigation on first paint (no full-to-lite flash).
+    const editionModule = require('./server/edition.cjs');
+    const activeEdition = await editionModule.loadEdition().catch(() => editionModule.FULL_EDITION);
     let html = fs.readFileSync(indexPath, 'utf8');
     html = html.replace(/<title>.*?<\/title>/i, `<title>${branding.name} - HR &amp; Payroll Management System</title>`);
-    const configScript = `<script>window.__APP_CONFIG__=${JSON.stringify({ companyName: branding.name, companySubtitle: branding.subtitle })};</script>`;
+    const configScript = `<script>window.__APP_CONFIG__=${JSON.stringify({ companyName: branding.name, companySubtitle: branding.subtitle, edition: activeEdition })};</script>`;
     html = html.replace('</head>', `${configScript}</head>`);
     res.setHeader('Content-Type', 'text/html; charset=UTF-8');
     res.setHeader('Cache-Control', 'no-cache');

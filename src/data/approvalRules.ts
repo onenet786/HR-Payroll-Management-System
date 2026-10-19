@@ -1,12 +1,13 @@
 import type { AttendanceLog, Employee, PayrollRun, Payslip, Role, SalaryRevision, StatutoryChangeRequest, StatutoryConfig, TaxSlab, UserAccount } from '../types';
 
-export function payrollTransitionError(run: PayrollRun, nextStatus: 'Approved' | 'Disbursed', actorId: string): string | undefined {
+/** `makerChecker` false (lite edition): the same person may prepare, approve and pay a run. The server applies the same switch. */
+export function payrollTransitionError(run: PayrollRun, nextStatus: 'Approved' | 'Disbursed', actorId: string, makerChecker = true): string | undefined {
   if (nextStatus === 'Approved') {
     if (run.status !== 'Draft') return 'Only a draft payroll can be approved.';
-    if (run.createdById === actorId) return 'The payroll preparer cannot approve the same payroll run.';
+    if (makerChecker && run.createdById === actorId) return 'The payroll preparer cannot approve the same payroll run.';
   } else {
     if (run.status !== 'Approved') return 'Only an approved payroll can be disbursed.';
-    if (run.approvedById === actorId) return 'The payroll approver cannot disburse the same payroll run.';
+    if (makerChecker && run.approvedById === actorId) return 'The payroll approver cannot disburse the same payroll run.';
   }
   return undefined;
 }
@@ -17,6 +18,8 @@ export interface AttendanceReviewContext {
   users?: Pick<UserAccount, 'id' | 'employeeId' | 'roleId' | 'status' | 'username'>[];
   roles?: Pick<Role, 'id' | 'permissions'>[];
   now?: number;
+  /** False in the lite edition: an attendance manager may decide a request they raised themselves. */
+  makerChecker?: boolean;
 }
 
 /** The active line manager who can decide attendance corrections, when one is configured. */
@@ -29,10 +32,11 @@ export function lineManagerReviewer(context: AttendanceReviewContext) {
 
 export function attendanceReviewError(attendance: AttendanceLog, actorId: string, context: AttendanceReviewContext = {}): string | undefined {
   if (!attendance.regularizationRequested || attendance.regularizationApproved !== undefined) return 'This attendance item is not awaiting review.';
-  if (attendance.requestedById === actorId) return 'The requester cannot review their own attendance adjustment.';
-  if (context.employee && context.actorEmployeeId === context.employee.id) return 'Employees cannot review their own attendance.';
+  const dual = context.makerChecker !== false;
+  if (dual && attendance.requestedById === actorId) return 'The requester cannot review their own attendance adjustment.';
+  if (dual && context.employee && context.actorEmployeeId === context.employee.id) return 'Employees cannot review their own attendance.';
   const manager = lineManagerReviewer(context);
-  if (manager && manager.id !== actorId && !isRegularizationOverdue(attendance, context.now)) {
+  if (dual && manager && manager.id !== actorId && !isRegularizationOverdue(attendance, context.now)) {
     return `Awaiting line manager ${manager.username}. HR can decide after the ${REGULARIZATION_DEADLINE_WORKING_DAYS}-working-day review deadline passes.`;
   }
   return undefined;
@@ -67,9 +71,9 @@ export function isRegularizationOverdue(attendance: AttendanceLog, now = Date.no
   return Boolean(due && Date.parse(due) < now);
 }
 
-export function salaryRevisionApprovalError(revision: SalaryRevision, actorId: string): string | undefined {
+export function salaryRevisionApprovalError(revision: SalaryRevision, actorId: string, makerChecker = true): string | undefined {
   if (revision.status === 'Approved') return 'This salary revision is already approved.';
-  if (revision.createdById && revision.createdById === actorId) return 'The user who prepared a salary revision cannot approve it.';
+  if (makerChecker && revision.createdById && revision.createdById === actorId) return 'The user who prepared a salary revision cannot approve it.';
   return undefined;
 }
 
@@ -120,9 +124,9 @@ export function statutoryChangedFields(live: StatutoryConfig, proposed: Statutor
   return fields;
 }
 
-export function statutoryReviewError(request: StatutoryChangeRequest, actorId: string): string | undefined {
+export function statutoryReviewError(request: StatutoryChangeRequest, actorId: string, makerChecker = true): string | undefined {
   if (request.status !== 'Pending') return 'This statutory change request has already been decided.';
-  if (request.createdById === actorId) return 'The user who proposed a statutory rate change cannot approve it.';
+  if (makerChecker && request.createdById === actorId) return 'The user who proposed a statutory rate change cannot approve it.';
   if (!request.changedFields.length) return 'The request does not change any statutory value.';
   if (!request.proposedConfig.sourceReference?.trim()) return 'Record the official FBR / EOBI / provincial notification reference before approval.';
   return statutoryPeriodError(request.proposedConfig);

@@ -79,6 +79,8 @@ const payslip = runId => ({ id: `${runId}-e1`, payrollRunId: runId, employeeId: 
 
 test.before(async () => {
   for (const table of TABLES) await pool.query(`DELETE FROM ${table}`);
+  // Every suite starts in the full edition (creates app_settings when the migration has not run yet).
+  await require('./edition.cjs').saveEdition(pool, { id: 'full' }, 'integration-test');
   const roles = { 'role-hr': ['manage_employees', 'manage_attendance'], 'role-payroll': ['manage_payroll'], 'role-settings': ['manage_settings', 'manage_employees', 'manage_payroll', 'manage_attendance'], 'role-employee': [] };
   for (const [id, permissions] of Object.entries(roles)) await seed('roles', id, { name: id, permissions });
   const users = { 'u-maker': 'role-settings', 'u-checker': 'role-settings', 'u-third': 'role-settings', 'u-hr': 'role-hr', 'u-mgr': 'role-hr', 'u-emp': 'role-employee', 'u-pay-only': 'role-payroll' };
@@ -322,6 +324,39 @@ test('an off-site GPS punch can still be visited, completed and approved hours l
   assert.equal(await put('u-mgr', 'attendances', 'gps-1', { ...later, regularizationApproved: true, reviewedById: 'u-mgr', reviewedAt: new Date().toISOString(), reviewComment: 'Confirmed client visit' }), 200, 'manager approves without new GPS evidence');
   assert.equal((await current('attendances', 'gps-1')).regularizationApproved, true);
   assert.ok(withVisit.fieldVisits.length === 1);
+});
+
+test('lite edition: one owner runs a cash payroll alone; the full edition restores maker-checker', async () => {
+  const { saveEdition } = require('./edition.cjs');
+  // August has no payroll yet in this suite (one regular run per period); the register hashes are seeded consistently.
+  const periodId = 'attendance-period-2026-08';
+  await pool.query(`DELETE FROM attendance_periods`);
+  await seed('attendance_periods', periodId, { ...lockedPeriod(1, []), id: periodId, periodMonth: 8 }, { status: 'Locked' });
+  const bankDetails = (await current('employees', 'e1'));
+  await pool.query(`UPDATE employees SET data = data - 'bankName' - 'bankAccountNumber' - 'iban' WHERE id='e1'`); // paid in cash
+  const liteRun = { ...run('lite-run'), periodMonth: 8, startDate: '2026-08-01', endDate: '2026-08-31', attendancePeriodId: periodId };
+  await seed('payroll_runs', 'lite-run', liteRun, { status: 'Draft' });
+  await seed('payroll_payslips', 'lite-run-e1', { ...payslip('lite-run'), periodMonth: 8, bankName: '', bankAccountNumber: '', iban: '' }, { payroll_run_id: 'lite-run', employee_id: 'e1' });
+  const approved = { ...liteRun, status: 'Approved', approvedById: 'u-maker', approvedAt: 'now' };
+  assert.equal(await put('u-maker', 'payrollRuns', 'lite-run', approved), 403, 'full edition: the preparer cannot approve');
+
+  await saveEdition(pool, { id: 'lite' }, 'integration-test');
+  assert.equal(await put('u-maker', 'payrollRuns', 'lite-run', approved), 200, 'lite edition: the owner approves their own run with a cash-paid worker');
+  const paid = { ...approved, status: 'Disbursed', disbursedById: 'u-maker', disbursedAt: 'now', disbursementReference: 'CASH-VOUCHER-12' };
+  assert.equal(await put('u-maker', 'payrollRuns', 'lite-run', paid), 200, 'lite edition: paid in cash without a bank advice file');
+  assert.equal(await put('u-maker', 'statConfig', 'stat-1', { minimumWage: 42000, taxYear: '2027' }), 200, 'lite edition: live rates are edited directly');
+  const pending = { employeeId: 'e1', date: '2026-12-01', method: 'Manual', status: 'Absent', overtimeMinutes: 0, regularizationRequested: true, regularizationReason: 'Forgot to punch', requestedAt: new Date().toISOString() };
+  assert.equal(await put('u-hr', 'attendances', 'lite-reg', pending), 200);
+  const decision = (reviewer, record) => ({ ...record, status: 'Present', regularizationApproved: true, reviewedById: reviewer, reviewedAt: new Date().toISOString(), reviewComment: 'Owner confirmed' });
+  assert.equal(await put('u-hr', 'attendances', 'lite-reg', decision('u-hr', pending)), 200, 'lite edition: the attendance manager decides a request they raised');
+  const own = { ...pending, date: '2026-12-02' };
+  assert.equal(await put('u-emp', 'attendances', 'lite-own', own), 200);
+  assert.equal(await put('u-emp', 'attendances', 'lite-own', decision('u-emp', own)), 403, 'an employee never approves their own attendance, in any edition');
+
+  await saveEdition(pool, { id: 'full' }, 'integration-test');
+  assert.equal(await put('u-maker', 'statConfig', 'stat-1', { minimumWage: 43000, taxYear: '2027' }), 403, 'full edition: change control is back');
+  await pool.query(`UPDATE employees SET data = data || $2::jsonb WHERE id=$1`, ['e1', JSON.stringify({ bankName: bankDetails.bankName, bankAccountNumber: bankDetails.bankAccountNumber, iban: bankDetails.iban })]);
+  await pool.query(`DELETE FROM attendance_periods`);
 });
 
 test('employees see and mark their own and company-wide notifications only', async () => {

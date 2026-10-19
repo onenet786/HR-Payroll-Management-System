@@ -15,6 +15,8 @@ interface Props {
   companies: Company[];
   lifecycleRequests: LifecycleRequest[];
   currentUserId: string;
+  /** False in the lite edition: the user who raised a request may approve it. */
+  makerChecker?: boolean;
   onCreate: (draft: Omit<LifecycleRequest, 'id' | 'status' | 'createdAt' | 'createdById' | 'createdBy'>) => Promise<boolean>;
   onReview: (id: string, decision: 'Approved' | 'Rejected', comment: string) => void;
   onUpdateOnboarding: (employeeId: string, item: OnboardingChecklistItem, done: boolean) => void;
@@ -25,7 +27,7 @@ interface Props {
 const TYPES: LifecycleRequestType[] = ['Probation Confirmation', 'Probation Extension', 'Transfer', 'Promotion', 'Resignation', 'Termination'];
 const emptyForm = { employeeId: '', type: 'Probation Confirmation' as LifecycleRequestType, effectiveDate: new Date().toISOString().slice(0, 10), reason: '', newBranchId: '', newDepartmentId: '', newDesignationId: '', newBasicSalary: '', newProbationEndDate: '', noticeDays: '0', leaveEncashDays: '0' };
 
-export function EmployeeLifecycleModule({ employees, branches, departments, designations, companies, lifecycleRequests, currentUserId, onCreate, onReview, onUpdateOnboarding, leaves, statConfig }: Props) {
+export function EmployeeLifecycleModule({ employees, branches, departments, designations, companies, lifecycleRequests, currentUserId, onCreate, onReview, onUpdateOnboarding, leaves, statConfig, makerChecker = true }: Props) {
   const [view, setView] = useState<'requests' | 'onboarding' | 'letters'>('requests');
   const [form, setForm] = useState(emptyForm);
   const [search, setSearch] = useState('');
@@ -119,8 +121,8 @@ export function EmployeeLifecycleModule({ employees, branches, departments, desi
                 <p className="mt-1 text-slate-600">{detail(request)}</p>
                 <p className="mt-1 italic text-slate-500">“{request.reason}” — raised by {request.createdBy}</p>
                 <div className="mt-2 flex justify-end gap-2">
-                  <button type="button" disabled={request.createdById === currentUserId} onClick={() => review(request, 'Rejected')} className="rounded border border-slate-300 px-3 py-1 font-semibold text-slate-600 disabled:opacity-40">Reject</button>
-                  <button type="button" disabled={request.createdById === currentUserId} title={request.createdById === currentUserId ? 'Raised by you; another authorized user must approve.' : 'Approve and apply'} onClick={() => review(request, 'Approved')} className="flex items-center gap-1 rounded bg-emerald-700 px-3 py-1 font-bold text-white disabled:opacity-40"><CheckCircle size={13} />Approve</button>
+                  <button type="button" disabled={makerChecker && request.createdById === currentUserId} onClick={() => review(request, 'Rejected')} className="rounded border border-slate-300 px-3 py-1 font-semibold text-slate-600 disabled:opacity-40">Reject</button>
+                  <button type="button" disabled={makerChecker && request.createdById === currentUserId} title={makerChecker && request.createdById === currentUserId ? 'Raised by you; another authorized user must approve.' : 'Approve and apply'} onClick={() => review(request, 'Approved')} className="flex items-center gap-1 rounded bg-emerald-700 px-3 py-1 font-bold text-white disabled:opacity-40"><CheckCircle size={13} />Approve</button>
                 </div>
               </li>)}
             </ul>}

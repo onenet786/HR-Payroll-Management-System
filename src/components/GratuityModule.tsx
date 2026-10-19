@@ -19,6 +19,8 @@ interface GratuityModuleProps {
   statConfig: StatutoryConfig;
   canManage: boolean;
   currentUserAccount: UserAccount;
+  /** False in the lite edition: one user may create, process and pay a settlement. */
+  makerChecker?: boolean;
   onAddSettlement: (settlement: GratuitySettlement) => void;
   onUpdateSettlement: (settlement: GratuitySettlement) => void;
 }
@@ -43,7 +45,7 @@ function computeYears(joiningDate: string, lastWorkingDate: string) {
 }
 
 
-export function GratuityModule({ settlements, employees, statConfig, canManage, currentUserAccount, onAddSettlement, onUpdateSettlement }: GratuityModuleProps) {
+export function GratuityModule({ settlements, employees, statConfig, canManage, currentUserAccount, onAddSettlement, onUpdateSettlement, makerChecker = true }: GratuityModuleProps) {
   const [showCalc, setShowCalc] = useState(false);
   const [search, setSearch] = useState('');
 
@@ -179,11 +181,11 @@ export function GratuityModule({ settlements, employees, statConfig, canManage, 
                       {canManage && s.status !== 'Paid' && (
                         <div className="flex gap-1">
                           {s.status === 'Pending' && (
-                            <button disabled={s.createdById === currentUserAccount.id} title={s.createdById === currentUserAccount.id ? 'Another payroll user must process this settlement.' : 'Process settlement'} onClick={() => onUpdateSettlement({ ...s, status: 'Processed', processedAt: new Date().toISOString(), processedById: currentUserAccount.id })}
+                            <button disabled={makerChecker && s.createdById === currentUserAccount.id} title={makerChecker && s.createdById === currentUserAccount.id ? 'Another payroll user must process this settlement.' : 'Process settlement'} onClick={() => onUpdateSettlement({ ...s, status: 'Processed', processedAt: new Date().toISOString(), processedById: currentUserAccount.id })}
                               className="text-[10px] font-bold text-blue-700 bg-blue-50 px-2 py-1 rounded-lg hover:bg-blue-500/20 transition">Process</button>
                           )}
                           {s.status === 'Processed' && (
-                            <button disabled={s.createdById === currentUserAccount.id || s.processedById === currentUserAccount.id} title={s.createdById === currentUserAccount.id ? 'Settlement maker cannot pay it.' : s.processedById === currentUserAccount.id ? 'Settlement processor cannot pay it.' : 'Mark settlement paid'} onClick={() => onUpdateSettlement({ ...s, status: 'Paid', paidDate: new Date().toISOString().split('T')[0], paidById: currentUserAccount.id })}
+                            <button disabled={makerChecker && (s.createdById === currentUserAccount.id || s.processedById === currentUserAccount.id)} title={makerChecker && s.createdById === currentUserAccount.id ? 'Settlement maker cannot pay it.' : makerChecker && s.processedById === currentUserAccount.id ? 'Settlement processor cannot pay it.' : 'Mark settlement paid'} onClick={() => onUpdateSettlement({ ...s, status: 'Paid', paidDate: new Date().toISOString().split('T')[0], paidById: currentUserAccount.id })}
                               className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-lg hover:bg-emerald-500/20 transition">Mark Paid</button>
                           )}
                         </div>

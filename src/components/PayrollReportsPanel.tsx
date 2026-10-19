@@ -8,6 +8,7 @@ import {
 } from '../data/payrollLedgers';
 import { openPrintableHtml } from '../data/lifecycle';
 import { RequiredMark, RequiredNote } from './RequiredMark';
+import { FULL_EDITION, type EditionFeatures } from '../data/edition';
 
 interface Props {
   employees: Employee[];
@@ -25,6 +26,8 @@ interface Props {
   currentUser: { id: string; username: string };
   onCreatePayrollAdjustment: (adjustment: PayrollAdjustment) => void | Promise<void>;
   onRetroRecalculate: (payslipId: string, reason: string, target: { month: number; year: number }) => void | Promise<void>;
+  /** Edition switches: reports of a switched-off scheme are hidden. */
+  features?: EditionFeatures;
 }
 
 const download = (report: CsvReport) => {
@@ -34,6 +37,8 @@ const download = (report: CsvReport) => {
 
 export function PayrollReportsPanel(props: Props) {
   const { employees, payrollRuns, payrollPayslips, gratuitySettlements, statConfig, wageTypes, company, periodMonth, periodYear } = props;
+  const features = props.features || FULL_EDITION.features;
+  const statutory = features.incomeTax || features.eobi || features.socialSecurity;
   const [taxYear, setTaxYear] = useState(taxYearOfPeriod(periodMonth, periodYear));
   const [certificateEmployeeId, setCertificateEmployeeId] = useState('');
   const [retro, setRetro] = useState({ payslipId: '', days: '', reason: '' });
@@ -69,24 +74,24 @@ export function PayrollReportsPanel(props: Props) {
     <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 text-xs shadow-sm" aria-labelledby="payroll-reports-title">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h3 id="payroll-reports-title" className="text-sm font-bold text-slate-900">Statutory, finance &amp; off-cycle payroll</h3>
+          <h3 id="payroll-reports-title" className="text-sm font-bold text-slate-900">{statutory ? 'Statutory, finance & off-cycle payroll' : 'Corrections & off-cycle payroll'}</h3>
           <p className="mt-1 text-slate-500">Reports use approved and disbursed runs only; cancelled runs are excluded.</p>
         </div>
-        <label className="flex items-center gap-2 text-slate-600">Tax year
+        {(features.incomeTax || features.providentFund) && <label className="flex items-center gap-2 text-slate-600">Tax year
           <input aria-label="Report tax year" value={taxYear} onChange={event => setTaxYear(event.target.value.replace(/\D/g, '').slice(0, 4))} className="w-20 rounded border border-slate-300 p-1.5 font-mono" />
-        </label>
+        </label>}
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        <button type="button" className={button} onClick={() => run(() => download(providentFundLedger(payrollRuns, payrollPayslips, taxYear)))}><Download size={13} />PF ledger</button>
-        <button type="button" className={button} onClick={() => run(() => download(gratuityProvision(employees, today, statConfig, wageTypes)))}><Download size={13} />Gratuity provision</button>
-        <button type="button" className={button} onClick={() => run(() => download(taxDepositReconciliation(payrollRuns, payrollPayslips)))}><Download size={13} />Tax deposit reconciliation</button>
-        <button type="button" className={button} onClick={() => run(() => download(annualTaxCertificatesCsv(employees, payrollRuns, payrollPayslips, taxYear)))}><Download size={13} />Annual tax summary</button>
-        <button type="button" className={button} onClick={() => run(() => download(missingRegistrationReport(employees)))}><Download size={13} />Missing registrations</button>
-        <button type="button" className={button} onClick={() => run(() => download(taxReconciliationReport(employees, payrollRuns, payrollPayslips, taxYear)))}><Download size={13} />Tax vs annual liability</button>
-      </div>
+      {(statutory || features.providentFund || features.gratuity) && <div className="flex flex-wrap gap-2">
+        {features.providentFund && <button type="button" className={button} onClick={() => run(() => download(providentFundLedger(payrollRuns, payrollPayslips, taxYear)))}><Download size={13} />PF ledger</button>}
+        {features.gratuity && <button type="button" className={button} onClick={() => run(() => download(gratuityProvision(employees, today, statConfig, wageTypes)))}><Download size={13} />Gratuity provision</button>}
+        {features.incomeTax && <button type="button" className={button} onClick={() => run(() => download(taxDepositReconciliation(payrollRuns, payrollPayslips)))}><Download size={13} />Tax deposit reconciliation</button>}
+        {features.incomeTax && <button type="button" className={button} onClick={() => run(() => download(annualTaxCertificatesCsv(employees, payrollRuns, payrollPayslips, taxYear)))}><Download size={13} />Annual tax summary</button>}
+        {statutory && <button type="button" className={button} onClick={() => run(() => download(missingRegistrationReport(employees)))}><Download size={13} />Missing registrations</button>}
+        {features.incomeTax && <button type="button" className={button} onClick={() => run(() => download(taxReconciliationReport(employees, payrollRuns, payrollPayslips, taxYear)))}><Download size={13} />Tax vs annual liability</button>}
+      </div>}
 
-      <div className="flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 p-3">
+      {features.incomeTax && <div className="flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 p-3">
         <span className="font-semibold text-slate-700">Salary tax certificate (s.149):</span>
         <select aria-label="Certificate employee" value={certificateEmployeeId} onChange={event => setCertificateEmployeeId(event.target.value)} className="rounded border border-slate-300 bg-white p-1.5">
           <option value="">Select employee</option>
@@ -96,11 +101,11 @@ export function PayrollReportsPanel(props: Props) {
           const employee = employees.find(item => item.id === certificateEmployeeId)!;
           openPrintableHtml(annualTaxCertificateHtml(employee, payrollRuns, payrollPayslips, taxYear, company));
         })}><FileText size={13} />Open certificate</button>
-      </div>
+      </div>}
 
       <div className="rounded-lg border border-slate-200 p-3">
         <h4 className="font-bold text-slate-900">Retroactive attendance correction</h4>
-        <p className="mt-1 text-[11px] text-slate-500">Paid months stay locked. Days found later are paid (arrears) or recovered (deduction) in {periodMonth}/{periodYear}, after approval by another payroll user.</p>
+        <p className="mt-1 text-[11px] text-slate-500">Paid months stay locked. Days found later are paid (arrears) or recovered (deduction) in {periodMonth}/{periodYear}{features.makerChecker ? ', after approval by another payroll user' : ''}.</p>
         <RequiredNote className="mt-1" />
         <div className="mt-2 grid gap-2 md:grid-cols-[minmax(0,2fr)_6rem_minmax(0,2fr)_auto]">
           <label className="flex min-w-0 flex-col gap-0.5 text-[10px] font-semibold text-slate-600">Paid payslip<RequiredMark />
@@ -121,7 +126,7 @@ export function PayrollReportsPanel(props: Props) {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <div className="rounded-lg border border-slate-200 p-3">
+        {features.incomeTax && <div className="rounded-lg border border-slate-200 p-3">
           <h4 className="font-bold text-slate-900">FBR deposits pending reconciliation ({outstanding.length})</h4>
           {outstanding.length === 0 ? <p className="mt-2 text-emerald-700">All processed payroll tax has a matching CPR.</p> : <ul className="mt-2 space-y-1">
             {outstanding.slice(0, 8).map(line => <li key={line.run.id} className="flex items-center justify-between gap-2">
@@ -129,18 +134,20 @@ export function PayrollReportsPanel(props: Props) {
               <button type="button" onClick={() => recordDeposit(line)} className="shrink-0 font-semibold text-indigo-700 hover:underline">Record CPR</button>
             </li>)}
           </ul>}
-        </div>
+        </div>}
         <div className="rounded-lg border border-slate-200 p-3">
           <h4 className="font-bold text-slate-900">Off-cycle runs</h4>
           <button type="button" onClick={() => props.onCreateSupplementaryRun(periodMonth, periodYear)} className="mt-2 rounded-lg bg-indigo-700 px-3 py-2 font-bold text-white hover:bg-indigo-800">Run supplementary payroll for {periodMonth}/{periodYear}</button>
-          <p className="mt-1 text-[11px] text-slate-500">Pays bonuses, arrears and other adjustments approved after the regular run, taxed at the marginal rate.</p>
+          <p className="mt-1 text-[11px] text-slate-500">Pays bonuses, arrears and other adjustments approved after the regular run{features.incomeTax ? ', taxed at the marginal rate' : ''}.</p>
+          {features.gratuity && <>
           <p className="mt-3 font-semibold text-slate-700">Approved settlements awaiting payroll ({settlementsReady.length})</p>
-          {settlementsReady.length === 0 ? <p className="text-slate-500">None. A settlement must be processed by an independent approver first.</p> : <ul className="mt-1 space-y-1">
+          {settlementsReady.length === 0 ? <p className="text-slate-500">{features.makerChecker ? 'None. A settlement must be processed by an independent approver first.' : 'None. Process a settlement under Gratuity & Settlement first.'}</p> : <ul className="mt-1 space-y-1">
             {settlementsReady.map(item => <li key={item.id} className="flex items-center justify-between gap-2">
               <span>{employees.find(employee => employee.id === item.employeeId)?.fullName || item.employeeId} · {item.separationType} {item.separationDate} · PKR {item.totalSettlementAmount.toLocaleString()}</span>
               <button type="button" onClick={() => props.onCreateFinalSettlementRun(item.id)} className="shrink-0 font-semibold text-indigo-700 hover:underline">Create final settlement run</button>
             </li>)}
           </ul>}
+          </>}
         </div>
       </div>
     </section>

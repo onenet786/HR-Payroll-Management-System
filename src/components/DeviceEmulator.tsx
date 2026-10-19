@@ -10,6 +10,7 @@ import { WebPortal, type WebPortalProps } from './WebPortal';
 import { KioskTerminal } from './KioskTerminal';
 import { MobileApp } from './MobileApp';
 import type { FirestoreSyncStatus } from '../App';
+import type { AppEdition } from '../data/edition';
 import {
   Employee, AttendanceLog, AttendancePeriod, LeaveRequest, StatutoryConfig, TaxSlab, PayrollRun, Payslip, Designation, Branch, Department,
   Role, UserAccount, NewUserAccount, Holiday, LoanAdvance, SalaryRevision, PayrollAdjustment,
@@ -109,6 +110,8 @@ interface DeviceEmulatorProps {
   onMarkAllNotificationsRead: () => void;
   onDeleteNotification: (id: string) => void;
   firestoreSyncStatus: FirestoreSyncStatus;
+  /** Product edition in force (full / lite). */
+  edition: AppEdition;
 }
 
 export function DeviceEmulator({
@@ -202,7 +205,8 @@ export function DeviceEmulator({
   onMarkNotificationRead,
   onMarkAllNotificationsRead,
   onDeleteNotification,
-  firestoreSyncStatus
+  firestoreSyncStatus,
+  edition
 }: DeviceEmulatorProps) {
   const isKioskUser = loggedInUser?.username === 'kiosk' || loggedInUser?.roleId === 'role-kiosk';
   const isNativeApp = !!(window as any).Capacitor?.isNativePlatform?.();
@@ -387,6 +391,7 @@ export function DeviceEmulator({
               onDeleteNotification={onDeleteNotification}
               onSimulatePunch={onSimulatePunch}
               firestoreSyncStatus={firestoreSyncStatus}
+              edition={edition}
             />
           </motion.div>
         </div>

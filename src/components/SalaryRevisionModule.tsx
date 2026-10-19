@@ -17,6 +17,8 @@ interface SalaryRevisionModuleProps {
   employees: Employee[];
   currentUserAccount: { id: string; username: string };
   onAddSalaryRevision: (revision: SalaryRevision) => void;
+  /** False in the lite edition: the preparer may approve their own revision. */
+  makerChecker?: boolean;
 }
 
 const revisionTypeColors: Record<string, string> = {
@@ -26,7 +28,7 @@ const revisionTypeColors: Record<string, string> = {
   'Market Correction': 'bg-indigo-50 text-indigo-700 border-indigo-200'
 };
 
-export function SalaryRevisionModule({ salaryRevisions, employees, currentUserAccount, onAddSalaryRevision }: SalaryRevisionModuleProps) {
+export function SalaryRevisionModule({ salaryRevisions, employees, currentUserAccount, onAddSalaryRevision, makerChecker = true }: SalaryRevisionModuleProps) {
   const [showForm, setShowForm] = useState(false);
   const [filterEmpId, setFilterEmpId] = useState<string>('All');
   const [search, setSearch] = useState('');
@@ -220,7 +222,7 @@ export function SalaryRevisionModule({ salaryRevisions, employees, currentUserAc
               </div>
               {revision.status === 'Draft' && <div className="mt-3 flex items-center justify-between rounded-xl border border-amber-200 bg-amber-50 p-3">
                 <p className="text-xs text-amber-700">{revision.sourcePerformanceReviewId ? 'Performance recommendation only.' : 'Awaiting independent approval.'} Approving updates the employee salary; back-dated revisions raise an arrears adjustment for months already processed.</p>
-                <button type="button" disabled={revision.createdById === currentUserAccount.id} title={revision.createdById === currentUserAccount.id ? 'Prepared by you; another authorized user must approve.' : 'Approve and apply'} onClick={() => onAddSalaryRevision({ ...revision, status: 'Approved', approvedBy: currentUserAccount.username, approvedOn: new Date().toISOString().split('T')[0] })} className="ml-4 shrink-0 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-40">Approve &amp; Apply</button>
+                <button type="button" disabled={makerChecker && revision.createdById === currentUserAccount.id} title={makerChecker && revision.createdById === currentUserAccount.id ? 'Prepared by you; another authorized user must approve.' : 'Approve and apply'} onClick={() => onAddSalaryRevision({ ...revision, status: 'Approved', approvedBy: currentUserAccount.username, approvedOn: new Date().toISOString().split('T')[0] })} className="ml-4 shrink-0 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-40">Approve &amp; Apply</button>
               </div>}
             </div>
           ))

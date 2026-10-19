@@ -1,4 +1,5 @@
 import type { Branch, Employee, Payslip, StatutoryConfig, WageType } from '../types';
+import type { EditionFeatures } from './edition';
 import { resolveWageBasis } from './masterData';
 import { employeeProvince, provincialPolicy } from './provincialCompliance';
 
@@ -12,8 +13,10 @@ export interface PayrollPreflightIssue {
   message: string;
 }
 
-export function payrollPreflight(employees: Employee[], draftPayslips: Payslip[], historicalPayslips: Payslip[], branches?: Branch[], statutoryConfig?: StatutoryConfig, wageTypes: WageType[] = []): PayrollPreflightIssue[] {
+/** `features` (edition): switched-off schemes raise no issues and, without bank payroll, a missing bank account only warns (cash salary). */
+export function payrollPreflight(employees: Employee[], draftPayslips: Payslip[], historicalPayslips: Payslip[], branches?: Branch[], statutoryConfig?: StatutoryConfig, wageTypes: WageType[] = [], features?: EditionFeatures): PayrollPreflightIssue[] {
   const issues: PayrollPreflightIssue[] = [];
+  const bankPayroll = features?.bankPayroll !== false;
   const normalizeIdentity = (value?: string) => (value || '').replace(/[^a-z0-9]/gi, '').toUpperCase();
   const duplicateCNICs = new Map<string, Employee[]>();
   const duplicateBankAccounts = new Map<string, Employee[]>();
@@ -32,9 +35,12 @@ export function payrollPreflight(employees: Employee[], draftPayslips: Payslip[]
     if (!/^\d{5}-\d{7}-\d$/.test(employee.cnic || '')) add('Critical', 'INVALID_CNIC', 'CNIC is missing or invalid.');
     const cnicMatches = duplicateCNICs.get(normalizeIdentity(employee.cnic)) || [];
     if (cnicMatches.length > 1) add('Critical', 'DUPLICATE_CNIC', `CNIC is also assigned to ${cnicMatches.filter(item => item.id !== employee.id).map(item => item.fullName).join(', ')}. Resolve the duplicate before payroll.`);
-    if (!employee.bankName?.trim() || !employee.bankAccountNumber?.trim()) add('Critical', 'MISSING_BANK', 'Bank name or account number is missing.');
+    if (!employee.bankName?.trim() || !employee.bankAccountNumber?.trim()) {
+      if (bankPayroll) add('Critical', 'MISSING_BANK', 'Bank name or account number is missing.');
+      else add('Warning', 'MISSING_BANK', 'No bank account recorded; this salary will be paid in cash.');
+    }
     if (employee.iban && !/^PK\d{2}[A-Z0-9]{20}$/i.test(employee.iban.replace(/\s/g, ''))) add('Critical', 'INVALID_IBAN', 'IBAN must be a valid 24-character Pakistan IBAN.');
-    if (employee.fbrEnabled !== false && !employee.ntn?.trim()) add('Warning', 'MISSING_NTN', 'FBR withholding is enabled but the employee NTN is not recorded.');
+    if (features?.incomeTax !== false && employee.fbrEnabled !== false && !employee.ntn?.trim()) add('Warning', 'MISSING_NTN', 'FBR withholding is enabled but the employee NTN is not recorded.');
     const bankIdentity = normalizeIdentity(employee.iban) || `${normalizeIdentity(employee.bankName)}:${normalizeIdentity(employee.bankAccountNumber)}`;
     const bankMatches = duplicateBankAccounts.get(bankIdentity) || [];
     if (bankIdentity !== ':' && bankMatches.length > 1) add('Warning', 'DUPLICATE_BANK_ACCOUNT', `Payment account is also used by ${bankMatches.filter(item => item.id !== employee.id).map(item => item.fullName).join(', ')}. Confirm this shared account is legitimate before release.`);
@@ -44,8 +50,8 @@ export function payrollPreflight(employees: Employee[], draftPayslips: Payslip[]
       const policy = provincialPolicy(statutoryConfig, province, branches.find(branch => branch.id === employee.branchId)?.establishmentType);
       const monthlyBasic = resolveWageBasis(employee, wageTypes) === 'Daily' ? employee.basicSalary * 26 : employee.basicSalary;
       if (monthlyBasic < policy.minimumWage) add('Critical', 'BELOW_MINIMUM_WAGE', `Basic wage is below the ${policy.province} configured minimum wage of PKR ${policy.minimumWage.toLocaleString()}.`);
-      if (employee.eobiEnabled === false && !employee.eobiExemptionReason?.trim()) add('Warning', 'MISSING_EOBI_REASON', 'EOBI is disabled without a documented exemption reason.');
-      if (!employee.socialSecurityNumber && !employee.socialSecurityExemptionReason?.trim()) add('Warning', 'MISSING_SOCIAL_SECURITY_REASON', `${policy.scheme} registration is missing without a documented exemption reason.`);
+      if (features?.eobi !== false && employee.eobiEnabled === false && !employee.eobiExemptionReason?.trim()) add('Warning', 'MISSING_EOBI_REASON', 'EOBI is disabled without a documented exemption reason.');
+      if (features?.socialSecurity !== false && !employee.socialSecurityNumber && !employee.socialSecurityExemptionReason?.trim()) add('Warning', 'MISSING_SOCIAL_SECURITY_REASON', `${policy.scheme} registration is missing without a documented exemption reason.`);
     }
     const previous = historicalPayslips
       .filter(item => item.employeeId === employee.id && item.payrollRunId !== sheet.payrollRunId)

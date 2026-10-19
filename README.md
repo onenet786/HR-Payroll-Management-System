@@ -25,6 +25,14 @@ View your app in AI Studio: https://ai.studio/apps/0ab7c3a1-e4ca-49b5-86f4-68838
 3. Run the app:
    `npm run dev`
 
+## Editions: full compliance or lite (small shops)
+
+Every installation runs in one of two editions. The **full edition** (default) keeps every rule: FBR withholding and tax slabs, EOBI, provincial social security, provident fund, gratuity, bank payroll with a bank advice file, and maker-checker approvals. The **lite edition** is for shops and small businesses with 10-15 staff: attendance, leave, salaries, advances and payslips only. FBR, EOBI and social-security data are not asked for, salaries may be paid in cash, employee email and bank account are optional, and one owner can prepare, approve and pay payroll alone.
+
+The vendor (OneNet) chooses the edition from the sign-in screen: login `onenet`, password `OneNet` followed by today's date as `DDMonYYYY` on Pakistan time (for example `OneNet19Oct2026`; the day before and after are also accepted). This opens the edition console, which can change nothing but the edition. The choice is stored in the `app_settings` table, applies to every browser, kiosk and phone on their next page load, and is recorded in the audit log. Switching back to the full edition restores every rule; no customer data is changed either way. On a fresh database the setup wizard has a link to the sign-in screen so the edition can be set before the first company is created.
+
+Server options (`.env`): `VENDOR_LOGIN` (default `onenet`), `VENDOR_PASSWORD_PREFIX` (default `OneNet`), `VENDOR_CONSOLE_DISABLED=true` to switch the console off. Feature switches and presets live in `src/data/edition.ts` (mirrored by `server/edition.cjs`).
+
 ## Deployment security requirements
 
 - The system operates on a dedicated PostgreSQL server backend. Configure aaPanel with Node.js and PostgreSQL services.

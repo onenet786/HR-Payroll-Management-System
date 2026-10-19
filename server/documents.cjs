@@ -3,6 +3,7 @@ const crypto = require('node:crypto');
 const { transaction, pool } = require('./db.cjs');
 const { policyFor, allowed, getTableName } = require('./collections.cjs');
 const { publicUserData, prepareUserWrite } = require('./user-secrets.cjs');
+const { loadEdition } = require('./edition.cjs');
 
 const router = express.Router();
 const safeName = value => typeof value === 'string' && /^[A-Za-z][A-Za-z0-9_]{0,79}$/.test(value);
@@ -135,6 +136,13 @@ async function validLockedRegister(client, id, next) {
 
 async function authorizeWrite(client, name, table, id, identity, existing, next) {
   const policy = policyFor(name);
+  // Edition switches (server/edition.cjs). The full edition keeps every rule below exactly as written:
+  //  - dual (maker-checker): a different user must approve, pay or review what another user prepared;
+  //  - bankPayroll: bank details and a bank advice file are required before salaries are marked paid.
+  // In the lite edition one owner may do everything and salaries may be paid in cash.
+  const { features } = await loadEdition(client);
+  const dual = features.makerChecker !== false;
+  const bankPayroll = features.bankPayroll !== false;
   const employeeId = employeeIdOf(next) || (name === 'employees' || name === 'biometricTemplates' || table === 'employees' || table === 'biometric_templates' ? id : null);
   // An employee may mark a notification addressed to them (or to everyone) as read, and change nothing else.
   if ((name === 'notifications' || table === 'notifications') && existing && identity.employeeId && policy && !allowed(policy.write, identity, id, '__not_self__')) {
@@ -218,7 +226,7 @@ async function authorizeWrite(client, name, table, id, identity, existing, next)
         || typeof next.cancellationReason !== 'string' || next.cancellationReason.trim().length < 10 || next.cancellationReason.length > 500
         || payrollRunImmutableFields.some(field => !sameJson(next[field], previous[field]))) return false;
     } else if (previous.status === 'Draft') {
-      if (next.status !== 'Approved' || identity.uid === previous.createdById || next.approvedById !== identity.uid || !next.approvedAt) return false;
+      if (next.status !== 'Approved' || (dual && identity.uid === previous.createdById) || next.approvedById !== identity.uid || !next.approvedAt) return false;
       if (previous.runType === 'Final Settlement') {
         const settlement = await client.query(`SELECT data FROM gratuity_settlements WHERE id=$1 FOR SHARE`, [previous.settlementId]);
         if (settlement.rows[0]?.data?.status !== 'Processed') return false;
@@ -244,8 +252,8 @@ async function authorizeWrite(client, name, table, id, identity, existing, next)
       for (const row of employeeResult.rows) {
         const employee = row.data;
         const iban = String(employee.iban || '').replace(/\s/g, '');
-        if (!/^\d{5}-\d{7}-\d$/.test(employee.cnic || '') || !String(employee.bankName || '').trim()
-          || !String(employee.bankAccountNumber || '').trim() || (iban && !/^PK\d{2}[A-Z0-9]{20}$/i.test(iban))
+        if (!/^\d{5}-\d{7}-\d$/.test(employee.cnic || '') || (bankPayroll && !String(employee.bankName || '').trim())
+          || (bankPayroll && !String(employee.bankAccountNumber || '').trim()) || (iban && !/^PK\d{2}[A-Z0-9]{20}$/i.test(iban))
           || (cnicOwnerMap.get(String(employee.cnic || '').replace(/\D/g, '')) || []).length > 1
           || ((cnicOwnerMap.get(String(employee.cnic || '').replace(/\D/g, '')) || []).length === 0 && previous.runType !== 'Final Settlement')) return false;
       }
@@ -267,9 +275,12 @@ async function authorizeWrite(client, name, table, id, identity, existing, next)
           || next.bankAdviceChecksum !== currentHash || next.bankAdviceEmployeeCount !== sheets.length
           || Math.abs(next.bankAdviceTotal - currentTotal) > 0.01 || next.disbursementReference) return false;
       } else if (next.status === 'Disbursed') {
-        if (identity.uid === previous.approvedById || next.disbursedById !== identity.uid || !next.disbursedAt
-          || !previous.bankAdviceChecksum || previous.bankAdviceChecksum !== currentHash
-          || next.bankAdviceChecksum !== previous.bankAdviceChecksum
+        // Cash payroll (bank payroll switched off): no bank advice is needed, but one that was generated must still match.
+        const adviceRequired = bankPayroll || Boolean(previous.bankAdviceChecksum);
+        const adviceValid = adviceRequired
+          ? Boolean(previous.bankAdviceChecksum) && previous.bankAdviceChecksum === currentHash && next.bankAdviceChecksum === previous.bankAdviceChecksum
+          : !next.bankAdviceChecksum;
+        if ((dual && identity.uid === previous.approvedById) || next.disbursedById !== identity.uid || !next.disbursedAt || !adviceValid
           || typeof next.disbursementReference !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9\/_ .-]{2,99}$/.test(next.disbursementReference)) return false;
       } else return false;
     } else return false;
@@ -288,7 +299,7 @@ async function authorizeWrite(client, name, table, id, identity, existing, next)
       const previous = existing.data;
       if (!adjustmentCoreUnchanged(previous, next)) return false;
       if (previous.status === 'Pending') {
-        if (!['Approved', 'Rejected'].includes(next.status) || identity.uid === previous.createdById
+        if (!['Approved', 'Rejected'].includes(next.status) || (dual && identity.uid === previous.createdById)
           || next.reviewedById !== identity.uid || !next.reviewedAt || !Number.isFinite(Date.parse(next.reviewedAt))
           || next.payrollRunId) return false;
       } else if (previous.status === 'Approved' && !previous.payrollRunId) {
@@ -334,7 +345,7 @@ async function authorizeWrite(client, name, table, id, identity, existing, next)
           if (next.paymentFailedById !== identity.uid || typeof next.paymentFailureReason !== 'string' || next.paymentFailureReason.trim().length < 5) return false;
         } else if (next.paymentStatus === 'Retried') {
           // The retry pays the employee's current bank details: whoever recorded the return cannot release it.
-          if (previous.paymentStatus !== 'Failed' || next.paymentRetriedById !== identity.uid || previous.paymentFailedById === identity.uid
+          if (previous.paymentStatus !== 'Failed' || next.paymentRetriedById !== identity.uid || (dual && previous.paymentFailedById === identity.uid)
             || !/^[A-Za-z0-9][A-Za-z0-9\/_ .-]{2,99}$/.test(String(next.paymentRetryReference || ''))) return false;
         } else return false;
       }
@@ -349,7 +360,7 @@ async function authorizeWrite(client, name, table, id, identity, existing, next)
       if (next.status === 'Pending') {
         if (identity.uid !== previous.createdById || next.reviewedById) return false;
       } else if (next.status === 'Approved') {
-        if (identity.uid === previous.createdById || next.reviewedById !== identity.uid || !next.reviewedAt
+        if ((dual && identity.uid === previous.createdById) || next.reviewedById !== identity.uid || !next.reviewedAt
           || !sameJson(next.proposedConfig, previous.proposedConfig) || !sameJson(next.proposedTaxSlabs, previous.proposedTaxSlabs)) return false;
       } else if (next.status === 'Rejected') {
         if (next.reviewedById !== identity.uid || !next.reviewedAt) return false;
@@ -358,7 +369,8 @@ async function authorizeWrite(client, name, table, id, identity, existing, next)
   }
   if (name === 'statConfig' || table === 'stat_config' || name === 'taxSlabs' || table === 'tax_slabs') {
     const any = await client.query(`SELECT 1 FROM ${name === 'statConfig' || table === 'stat_config' ? 'stat_config' : 'tax_slabs'} LIMIT 1`);
-    if (any.rowCount) {
+    // Without maker-checker (lite edition) a settings administrator edits the live rates directly.
+    if (any.rowCount && dual) {
       // Live rates change only by applying an approved proposal, and only as approved.
       const request = await client.query(`SELECT data FROM statutory_change_requests WHERE id=$1 AND status='Approved'`, [next.changeRequestId]);
       const approved = request.rows[0]?.data;
@@ -380,7 +392,7 @@ async function authorizeWrite(client, name, table, id, identity, existing, next)
       const previous = existing.data;
       const immutable = ['employeeId', 'type', 'effectiveDate', 'reason', 'createdAt', 'createdById', 'newBranchId', 'newDepartmentId', 'newDesignationId', 'newBasicSalary', 'newProbationEndDate', 'noticeDays', 'leaveEncashDays'];
       if (previous.status !== 'Pending' || immutable.some(field => !sameJson(previous[field], next[field]))
-        || !['Approved', 'Rejected'].includes(next.status) || identity.uid === previous.createdById
+        || !['Approved', 'Rejected'].includes(next.status) || (dual && identity.uid === previous.createdById)
         || next.reviewedById !== identity.uid || !next.reviewedAt) return false;
     }
   }
@@ -392,7 +404,7 @@ async function authorizeWrite(client, name, table, id, identity, existing, next)
       if (['employeeId', 'previousSalary', 'newSalary', 'effectiveDate', 'createdById'].some(field => previous[field] !== next[field])) return false;
       if (previous.status === 'Approved' && next.status !== 'Approved') return false;
       if (previous.status !== 'Approved' && next.status === 'Approved'
-        && ((previous.createdById && previous.createdById === identity.uid) || next.approvedById !== identity.uid)) return false;
+        && ((dual && previous.createdById && previous.createdById === identity.uid) || next.approvedById !== identity.uid)) return false;
     }
   }
   if ((name === 'gratuitySettlements' || table === 'gratuity_settlements') && ['Processed', 'Paid'].includes(next.status)
@@ -413,9 +425,9 @@ async function authorizeWrite(client, name, table, id, identity, existing, next)
       const immutable = ['employeeId', 'separationType', 'lastWorkingDate', 'separationDate', 'createdById', 'createdAt', 'notes', ...numericFields];
       if (immutable.some(field => previous[field] !== next[field])) return false;
       if (previous.status === 'Pending') {
-        if (next.status !== 'Processed' || identity.uid === previous.createdById || next.processedById !== identity.uid || !next.processedAt || next.paidById || next.paidDate) return false;
+        if (next.status !== 'Processed' || (dual && identity.uid === previous.createdById) || next.processedById !== identity.uid || !next.processedAt || next.paidById || next.paidDate) return false;
       } else if (previous.status === 'Processed') {
-        if (next.status !== 'Paid' || identity.uid === previous.createdById || identity.uid === previous.processedById || next.paidById !== identity.uid || !/^\d{4}-\d{2}-\d{2}$/.test(next.paidDate || '')) return false;
+        if (next.status !== 'Paid' || (dual && (identity.uid === previous.createdById || identity.uid === previous.processedById)) || next.paidById !== identity.uid || !/^\d{4}-\d{2}-\d{2}$/.test(next.paidDate || '')) return false;
       } else return false;
     }
   }
@@ -500,8 +512,12 @@ async function authorizeWrite(client, name, table, id, identity, existing, next)
     }
     if (existing?.data?.requestedById) next.requestedById = existing.data.requestedById;
     if (existing && existing.data.regularizationApproved === undefined && typeof next.regularizationApproved === 'boolean') {
-      if (existing.data.requestedById === identity.uid || next.reviewedById !== identity.uid || !next.reviewedAt) return false;
-      if (identity.employeeId && identity.employeeId === existing.data.employeeId) return false;
+      // Without maker-checker an attendance manager may decide a request they raised themselves (one-owner shop);
+      // an employee can never approve their own attendance in any edition.
+      const attendanceManager = identity.roleId === 'role-admin' || identity.permissions.has('manage_attendance');
+      const selfReviewBlocked = dual || !attendanceManager;
+      if ((selfReviewBlocked && existing.data.requestedById === identity.uid) || next.reviewedById !== identity.uid || !next.reviewedAt) return false;
+      if (selfReviewBlocked && identity.employeeId && identity.employeeId === existing.data.employeeId) return false;
       if (typeof next.reviewComment !== 'string' || next.reviewComment.trim().length < 5) return false;
       // The line manager decides first; HR may decide only after the three-working-day review deadline.
       const subject = (await client.query(`SELECT data FROM employees WHERE id=$1`, [existing.data.employeeId])).rows[0]?.data;
@@ -510,7 +526,7 @@ async function authorizeWrite(client, name, table, id, identity, existing, next)
         const managers = await client.query(`SELECT u.data AS user, r.data AS role FROM users u LEFT JOIN roles r ON r.id = u.data->>'roleId' WHERE u.data->>'employeeId'=$1 AND COALESCE(u.data->>'status','Active')='Active'`, [managerId]);
         const managerCanReview = managers.rows.some(row => row.user?.roleId === 'role-admin' || (row.role?.permissions || []).includes('manage_attendance'));
         const requested = Date.parse(existing.data.requestedAt || `${existing.data.date}T00:00:00`);
-        if (managerCanReview && Number.isFinite(requested) && addWorkingDays(requested, 3).getTime() > Date.now()) return false;
+        if (dual && managerCanReview && Number.isFinite(requested) && addWorkingDays(requested, 3).getTime() > Date.now()) return false;
       }
     }
     if (existing && existing.data.regularizationApproved !== undefined
@@ -734,7 +750,7 @@ router.delete('/:collection/:id', async (req, res, next) => {
         if (admins.rows[0].n === 0) return res.status(403).json({ error: 'The last active Super Admin cannot be deleted.' });
       }
     }
-    if (table === 'tax_slabs') {
+    if (table === 'tax_slabs' && (await loadEdition(pool)).features.makerChecker !== false) {
       const latest = await pool.query(`SELECT data FROM statutory_change_requests WHERE status='Approved' AND data->>'reviewedById'=$1 ORDER BY updated_at DESC LIMIT 1`, [req.identity.uid]);
       const approved = latest.rows[0]?.data;
       if (!approved || (approved.proposedTaxSlabs || []).some(slab => slab.id === id)) return res.status(403).json({ error: 'Tax slabs can be removed only by applying an approved statutory change.' });

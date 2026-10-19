@@ -41,9 +41,9 @@ export function lifecycleRequestError(request: Partial<LifecycleRequest>, employ
   return undefined;
 }
 
-export function lifecycleReviewError(request: LifecycleRequest, actorId: string): string | undefined {
+export function lifecycleReviewError(request: LifecycleRequest, actorId: string, makerChecker = true): string | undefined {
   if (request.status !== 'Pending') return 'This request has already been decided.';
-  if (request.createdById === actorId) return 'The user who raised a lifecycle request cannot approve it.';
+  if (makerChecker && request.createdById === actorId) return 'The user who raised a lifecycle request cannot approve it.';
   return undefined;
 }
 

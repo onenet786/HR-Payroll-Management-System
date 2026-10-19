@@ -59,6 +59,7 @@ import { companyInitialsPrefix, employeeCodePrefixError } from '../data/masterCo
 import { goLiveReadiness } from '../data/goLiveReadiness';
 import { GoLiveReadinessPanel } from './GoLiveReadinessPanel';
 import { ParallelRunPanel } from './ParallelRunPanel';
+import { editionEmployee, editionStatConfig, hasStatutoryDeductions, type AppEdition } from '../data/edition';
 import { applyUrduInterface } from '../utils/urduInterface';
 import { authenticatedApiRequest as payrollApi } from '../data/postgresStore';
 import { exportTemplatesFor, renderExport, type ExportKind } from '../data/exportTemplates';
@@ -260,6 +261,8 @@ export interface WebPortalProps {
   onDeleteNotification: (id: string) => void;
   onSimulatePunch: (employeeId: string, punchIn: string, punchOut: string, method: string, lat?: number, lon?: number, locationAccuracyMeters?: number, locationCapturedAt?: string, locationAddress?: string) => void | Promise<void>;
   firestoreSyncStatus: FirestoreSyncStatus;
+  /** Product edition in force (full / lite); see src/data/edition.ts. */
+  edition: AppEdition;
 }
 
 type PortalTab = 'dashboard' | 'lifecycle' | 'employees' | 'attendance' | 'leaves' | 'payroll' | 'settings' | 'company-setup' | 'master-data' | 'access' | 'maintenance' | 'holidays' | 'loans' | 'revisions' | 'performance' | 'assets' | 'recruitment' | 'gratuity' | 'notifications' | 'biometric' | 'help';
@@ -593,7 +596,8 @@ export function WebPortal({
   onMarkAllNotificationsRead,
   onDeleteNotification,
   onSimulatePunch,
-  firestoreSyncStatus
+  firestoreSyncStatus,
+  edition
 }: WebPortalProps) {
   const [activeTab, setActiveTab] = useState<PortalTab>('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -633,6 +637,17 @@ export function WebPortal({
   });
 
   const closeSidebar = () => setSidebarOpen(false);
+  // Edition switches (src/data/edition.ts). In the full edition every flag is true and nothing below changes.
+  const features = edition.features;
+  const dualControl = features.makerChecker;
+  const statutoryPayroll = hasStatutoryDeductions(features);
+  // Pages of a switched-off feature disappear from navigation, search and the step flow.
+  const tabEnabled = (tab: string) =>
+    !(tab === 'gratuity' && !features.gratuity) && !(tab === 'recruitment' && !features.recruitment) && !(tab === 'performance' && !features.performance)
+    && !(tab === 'assets' && !features.assets) && !(tab === 'loans' && !features.loans) && !(tab === 'revisions' && !features.salaryRevisions);
+  // Payroll previews use the same edition-adjusted inputs as the real run (switched-off schemes deduct nothing).
+  const payrollEmployee = (employee: Employee) => editionEmployee(features, employee);
+  const payrollStatConfig = editionStatConfig(features, statConfig);
   // Settings edit the pending proposal (maker-checker); payroll always uses the live statConfig/taxSlabs.
   const pendingStatutoryChange = statutoryChangeRequests.find(item => item.status === 'Pending');
   const editableStatConfig = pendingStatutoryChange?.proposedConfig || statConfig;
@@ -670,7 +685,7 @@ export function WebPortal({
       else showToast(`${channel === 'sms' ? 'SMS' : 'WhatsApp'} alerts: ${summary}`);
     } catch (error) { alert(error instanceof Error ? error.message : 'Alerts could not be sent.'); }
   };
-  const openComplianceAlerts = useMemo(() => complianceAlerts({ employees, attendances, branches, wageTypes, statConfig }), [employees, attendances, branches, wageTypes, statConfig]);
+  const openComplianceAlerts = useMemo(() => complianceAlerts({ employees, attendances, branches, wageTypes, statConfig, features }), [employees, attendances, branches, wageTypes, statConfig, features]);
   const bilingual = (english: string, urdu: string) => payslipUrdu ? `${english} / ${urdu}` : english;
   const updateTaxSlab = (id: string, field: keyof Pick<TaxSlab, 'minIncome' | 'maxIncome' | 'baseTax' | 'percentage'>, value: number) =>
     onUpdateTaxSlabs(activeTaxSlabs.map(slab => slab.id === id ? { ...slab, [field]: value } : slab));
@@ -784,6 +799,7 @@ export function WebPortal({
 
   const hasPermission = (tab: string) => {
     if (!accessControlLoaded) return false;
+    if (!tabEnabled(tab)) return false;
     if (tab === 'dashboard') return userPermissions.includes('view_dashboard');
     if (tab === 'employees') return userPermissions.includes('manage_employees');
     if (tab === 'attendance') return userPermissions.includes('manage_attendance');
@@ -1589,7 +1605,7 @@ export function WebPortal({
 
   const handleCreateEmployeeSubmit = (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!newEmpForm.fullName || !newEmpForm.email || !newEmpForm.cnic) {
+    if (!newEmpForm.fullName || (features.requireEmployeeEmail && !newEmpForm.email) || !newEmpForm.cnic) {
       alert('Kindly fill in all required fields.');
       return;
     }
@@ -1613,7 +1629,8 @@ export function WebPortal({
       return;
     }
 
-    if (!String(newEmpForm.bankName || '').trim()) {
+    // Without bank payroll (lite edition) a blank bank means the salary is paid in cash.
+    if (features.bankPayroll && !String(newEmpForm.bankName || '').trim()) {
       alert('Select the Disbursal Bank. Salaries cannot be paid without it.');
       return;
     }
@@ -1704,7 +1721,7 @@ export function WebPortal({
 
   const handleEditEmployeeSubmit = (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!editEmpForm.fullName || !editEmpForm.email || !editEmpForm.cnic) {
+    if (!editEmpForm.fullName || (features.requireEmployeeEmail && !editEmpForm.email) || !editEmpForm.cnic) {
       alert('Kindly fill in all required fields.');
       return;
     }
@@ -1721,7 +1738,7 @@ export function WebPortal({
       return;
     }
 
-    if (!String(editEmpForm.bankName || '').trim()) {
+    if (features.bankPayroll && !String(editEmpForm.bankName || '').trim()) {
       alert('Select the Disbursal Bank. Salaries cannot be paid without it.');
       return;
     }
@@ -2030,7 +2047,7 @@ export function WebPortal({
       + `- Leave encashment (${preview.encashableLeaveDays} days): PKR ${preview.leaveEncashmentAmount.toLocaleString()}\n`
       + `- Notice pay: PKR ${preview.noticePayAmount.toLocaleString()}\n`
       + `- Estimated settlement: PKR ${preview.totalSettlementAmount.toLocaleString()}\n`
-      + 'The employee stays active until another authorized user approves the request in Employee Lifecycle.');
+      + (dualControl ? 'The employee stays active until another authorized user approves the request in Employee Lifecycle.' : 'Approve the request under Employee Lifecycle to complete the exit.'));
     setShowOffboardModal(null);
   };
 
@@ -2061,11 +2078,11 @@ export function WebPortal({
     }
 
     if (step.tab === 'settings') {
-      const hasFix = !statConfig?.minimumWage || !statConfig?.taxYear || !taxSlabs || taxSlabs.length === 0;
-      if (hasFix) return { className: 'fix', statusText: 'slabs to set' };
+      const hasFix = !statConfig?.minimumWage || (features.incomeTax && (!statConfig?.taxYear || !taxSlabs || taxSlabs.length === 0));
+      if (hasFix) return { className: 'fix', statusText: features.incomeTax ? 'slabs to set' : 'wage to set' };
     }
     if (step.tab === 'company-setup') {
-      const hasFix = !primaryCompany?.ntn && !primaryCompany?.taxRegistrationNumber;
+      const hasFix = features.incomeTax && !primaryCompany?.ntn && !primaryCompany?.taxRegistrationNumber;
       if (hasFix) return { className: 'fix', statusText: 'NTN missing' };
     }
     if (step.tab === 'attendance') {
@@ -2097,7 +2114,7 @@ export function WebPortal({
   const unreadNotificationCount = notifications.filter(n => (!n.targetEmployeeId || n.targetEmployeeId === currentUserAccount?.employeeId) && !(n.readBy || []).includes(readerKey)).length;
 
   const searchFilteredPages = SEARCHABLE_PAGES.filter(p =>
-    !searchQuery || p.label.toLowerCase().includes(searchQuery.toLowerCase()) || p.category.toLowerCase().includes(searchQuery.toLowerCase())
+    tabEnabled(p.tab) && (!searchQuery || p.label.toLowerCase().includes(searchQuery.toLowerCase()) || p.category.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
   const searchFilteredEmployees = employees.filter(e =>
@@ -2127,6 +2144,7 @@ export function WebPortal({
         <div className="brand flex items-center gap-2">
           <span>{companyDisplayName} HR &amp; PAYROLL</span>
           <span style={{ fontSize: '10px', background: '#059669', borderRadius: '4px', padding: '1px 5px', color: '#fff', fontWeight: 600 }}>v2</span>
+          {edition.id === 'lite' && <span title={edition.label} style={{ fontSize: '10px', background: '#0369a1', borderRadius: '4px', padding: '1px 5px', color: '#fff', fontWeight: 700 }}>LITE</span>}
           <small>Friendly build</small>
         </div>
 
@@ -2248,8 +2266,8 @@ export function WebPortal({
                 onClick={() => navigateFromSidebar('settings')}
                 className={`side-item ${activeTab === 'settings' ? 'on' : ''}`}
               >
-                <span>{navLabel('1. Statutory Config', '1. قانونی ترتیبات')}</span>
-                {(!statConfig?.minimumWage || !statConfig?.taxYear || !taxSlabs || taxSlabs.length === 0) && (
+                <span>{navLabel(statutoryPayroll ? '1. Statutory Config' : '1. Payroll Settings', statutoryPayroll ? '1. قانونی ترتیبات' : '1. پے رول کی ترتیبات')}</span>
+                {(!statConfig?.minimumWage || (features.incomeTax && (!statConfig?.taxYear || !taxSlabs || taxSlabs.length === 0))) && (
                   <span className="n" style={{ background: '#B91C1C', color: '#fff' }}>fix</span>
                 )}
               </button>
@@ -2261,7 +2279,7 @@ export function WebPortal({
                 className={`side-item ${activeTab === 'company-setup' ? 'on' : ''}`}
               >
                 <span>{navLabel('2. Company & Master Data', '2. کمپنی اور ماسٹر ڈیٹا')}</span>
-                {(!primaryCompany?.ntn && !primaryCompany?.taxRegistrationNumber) && (
+                {features.incomeTax && (!primaryCompany?.ntn && !primaryCompany?.taxRegistrationNumber) && (
                   <span className="n" style={{ background: '#B91C1C', color: '#fff' }}>fix</span>
                 )}
               </button>
@@ -2484,7 +2502,7 @@ export function WebPortal({
             <>
               {/* 12-Step Compliance & Payroll Flow */}
               <div className="flow" aria-label="12-step compliance and payroll flow">
-                {FLOW_STEPS.map(step => {
+                {FLOW_STEPS.filter(step => tabEnabled(step.tab)).map(step => {
                   const { className, statusText } = getFlowStepState(step);
                   return (
                     <button
@@ -2594,8 +2612,8 @@ export function WebPortal({
                     </div>
                   </div>
 
-                  {(userPermissions.includes('manage_settings') || userPermissions.includes('manage_payroll')) && (
-                    <GoLiveReadinessPanel items={goLiveReadiness({ statConfig, employees, branches, users, roles, payrollRuns, channels: alertChannels.known ? alertChannels : undefined })} />
+                  {features.goLiveChecklist && (userPermissions.includes('manage_settings') || userPermissions.includes('manage_payroll')) && (
+                    <GoLiveReadinessPanel items={goLiveReadiness({ statConfig, employees, branches, users, roles, payrollRuns, channels: alertChannels.known ? alertChannels : undefined, features })} />
                   )}
                   <ComplianceAlertsPanel alerts={openComplianceAlerts} onOpenEmployees={() => setActiveTab('employees')} />
 
@@ -3142,16 +3160,16 @@ export function WebPortal({
                                     <div className="flex justify-end space-x-2 pt-2 border-t border-slate-100">
                                       <button 
                                         onClick={() => { const comment = window.prompt('Reason for declining this attendance correction:')?.trim(); if (comment) onRejectRegularization(att.id, comment); }}
-                                        disabled={att.requestedById === currentUserAccount.id}
-                                        title={att.requestedById === currentUserAccount.id ? 'The requester cannot review their own attendance adjustment.' : 'Decline request'}
+                                        disabled={dualControl && att.requestedById === currentUserAccount.id}
+                                        title={dualControl && att.requestedById === currentUserAccount.id ? 'The requester cannot review their own attendance adjustment.' : 'Decline request'}
                                         className="px-2.5 py-1 text-slate-600 border border-slate-355 hover:bg-slate-100 rounded disabled:cursor-not-allowed disabled:opacity-40"
                                       >
                                         Decline
                                       </button>
                                       <button 
                                         onClick={() => { const comment = window.prompt('Approval comment — evidence reviewed (e.g. gate log, manager confirmation):')?.trim(); if (comment) onApproveRegularization(att.id, comment); }}
-                                        disabled={att.requestedById === currentUserAccount.id}
-                                        title={att.requestedById === currentUserAccount.id ? 'The requester cannot approve their own attendance adjustment.' : 'Approve request'}
+                                        disabled={dualControl && att.requestedById === currentUserAccount.id}
+                                        title={dualControl && att.requestedById === currentUserAccount.id ? 'The requester cannot approve their own attendance adjustment.' : 'Approve request'}
                                         className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded font-bold shadow-xs flex items-center disabled:cursor-not-allowed disabled:opacity-40"
                                       >
                                         <CheckCircle className="w-3.5 h-3.5 mr-1" /> Approve
@@ -4029,8 +4047,8 @@ export function WebPortal({
                   
                   <div className="flex flex-col md:flex-row justify-between items-start md:items-center space-y-2 md:space-y-0">
                     <div>
-                      <h2 className="text-xl font-bold text-slate-900">FBR &amp; Regional Statutory Payroll Engine</h2>
-                      <p className="text-xs text-slate-500">Calculate EOBI, Provincial PESSI contributions, individual 12-month annualized tax slabs and download HBL/Alfalah files</p>
+                      <h2 className="text-xl font-bold text-slate-900">{statutoryPayroll ? 'FBR & Regional Statutory Payroll Engine' : 'Monthly Payroll'}</h2>
+                      <p className="text-xs text-slate-500">{statutoryPayroll ? 'Calculate EOBI, Provincial PESSI contributions, individual 12-month annualized tax slabs and download HBL/Alfalah files' : 'Lock the attendance register, run the month, review payslips and mark salaries paid'}</p>
                     </div>
                     <div className="flex items-center gap-2">
                       <select aria-label="Payroll month" value={payrollMonth} onChange={e => setPayrollMonth(Number(e.target.value))} className="border border-slate-300 rounded-lg px-2 py-2 text-xs bg-white text-slate-800">
@@ -4077,13 +4095,14 @@ export function WebPortal({
                     currentUser={currentUserAccount}
                     onCreatePayrollAdjustment={onCreatePayrollAdjustment}
                     onRetroRecalculate={onRetroRecalculate}
+                    features={features}
                   />
-                  <ParallelRunPanel payrollRuns={payrollRuns} payrollPayslips={payrollPayslips} onRecord={onRecordParallelRun} />
+                  {features.parallelRun && <ParallelRunPanel payrollRuns={payrollRuns} payrollPayslips={payrollPayslips} onRecord={onRecordParallelRun} />}
 
                   <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-4">
                     <div>
                       <h3 className="font-bold text-slate-900 text-sm uppercase tracking-wide">One-time payroll adjustments</h3>
-                      <p className="text-xs text-slate-500">Period-specific items require approval by a different payroll user and can be consumed by one payroll run only.</p>
+                      <p className="text-xs text-slate-500">{dualControl ? 'Period-specific items require approval by a different payroll user and can be consumed by one payroll run only.' : 'Period-specific items are approved here and can be consumed by one payroll run only.'}</p>
                       <RequiredNote className="mt-1" />
                     </div>
                     <form className="grid grid-cols-1 md:grid-cols-6 gap-3" onSubmit={async event => {
@@ -4136,7 +4155,7 @@ export function WebPortal({
                               <td className="p-2 text-slate-600">{item.reason}</td>
                               <td className="p-2 text-slate-500">{item.createdBy}</td>
                               <td className="p-2">
-                                {item.status === 'Pending' ? <div className="flex gap-2"><button type="button" disabled={item.createdById === currentUserAccount.id} onClick={() => onReviewPayrollAdjustment(item.id, 'Approved')} className="text-emerald-700 font-bold disabled:text-slate-400" title={item.createdById === currentUserAccount.id ? 'Another payroll user must approve.' : 'Approve'}>Approve</button><button type="button" disabled={item.createdById === currentUserAccount.id} onClick={() => onReviewPayrollAdjustment(item.id, 'Rejected')} className="text-rose-700 font-bold disabled:text-slate-400">Reject</button></div> : <span className={item.status === 'Approved' ? 'text-emerald-700 font-bold' : 'text-rose-700 font-bold'}>{item.status}{item.payrollRunId ? ' · consumed' : ''}</span>}
+                                {item.status === 'Pending' ? <div className="flex gap-2"><button type="button" disabled={dualControl && item.createdById === currentUserAccount.id} onClick={() => onReviewPayrollAdjustment(item.id, 'Approved')} className="text-emerald-700 font-bold disabled:text-slate-400" title={dualControl && item.createdById === currentUserAccount.id ? 'Another payroll user must approve.' : 'Approve'}>Approve</button><button type="button" disabled={dualControl && item.createdById === currentUserAccount.id} onClick={() => onReviewPayrollAdjustment(item.id, 'Rejected')} className="text-rose-700 font-bold disabled:text-slate-400">Reject</button></div> : <span className={item.status === 'Approved' ? 'text-emerald-700 font-bold' : 'text-rose-700 font-bold'}>{item.status}{item.payrollRunId ? ' · consumed' : ''}</span>}
                               </td>
                             </tr>
                           ))}
@@ -4184,16 +4203,16 @@ export function WebPortal({
                                 >
                                   <Download className="w-3 h-3 mr-0.5" /> Bank Advice File
                                 </button>
-                                {run.status === 'Draft' && <button disabled={run.createdById === currentUserAccount.id} title={run.createdById === currentUserAccount.id ? 'Prepared by you; another payroll officer must approve.' : 'Approve payroll'} onClick={() => onUpdatePayrollStatus(run.id, 'Approved')} className="text-blue-700 hover:underline disabled:cursor-not-allowed disabled:text-slate-400 disabled:no-underline">Approve</button>}
-                                {run.status === 'Approved' && <button disabled={run.approvedById === currentUserAccount.id || !run.bankAdviceChecksum} title={run.approvedById === currentUserAccount.id ? 'Approved by you; another authorized user must disburse.' : !run.bankAdviceChecksum ? 'Generate and download bank advice first.' : 'Mark payroll disbursed'} onClick={() => { const reference = window.prompt('Enter the bank transaction/reference number shown by your bank:')?.trim(); if (reference) onUpdatePayrollStatus(run.id, 'Disbursed', reference); }} className="text-emerald-700 hover:underline disabled:cursor-not-allowed disabled:text-slate-400 disabled:no-underline">Mark Disbursed</button>}
+                                {run.status === 'Draft' && <button disabled={dualControl && run.createdById === currentUserAccount.id} title={dualControl && run.createdById === currentUserAccount.id ? 'Prepared by you; another payroll officer must approve.' : 'Approve payroll'} onClick={() => onUpdatePayrollStatus(run.id, 'Approved')} className="text-blue-700 hover:underline disabled:cursor-not-allowed disabled:text-slate-400 disabled:no-underline">Approve</button>}
+                                {run.status === 'Approved' && <button disabled={(dualControl && run.approvedById === currentUserAccount.id) || (features.bankPayroll && !run.bankAdviceChecksum)} title={dualControl && run.approvedById === currentUserAccount.id ? 'Approved by you; another authorized user must disburse.' : features.bankPayroll && !run.bankAdviceChecksum ? 'Generate and download bank advice first.' : 'Mark payroll disbursed'} onClick={() => { const reference = window.prompt(features.bankPayroll || run.bankAdviceChecksum ? 'Enter the bank transaction/reference number shown by your bank:' : 'Enter the payment reference (bank transaction number or cash voucher number):')?.trim(); if (reference) onUpdatePayrollStatus(run.id, 'Disbursed', reference); }} className="text-emerald-700 hover:underline disabled:cursor-not-allowed disabled:text-slate-400 disabled:no-underline">Mark Disbursed</button>}
                                 {(run.status === 'Draft' || run.status === 'Approved') && <button type="button" onClick={() => { const reason = window.prompt('Reason for cancelling this payroll run (min 10 characters). Payslips are kept for audit:')?.trim(); if (reason) onCancelPayrollRun(run.id, reason); }} className="text-rose-700 hover:underline">Cancel Run</button>}
                               </div>
                               {run.status !== 'Draft' && run.status !== 'Cancelled' && <div className="flex flex-wrap gap-x-3 gap-y-1 border-t border-slate-200 pt-2 text-[10px] font-semibold">
-                                <button type="button" onClick={() => downloadStatutoryReport('FBR', run)} className="text-indigo-700 hover:underline">FBR withholding CSV</button>
-                                <button type="button" onClick={() => downloadStatutoryReport('EOBI', run)} className="text-indigo-700 hover:underline">EOBI return CSV</button>
-                                <button type="button" onClick={() => downloadStatutoryReport('SOCIAL_SECURITY', run)} className="text-indigo-700 hover:underline">Provincial social-security CSV</button>
-                                <button type="button" onClick={() => downloadTemplateReturn('EOBI Return', run)} className="text-indigo-700 hover:underline">EOBI upload file</button>
-                                <button type="button" onClick={() => downloadTemplateReturn('Social Security Return', run)} className="text-indigo-700 hover:underline">Social-security upload file</button>
+                                {features.incomeTax && <button type="button" onClick={() => downloadStatutoryReport('FBR', run)} className="text-indigo-700 hover:underline">FBR withholding CSV</button>}
+                                {features.eobi && <button type="button" onClick={() => downloadStatutoryReport('EOBI', run)} className="text-indigo-700 hover:underline">EOBI return CSV</button>}
+                                {features.socialSecurity && <button type="button" onClick={() => downloadStatutoryReport('SOCIAL_SECURITY', run)} className="text-indigo-700 hover:underline">Provincial social-security CSV</button>}
+                                {features.eobi && <button type="button" onClick={() => downloadTemplateReturn('EOBI Return', run)} className="text-indigo-700 hover:underline">EOBI upload file</button>}
+                                {features.socialSecurity && <button type="button" onClick={() => downloadTemplateReturn('Social Security Return', run)} className="text-indigo-700 hover:underline">Social-security upload file</button>}
                                 {run.bankAdviceBatchReference && <span className="text-slate-500">Bank batch {run.bankAdviceBatchReference} · control {run.bankAdviceControlHash}{run.bankAdviceTemplateVerified ? '' : ' (unverified template)'}</span>}
                                 <button type="button" onClick={() => downloadAccountingJournal(run)} className="text-indigo-700 hover:underline">Accounting journal CSV</button>
                                 {run.status === 'Disbursed' && <button type="button" onClick={() => setPaymentExceptionRun(run)} className="text-rose-700 hover:underline">Payment exceptions{payrollPayslips.some(item => item.payrollRunId === run.id && item.paymentStatus === 'Failed') ? ' (open)' : ''}</button>}
@@ -4223,10 +4242,10 @@ export function WebPortal({
                             <tr>
                               <th className="px-3 py-2">Staff</th>
                               <th className="px-3 py-2">Gross (PKR)</th>
-                              <th className="px-3 py-2">FBR Tax</th>
-                              <th className="px-3 py-2">EOBI (1%)</th>
-                              <th className="px-3 py-2">Prov. Sec (6%)</th>
-                              <th className="px-3 py-2">P.F (Employer Match)</th>
+                              {features.incomeTax && <th className="px-3 py-2">FBR Tax</th>}
+                              {features.eobi && <th className="px-3 py-2">EOBI (1%)</th>}
+                              {features.eobi && <th className="px-3 py-2">Prov. Sec (6%)</th>}
+                              {features.providentFund && <th className="px-3 py-2">P.F (Employer Match)</th>}
                               <th className="px-3 py-2">Net Wage (PKR)</th>
                               <th className="px-3 py-2 text-right">Payslip</th>
                             </tr>
@@ -4234,7 +4253,7 @@ export function WebPortal({
                           <tbody className="divide-y divide-slate-200 text-slate-700 font-mono">
                             {searchedEmployees(payrollSearch).map(emp => {
                               const sheet = computePayslipDetails(
-                                emp, payrollMonth, payrollYear, attendances, leaves, statConfig, taxSlabs, departments, designations, branches, loanAdvances, wageTypes, holidays, payrollPayslips, payrollAdjustments
+                                payrollEmployee(emp), payrollMonth, payrollYear, attendances, leaves, payrollStatConfig, taxSlabs, departments, designations, branches, loanAdvances, wageTypes, holidays, payrollPayslips, payrollAdjustments
                               );
                               return (
                                 <tr key={emp.id} className="hover:bg-slate-50/50">
@@ -4245,18 +4264,18 @@ export function WebPortal({
                                   <td className="px-3 py-2 font-bold text-slate-800">
                                     {sheet.grossSalary.toLocaleString()}
                                   </td>
-                                  <td className="px-3 py-2 text-rose-700">
+                                  {features.incomeTax && <td className="px-3 py-2 text-rose-700">
                                     {sheet.incomeTaxDeduction ? `${sheet.incomeTaxDeduction.toLocaleString()}` : '0'}
-                                  </td>
-                                  <td className="px-3 py-2">
+                                  </td>}
+                                  {features.eobi && <td className="px-3 py-2">
                                     {sheet.eobiEmployeeDeduction.toLocaleString()}
-                                  </td>
-                                  <td className="px-3 py-2">
+                                  </td>}
+                                  {features.eobi && <td className="px-3 py-2">
                                     {sheet.eobiEmployerContribution.toLocaleString()}
-                                  </td>
-                                  <td className="px-3 py-2 text-indigo-700">
+                                  </td>}
+                                  {features.providentFund && <td className="px-3 py-2 text-indigo-700">
                                     {sheet.providentFundDeduction.toLocaleString()}
-                                  </td>
+                                  </td>}
                                   <td className="px-3 py-2 font-bold text-emerald-700">
                                     {sheet.netSalary.toLocaleString()}
                                   </td>
@@ -4284,26 +4303,26 @@ export function WebPortal({
               {/* TAB 6: SYSTEM SLABS & STATUTORY SETTINGS */}
               {activeTab === 'settings' && (
                 <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-                  <StatutoryGovernancePanel
+                  {dualControl && <StatutoryGovernancePanel
                     editableConfig={editableStatConfig}
                     pendingRequest={pendingStatutoryChange}
                     recentDecisions={statutoryChangeRequests.filter(item => item.status !== 'Pending').sort((a, b) => (b.reviewedAt || '').localeCompare(a.reviewedAt || ''))}
                     currentUserId={currentUserAccount.id}
                     onUpdateStatConfig={onUpdateStatConfig}
                     onReviewStatutoryChange={onReviewStatutoryChange}
-                  />
-                  
+                  />}
+
                   <div className="flex justify-between items-center">
                     <div>
-                      <h2 className="text-xl font-bold text-slate-900">FBR Individual Tax Slabs settings</h2>
-                      <p className="text-xs text-slate-500">Easily update tax matrices annually without code migration</p>
+                      <h2 className="text-xl font-bold text-slate-900">{features.incomeTax ? 'FBR Individual Tax Slabs settings' : 'Payroll settings'}</h2>
+                      <p className="text-xs text-slate-500">{features.incomeTax ? 'Easily update tax matrices annually without code migration' : 'Minimum wage, overtime and absence rules applied by every payroll run; changes are saved as you type.'}</p>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    
+                  <div className={`grid grid-cols-1 gap-6 ${features.incomeTax ? 'lg:grid-cols-3' : 'lg:grid-cols-2'}`}>
+
                     {/* Tax slabs table editor */}
-                    <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm lg:col-span-2 space-y-4">
+                    {features.incomeTax && <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm lg:col-span-2 space-y-4">
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
                         <div>
                           <h3 className="font-bold text-slate-800 text-xs uppercase tracking-wide font-mono flex items-center gap-2">
@@ -4373,20 +4392,20 @@ export function WebPortal({
                       <div className="bg-slate-50 p-3 rounded-lg text-xs text-slate-500 border border-dashed border-slate-300">
                         Slab parameters automatically recalculate basic payroll registers on the fly. You can safely simulate different fiscal year slabs or click <strong>&quot;Update from FBR&quot;</strong> to restore official rates.
                       </div>
-                    </div>
+                    </div>}
 
                     {/* EOBI & Social Security Config */}
                     <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
                       <h3 className="font-bold text-slate-800 text-xs uppercase tracking-wide font-mono">Regional Contribution Configurations</h3>
                       
                       <div className="space-y-4">
-                        <div>
+                        {features.incomeTax && <div>
                           <label className="block text-xs font-semibold text-slate-700 uppercase tracking-widest mb-1.5">Tax year / effective date:</label>
                           <div className="grid grid-cols-2 gap-2">
                             <input aria-label="FBR tax year" value={editableStatConfig.taxYear || ''} onChange={e => onUpdateStatConfig({ ...editableStatConfig, taxYear: e.target.value, updatedAt: new Date().toISOString() })} placeholder="2027" className="w-full text-xs font-mono p-2 border border-slate-300 rounded" />
                             <DateField aria-label="Statutory effective from" value={editableStatConfig.effectiveFrom || ''} onChange={e => onUpdateStatConfig({ ...editableStatConfig, effectiveFrom: e.target.value, updatedAt: new Date().toISOString() })} className="w-full text-xs font-mono p-2 border border-slate-300 rounded" />
                           </div>
-                        </div>
+                        </div>}
 
                         <div>
                           <label className="block text-xs font-semibold text-slate-700 uppercase tracking-widest mb-1.5">System Country Setting:</label>
@@ -4410,15 +4429,15 @@ export function WebPortal({
                             onChange={(e) => onUpdateStatConfig({ ...editableStatConfig, minimumWage: Number(e.target.value) })}
                             className="w-full text-xs font-mono p-2 border border-slate-300 rounded focus:ring-1 focus:ring-emerald-500 focus:outline-none"
                           />
-                          <span className="text-[10px] text-slate-400">EOBI calculations are mathematically bound to 1% employee / 5% employer of this constant.</span>
+                          {features.eobi && <span className="text-[10px] text-slate-400">EOBI calculations are mathematically bound to 1% employee / 5% employer of this constant.</span>}
                         </div>
 
-                        <div>
+                        {features.socialSecurity && <div>
                           <label className="block text-xs font-semibold text-slate-700 uppercase tracking-widest mb-1.5">Provincial social security employer %:</label>
                           <div className="grid grid-cols-2 gap-2">
                             {JURISDICTIONS.map(province => <label key={province} className="text-[10px] text-slate-500">{province}<input type="number" min="0" step="0.01" value={editableStatConfig.provincialSocialSecurityRates?.[province] ?? editableStatConfig.pessiEmployerRate} onChange={e => onUpdateStatConfig({ ...editableStatConfig, provincialSocialSecurityRates: { ...editableStatConfig.provincialSocialSecurityRates, [province]: Number(e.target.value) }, updatedAt: new Date().toISOString() })} className="mt-1 w-full text-xs font-mono p-2 border border-slate-300 rounded" /></label>)}
                           </div>
-                        </div>
+                        </div>}
 
                         <div>
                           <label className="block text-xs font-semibold text-slate-700 uppercase tracking-widest mb-1.5">Absence deduction basis (salaried):</label>
@@ -4438,12 +4457,12 @@ export function WebPortal({
                           </div>
                         </div>
 
-                        <div>
+                        {features.socialSecurity && <div>
                           <label className="block text-xs font-semibold text-slate-700 uppercase tracking-widest mb-1.5">Social security wage ceiling (PKR):</label>
                           <input type="number" value={editableStatConfig.socialSecurityWageCeiling || 0} onChange={e => onUpdateStatConfig({ ...editableStatConfig, socialSecurityWageCeiling: Number(e.target.value), updatedAt: new Date().toISOString() })} className="w-full text-xs font-mono p-2 border border-slate-300 rounded" />
-                        </div>
+                        </div>}
 
-                        <div>
+                        {features.gratuity && <div>
                           <label className="block text-xs font-semibold text-slate-700 uppercase tracking-widest mb-1.5">Gratuity Entitlement rate (annual):</label>
                           <input
                             type="number"
@@ -4455,7 +4474,7 @@ export function WebPortal({
                             className="w-full text-xs font-mono p-2 border border-slate-300 rounded focus:ring-1 focus:ring-emerald-500 focus:outline-none"
                           />
                           <span className="text-[10px] text-slate-400">Days of basic salary earned per completed year of employment on exit clearance.</span>
-                        </div>
+                        </div>}
                       </div>
                     </div>
 
@@ -4960,7 +4979,7 @@ export function WebPortal({
 
               {activeTab === 'company-setup' && (
                 <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="h-full">
-                  <CompanySetupModule companies={companies} branches={branches} departments={departments} designations={designations} statutoryConfig={statConfig} taxSlabs={taxSlabs} onSave={onSaveCompanySetup} />
+                  <CompanySetupModule companies={companies} branches={branches} departments={departments} designations={designations} statutoryConfig={statConfig} taxSlabs={taxSlabs} onSave={onSaveCompanySetup} features={features} />
                 </motion.div>
               )}
 
@@ -5006,6 +5025,7 @@ export function WebPortal({
                     employees={employees}
                     currentUserAccount={currentUserAccount}
                     onAddSalaryRevision={onAddSalaryRevision}
+                    makerChecker={dualControl}
                   />
                 </motion.div>
               )}
@@ -5078,6 +5098,7 @@ export function WebPortal({
                     currentUserAccount={currentUserAccount}
                     onAddSettlement={onAddGratuitySettlement}
                     onUpdateSettlement={onUpdateGratuitySettlement}
+                    makerChecker={dualControl}
                   />
                 </motion.div>
               )}
@@ -5097,6 +5118,7 @@ export function WebPortal({
                     onUpdateOnboarding={onUpdateOnboarding}
                     leaves={leaves}
                     statConfig={statConfig}
+                    makerChecker={dualControl}
                   />
                 </motion.div>
               )}
@@ -5184,10 +5206,10 @@ export function WebPortal({
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
-                        <span>Official Email ID:<RequiredMark /></span>
+                        <span>Official Email ID:{features.requireEmployeeEmail && <RequiredMark />}</span>
                       </label>
                       <input
-                        type="email" required
+                        type="email" required={features.requireEmployeeEmail}
                         aria-label="Official Email ID"
                         placeholder="e.g. employee@company.com"
                         value={newEmpForm.email}
@@ -5597,7 +5619,7 @@ export function WebPortal({
                         <label className="font-bold text-slate-700 font-sans text-xs">
                           <span>{newEmpTakeHome ? 'Target Take Home (Net PKR):' : 'Basic Monthly Wage / Daily Rate (PKR):'}<RequiredMark /></span>
                         </label>
-                        <label className="flex items-center gap-1.5 cursor-pointer select-none bg-emerald-50 hover:bg-emerald-100/80 px-2 py-0.5 rounded border border-emerald-200 text-emerald-800 transition-colors" title="Check to enter target take-home pay and auto-calculate gross and FBR allowances">
+                        {features.incomeTax && <label className="flex items-center gap-1.5 cursor-pointer select-none bg-emerald-50 hover:bg-emerald-100/80 px-2 py-0.5 rounded border border-emerald-200 text-emerald-800 transition-colors" title="Check to enter target take-home pay and auto-calculate gross and FBR allowances">
                           <input
                             type="checkbox"
                             checked={newEmpTakeHome}
@@ -5616,7 +5638,7 @@ export function WebPortal({
                             className="rounded text-emerald-600 focus:ring-emerald-500 w-3.5 h-3.5"
                           />
                           <span className="text-[11px] font-bold">Take Home (FBR Auto)</span>
-                        </label>
+                        </label>}
                       </div>
                       <input
                         type="number" required
@@ -5644,7 +5666,7 @@ export function WebPortal({
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
-                        <span>Disbursal Bank:<RequiredMark /></span>
+                        <span>Disbursal Bank:{features.bankPayroll ? <RequiredMark /> : <span className="ml-1 font-normal text-slate-400">(blank = cash salary)</span>}</span>
                       </label>
                       <div className="flex space-x-1.5 items-center h-9">
                         <select
@@ -5679,10 +5701,10 @@ export function WebPortal({
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
-                        <span>Account Number:<RequiredMark /></span>
+                        <span>Account Number:{features.bankPayroll && <RequiredMark />}</span>
                       </label>
                       <input
-                        type="text" required
+                        type="text" required={features.bankPayroll}
                         aria-label="Bank Account Number"
                         placeholder="e.g. 12345678901234"
                         value={newEmpForm.bankAccountNumber}
@@ -5693,7 +5715,7 @@ export function WebPortal({
                   </div>
 
                   {/* FBR Live Salary & Allowance Breakdown Card */}
-                  {((wageTypes.find(item => item.id === newEmpForm.wageTypeId)?.calculationBasis ?? (newEmpForm.wageType === 'Daily Wager' ? 'Daily' : 'Monthly')) === 'Monthly') && (
+                  {features.incomeTax && ((wageTypes.find(item => item.id === newEmpForm.wageTypeId)?.calculationBasis ?? (newEmpForm.wageType === 'Daily Wager' ? 'Daily' : 'Monthly')) === 'Monthly') && (
                     <div className="bg-gradient-to-r from-emerald-50/80 via-slate-50 to-emerald-50/50 p-3 rounded-xl border border-emerald-200/90 shadow-2xs">
                       <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
                         <div className="flex items-center gap-2">
@@ -5828,12 +5850,12 @@ export function WebPortal({
                   </div>
                 </div>
 
-                {/* SECTION 4: STATUTORY & TRUST FUNDS COMPLIANCE */}
-                <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-2xs space-y-3">
+                {/* SECTION 4: STATUTORY & TRUST FUNDS COMPLIANCE (only the schemes this edition runs) */}
+                {(statutoryPayroll || features.gratuity) && <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-2xs space-y-3">
                   <h3 className="font-bold text-slate-800 text-xs uppercase tracking-wider flex items-center text-emerald-600 border-b border-slate-100 pb-2">Statutory &amp; Trust Compliance</h3>
-                  
+
                   <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4 items-stretch">
-                    <div className="bg-slate-50/80 p-3 rounded-xl border border-slate-200 flex flex-col justify-between space-y-2 h-full">
+                    {features.eobi && <div className="bg-slate-50/80 p-3 rounded-xl border border-slate-200 flex flex-col justify-between space-y-2 h-full">
                       <label className="flex items-center space-x-2 font-medium select-none cursor-pointer">
                         <input
                           type="checkbox"
@@ -5856,10 +5878,10 @@ export function WebPortal({
                       ) : (
                         <input type="text" aria-label="EOBI Exemption Reason" placeholder="Required EOBI exemption reason" value={newEmpForm.eobiExemptionReason} onChange={(e) => setNewEmpForm({ ...newEmpForm, eobiExemptionReason: e.target.value })} className="w-full h-8 px-2.5 border border-amber-300 rounded-lg text-xs bg-white focus:ring-1 focus:ring-emerald-500" />
                       )}
-                    </div>
+                    </div>}
 
-                    <div className="bg-slate-50/80 p-3 rounded-xl border border-slate-200 flex flex-col justify-between space-y-2 h-full">
-                      <label className="flex items-center space-x-2 font-medium select-none cursor-pointer">
+                    {(features.incomeTax || features.socialSecurity) && <div className="bg-slate-50/80 p-3 rounded-xl border border-slate-200 flex flex-col justify-between space-y-2 h-full">
+                      {features.incomeTax && <label className="flex items-center space-x-2 font-medium select-none cursor-pointer">
                         <input
                           type="checkbox"
                           aria-label="Enable FBR Tax"
@@ -5868,20 +5890,20 @@ export function WebPortal({
                           className="rounded text-emerald-600 focus:ring-emerald-500 w-4 h-4"
                         />
                         <span className="font-bold text-slate-700 text-xs">Enable FBR Tax</span>
-                      </label>
-                      <input
+                      </label>}
+                      {features.socialSecurity && <input
                         type="text"
                         aria-label="PESSI Social Security Number"
                         placeholder="PESSI SSN (e.g. SS-42-000)"
                         value={newEmpForm.socialSecurityNumber}
                         onChange={(e) => setNewEmpForm({ ...newEmpForm, socialSecurityNumber: e.target.value })}
                         className="w-full h-8 px-2.5 border border-slate-300 rounded-lg font-mono text-xs bg-white focus:ring-1 focus:ring-emerald-500"
-                      />
-                      {newEmpForm.fbrEnabled && <input type="text" aria-label="Employee NTN" placeholder="Employee NTN (if registered)" value={newEmpForm.ntn} onChange={(e) => setNewEmpForm({ ...newEmpForm, ntn: e.target.value })} className="w-full h-8 px-2.5 border border-slate-300 rounded-lg font-mono text-xs bg-white focus:ring-1 focus:ring-emerald-500" />}
-                      {!newEmpForm.socialSecurityNumber && <input type="text" aria-label="Social Security Exemption Reason" placeholder="Required exemption reason if unregistered" value={newEmpForm.socialSecurityExemptionReason} onChange={(e) => setNewEmpForm({ ...newEmpForm, socialSecurityExemptionReason: e.target.value })} className="w-full h-8 px-2.5 border border-amber-300 rounded-lg text-xs bg-white focus:ring-1 focus:ring-emerald-500" />}
-                    </div>
+                      />}
+                      {features.incomeTax && newEmpForm.fbrEnabled && <input type="text" aria-label="Employee NTN" placeholder="Employee NTN (if registered)" value={newEmpForm.ntn} onChange={(e) => setNewEmpForm({ ...newEmpForm, ntn: e.target.value })} className="w-full h-8 px-2.5 border border-slate-300 rounded-lg font-mono text-xs bg-white focus:ring-1 focus:ring-emerald-500" />}
+                      {features.socialSecurity && !newEmpForm.socialSecurityNumber && <input type="text" aria-label="Social Security Exemption Reason" placeholder="Required exemption reason if unregistered" value={newEmpForm.socialSecurityExemptionReason} onChange={(e) => setNewEmpForm({ ...newEmpForm, socialSecurityExemptionReason: e.target.value })} className="w-full h-8 px-2.5 border border-amber-300 rounded-lg text-xs bg-white focus:ring-1 focus:ring-emerald-500" />}
+                    </div>}
 
-                    <div className="bg-slate-50/80 p-3 rounded-xl border border-slate-200 flex flex-col justify-center space-y-2 h-full">
+                    {features.providentFund && <div className="bg-slate-50/80 p-3 rounded-xl border border-slate-200 flex flex-col justify-center space-y-2 h-full">
                       <label className="flex items-center space-x-2 font-medium select-none cursor-pointer">
                         <input
                           type="checkbox"
@@ -5892,9 +5914,9 @@ export function WebPortal({
                         />
                         <span className="font-bold text-slate-700 text-xs">Opt In PF Fund</span>
                       </label>
-                    </div>
+                    </div>}
 
-                    <div className="bg-slate-50/80 p-3 rounded-xl border border-slate-200 flex flex-col justify-center space-y-2 h-full">
+                    {features.gratuity && <div className="bg-slate-50/80 p-3 rounded-xl border border-slate-200 flex flex-col justify-center space-y-2 h-full">
                       <label className="flex items-center space-x-2 font-medium select-none cursor-pointer">
                         <input
                           type="checkbox"
@@ -5905,9 +5927,9 @@ export function WebPortal({
                         />
                         <span className="font-bold text-slate-700 text-xs">Opt In Gratuity</span>
                       </label>
-                    </div>
+                    </div>}
                   </div>
-                </div>
+                </div>}
 
                 <div className="flex justify-end space-x-3 pt-3 border-t border-slate-200 flex-shrink-0">
                   <button
@@ -5969,10 +5991,10 @@ export function WebPortal({
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
-                        <span>Official Email ID:<RequiredMark /></span>
+                        <span>Official Email ID:{features.requireEmployeeEmail && <RequiredMark />}</span>
                       </label>
                       <input
-                        type="email" required
+                        type="email" required={features.requireEmployeeEmail}
                         aria-label="Official Email ID"
                         placeholder="e.g. employee@company.com"
                         value={editEmpForm.email}
@@ -6394,7 +6416,7 @@ export function WebPortal({
                         <label className="font-bold text-slate-700 font-sans text-xs">
                           <span>{editEmpTakeHome ? 'Target Take Home (Net PKR):' : 'Basic Monthly Wage / Daily Rate (PKR):'}<RequiredMark /></span>
                         </label>
-                        <label className="flex items-center gap-1.5 cursor-pointer select-none bg-indigo-50 hover:bg-indigo-100/80 px-2 py-0.5 rounded border border-indigo-200 text-indigo-800 transition-colors" title="Check to enter target take-home pay and auto-calculate gross and FBR allowances">
+                        {features.incomeTax && <label className="flex items-center gap-1.5 cursor-pointer select-none bg-indigo-50 hover:bg-indigo-100/80 px-2 py-0.5 rounded border border-indigo-200 text-indigo-800 transition-colors" title="Check to enter target take-home pay and auto-calculate gross and FBR allowances">
                           <input
                             type="checkbox"
                             checked={editEmpTakeHome}
@@ -6413,7 +6435,7 @@ export function WebPortal({
                             className="rounded text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5"
                           />
                           <span className="text-[11px] font-bold">Take Home (FBR Auto)</span>
-                        </label>
+                        </label>}
                       </div>
                       <input
                         type="number" required
@@ -6441,7 +6463,7 @@ export function WebPortal({
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
-                        <span>Disbursal Bank:<RequiredMark /></span>
+                        <span>Disbursal Bank:{features.bankPayroll ? <RequiredMark /> : <span className="ml-1 font-normal text-slate-400">(blank = cash salary)</span>}</span>
                       </label>
                       <div className="flex space-x-1.5 items-center h-9">
                         <select
@@ -6476,10 +6498,10 @@ export function WebPortal({
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
-                        <span>Account Number:<RequiredMark /></span>
+                        <span>Account Number:{features.bankPayroll && <RequiredMark />}</span>
                       </label>
                       <input
-                        type="text" required
+                        type="text" required={features.bankPayroll}
                         aria-label="Bank Account Number"
                         placeholder="e.g. 12345678901234"
                         value={editEmpForm.bankAccountNumber}
@@ -6490,7 +6512,7 @@ export function WebPortal({
                   </div>
 
                   {/* FBR Live Salary & Allowance Breakdown Card */}
-                  {((wageTypes.find(item => item.id === editEmpForm.wageTypeId)?.calculationBasis ?? (editEmpForm.wageType === 'Daily Wager' ? 'Daily' : 'Monthly')) === 'Monthly') && (
+                  {features.incomeTax && ((wageTypes.find(item => item.id === editEmpForm.wageTypeId)?.calculationBasis ?? (editEmpForm.wageType === 'Daily Wager' ? 'Daily' : 'Monthly')) === 'Monthly') && (
                     <div className="bg-gradient-to-r from-indigo-50/80 via-slate-50 to-indigo-50/50 p-3 rounded-xl border border-indigo-200/90 shadow-2xs">
                       <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
                         <div className="flex items-center gap-2">
@@ -6625,12 +6647,12 @@ export function WebPortal({
                   </div>
                 </div>
 
-                {/* SECTION 4: STATUTORY & TRUST FUNDS COMPLIANCE */}
-                <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-2xs space-y-3">
+                {/* SECTION 4: STATUTORY & TRUST FUNDS COMPLIANCE (only the schemes this edition runs) */}
+                {(statutoryPayroll || features.gratuity) && <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-2xs space-y-3">
                   <h3 className="font-bold text-slate-800 text-xs uppercase tracking-wider flex items-center text-indigo-600 border-b border-slate-100 pb-2">Statutory &amp; Trust Compliance</h3>
-                  
+
                   <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4 items-stretch">
-                    <div className="bg-slate-50/80 p-3 rounded-xl border border-slate-200 flex flex-col justify-between space-y-2 h-full">
+                    {features.eobi && <div className="bg-slate-50/80 p-3 rounded-xl border border-slate-200 flex flex-col justify-between space-y-2 h-full">
                       <label className="flex items-center space-x-2 font-medium select-none cursor-pointer">
                         <input
                           type="checkbox"
@@ -6653,10 +6675,10 @@ export function WebPortal({
                       ) : (
                         <input type="text" aria-label="Edit EOBI Exemption Reason" placeholder="Required EOBI exemption reason" value={editEmpForm.eobiExemptionReason} onChange={(e) => setEditEmpForm({ ...editEmpForm, eobiExemptionReason: e.target.value })} className="w-full h-8 px-2.5 border border-amber-300 rounded-lg text-xs bg-white focus:ring-1 focus:ring-indigo-500" />
                       )}
-                    </div>
+                    </div>}
 
-                    <div className="bg-slate-50/80 p-3 rounded-xl border border-slate-200 flex flex-col justify-between space-y-2 h-full">
-                      <label className="flex items-center space-x-2 font-medium select-none cursor-pointer">
+                    {(features.incomeTax || features.socialSecurity) && <div className="bg-slate-50/80 p-3 rounded-xl border border-slate-200 flex flex-col justify-between space-y-2 h-full">
+                      {features.incomeTax && <label className="flex items-center space-x-2 font-medium select-none cursor-pointer">
                         <input
                           type="checkbox"
                           aria-label="Enable FBR Tax"
@@ -6665,20 +6687,20 @@ export function WebPortal({
                           className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4"
                         />
                         <span className="font-bold text-slate-700 text-xs">Enable FBR Tax</span>
-                      </label>
-                      <input
+                      </label>}
+                      {features.socialSecurity && <input
                         type="text"
                         aria-label="PESSI Social Security Number"
                         placeholder="PESSI SSN (e.g. SS-42-000)"
                         value={editEmpForm.socialSecurityNumber}
                         onChange={(e) => setEditEmpForm({ ...editEmpForm, socialSecurityNumber: e.target.value })}
                         className="w-full h-8 px-2.5 border border-slate-300 rounded-lg font-mono text-xs bg-white focus:ring-1 focus:ring-indigo-500"
-                      />
-                      {editEmpForm.fbrEnabled && <input type="text" aria-label="Edit Employee NTN" placeholder="Employee NTN (if registered)" value={editEmpForm.ntn} onChange={(e) => setEditEmpForm({ ...editEmpForm, ntn: e.target.value })} className="w-full h-8 px-2.5 border border-slate-300 rounded-lg font-mono text-xs bg-white focus:ring-1 focus:ring-indigo-500" />}
-                      {!editEmpForm.socialSecurityNumber && <input type="text" aria-label="Edit Social Security Exemption Reason" placeholder="Required exemption reason if unregistered" value={editEmpForm.socialSecurityExemptionReason} onChange={(e) => setEditEmpForm({ ...editEmpForm, socialSecurityExemptionReason: e.target.value })} className="w-full h-8 px-2.5 border border-amber-300 rounded-lg text-xs bg-white focus:ring-1 focus:ring-indigo-500" />}
-                    </div>
+                      />}
+                      {features.incomeTax && editEmpForm.fbrEnabled && <input type="text" aria-label="Edit Employee NTN" placeholder="Employee NTN (if registered)" value={editEmpForm.ntn} onChange={(e) => setEditEmpForm({ ...editEmpForm, ntn: e.target.value })} className="w-full h-8 px-2.5 border border-slate-300 rounded-lg font-mono text-xs bg-white focus:ring-1 focus:ring-indigo-500" />}
+                      {features.socialSecurity && !editEmpForm.socialSecurityNumber && <input type="text" aria-label="Edit Social Security Exemption Reason" placeholder="Required exemption reason if unregistered" value={editEmpForm.socialSecurityExemptionReason} onChange={(e) => setEditEmpForm({ ...editEmpForm, socialSecurityExemptionReason: e.target.value })} className="w-full h-8 px-2.5 border border-amber-300 rounded-lg text-xs bg-white focus:ring-1 focus:ring-indigo-500" />}
+                    </div>}
 
-                    <div className="bg-slate-50/80 p-3 rounded-xl border border-slate-200 flex flex-col justify-center space-y-2 h-full">
+                    {features.providentFund && <div className="bg-slate-50/80 p-3 rounded-xl border border-slate-200 flex flex-col justify-center space-y-2 h-full">
                       <label className="flex items-center space-x-2 font-medium select-none cursor-pointer">
                         <input
                           type="checkbox"
@@ -6689,9 +6711,9 @@ export function WebPortal({
                         />
                         <span className="font-bold text-slate-700 text-xs">Opt In PF Fund</span>
                       </label>
-                    </div>
+                    </div>}
 
-                    <div className="bg-slate-50/80 p-3 rounded-xl border border-slate-200 flex flex-col justify-center space-y-2 h-full">
+                    {features.gratuity && <div className="bg-slate-50/80 p-3 rounded-xl border border-slate-200 flex flex-col justify-center space-y-2 h-full">
                       <label className="flex items-center space-x-2 font-medium select-none cursor-pointer">
                         <input
                           type="checkbox"
@@ -6702,12 +6724,12 @@ export function WebPortal({
                         />
                         <span className="font-bold text-slate-700 text-xs">Opt In Gratuity</span>
                       </label>
-                    </div>
+                    </div>}
                   </div>
-                </div>
+                </div>}
 
                 <div className="flex justify-end space-x-3 pt-3 border-t border-slate-200 flex-shrink-0">
-                  <button 
+                  <button
                     type="button"
                     onClick={() => { setShowEditEmpModal(false); setEditingEmployee(null); }}
                     className="px-5 py-2 border border-slate-300 text-slate-700 hover:bg-slate-100 rounded-xl font-semibold text-xs transition-colors"
@@ -6975,7 +6997,7 @@ export function WebPortal({
                         <h5 className="font-bold text-slate-800 uppercase text-[10px] tracking-wider border-b pb-1">Statutory deductions</h5>
                         
                         <div className="space-y-1 font-mono text-[11px]">
-                          <div className="flex justify-between items-center mb-1">
+                          {(features.incomeTax || showPayslipModal.incomeTaxDeduction > 0) && <div className="flex justify-between items-center mb-1">
                             <span className="text-slate-500">{bilingual('FBR Income Tax:', 'انکم ٹیکس')}</span>
                             <div className="flex items-center space-x-1">
                               <span className={`px-1 py-0.5 rounded text-[8px] font-bold ${payslipEmp?.fbrEnabled !== false ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-850'}`}>
@@ -6983,7 +7005,7 @@ export function WebPortal({
                               </span>
                               <span className="text-rose-700 font-bold">-{showPayslipModal.incomeTaxDeduction.toLocaleString()} PKR</span>
                             </div>
-                          </div>
+                          </div>}
                           {showPayslipModal.taxYear && (
                             <div className="my-2 rounded border border-slate-200 bg-slate-50 p-2 text-[9px] leading-relaxed text-slate-500">
                               <div className="flex justify-between"><span>Tax Year</span><strong className="text-slate-700">{showPayslipModal.taxYear}</strong></div>

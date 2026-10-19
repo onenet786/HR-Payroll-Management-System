@@ -1,4 +1,5 @@
 import type { AttendanceLog, Branch, Employee, StatutoryConfig, WageType } from '../types';
+import type { EditionFeatures } from './edition';
 import { attendanceLocations, impossibleTravel } from './geofence';
 import { employeeProvince, establishmentRule, provincialPolicy } from './provincialCompliance';
 import { resolveWageBasis } from './masterData';
@@ -40,6 +41,8 @@ export interface ComplianceInputs {
   today?: string;
   /** Only attendance on or after this date is scanned (defaults to 45 days before today). */
   sinceDate?: string;
+  /** Edition switches: schemes that are off raise no registration alerts; without bank payroll a missing account is informational. */
+  features?: EditionFeatures;
 }
 
 export function complianceAlerts(inputs: ComplianceInputs): ComplianceAlert[] {
@@ -49,6 +52,7 @@ export function complianceAlerts(inputs: ComplianceInputs): ComplianceAlert[] {
   const defaultMaxWeeklyOvertime = config?.maxWeeklyOvertimeHours ?? DEFAULT_MAX_WEEKLY_OVERTIME_HOURS;
   const defaultMaxConsecutive = config?.maxConsecutiveWorkDays ?? DEFAULT_MAX_CONSECUTIVE_WORK_DAYS;
   const lowConfidence = config?.lowConfidenceBiometricPercent ?? DEFAULT_LOW_CONFIDENCE_BIOMETRIC_PERCENT;
+  const features = inputs.features;
   const alerts: ComplianceAlert[] = [];
   const active = inputs.employees.filter(employee => employee.status !== 'Terminated');
   const byEmployee = new Map<string, AttendanceLog[]>();
@@ -117,13 +121,16 @@ export function complianceAlerts(inputs: ComplianceInputs): ComplianceAlert[] {
     if (!employee.cnicExpiryDate) add('Info', 'Documents', 'cnic-expiry-missing', 'CNIC expiry date is not recorded.');
 
     if (!/^\d{5}-\d{7}-\d$/.test(employee.cnic || '')) add('Critical', 'Registration', 'cnic', 'CNIC is missing or not in 00000-0000000-0 format.');
-    if (employee.fbrEnabled !== false && !employee.ntn?.trim()) add('Info', 'Registration', 'ntn', 'NTN is not recorded for an FBR-withholding employee.');
-    if (employee.eobiEnabled !== false && !employee.eobiNumber?.trim()) add('Warning', 'Registration', 'eobi', 'EOBI registration number is missing.');
-    if (employee.eobiEnabled === false && !employee.eobiExemptionReason?.trim()) add('Warning', 'Registration', 'eobi-reason', 'EOBI is disabled without a documented exemption reason.');
-    if (!employee.socialSecurityNumber?.trim() && !employee.socialSecurityExemptionReason?.trim()) add('Warning', 'Registration', 'social-security', 'Provincial social-security registration is missing without a documented exemption reason.');
+    if (features?.incomeTax !== false && employee.fbrEnabled !== false && !employee.ntn?.trim()) add('Info', 'Registration', 'ntn', 'NTN is not recorded for an FBR-withholding employee.');
+    if (features?.eobi !== false && employee.eobiEnabled !== false && !employee.eobiNumber?.trim()) add('Warning', 'Registration', 'eobi', 'EOBI registration number is missing.');
+    if (features?.eobi !== false && employee.eobiEnabled === false && !employee.eobiExemptionReason?.trim()) add('Warning', 'Registration', 'eobi-reason', 'EOBI is disabled without a documented exemption reason.');
+    if (features?.socialSecurity !== false && !employee.socialSecurityNumber?.trim() && !employee.socialSecurityExemptionReason?.trim()) add('Warning', 'Registration', 'social-security', 'Provincial social-security registration is missing without a documented exemption reason.');
 
     const iban = (employee.iban || '').replace(/\s/g, '');
-    if (!employee.bankAccountNumber?.trim() && !iban) add('Critical', 'Bank', 'missing', 'Bank account is missing.');
+    if (!employee.bankAccountNumber?.trim() && !iban) {
+      if (features?.bankPayroll === false) add('Info', 'Bank', 'missing', 'No bank account recorded; salary is paid in cash.');
+      else add('Critical', 'Bank', 'missing', 'Bank account is missing.');
+    }
     else if (iban && !/^PK\d{2}[A-Z0-9]{20}$/i.test(iban)) add('Critical', 'Bank', 'iban', 'IBAN is not a valid 24-character Pakistan IBAN.');
     if ((employee.bankAccountNumber || iban) && !employee.bankVerifiedAt) add('Info', 'Bank', 'unverified', 'Bank account has not been verified against a cheque or bank letter.');
 

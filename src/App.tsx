@@ -24,7 +24,9 @@ import { computeFinalSettlementPayslip, computeSupplementaryPayslip, retroRecalc
 import { attendanceReviewError, isRegularizationOverdue, lineManagerReviewer, payrollCancellationError, payrollTransitionError, salaryRevisionApprovalError, salaryRevisionArrears, statutoryChangedFields, statutoryReviewError } from './data/approvalRules';
 import { resolveWageBasis } from './data/masterData';
 import { payrollPreflight } from './data/payrollPreflight';
+import { FULL_EDITION, editionEmployee, editionStatConfig, resolveEdition, type AppEdition } from './data/edition';
 import { DeviceEmulator } from './components/DeviceEmulator';
+import { EditionConsole } from './components/EditionConsole';
 import {
   db, collection, deleteDoc, deleteField, doc, getDoc, setDoc, updateDoc, onSnapshot, writeBatch, query, where, setAuthToken, getAuthToken, authenticatedApiRequest
 } from './data/postgresStore';
@@ -206,6 +208,13 @@ export default function App() {
 
   // User & RBAC States
   const [loggedInUser, setLoggedInUser] = useState<UserAccount | null>(() => getInitialValue('hr_logged_in_user', null));
+  // Product edition (full / lite) chosen by the vendor: injected by the server on first paint, refreshed from /api/auth/status.
+  // Switched-off schemes are removed from payroll at computation time only; nothing on the saved records changes.
+  const [edition, setEdition] = useState<AppEdition>(() => {
+    try { return resolveEdition((window as any).__APP_CONFIG__?.edition); } catch { return FULL_EDITION; }
+  });
+  const [vendorSession, setVendorSession] = useState<{ token: string; expiresAt?: string; edition: AppEdition } | null>(null);
+  const dualControl = edition.features.makerChecker;
   const [roles, setRoles] = useState<Role[]>(() => getInitialValue('hr_roles', []));
   const [users, setUsers] = useState<UserAccount[]>(() => getInitialValue('hr_users', []));
   const [rolesLoaded, setRolesLoaded] = useState(true);
@@ -262,6 +271,11 @@ export default function App() {
       });
       if (response.ok) {
         const data = await response.json();
+        if (data.vendorConsole && data.vendorToken) {
+          // OneNet vendor console: no user session is created; only the product edition can be changed.
+          setVendorSession({ token: data.vendorToken, expiresAt: data.expiresAt, edition: resolveEdition(data.edition) });
+          return;
+        }
         if (data.mfaRequired && data.mfaChallenge) {
           // The server no longer trusts this device (expired, revoked or credentials changed).
           writeTrustedDevice(email, null);
@@ -668,17 +682,34 @@ export default function App() {
     }
   };
 
+  // Without maker-checker (lite edition) the live rates are written directly; the server accepts that under the same switch.
+  const saveStatutoryDirectly = async (nextConfig: StatutoryConfig, nextSlabs: TaxSlab[]) => {
+    const liveConfig: StatutoryConfig = { ...nextConfig, id: statConfig.id || nextConfig.id || 'stat-pk', updatedAt: new Date().toISOString() };
+    const removedSlabs = taxSlabs.filter(slab => !nextSlabs.some(item => item.id === slab.id));
+    setStatConfig(liveConfig);
+    setTaxSlabs(nextSlabs);
+    privacyStorage.setItem('hr_stat_config', JSON.stringify(liveConfig));
+    privacyStorage.setItem('hr_tax_slabs', JSON.stringify(nextSlabs));
+    try {
+      await setDoc(doc(db, 'statConfig', liveConfig.id), cleanData(liveConfig));
+      await Promise.all(nextSlabs.map(slab => setDoc(doc(db, 'taxSlabs', slab.id), cleanData(slab))));
+      await Promise.all(removedSlabs.map(slab => deleteDoc(doc(db, 'taxSlabs', slab.id))));
+    } catch (err) {
+      console.warn('PostgreSQL statutory config save delayed:');
+    }
+  };
+
   const handleUpdateStatConfig = (newConfig: StatutoryConfig) =>
-    proposeStatutoryChange(newConfig, pendingStatutoryChange?.proposedTaxSlabs || taxSlabs);
+    dualControl ? proposeStatutoryChange(newConfig, pendingStatutoryChange?.proposedTaxSlabs || taxSlabs) : saveStatutoryDirectly(newConfig, taxSlabs);
 
   const handleUpdateTaxSlabs = (newSlabs: TaxSlab[]) =>
-    proposeStatutoryChange(pendingStatutoryChange?.proposedConfig || statConfig, newSlabs);
+    dualControl ? proposeStatutoryChange(pendingStatutoryChange?.proposedConfig || statConfig, newSlabs) : saveStatutoryDirectly(statConfig, newSlabs);
 
   const handleReviewStatutoryChange = async (id: string, decision: 'Approved' | 'Rejected', reviewComment: string) => {
     const request = statutoryChangeRequests.find(item => item.id === id);
     if (!request) return;
     const withdrawing = decision === 'Rejected' && request.createdById === currentUserAccount.id && request.status === 'Pending';
-    const reviewError = withdrawing ? undefined : statutoryReviewError(request, currentUserAccount.id);
+    const reviewError = withdrawing ? undefined : statutoryReviewError(request, currentUserAccount.id, dualControl);
     if (reviewError) { alert(`Maker-checker control: ${reviewError}`); return; }
     if (!withdrawing && reviewComment.trim().length < 5) { alert('Enter a review comment (for example the FBR/EOBI notification reference).'); return; }
     const now = new Date().toISOString();
@@ -817,7 +848,7 @@ export default function App() {
 
   // ─── Attendance Handlers ──────────────────────────────────────────────────
   const reviewContextFor = (attendance: AttendanceLog) => ({
-    actorEmployeeId: currentUserAccount.employeeId, employee: employees.find(item => item.id === attendance.employeeId), users, roles,
+    actorEmployeeId: currentUserAccount.employeeId, employee: employees.find(item => item.id === attendance.employeeId), users, roles, makerChecker: dualControl,
   });
 
   const handleApproveRegularization = async (id: string, reviewComment = '') => {
@@ -1197,7 +1228,7 @@ export default function App() {
     const runId = `run-${month}-${year}-${Date.now()}`;
 
     const sheets = eligibleEmployees.map(emp => ({
-      ...computePayslipDetails(emp, month, year, attendances, leaves, statConfig, taxSlabs, departments, designations, branches, loanAdvances, wageTypes, holidays, effectivePayslips, payrollAdjustments, lockedPeriod.registerRows),
+      ...computePayslipDetails(editionEmployee(edition.features, emp), month, year, attendances, leaves, editionStatConfig(edition.features, statConfig), taxSlabs, departments, designations, branches, loanAdvances, wageTypes, holidays, effectivePayslips, payrollAdjustments, lockedPeriod.registerRows),
       id: `${runId}-${emp.id}`,
       payrollRunId: runId
     }));
@@ -1207,7 +1238,7 @@ export default function App() {
     const totalNetPay = sheets.reduce((sum, s) => sum + s.netSalary, 0);
     const totalEobiEmployer = sheets.reduce((sum, s) => sum + s.eobiEmployerContribution, 0);
     const totalSocialSecurityEmployer = sheets.reduce((sum, s) => sum + s.pessiEmployerContribution, 0);
-    const preflightIssues = payrollPreflight(employees, sheets, effectivePayslips, branches, statConfig, wageTypes);
+    const preflightIssues = payrollPreflight(employees, sheets, effectivePayslips, branches, statConfig, wageTypes, edition.features);
     const preflightCriticalCount = preflightIssues.filter(item => item.severity === 'Critical').length;
     const preflightWarningCount = preflightIssues.filter(item => item.severity === 'Warning').length;
     if (preflightCriticalCount > 0) {
@@ -1277,7 +1308,7 @@ export default function App() {
   const handleReviewPayrollAdjustment = async (id: string, status: 'Approved' | 'Rejected') => {
     const adjustment = payrollAdjustments.find(item => item.id === id);
     if (!adjustment || adjustment.status !== 'Pending') return;
-    if (adjustment.createdById === currentUserAccount.id) { alert('Maker-checker control: another payroll user must review this adjustment.'); return; }
+    if (dualControl && adjustment.createdById === currentUserAccount.id) { alert('Maker-checker control: another payroll user must review this adjustment.'); return; }
     const updated = { ...adjustment, status, reviewedAt: new Date().toISOString(), reviewedById: currentUserAccount.id, reviewedBy: currentUserAccount.username };
     await setDoc(doc(db, 'payrollAdjustments', id), cleanData(updated));
     setPayrollAdjustments(previous => previous.map(item => item.id === id ? updated : item));
@@ -1296,18 +1327,23 @@ export default function App() {
   const handleUpdatePayrollStatus = async (runId: string, nextStatus: 'Approved' | 'Disbursed', disbursementReference?: string) => {
     const run = payrollRuns.find(item => item.id === runId);
     if (!run) return;
-    const transitionError = payrollTransitionError(run, nextStatus, currentUserAccount.id);
+    const transitionError = payrollTransitionError(run, nextStatus, currentUserAccount.id, dualControl);
     if (transitionError) { alert(`Maker-checker control: ${transitionError}`); return; }
     if (nextStatus === 'Approved') {
       const runSheets = payrollPayslips.filter(item => item.payrollRunId === runId);
-      const criticalIssues = payrollPreflight(employees, runSheets, effectivePayslips, branches, statConfig, wageTypes).filter(item => item.severity === 'Critical');
+      const criticalIssues = payrollPreflight(employees, runSheets, effectivePayslips, branches, statConfig, wageTypes, edition.features).filter(item => item.severity === 'Critical');
       if (criticalIssues.length) {
         alert(`Approval blocked: ${criticalIssues.length} critical payroll preflight issue(s) remain. ${criticalIssues[0].employeeName}: ${criticalIssues[0].message}`);
         return;
       }
     }
-    if (nextStatus === 'Disbursed' && (!run.bankAdviceChecksum || !disbursementReference?.trim())) {
+    // Bank payroll needs the bank advice first; a cash payroll (lite edition) only needs a payment reference.
+    if (nextStatus === 'Disbursed' && edition.features.bankPayroll && !run.bankAdviceChecksum) {
       alert('Disbursement blocked: download the bank advice first and enter the bank transaction/reference number.');
+      return;
+    }
+    if (nextStatus === 'Disbursed' && !disbursementReference?.trim()) {
+      alert('Disbursement blocked: enter the payment reference (bank transaction number or cash voucher number).');
       return;
     }
     const now = new Date().toISOString();
@@ -1424,7 +1460,7 @@ export default function App() {
     const request = lifecycleRequests.find(item => item.id === id);
     const employee = request && employees.find(item => item.id === request.employeeId);
     if (!request || !employee) return;
-    const reviewError = lifecycleReviewError(request, currentUserAccount.id);
+    const reviewError = lifecycleReviewError(request, currentUserAccount.id, dualControl);
     if (reviewError) { alert(`Maker-checker control: ${reviewError}`); return; }
     if (reviewComment.trim().length < 5) { alert('Enter a review comment.'); return; }
     const now = new Date().toISOString();
@@ -1478,7 +1514,7 @@ export default function App() {
     const directory = { departments, designations, branches };
     const sheets = employees.flatMap(employee => {
       const base = effectivePayslips.find(item => item.payrollRunId === regular.id && item.employeeId === employee.id);
-      const sheet = computeSupplementaryPayslip(employee, month, year, payrollAdjustments, base, statConfig, taxSlabs, directory);
+      const sheet = computeSupplementaryPayslip(editionEmployee(edition.features, employee), month, year, payrollAdjustments, base, editionStatConfig(edition.features, statConfig), taxSlabs, directory);
       return sheet ? [sheet] : [];
     });
     if (!sheets.length) { alert('No approved, unpaid adjustments exist for this period.'); return; }
@@ -1491,7 +1527,7 @@ export default function App() {
     const assigned = payrollAdjustments.filter(item => used.has(item.id)).map(item => ({ ...item, payrollRunId: runId }));
     await Promise.all(assigned.map(item => setDoc(doc(db, 'payrollAdjustments', item.id), cleanData(item))));
     setPayrollAdjustments(previous => previous.map(item => assigned.find(next => next.id === item.id) || item));
-    alert(`Supplementary draft created for ${linked.length} employee(s): net PKR ${run.totalNetPay.toLocaleString()}. Another payroll officer must approve it.`);
+    alert(`Supplementary draft created for ${linked.length} employee(s): net PKR ${run.totalNetPay.toLocaleString()}.${dualControl ? ' Another payroll officer must approve it.' : ''}`);
   };
 
   const handleCreateFinalSettlementRun = async (settlementId: string) => {
@@ -1500,7 +1536,7 @@ export default function App() {
     if (!settlement || !employee) return;
     if (payrollRuns.some(run => run.settlementId === settlementId && run.status !== 'Cancelled')) { alert('A payroll run already exists for this settlement.'); return; }
     try {
-      const sheet = computeFinalSettlementPayslip(employee, settlement, loanAdvances, effectivePayslips, statConfig, taxSlabs, { departments, designations, branches });
+      const sheet = computeFinalSettlementPayslip(editionEmployee(edition.features, employee), settlement, loanAdvances, effectivePayslips, editionStatConfig(edition.features, statConfig), taxSlabs, { departments, designations, branches });
       if (sheet.netSalary <= 0) { alert('Settlement net pay is zero after tax and loan recovery; record the settlement outside payroll.'); return; }
       const runId = `run-fs-${employee.id}-${Date.now()}`;
       const run = { ...offCycleRun(`Final settlement - ${employee.fullName}`, sheet.periodMonth!, sheet.periodYear!, [sheet], { runType: 'Final Settlement', settlementId }), id: runId };
@@ -1519,13 +1555,13 @@ export default function App() {
     if ((run.runType || 'Regular') !== 'Regular' || (run.status !== 'Approved' && run.status !== 'Disbursed')) { alert('Only processed regular payroll months can be recalculated.'); return; }
     const register = attendancePeriods.find(item => item.id === run.attendancePeriodId)?.registerRows;
     // Recompute the month exactly as payroll did, against the same locked register, with today's corrected employee data.
-    const recomputed = computePayslipDetails(employee, original.periodMonth, original.periodYear, attendances, leaves, statConfig, taxSlabs, departments, designations, branches,
+    const recomputed = computePayslipDetails(editionEmployee(edition.features, employee), original.periodMonth, original.periodYear, attendances, leaves, editionStatConfig(edition.features, statConfig), taxSlabs, departments, designations, branches,
       loanAdvances, wageTypes, holidays, effectivePayslips.filter(item => item.id !== original.id), [], register);
     try {
       const result = retroRecalculationAdjustment(original, recomputed, reason, currentUserAccount, target);
       if (!result.adjustment) { alert('Recalculation matches what was paid; no correction is needed.'); return; }
       const lines = result.breakdown.map(([label, delta]) => `• ${label}: ${delta > 0 ? '+' : ''}PKR ${delta.toLocaleString()}`).join('\n');
-      if (!window.confirm(`${employee.fullName} — ${original.periodYear}-${String(original.periodMonth).padStart(2, '0')}\n${lines}\n\n${result.adjustment.type} of PKR ${result.adjustment.amount.toLocaleString()} will be raised for ${target.month}/${target.year} and needs approval by another payroll user. Continue?`)) return;
+      if (!window.confirm(`${employee.fullName} — ${original.periodYear}-${String(original.periodMonth).padStart(2, '0')}\n${lines}\n\n${result.adjustment.type} of PKR ${result.adjustment.amount.toLocaleString()} will be raised for ${target.month}/${target.year}${dualControl ? ' and needs approval by another payroll user' : ''}. Continue?`)) return;
       await handleCreatePayrollAdjustment(result.adjustment);
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Recalculation failed.');
@@ -1566,7 +1602,7 @@ export default function App() {
     const now = new Date().toISOString();
     const failed = payrollPayslips.filter(item => payslipIds.includes(item.id) && item.paymentStatus === 'Failed');
     // The retry pays to the employee's current bank details, so the user who recorded the bank return cannot release it.
-    const ownFailures = failed.filter(item => item.paymentFailedById === currentUserAccount.id);
+    const ownFailures = dualControl ? failed.filter(item => item.paymentFailedById === currentUserAccount.id) : [];
     if (ownFailures.length) { alert(`Maker-checker control: you marked ${ownFailures.map(item => item.employeeName).join(', ')} as failed. Another payroll user must record the retry payment.`); return; }
     const updates = failed.map(item => {
       const employee = employees.find(record => record.id === item.employeeId);
@@ -1775,9 +1811,12 @@ export default function App() {
     payload.designations.forEach(item => batch.set(doc(db, 'designations', item.id), cleanData(item), { merge: true }));
     // Live statutory rates change only through maker-checker: written directly on first setup only; later
     // edits made in this wizard become a statutory change proposal for another user to approve.
-    const firstSetup = !statConfig.id || !statConfig.effectiveFrom;
+    // Without maker-checker (lite edition) the wizard writes the live rates directly every time.
+    const firstSetup = !dualControl || !statConfig.id || !statConfig.effectiveFrom;
     const statutoryChanges = firstSetup ? [] : statutoryChangedFields(statConfig, { ...payload.statutoryConfig, id: statConfig.id }, taxSlabs, taxSlabs);
-    if (firstSetup) batch.set(doc(db, 'statConfig', payload.statutoryConfig.id), cleanData(payload.statutoryConfig), { merge: true });
+    const statutoryId = payload.statutoryConfig.id || statConfig.id || 'stat-pk';
+    const liveStatutory: StatutoryConfig = { ...payload.statutoryConfig, id: statutoryId };
+    if (firstSetup) batch.set(doc(db, 'statConfig', statutoryId), cleanData(liveStatutory), { merge: true });
     await batch.commit();
     if (statutoryChanges.length) {
       await proposeStatutoryChange({ ...payload.statutoryConfig, id: statConfig.id }, taxSlabs);
@@ -1785,7 +1824,7 @@ export default function App() {
     }
 
     setCompanies(nextCompanies); setBranches(nextBranches); setDepartments(nextDepartments); setDesignations(nextDesignations);
-    if (firstSetup) setStatConfig(payload.statutoryConfig);
+    if (firstSetup) setStatConfig(liveStatutory);
     const activeName = (payload.company?.legalName?.trim() || payload.company?.name?.trim());
     if (activeName) {
       setBrandTitle(activeName);
@@ -1957,7 +1996,7 @@ export default function App() {
     const employee = employees.find(e => e.id === revision.employeeId);
     const previous = salaryRevisions.find(item => item.id === revision.id);
     if (revision.status !== 'Draft') {
-      const approvalError = salaryRevisionApprovalError(previous || { ...revision, status: 'Draft' }, currentUserAccount.id);
+      const approvalError = salaryRevisionApprovalError(previous || { ...revision, status: 'Draft' }, currentUserAccount.id, dualControl);
       if (approvalError) { alert(`Maker-checker control: ${approvalError}`); return; }
       revision = { ...revision, approvedById: currentUserAccount.id, approvedBy: currentUserAccount.username, approvedOn: todayStr() };
       // Back-dated revisions owe the difference for payroll months already processed at the old salary.
@@ -2207,6 +2246,8 @@ export default function App() {
 
   const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
   const [hasUsersInDb, setHasUsersInDb] = useState<boolean | null>(null);
+  // On an empty database the vendor can open the sign-in screen (for the edition console) before the customer runs setup.
+  const [showLoginOnEmptyDb, setShowLoginOnEmptyDb] = useState(false);
   const [brandTitle, setBrandTitle] = useState<string>(() => {
     try {
       const injected = (window as any).__APP_CONFIG__?.companyName;
@@ -2231,6 +2272,7 @@ export default function App() {
       .then(res => res.json())
       .then(data => {
         setHasUsersInDb(Boolean(data.hasUsers));
+        if (data.edition) setEdition(resolveEdition(data.edition));
         if (data.companyName) {
           setBrandTitle(data.companyName);
           try { localStorage.setItem('app_brand_name', data.companyName); } catch {}
@@ -2258,11 +2300,25 @@ export default function App() {
 
   const isDatabaseEmpty = hasUsersInDb === false;
 
+  if (!loggedInUser && vendorSession) {
+    return (
+      <EditionConsole
+        apiBase={API_BASE}
+        vendorToken={vendorSession.token}
+        expiresAt={vendorSession.expiresAt}
+        initialEdition={vendorSession.edition}
+        onSaved={saved => { setEdition(saved); setVendorSession(previous => previous && { ...previous, edition: saved }); }}
+        onExit={() => { setVendorSession(null); setShowLoginOnEmptyDb(false); }}
+      />
+    );
+  }
+
   if (!loggedInUser) {
-    if (isDatabaseEmpty) {
+    if (isDatabaseEmpty && !showLoginOnEmptyDb) {
       return (
         <SetupWizardScreen
           canCancel={false}
+          onVendorConsole={() => setShowLoginOnEmptyDb(true)}
           onComplete={async (companyName, adminEmail, adminPassword, adminName) => {
             const res = await fetch(`${API_BASE}/api/auth/setup`, {
               method: 'POST',
@@ -2285,7 +2341,8 @@ export default function App() {
         authReady={authReady}
         authMessage={authMessage}
         onLogin={handleLogin}
-        isDatabaseEmpty={false}
+        isDatabaseEmpty={isDatabaseEmpty}
+        onLaunchSetup={isDatabaseEmpty ? () => setShowLoginOnEmptyDb(false) : undefined}
         appName={brandTitle}
         appSubtitle={brandSubtitle}
       />
@@ -2399,6 +2456,7 @@ export default function App() {
       onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
       onDeleteNotification={handleDeleteNotification}
       firestoreSyncStatus={firestoreSyncStatus}
+      edition={edition}
     />
     </>
   );
@@ -2664,7 +2722,9 @@ function LoginScreen({
                       <Mail className="h-4 w-4" />
                     </div>
                     <input
-                      type="email"
+                      type="text"
+                      inputMode="email"
+                      spellCheck={false}
                       autoComplete="username"
                       required
                       value={loginId}
@@ -2852,10 +2912,12 @@ function SetupWizardScreen({
   onComplete,
   onCancel,
   canCancel,
+  onVendorConsole,
 }: {
   onComplete: (companyName: string, adminEmail: string, adminPassword: string, adminName: string) => Promise<void>;
   onCancel?: () => void;
   canCancel?: boolean;
+  onVendorConsole?: () => void;
 }) {
   const [companyName, setCompanyName] = useState('OneNet Solutions');
   const [adminName, setAdminName] = useState('System Administrator');
@@ -2929,6 +2991,11 @@ function SetupWizardScreen({
         {canCancel && onCancel && (
           <button type="button" onClick={onCancel} className="w-full text-xs text-slate-400 hover:text-white transition">
             Back to Sign In
+          </button>
+        )}
+        {onVendorConsole && (
+          <button type="button" onClick={onVendorConsole} className="w-full text-[11px] text-slate-500 hover:text-emerald-300 transition">
+            OneNet vendor? Choose this installation&rsquo;s edition before setup
           </button>
         )}
       </div>
