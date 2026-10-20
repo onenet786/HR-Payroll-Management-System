@@ -537,10 +537,23 @@ app.use(express.static(path.join(__dirname, 'dist'), { index: false, dotfiles: '
 app.get('*', async (_req, res, next) => {
   try {
     const indexPath = path.join(__dirname, 'dist', 'index.html');
-    if (!fs.existsSync(indexPath)) {
-      return res.status(404).json({ error: 'Frontend build not found. Please upload dist folder.' });
-    }
     const branding = await getActiveBranding();
+    if (!fs.existsSync(indexPath)) {
+      // The dist folder is being uploaded or was not deployed: staff see a short branded notice, not raw JSON.
+      const name = String(branding.name || 'HR & Payroll').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+      res.status(503);
+      res.setHeader('Retry-After', '30');
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('Content-Type', 'text/html; charset=UTF-8');
+      return res.send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="30"><title>${name} - System update in progress</title>
+<style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0f172a;color:#e2e8f0;font:15px/1.6 system-ui,Segoe UI,Roboto,sans-serif}
+.card{max-width:460px;margin:24px;padding:32px;border:1px solid #1e293b;border-radius:20px;background:#020617;box-shadow:0 20px 60px rgba(0,0,0,.4);text-align:center}
+.logo{width:56px;height:56px;margin:0 auto 16px;border-radius:16px;background:linear-gradient(135deg,#059669,#22c55e);display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:20px}
+h1{font-size:20px;margin:0 0 6px;color:#fff}p{margin:0;color:#94a3b8}.k{margin-top:18px;font-size:12px;color:#64748b}</style></head>
+<body><div class="card"><div class="logo">HR</div><h1>${name}</h1><p>The HR &amp; Payroll system is being updated and will be back in a few minutes. This page refreshes automatically.</p>
+<p class="k">If this notice stays for more than 15 minutes, contact your system administrator.</p></div></body></html>`);
+    }
     // The edition is injected so the portal renders the right navigation on first paint (no full-to-lite flash).
     const editionModule = require('./server/edition.cjs');
     const activeEdition = await editionModule.loadEdition().catch(() => editionModule.FULL_EDITION);

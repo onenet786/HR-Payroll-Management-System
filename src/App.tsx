@@ -2715,7 +2715,7 @@ function LoginScreen({
                 {/* Email Field */}
                 <div className="space-y-1.5">
                   <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-widest">
-                    EMAIL<DarkRequiredMark />
+                    EMAIL OR USERNAME<DarkRequiredMark />
                   </label>
                   <div className="relative group">
                     <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500 group-focus-within:text-emerald-400 transition-colors">
