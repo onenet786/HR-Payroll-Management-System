@@ -60,6 +60,7 @@ import { goLiveReadiness } from '../data/goLiveReadiness';
 import { GoLiveReadinessPanel } from './GoLiveReadinessPanel';
 import { ParallelRunPanel } from './ParallelRunPanel';
 import { editionEmployee, editionStatConfig, hasStatutoryDeductions, type AppEdition } from '../data/edition';
+import { KpiDashboard } from './KpiDashboard';
 import { applyUrduInterface } from '../utils/urduInterface';
 import { authenticatedApiRequest as payrollApi } from '../data/postgresStore';
 import { exportTemplatesFor, renderExport, type ExportKind } from '../data/exportTemplates';
@@ -2620,52 +2621,19 @@ export function WebPortal({
                   )}
                   <ComplianceAlertsPanel alerts={openComplianceAlerts} onOpenEmployees={() => setActiveTab('employees')} />
 
-                  {/* Operations Metrics */}
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                    <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
-                      <div className="space-y-1">
-                        <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Active Headcount</p>
-                        <h3 className="text-2xl font-bold text-slate-900">{activeCount} / {totalCount}</h3>
-                        <p className="text-[11px] text-emerald-600 flex items-center font-medium">95.4% Retention Rate</p>
-                      </div>
-                      <div className="w-12 h-12 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
-                        <Users className="w-6 h-6" />
-                      </div>
-                    </div>
-
-                    <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
-                      <div className="space-y-1">
-                        <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Daily Attendance</p>
-                        <h3 className="text-2xl font-bold text-slate-900">{attendanceRate}%</h3>
-                        <p className="text-[11px] text-slate-400 font-mono">{presentToday} present in office today</p>
-                      </div>
-                      <div className="w-12 h-12 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
-                        <Calendar className="w-6 h-6" />
-                      </div>
-                    </div>
-
-                    <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
-                      <div className="space-y-1">
-                        <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Pending Tasks</p>
-                        <h3 className="text-2xl font-bold text-slate-900">{approvalInbox.length}</h3>
-                        <p className="text-[11px] text-amber-500 font-semibold">{overdueApprovalCount ? `${overdueApprovalCount} overdue · ` : ''}{pendingLeavesCount} leaves, {pendingRegularizationsCount} corrections, {pendingPayrollAdjustmentsCount} payroll</p>
-                      </div>
-                      <div className="w-12 h-12 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center">
-                        <AlertTriangle className="w-6 h-6" />
-                      </div>
-                    </div>
-
-                    <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
-                      <div className="space-y-1">
-                        <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Payroll Disbursals</p>
-                        <h3 className="text-xl font-bold text-slate-900">PKR {(totalSalaries).toLocaleString()}</h3>
-                        <p className="text-[11px] text-slate-400 font-mono">Monthly Estimated Liability</p>
-                      </div>
-                      <div className="w-12 h-12 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center">
-                        <CreditCard className="w-6 h-6" />
-                      </div>
-                    </div>
-                  </div>
+                  {/* HR KPI dashboard: month-over-month tiles, trends, diversity, performance and recruitment, from live records. */}
+                  <KpiDashboard
+                    employees={employees}
+                    attendances={attendances}
+                    leaves={leaves}
+                    departments={departments}
+                    branches={branches}
+                    jobPostings={jobPostings}
+                    jobApplications={jobApplications}
+                    performanceReviews={performanceReviews}
+                    features={features}
+                    pendingTasks={{ count: approvalInbox.length, overdue: overdueApprovalCount, detail: `${pendingLeavesCount} leaves, ${pendingRegularizationsCount} attendance corrections, ${pendingPayrollAdjustmentsCount} payroll adjustments · ${presentToday} present today` }}
+                  />
 
                   {/* Interactive Multi-tenant Hierarchy & Branches list */}
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -2673,7 +2641,7 @@ export function WebPortal({
                     <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm lg:col-span-2 space-y-4">
                       <div className="flex justify-between items-center">
                         <h3 className="font-bold text-sm text-slate-900 uppercase tracking-wide">Multi-Branch Locations & Compliance Scope</h3>
-                        <span className="text-xs text-indigo-600 font-semibold">2 Active Locations</span>
+                        <span className="text-xs text-indigo-600 font-semibold">{localBranches.length} Active Location{localBranches.length === 1 ? "" : "s"}</span>
                       </div>
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
