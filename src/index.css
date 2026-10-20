@@ -381,11 +381,12 @@ body {
   .help-banner b { display: inline; margin: 0 6px 0 0; }
   .help-banner b::after { content: "—"; margin-left: 6px; color: #93C5FD; }
 }
-
-/* Pages stay readable on wide monitors: content is centred and capped instead of stretching edge to edge.
-   Tables and grids inside keep their own horizontal scrolling. */
+/* Wide monitors: pages fill the width next to the sidebar; only the gutters grow so cards keep breathing room. */
 @media (min-width: 1536px) {
-  #web-main-panel > * { max-width: 1400px; margin-left: auto; margin-right: auto; }
+  #web-main-panel { padding-left: 1.75rem; padding-right: 1.75rem; }
+}
+@media (min-width: 1920px) {
+  #web-main-panel { padding-left: 2.5rem; padding-right: 2.5rem; }
 }
 
 /* Status Chips */
