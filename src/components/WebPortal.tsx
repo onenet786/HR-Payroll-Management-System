@@ -2519,39 +2519,42 @@ export function WebPortal({
                 })}
               </div>
 
-              <section aria-labelledby="my-security-title" className={`mb-4 overflow-hidden rounded-xl border shadow-sm ${mfaEnabled ? 'border-emerald-200 bg-emerald-50/70' : 'border-amber-200 bg-amber-50/70'}`}>
-                <div className="flex flex-col gap-4 p-4 lg:flex-row lg:items-center lg:justify-between">
-                  <div className="flex min-w-0 items-start gap-3">
-                    <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border ${mfaEnabled ? 'border-emerald-200 bg-emerald-100 text-emerald-700' : 'border-amber-200 bg-amber-100 text-amber-700'}`}>
-                      <ShieldCheck className="h-5 w-5" aria-hidden="true" />
+              {/* Once MFA is active this is a single status line; the full guidance only shows while something still needs doing. */}
+              <section aria-labelledby="my-security-title" className={`mb-3 overflow-hidden rounded-xl border shadow-sm ${mfaEnabled ? 'border-emerald-200 bg-emerald-50/70' : 'border-amber-200 bg-amber-50/70'}`}>
+                <div className={`flex flex-col gap-2 px-4 lg:flex-row lg:items-center lg:justify-between ${mfaEnabled ? 'py-2' : 'py-3.5 lg:gap-4'}`}>
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border ${mfaEnabled ? 'border-emerald-200 bg-emerald-100 text-emerald-700' : 'border-amber-200 bg-amber-100 text-amber-700'}`}>
+                      <ShieldCheck className="h-4 w-4" aria-hidden="true" />
                     </div>
                     <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                         <h2 id="my-security-title" className="text-sm font-bold text-slate-900">My Security</h2>
                         <span className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${mfaEnabled ? 'bg-emerald-700 text-white' : 'bg-amber-200 text-amber-950'}`}>
                           {mfaEnabled ? 'Protected' : 'Action needed'}
                         </span>
                         <span className="rounded border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-600">{currentUserRole?.name || 'User'}</span>
                         {!mfaEnabled && <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${mfaRequiredForRole ? 'bg-rose-100 text-rose-800' : 'bg-slate-200 text-slate-700'}`}>{mfaRequiredForRole ? 'Required for this role' : 'Recommended'}</span>}
+                        {mfaEnabled && <span className="text-[11px] text-emerald-900" title="Signed out after 30 minutes of inactivity (12 hours maximum), or up to 5 days with “Remember me”.">MFA active · session 30 min idle, 12 h max, 5 days with “Remember me”</span>}
                       </div>
-                      <p className={`mt-1 text-xs ${mfaEnabled ? 'text-emerald-900' : 'text-amber-950'}`}>
-                        {mfaEnabled
-                          ? 'MFA protection is active for this account.'
-                          : mfaRequiredForRole
-                            ? 'This account can access sensitive people, payroll, or system data. Set up MFA now.'
-                            : 'Set up MFA to protect your account if your password is ever exposed.'}
-                      </p>
-                      <p className="mt-1 text-[11px] text-slate-600">Session policy: signed out after 30 minutes of inactivity (12 hours maximum), or up to 5 days with “Remember me”.</p>
-                      {mfaEnabled && <button type="button" onClick={async () => {
-                        if (!window.confirm('Every device that skips the verification code will have to enter a code again at its next sign-in. Continue?')) return;
-                        try {
-                          const result = await payrollApi('/api/auth/mfa/trusted-devices/revoke', { method: 'POST', body: '{}' }) as { revoked: number };
-                          try { localStorage.removeItem('hr_mfa_trusted_devices'); } catch { /* nothing stored */ }
-                          showToast(`${result.revoked} trusted device(s) removed. A code will be asked at the next sign-in.`);
-                        } catch (error) { alert(error instanceof Error ? error.message : 'Trusted devices could not be removed.'); }
-                      }} className="mt-2 text-[11px] font-semibold text-emerald-800 underline hover:text-emerald-950">Stop trusting my devices (lost phone or shared device)</button>}
+                      {!mfaEnabled && <p className="mt-1 text-xs text-amber-950">
+                        {mfaRequiredForRole
+                          ? 'This account can access sensitive people, payroll, or system data. Set up MFA now.'
+                          : 'Set up MFA to protect your account if your password is ever exposed.'}
+                        <span className="ml-1 text-[11px] text-slate-600">Sessions end after 30 minutes idle (12 hours maximum), or 5 days with “Remember me”.</span>
+                      </p>}
                     </div>
                   </div>
+                  {mfaEnabled && <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] font-semibold lg:shrink-0">
+                    <button type="button" onClick={async () => {
+                      if (!window.confirm('Every device that skips the verification code will have to enter a code again at its next sign-in. Continue?')) return;
+                      try {
+                        const result = await payrollApi('/api/auth/mfa/trusted-devices/revoke', { method: 'POST', body: '{}' }) as { revoked: number };
+                        try { localStorage.removeItem('hr_mfa_trusted_devices'); } catch { /* nothing stored */ }
+                        showToast(`${result.revoked} trusted device(s) removed. A code will be asked at the next sign-in.`);
+                      } catch (error) { alert(error instanceof Error ? error.message : 'Trusted devices could not be removed.'); }
+                    }} className="text-emerald-800 underline hover:text-emerald-950" title="Lost phone or shared device: every remembered device must enter a code again">Stop trusting my devices</button>
+                    {!showMfaRecoveryForm && <button type="button" onClick={() => setShowMfaRecoveryForm(true)} className="text-slate-700 underline hover:text-rose-700" title="Lost or replacing your authenticator device">Request MFA reset</button>}
+                  </div>}
                   {!mfaEnabled && !mfaSetupChoice && <button type="button" onClick={() => setMfaSetupChoice('choose')} className="shrink-0 rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2">Set up MFA</button>}
                 </div>
                 {!mfaEnabled && mfaSetupChoice === 'choose' && <div className="border-t border-amber-200 bg-white/85 p-4"><h3 className="text-sm font-bold text-slate-900">Choose your MFA method</h3><p className="mt-1 text-xs text-slate-600">Select one method. Only the selected method will be required when you sign in.</p><div className="mt-3 grid gap-3 sm:grid-cols-2"><button type="button" onClick={beginMfaEnrollment} className="rounded-xl border border-slate-300 bg-white p-4 text-left hover:border-emerald-500"><b className="text-sm text-slate-900">Authenticator app</b><span className="mt-1 block text-xs text-slate-600">Use a QR code with Google or Microsoft Authenticator, Authy, or another compatible app.</span></button><button type="button" onClick={beginEmailMfaEnrollment} className="rounded-xl border border-slate-300 bg-white p-4 text-left hover:border-emerald-500"><b className="text-sm text-slate-900">Email verification</b><span className="mt-1 block text-xs text-slate-600">Receive a one-time code at your registered email address for each sign-in.</span></button></div><button type="button" onClick={() => setMfaSetupChoice(null)} className="mt-3 text-xs font-semibold text-slate-600 underline">Cancel</button></div>}
@@ -2579,8 +2582,8 @@ export function WebPortal({
                   {mfaEnrollmentError && <p role="alert" className="mt-3 text-xs font-medium text-rose-700">{mfaEnrollmentError}</p>}
                 </div>}
                 {emailMfaEnrollment && <div className="border-t border-amber-200 bg-white/85 p-4"><div className="max-w-xl space-y-3"><h3 className="text-sm font-bold text-slate-900">Confirm email MFA</h3><p className="text-xs text-slate-600">A six-digit setup code was sent to <strong>{emailMfaEnrollment.email}</strong>. Enter it to enable email verification as your MFA method.</p><input aria-label="Email verification code" aria-required="true" value={mfaEmailCode} onChange={event => setMfaEmailCode(event.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" autoComplete="one-time-code" maxLength={6} placeholder="Email verification code" className="w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm tracking-[0.2em]" /><div className="flex gap-2"><button type="button" disabled={mfaEmailCode.length !== 6} onClick={confirmEmailMfaEnrollment} className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-bold text-white disabled:opacity-50">Confirm email MFA</button><button type="button" onClick={() => { setEmailMfaEnrollment(null); setMfaEmailCode(''); setMfaSetupChoice(null); setMfaEnrollmentError(''); }} className="px-2 text-xs font-semibold text-slate-600 underline">Cancel</button></div></div>{mfaEnrollmentError && <p role="alert" className="mt-3 text-xs font-medium text-rose-700">{mfaEnrollmentError}</p>}</div>}
-                {mfaEnabled && <div className="border-t border-emerald-200 bg-white/70 p-4">
-                  {!showMfaRecoveryForm ? <button type="button" onClick={() => setShowMfaRecoveryForm(true)} className="text-xs font-semibold text-slate-700 underline hover:text-rose-700">Lost or replacing your authenticator device? Request a controlled MFA reset.</button> : <div className="max-w-xl space-y-2"><label htmlFor="mfa-recovery-reason" className="block text-xs font-bold text-slate-800">MFA recovery reason<RequiredMark /></label><textarea id="mfa-recovery-reason" aria-required="true" value={mfaRecoveryReason} onChange={event => setMfaRecoveryReason(event.target.value)} maxLength={500} rows={2} placeholder="Describe how your identity can be independently verified." className="w-full rounded-lg border border-slate-300 p-2 text-xs" /><div className="flex gap-2"><button type="button" disabled={mfaRecoverySubmitting} onClick={() => submitMfaRecoveryRequest()} className="rounded-lg bg-rose-700 px-3 py-2 text-xs font-bold text-white disabled:opacity-50">Submit recovery request</button><button type="button" onClick={() => { setShowMfaRecoveryForm(false); setMfaRecoveryError(''); }} className="px-2 text-xs font-semibold text-slate-600 underline">Cancel</button></div>{mfaRecoveryError && <p role="alert" className="text-xs font-medium text-rose-700">{mfaRecoveryError}</p>}</div>}
+                {mfaEnabled && showMfaRecoveryForm && <div className="border-t border-emerald-200 bg-white/70 p-4">
+                  {<div className="max-w-xl space-y-2"><label htmlFor="mfa-recovery-reason" className="block text-xs font-bold text-slate-800">MFA recovery reason<RequiredMark /></label><textarea id="mfa-recovery-reason" aria-required="true" value={mfaRecoveryReason} onChange={event => setMfaRecoveryReason(event.target.value)} maxLength={500} rows={2} placeholder="Describe how your identity can be independently verified." className="w-full rounded-lg border border-slate-300 p-2 text-xs" /><div className="flex gap-2"><button type="button" disabled={mfaRecoverySubmitting} onClick={() => submitMfaRecoveryRequest()} className="rounded-lg bg-rose-700 px-3 py-2 text-xs font-bold text-white disabled:opacity-50">Submit recovery request</button><button type="button" onClick={() => { setShowMfaRecoveryForm(false); setMfaRecoveryError(''); }} className="px-2 text-xs font-semibold text-slate-600 underline">Cancel</button></div>{mfaRecoveryError && <p role="alert" className="text-xs font-medium text-rose-700">{mfaRecoveryError}</p>}</div>}
                 </div>}
               </section>
 

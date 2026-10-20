@@ -356,25 +356,36 @@ body {
 .help-banner {
   background: #EFF6FF;
   border: 1px solid #BFDBFE;
-  border-radius: 12px;
-  padding: 12px 16px;
-  margin-bottom: 16px;
-  font-size: 13px;
+  border-radius: 10px;
+  padding: 8px 14px;
+  margin-bottom: 12px;
+  font-size: 12px;
   color: #1E3A8A;
   display: flex;
-  gap: 12px;
-  align-items: flex-start;
-  line-height: 1.45;
+  gap: 10px;
+  align-items: center;
+  line-height: 1.4;
 }
 .help-banner .ic {
-  font-size: 18px;
+  font-size: 16px;
   line-height: 1;
   flex-shrink: 0;
 }
 .help-banner b {
   display: block;
-  margin-bottom: 2px;
+  margin-bottom: 1px;
   color: #1E40AF;
+}
+/* On wide screens the heading and its help sit on one line. */
+@media (min-width: 1280px) {
+  .help-banner b { display: inline; margin: 0 6px 0 0; }
+  .help-banner b::after { content: "—"; margin-left: 6px; color: #93C5FD; }
+}
+
+/* Pages stay readable on wide monitors: content is centred and capped instead of stretching edge to edge.
+   Tables and grids inside keep their own horizontal scrolling. */
+@media (min-width: 1536px) {
+  #web-main-panel > * { max-width: 1400px; margin-left: auto; margin-right: auto; }
 }
 
 /* Status Chips */
