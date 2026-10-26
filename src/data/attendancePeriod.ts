@@ -65,7 +65,12 @@ export function employedDuring(employee: Pick<Employee, 'status' | 'dateOfJoinin
   return employee.status === 'Active' || employee.status === 'On Leave' || (employee.status === 'Terminated' && Boolean(employee.separationDate));
 }
 
-export function buildAttendanceRegister(attendances: AttendanceLog[], employees: Employee[], leaves: LeaveRequest[], holidays: Holiday[], month: number, year: number): AttendanceRegisterRow[] {
+export interface RegisterOptions {
+  /** What a rostered working day without any record becomes (policy: leave first, HR marks absences by hand). */
+  noPunchDayStatus?: 'Absent' | 'Unpaid Leave';
+}
+
+export function buildAttendanceRegister(attendances: AttendanceLog[], employees: Employee[], leaves: LeaveRequest[], holidays: Holiday[], month: number, year: number, options: RegisterOptions = {}): AttendanceRegisterRow[] {
   const attendanceByEmployeeDay = new Map(attendances.filter(item => item.date.startsWith(`${year}-${String(month).padStart(2, '0')}`)).map(item => [`${item.employeeId}|${item.date}`, item]));
   const holidayDates = new Set(holidays.map(item => item.date));
   const lastDay = new Date(year, month, 0).getDate();
@@ -81,20 +86,21 @@ export function buildAttendanceRegister(attendances: AttendanceLog[], employees:
     if (!attendance && date < employee.dateOfJoining) return { employeeId: employee.id, date, status: 'Not Joined', source: 'Roster' };
     if (!attendance && employee.separationDate && date > employee.separationDate) return { employeeId: employee.id, date, status: 'Separated', source: 'Roster' };
     if (attendance) {
-      // An "On Leave" entry for a day of approved unpaid leave stays unpaid.
-      const status = attendance.status === 'On Leave' ? (leave?.leaveType === 'Unpaid' ? 'Unpaid Leave' : 'Paid Leave') : attendance.status === 'Holiday' ? 'Holiday' : attendance.status as AttendanceRegisterRow['status'];
+      // An "On Leave" entry for a day of approved unpaid leave stays unpaid; a leave imposed by the attendance
+      // policy (duty off before half time) has no approved leave behind it and is unpaid too.
+      const status = attendance.status === 'On Leave' ? (leave ? (leave.leaveType === 'Unpaid' ? 'Unpaid Leave' : 'Paid Leave') : attendance.policyLeave ? 'Unpaid Leave' : 'Paid Leave') : attendance.status === 'Holiday' ? 'Holiday' : attendance.status as AttendanceRegisterRow['status'];
       return { employeeId: employee.id, date, status, attendanceId: attendance.id, source: attendance.method };
     }
     if (holidayDates.has(date)) return { employeeId: employee.id, date, status: 'Holiday', source: 'Holiday' };
     if (leave) return { employeeId: employee.id, date, status: leave.leaveType === 'Unpaid' ? 'Unpaid Leave' : 'Paid Leave', source: 'Leave' };
     if (!workingDays.includes(weekday)) return { employeeId: employee.id, date, status: 'Weekly Off', source: 'Roster' };
-    return { employeeId: employee.id, date, status: 'Absent', source: 'Roster' };
+    return { employeeId: employee.id, date, status: options.noPunchDayStatus || 'Absent', source: 'Roster' };
   }));
 }
 
 export function createAttendancePeriod(
   attendances: AttendanceLog[], employees: Employee[], leaves: LeaveRequest[], holidays: Holiday[], month: number, year: number, actor: string, now = new Date().toISOString(),
-  previous?: AttendancePeriod
+  previous?: AttendancePeriod, options: RegisterOptions = {}
 ): AttendancePeriod {
   if (previous && previous.status !== 'Reopened') throw new Error('This attendance register is already locked. Reopen it with a documented reason before locking a new version.');
   const issues = findAttendanceLockIssues(attendances, month, year);
@@ -102,7 +108,7 @@ export function createAttendancePeriod(
   const prefix = `${year}-${String(month).padStart(2, '0')}`;
   const records = attendances.filter(item => item.date.startsWith(prefix));
   if (!records.length) throw new Error('Attendance period cannot be locked because it contains no attendance records.');
-  const registerRows = buildAttendanceRegister(attendances, employees, leaves, holidays, month, year);
+  const registerRows = buildAttendanceRegister(attendances, employees, leaves, holidays, month, year, options);
   const unresolved = registerRows.filter(row => row.status === 'Pending Review' || row.status === 'Missing Punch');
   if (unresolved.length) throw new Error(`Attendance period cannot be locked: ${unresolved.length} register day(s) require review.`);
   // A month still in progress cannot be certified: its remaining workdays would count as absences and

@@ -165,6 +165,13 @@ test('payroll runs: regular uniqueness, supplementary, cancellation, approval, p
   assert.equal(await put('u-maker', 'payrollPayslips', 'run-c-e1', { ...payslip('run-c'), netSalary: 95000 }), 403, 'approved payslips are immutable');
   const approved = await current('payroll_runs', 'run-c');
   const sheets = [await current('payroll_payslips', 'run-c-e1')];
+  // Per-employee salary record (hand-over / cash payroll): Unpaid until the payer marks it Paid, reversible to Unpaid.
+  assert.equal(await put('u-maker', 'payrollPayslips', 'run-c-e1', { ...sheets[0], paymentStatus: 'Paid', paidAt: 'now', paidById: 'u-maker' }), 403, 'paid needs a real timestamp');
+  assert.equal(await put('u-maker', 'payrollPayslips', 'run-c-e1', { ...sheets[0], paymentStatus: 'Paid', paidAt: new Date().toISOString(), paidById: 'u-checker' }), 403, 'the payer records the payment');
+  assert.equal(await put('u-maker', 'payrollPayslips', 'run-c-e1', { ...sheets[0], paymentStatus: 'Paid', paidAt: new Date().toISOString(), paidById: 'u-maker', paidBy: 'u-maker', paymentReference: 'CASH-07' }), 200, 'salary handed over once the run is approved');
+  assert.equal(await put('u-maker', 'payrollPayslips', 'run-c-e1', { ...sheets[0], paymentStatus: 'Unpaid' }), 200, 'moved back to unpaid');
+  assert.equal(await put('u-maker', 'payrollPayslips', 'run-c-e1', { ...sheets[0], paymentStatus: 'Failed', paymentFailureReason: 'Account closed', paymentFailedById: 'u-maker', paymentFailedAt: 'now' }), 403, 'bank returns exist only after disbursement');
+  assert.equal(await put('u-maker', 'payrollPayslips', 'run-c-e1', { ...sheets[0], paymentStatus: 'Paid', paidAt: new Date().toISOString(), paidById: 'u-maker', paidBy: 'u-maker' }), 200);
   const advised = { ...approved, bankAdviceChecksum: bankHash(sheets), bankAdviceGeneratedAt: 'now', bankAdviceGeneratedById: 'u-maker', bankAdviceEmployeeCount: 1, bankAdviceTotal: 90000 };
   assert.equal(await put('u-maker', 'payrollRuns', 'run-c', advised), 200);
   assert.equal(await put('u-checker', 'payrollRuns', 'run-c', { ...advised, status: 'Disbursed', disbursedById: 'u-checker', disbursedAt: 'now', disbursementReference: 'FT-2026-001' }), 403, 'approver cannot disburse');

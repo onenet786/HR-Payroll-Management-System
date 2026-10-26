@@ -9,7 +9,12 @@ const router = express.Router();
 const safeName = value => typeof value === 'string' && /^[A-Za-z][A-Za-z0-9_]{0,79}$/.test(value);
 const safeId = value => typeof value === 'string' && value.length > 0 && value.length <= 240 && !/[\/\0]/.test(value);
 const employeeIdOf = data => typeof data?.employeeId === 'string' ? data.employeeId : null;
-const adjustmentTypes = new Set(['Bonus', 'Commission', 'Arrears', 'Reimbursement', 'Deduction', 'Tax Adjustment']);
+// Mirrors src/data/payrollComponents.ts: every component HR may add to a payslip, and the ones that can never be taxable.
+const adjustmentTypes = new Set(['Bonus', 'Commission', 'Arrears', 'Reimbursement', 'Deduction', 'Tax Adjustment',
+  'Funeral Allowance', 'Fuel Allowance', 'Tip', 'Grading Reward', 'Surprise Reward',
+  'Penalty / Warning', 'Short Cash', 'Shopping', 'Uniform', 'Advance (STA)', 'Loan (LTA)', 'EOBI']);
+const nonTaxableAdjustmentTypes = new Set(['Reimbursement', 'Deduction', 'Tax Adjustment', 'Funeral Allowance',
+  'Penalty / Warning', 'Short Cash', 'Shopping', 'Uniform', 'Advance (STA)', 'Loan (LTA)', 'EOBI']);
 const adjustmentCoreUnchanged = (before, after) => ['employeeId', 'periodMonth', 'periodYear', 'type', 'amount', 'taxable', 'reason', 'createdAt', 'createdById', 'createdBy']
   .every(field => before[field] === after[field]);
 const bankAdviceHash = payslips => crypto.createHash('sha256').update(JSON.stringify(payslips.slice().sort((a, b) => String(a.id).localeCompare(String(b.id))).map(item => ({
@@ -68,7 +73,8 @@ const sameJson = (left, right) => JSON.stringify(canonical(left)) === JSON.strin
 const onlyChanged = (before, after, fields) => [...new Set([...Object.keys(before || {}), ...Object.keys(after || {})])]
   .every(key => fields.includes(key) || sameJson(before?.[key], after?.[key]));
 const withoutKeys = (value, keys) => Object.fromEntries(Object.entries(value || {}).filter(([key]) => !keys.includes(key)));
-const payslipPaymentFields = ['paymentStatus', 'paymentFailureReason', 'paymentFailedAt', 'paymentFailedById', 'paymentRetryReference', 'paymentRetriedAt', 'paymentRetriedById', 'retryBankName', 'retryBankAccountNumber', 'retryIban'];
+const payslipPaymentFields = ['paymentStatus', 'paymentFailureReason', 'paymentFailedAt', 'paymentFailedById', 'paymentRetryReference', 'paymentRetriedAt', 'paymentRetriedById', 'retryBankName', 'retryBankAccountNumber', 'retryIban',
+  'paidAt', 'paidById', 'paidBy', 'paymentReference'];
 const payslipRedactionFields = ['employeeId', 'employeeName', 'employeeCode', 'cnic', 'bankName', 'bankAccountNumber', 'iban'];
 
 function addWorkingDays(start, days) {
@@ -287,7 +293,7 @@ async function authorizeWrite(client, name, table, id, identity, existing, next)
   }
   if (name === 'payrollAdjustments' || table === 'payroll_adjustments') {
     if (!existing) {
-      const nonTaxableType = next.type === 'Reimbursement' || next.type === 'Deduction' || next.type === 'Tax Adjustment';
+      const nonTaxableType = nonTaxableAdjustmentTypes.has(next.type);
       if (!safeId(next.employeeId) || !Number.isInteger(next.periodMonth) || next.periodMonth < 1 || next.periodMonth > 12
         || !Number.isInteger(next.periodYear) || next.periodYear < 2020 || next.periodYear > 2100
         || !adjustmentTypes.has(next.type) || !Number.isFinite(next.amount) || next.amount <= 0
@@ -339,8 +345,17 @@ async function authorizeWrite(client, name, table, id, identity, existing, next)
       const redacted = payslipRedactionFields.some(field => !sameJson(previous[field], next[field]));
       if (redacted && (next.employeeName !== '[REDACTED]' || !String(next.employeeId || '').startsWith('deleted-'))) return false;
       if (next.paymentStatus !== previous.paymentStatus) {
-        if (run.status !== 'Disbursed') return false;
-        if (next.paymentStatus === 'Failed') {
+        // Paid / Unpaid is the per-employee (cash) payment record and may be kept from approval onwards;
+        // bank returns (Failed / Retried) exist only once the run is disbursed.
+        const cashFlow = next.paymentStatus === 'Paid' || next.paymentStatus === 'Unpaid';
+        if (cashFlow && !['Approved', 'Disbursed'].includes(run.status)) return false;
+        if (!cashFlow && run.status !== 'Disbursed') return false;
+        if (next.paymentStatus === 'Paid') {
+          if (previous.paymentStatus && previous.paymentStatus !== 'Unpaid') return false;
+          if (next.paidById !== identity.uid || !Number.isFinite(Date.parse(next.paidAt))) return false;
+        } else if (next.paymentStatus === 'Unpaid') {
+          if (previous.paymentStatus !== 'Paid') return false;
+        } else if (next.paymentStatus === 'Failed') {
           if (previous.paymentStatus && previous.paymentStatus !== 'Paid') return false;
           if (next.paymentFailedById !== identity.uid || typeof next.paymentFailureReason !== 'string' || next.paymentFailureReason.trim().length < 5) return false;
         } else if (next.paymentStatus === 'Retried') {

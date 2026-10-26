@@ -17,6 +17,7 @@ import {
 } from './types';
 import { attendancePeriodId, createAttendancePeriod, employedDuring, isAttendancePeriodValid, reopenAttendancePeriod } from './data/attendancePeriod';
 import { evaluateAttendanceTimes, isDuplicatePunch } from './data/attendanceRules';
+import { attendancePolicyOf, companyOptionsOf, evaluationContext, personalOutMinutes, policyShift } from './data/attendancePolicy';
 import { attendanceLocations, evaluateBranchGeofence, impossibleTravel, validateLocationEvidence } from './data/geofence';
 import { applyLifecycleRequest, dueSeparations, lifecycleRequestError, lifecycleReviewError } from './data/lifecycle';
 import { leaveBalanceError } from './data/leavePolicy';
@@ -851,6 +852,13 @@ export default function App() {
     actorEmployeeId: currentUserAccount.employeeId, employee: employees.find(item => item.id === attendance.employeeId), users, roles, makerChecker: dualControl,
   });
 
+  // Company attendance policy (branch opening time, grace / half-day minutes, duty-off cutoff, office-work exits).
+  const policyEvaluation = (employee: Employee | undefined, outReason?: string) => {
+    const policy = attendancePolicyOf(statConfig);
+    const branch = branches.find(item => item.id === employee?.branchId);
+    return { shift: policyShift(employee?.shift, branch, policy), context: evaluationContext(policy, branch, outReason, companyOptionsOf(statConfig)) };
+  };
+
   const handleApproveRegularization = async (id: string, reviewComment = '') => {
     const attendance = attendances.find(item => item.id === id);
     const reviewError = attendance ? attendanceReviewError(attendance, currentUserAccount.id, reviewContextFor(attendance)) : 'Attendance item was not found.';
@@ -861,9 +869,10 @@ export default function App() {
     const reviewedById = currentUserAccount.id;
     // Approval confirms the evidence; it must not upgrade a late, half-day or off-site punch to a clean Present.
     const employee = employees.find(item => item.id === attendance.employeeId);
-    const evaluated = attendance.punchIn ? evaluateAttendanceTimes(attendance.punchIn, attendance.punchOut, employee?.shift, attendance.breaks, attendance.date) : undefined;
+    const policyEval = policyEvaluation(employee, attendance.outReason);
+    const evaluated = attendance.punchIn ? evaluateAttendanceTimes(attendance.punchIn, attendance.punchOut, policyEval.shift, attendance.breaks, attendance.date, policyEval.context) : undefined;
     const status: AttendanceLog['status'] = evaluated ? evaluated.status : attendance.status === 'Absent' ? 'Present' : attendance.status;
-    const decision = { status, ...(evaluated && attendance.punchOut && { overtimeMinutes: evaluated.overtimeMinutes }), regularizationApproved: true, reviewedAt, reviewedBy, reviewedById, reviewComment: reviewComment.trim() };
+    const decision = { status, ...(evaluated && attendance.punchOut && { overtimeMinutes: evaluated.overtimeMinutes }), ...(evaluated?.policyLeave && { policyLeave: true }), regularizationApproved: true, reviewedAt, reviewedBy, reviewedById, reviewComment: reviewComment.trim() };
     setAttendances(prev => {
       const updated = prev.map(att =>
         att.id === id ? { ...att, ...decision } as AttendanceLog : att
@@ -1054,7 +1063,9 @@ export default function App() {
       if (mobileDetails?.action === 'workday-out' && existing.punchOut) throw new Error('The workday has already been finished.');
       if (mobileDetails?.action === 'workday-out' && existing.fieldVisits?.some(visit => !visit.checkOut)) throw new Error('Check out from the active field visit before finishing the workday.');
       const employee = employees.find(item => item.id === employeeId);
-      const evaluated = evaluateAttendanceTimes(existing.punchIn, punchOut, employee?.shift, existing.breaks, existing.date);
+      const finalOutReason = method === 'Mobile Kiosk' && mobileDetails?.reasonNote ? mobileDetails.reasonNote : existing.outReason;
+      const policyEval = policyEvaluation(employee, finalOutReason);
+      const evaluated = evaluateAttendanceTimes(existing.punchIn, punchOut, policyEval.shift, existing.breaks, existing.date, policyEval.context);
       const updatedLog: AttendanceLog = {
         ...existing,
         ...(mobileAuthorization && { method: 'Mobile GPS', mobileDutyAuthorizationId: mobileAuthorization.id }),
@@ -1064,6 +1075,8 @@ export default function App() {
         ...(method === 'Mobile Kiosk' && mobileDetails?.reasonNote && { outReason: mobileDetails.reasonNote }),
         status: evaluated.status,
         overtimeMinutes: evaluated.overtimeMinutes,
+        ...(evaluated.policyLeave && { policyLeave: true, policyLeaveReason: 'Duty off before the branch half time' }),
+        personalOutMinutes: personalOutMinutes(existing.breaks),
         ...(lat !== undefined && { latitude: lat }),
         ...(lon !== undefined && { longitude: lon }),
         ...(locationAccuracyMeters !== undefined && { locationAccuracyMeters }),
@@ -1085,7 +1098,7 @@ export default function App() {
       if (mobileDetails && mobileDetails.action !== 'workday-in') throw new Error('Start the workday before performing this action.');
       // Punch in — create new log
       const employee = employees.find(item => item.id === employeeId);
-      const status = evaluateAttendanceTimes(punchIn, undefined, employee?.shift, [], today).status;
+      const status = evaluateAttendanceTimes(punchIn, undefined, policyEvaluation(employee).shift, [], today).status;
       const newLog: AttendanceLog = {
         id: `att-${employeeId}-${Date.now()}`,
         employeeId,
@@ -1172,7 +1185,8 @@ export default function App() {
       return;
     }
     try {
-      const period = createAttendancePeriod(attendances, employees, leaves, holidays, month, year, currentUserAccount.username || currentUserAccount.id, undefined, existing);
+      const period = createAttendancePeriod(attendances, employees, leaves, holidays, month, year, currentUserAccount.username || currentUserAccount.id, undefined, existing,
+        { noPunchDayStatus: attendancePolicyOf(statConfig).noPunchDayStatus });
       await setDoc(doc(db, 'attendancePeriods', period.id), cleanData(period));
       setAttendancePeriods(previous => [...previous.filter(item => item.id !== period.id), period]);
       alert(`Attendance register locked. Integrity reference: ${period.integrityHash}`);
@@ -1616,6 +1630,37 @@ export default function App() {
       return;
     }
     setPayrollPayslips(previous => previous.map(item => updates.find(next => next.id === item.id) || item));
+  };
+
+  // Per-employee salary payment record (cash / hand-over payroll): Unpaid until HR marks each payslip Paid.
+  const handleMarkPaymentPaid = async (payslipIds: string[], reference: string) => {
+    const now = new Date().toISOString();
+    const targets = payrollPayslips.filter(item => payslipIds.includes(item.id) && (!item.paymentStatus || item.paymentStatus === 'Unpaid'));
+    const runs = new Set(targets.map(item => payrollRuns.find(run => run.id === item.payrollRunId)?.status));
+    if (!targets.length) { alert('Select unpaid salaries first.'); return; }
+    if ([...runs].some(status => status !== 'Approved' && status !== 'Disbursed')) { alert('Salaries can be marked paid only after the payroll run is approved.'); return; }
+    const updates = targets.map(item => ({ ...item, paymentStatus: 'Paid' as const, paidAt: now, paidById: currentUserAccount.id, paidBy: currentUserAccount.username, ...(reference.trim() && { paymentReference: reference.trim() }) }));
+    try {
+      await Promise.all(updates.map(item => setDoc(doc(db, 'payrollPayslips', item.id), cleanData(item))));
+    } catch {
+      alert('The payment could not be recorded. Nothing was changed.');
+      return;
+    }
+    setPayrollPayslips(previous => previous.map(item => updates.find(next => next.id === item.id) || item));
+  };
+
+  const handleMarkPaymentUnpaid = async (payslipId: string) => {
+    const sheet = payrollPayslips.find(item => item.id === payslipId);
+    if (!sheet || sheet.paymentStatus !== 'Paid') return;
+    const { paidAt: _paidAt, paidById: _paidById, paidBy: _paidBy, paymentReference: _reference, ...rest } = sheet;
+    const updated: Payslip = { ...rest, paymentStatus: 'Unpaid' };
+    try {
+      await setDoc(doc(db, 'payrollPayslips', payslipId), cleanData(updated));
+    } catch {
+      alert('The salary could not be moved back to unpaid. Nothing was changed.');
+      return;
+    }
+    setPayrollPayslips(previous => previous.map(item => item.id === payslipId ? updated : item));
   };
 
   // ─── Role & User Handlers ─────────────────────────────────────────────────
@@ -2389,7 +2434,7 @@ export default function App() {
         lifecycleRequests, onCreateLifecycleRequest: handleCreateLifecycleRequest, onReviewLifecycleRequest: handleReviewLifecycleRequest,
         onUpdateOnboarding: handleUpdateOnboarding, onCreateSupplementaryRun: handleCreateSupplementaryRun,
         onCreateFinalSettlementRun: handleCreateFinalSettlementRun, onRecordTaxDeposit: handleRecordTaxDeposit,
-        onMarkPaymentFailed: handleMarkPaymentFailed, onRecordPaymentRetry: handleRecordPaymentRetry, onRetroRecalculate: handleRetroRecalculate, onRecordParallelRun: handleRecordParallelRun,
+        onMarkPaymentFailed: handleMarkPaymentFailed, onRecordPaymentRetry: handleRecordPaymentRetry, onMarkPaymentPaid: handleMarkPaymentPaid, onMarkPaymentUnpaid: handleMarkPaymentUnpaid, onRetroRecalculate: handleRetroRecalculate, onRecordParallelRun: handleRecordParallelRun,
       }}
       onUpdatePayrollStatus={handleUpdatePayrollStatus}
       onRecordBankAdvice={handleRecordBankAdvice}

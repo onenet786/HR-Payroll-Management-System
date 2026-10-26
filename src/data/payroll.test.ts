@@ -103,3 +103,28 @@ test('reverse calculates gross salary to deliver target net take-home pay', () =
   assert.equal(split.medicalAllowance, 10000); // 10%
   assert.equal(split.basicWage + split.houseRentAllowance + split.conveyanceAllowance + split.medicalAllowance, 100000);
 });
+
+test('company attendance policy: escalating late fines, 1.5-day absences and itemised allowances / deductions', () => {
+  const policyConfig = { ...DEFAULT_STATUTORY_CONFIG, attendancePolicy: { lateGraceMinutes: 10, halfDayAfterMinutes: 20, absentDeductionDays: 1.5, lateFineBands: [{ uptoLateDays: 5, finePerDay: 100 }, { uptoLateDays: 10, finePerDay: 150 }] } };
+  const log = (day: number, status: AttendanceLog['status']): AttendanceLog => ({ id: `l${day}`, employeeId: employee.id, date: `2026-07-${String(day).padStart(2, '0')}`, punchIn: '09:30:00', punchOut: '18:00:00', status, method: 'Biometric', overtimeMinutes: 0 } as AttendanceLog);
+  const attendances = [log(1, 'Late'), log(2, 'Late'), log(3, 'Late'), log(6, 'Late'), log(7, 'Late'), log(8, 'Late'), log(9, 'Absent'), log(10, 'Absent')];
+  const adjustment = (id: string, type: PayrollAdjustment['type'], amount: number, overrides: Partial<PayrollAdjustment> = {}): PayrollAdjustment => ({ id, employeeId: employee.id, periodMonth: 7, periodYear: 2026, type, amount, taxable: true, reason: `${type} for July`, status: 'Approved', createdAt: 'now', createdById: 'maker', createdBy: 'maker', reviewedById: 'checker', reviewedAt: 'now', ...overrides });
+  const adjustments = [
+    adjustment('fuel', 'Fuel Allowance', 5000),
+    adjustment('uniform', 'Uniform', 2000, { taxable: false }),
+    adjustment('penalty', 'Penalty / Warning', 500, { taxable: false }),
+  ];
+  const withPolicy = computePayslipDetails(employee, 7, 2026, attendances, [], policyConfig, DEFAULT_TAX_SLABS, DEFAULT_DEPARTMENTS, DEFAULT_DESIGNATIONS, DEFAULT_BRANCHES, [], [], [], [], adjustments);
+  const plain = computePayslipDetails(employee, 7, 2026, attendances, [], DEFAULT_STATUTORY_CONFIG, DEFAULT_TAX_SLABS, DEFAULT_DEPARTMENTS, DEFAULT_DESIGNATIONS, DEFAULT_BRANCHES, [], [], [], [], adjustments);
+  assert.equal(withPolicy.lateDays, 6);
+  assert.equal(withPolicy.lateFineDeduction, 5 * 100 + 150);
+  assert.equal(plain.lateFineDeduction, 0, 'no policy, no fine');
+  assert.equal(withPolicy.absentDeductionDays, 1.5);
+  assert.equal(withPolicy.unpaidLeaveDeduction, Math.round(plain.unpaidLeaveDeduction * 1.5), 'each absent day costs one and a half days');
+  assert.deepEqual(withPolicy.adjustmentLines, [{ type: 'Fuel Allowance', amount: 5000, kind: 'earning' }, { type: 'Uniform', amount: 2000, kind: 'deduction' }, { type: 'Penalty / Warning', amount: 500, kind: 'deduction' }]);
+  assert.equal(withPolicy.otherAdjustmentsDeduction, 2500);
+  const noAdjustments = computePayslipDetails(employee, 7, 2026, attendances, [], policyConfig, DEFAULT_TAX_SLABS, DEFAULT_DEPARTMENTS, DEFAULT_DESIGNATIONS, DEFAULT_BRANCHES, [], [], [], [], []);
+  assert.equal(withPolicy.grossSalary, noAdjustments.grossSalary + 5000, 'the fuel allowance is paid as an earning');
+  assert.equal(withPolicy.totalDeductions, Math.round(withPolicy.incomeTaxDeduction + (withPolicy.manualTaxAdjustment || 0) + withPolicy.eobiEmployeeDeduction + withPolicy.providentFundDeduction + withPolicy.loanRepaymentDeduction + 2500 + 650), 'uniform, penalty and the late fine are deducted');
+  assert.equal(withPolicy.netSalary, withPolicy.grossSalary - withPolicy.totalDeductions);
+});

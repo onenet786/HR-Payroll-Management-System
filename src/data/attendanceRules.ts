@@ -21,6 +21,14 @@ export const completedBreakMinutes = (breaks: AttendanceBreak[] = []): number =>
   return start === undefined || end === undefined ? total : total + elapsedMinutes(start, end);
 }, 0);
 
+/** Policy inputs for one record; see src/data/attendancePolicy.ts. Without a context the plain shift rules apply. */
+export interface AttendanceEvaluationContext {
+  /** Break reasons that are company business and are not deducted from worked time (e.g. "Office Work"). */
+  excludedBreakReasons?: string[];
+  /** A final punch-out before this time (HH:MM) turns the day into a leave (duty off before the branch half time). */
+  leaveIfOutBefore?: string;
+}
+
 export function effectiveShiftForDate(shift: Shift = DEFAULT_SHIFT, workDate?: string): Shift {
   const inRamadan = Boolean(workDate && shift.ramadanStartDate && shift.ramadanEndDate && workDate >= shift.ramadanStartDate && workDate <= shift.ramadanEndDate);
   const date = workDate ? new Date(`${workDate}T00:00:00`) : undefined;
@@ -29,7 +37,7 @@ export function effectiveShiftForDate(shift: Shift = DEFAULT_SHIFT, workDate?: s
   return isFriday ? { ...base, startTime: shift.fridayStartTime || base.startTime, endTime: shift.fridayEndTime || base.endTime } : base;
 }
 
-export function evaluateAttendanceTimes(punchIn: string | undefined, punchOut: string | undefined, shift: Shift = DEFAULT_SHIFT, breaks: AttendanceBreak[] = [], workDate?: string): Pick<AttendanceLog, 'status' | 'overtimeMinutes'> & { workedMinutes: number } {
+export function evaluateAttendanceTimes(punchIn: string | undefined, punchOut: string | undefined, shift: Shift = DEFAULT_SHIFT, breaks: AttendanceBreak[] = [], workDate?: string, context: AttendanceEvaluationContext = {}): Pick<AttendanceLog, 'status' | 'overtimeMinutes'> & { workedMinutes: number; policyLeave?: boolean } {
   const effectiveShift = effectiveShiftForDate(shift, workDate);
   const start = timeMinutes(effectiveShift.startTime) ?? 540;
   const end = timeMinutes(effectiveShift.endTime) ?? 1020;
@@ -45,11 +53,15 @@ export function evaluateAttendanceTimes(punchIn: string | undefined, punchOut: s
   if (output === undefined) return { status, overtimeMinutes: 0, workedMinutes: 0 };
 
   const grossWorked = elapsedMinutes(input, output);
-  const recordedBreaks = completedBreakMinutes(breaks);
+  const excluded = new Set((context.excludedBreakReasons || []).map(reason => reason.toLowerCase()));
+  const recordedBreaks = completedBreakMinutes(breaks.filter(item => !excluded.has(String(item.reason || '').trim().toLowerCase())));
   const breakDeduction = Math.max(recordedBreaks, effectiveShift.breakMinutes || 0);
   const workedMinutes = Math.max(0, grossWorked - breakDeduction);
   const scheduledMinutes = elapsedMinutes(start, end) - (effectiveShift.breakMinutes || 0);
   const overtimeThreshold = effectiveShift.overtimeAfterMinutes ?? scheduledMinutes;
+  const cutoff = timeMinutes(context.leaveIfOutBefore);
+  // Leaving for the day before the branch half time is a leave, not a worked day (company policy).
+  if (cutoff !== undefined && output < cutoff && !isPlausiblyEarly) return { status: 'On Leave', workedMinutes, overtimeMinutes: 0, policyLeave: true };
   return { status, workedMinutes, overtimeMinutes: Math.max(0, workedMinutes - overtimeThreshold) };
 }
 

@@ -98,6 +98,29 @@ test('a registered kiosk syncs only allow-listed collections and fields', async 
   assert.equal(employees.some(item => item.id === 'e-kt-2'), false, 'terminated staff not sent');
 });
 
+test('a kiosk receives the optional attendance policy, company options and branch timings, nothing else', async () => {
+  const auth = { 'x-kiosk-token': (await call('POST', '/api/kiosk/register', { email: 'u-kiosk', password: 'Kiosk-Pass-2026' })).body.deviceToken };
+  await pool.query(`INSERT INTO stat_config(id, data) VALUES('stat-kt', $1::jsonb) ON CONFLICT (id) DO UPDATE SET data=EXCLUDED.data`,
+    [JSON.stringify({ id: 'stat-kt', minimumWage: 37000, lowConfidenceBiometricPercent: 60, attendancePolicy: { lateGraceMinutes: 10, lateFineBands: [{ uptoLateDays: 5, finePerDay: 100 }] }, companyOptions: { kioskThreeExitButtons: true } })]);
+  await pool.query(`INSERT INTO branches(id, data) VALUES('b-kt', $1::jsonb) ON CONFLICT (id) DO UPDATE SET data=EXCLUDED.data`,
+    [JSON.stringify({ id: 'b-kt', name: 'Kiosk branch', address: '1 Mall Road', openingTime: '11:00', halfTimeCutoff: '17:30', personalOutAllowanceMinutes: 45 })]);
+  try {
+    const config = (await call('GET', '/api/kiosk/sync/statConfig', null, auth)).body.documents.find(item => item.id === 'stat-kt');
+    assert.deepEqual(config.attendancePolicy, { lateGraceMinutes: 10, lateFineBands: [{ uptoLateDays: 5, finePerDay: 100 }] });
+    assert.deepEqual(config.companyOptions, { kioskThreeExitButtons: true });
+    assert.equal(config.lowConfidenceBiometricPercent, 60);
+    assert.equal(config.minimumWage, undefined, 'statutory rates withheld');
+    const branch = (await call('GET', '/api/kiosk/sync/branches', null, auth)).body.documents.find(item => item.id === 'b-kt');
+    assert.equal(branch.openingTime, '11:00');
+    assert.equal(branch.halfTimeCutoff, '17:30');
+    assert.equal(branch.personalOutAllowanceMinutes, 45);
+    assert.equal(branch.address, undefined, 'address withheld');
+  } finally {
+    await pool.query(`DELETE FROM stat_config WHERE id='stat-kt'`);
+    await pool.query(`DELETE FROM branches WHERE id='b-kt'`);
+  }
+});
+
 test('punch rules: attendance only, active staff, date window, locked months, no self-approval', async () => {
   const token = (await call('POST', '/api/kiosk/register', { email: 'u-kiosk', password: 'Kiosk-Pass-2026' })).body.deviceToken;
   const base = { employeeId: 'e-kt-1', date: today, method: 'Biometric', punchIn: `${today}T09:00:00`, status: 'Present' };

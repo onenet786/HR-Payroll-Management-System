@@ -15,23 +15,28 @@ const IP_CAM_REFRESH_MS = 2000;
 const AUTO_GOOD_FRAMES_NEEDED = 3;
 const AUTO_LOOP_MS = 700;
 const AUTO_PUNCH_COOLDOWN_MS = 8000;
+// Standard checkout list (default). The server side of the kiosk sends the active list in state.outReasons:
+// with the company option "three exit buttons" it is Duty Off / Personal Out / Office Work only.
 const CHECKOUT_REASONS = [
-  'End of Shift',
-  'Lunch Break',
-  'Tea Break',
-  'Official Duty',
-  'Client Meeting',
-  'Site Visit',
-  'Personal Work',
-  'Medical Appointment',
-  'Emergency Leave',
-  'Half-Day Leave',
-  'Sick Leave',
-  'Prayer',
+  'End of Shift', 'Lunch Break', 'Tea Break', 'Official Duty', 'Client Meeting', 'Site Visit',
+  'Personal Work', 'Medical Appointment', 'Emergency Leave', 'Half-Day Leave', 'Sick Leave', 'Prayer',
 ];
+const activeCheckoutReasons = () => (Array.isArray(kioskState?.outReasons) && kioskState.outReasons.length ? kioskState.outReasons : CHECKOUT_REASONS);
+const CHECKOUT_REASON_HINTS = {
+  'Duty Off': 'Finished for the day',
+  'Personal Out': 'Personal exit, back later (counts against your allowance)',
+  'Office Work': 'Out on company work, no effect on attendance',
+};
 
 // ─── Application State ──────────────────────────────────────────────────────
 let kioskState = null;
+
+// The readable theme is the default; "Classic dark theme" (kiosk settings) restores the original palette.
+function applyKioskTheme() {
+  const classic = !!kioskState?.terminal?.classicTheme;
+  if (classic) document.documentElement.setAttribute('data-theme', 'classic');
+  else document.documentElement.removeAttribute('data-theme');
+}
 let activeMode = MODE.FP;
 let preview = null;          // from kiosk:lookup-employee
 let cameraStream = null;
@@ -181,6 +186,7 @@ const el = {
   stReqCodeCam:   id('stReqCodeCam'),
   stAutoCaptureCamera: id('stAutoCaptureCamera'),
   stAutoFullscreen:id('stAutoFullscreen'),
+  stClassicTheme: id('stClassicTheme'),
   stSyncInfo:     id('stSyncInfo'),
   stEventsLog:    id('stEventsLog'),
   stStartBridge:  id('stStartBridge'),
@@ -1373,6 +1379,7 @@ function closeCheckoutReasonDialog() {
 
 function askCheckoutReason(employeeName) {
   return new Promise(resolve => {
+    const reasons = activeCheckoutReasons();
     let settled = false;
     let keyBuffer = '';
     let keyBufferTimer = null;
@@ -1402,17 +1409,17 @@ function askCheckoutReason(employeeName) {
       clearTimeout(keyBufferTimer);
 
       const selectedIndex = Number(keyBuffer) - 1;
-      if (selectedIndex >= 0 && selectedIndex < CHECKOUT_REASONS.length) {
-        if (keyBuffer === '1' && CHECKOUT_REASONS.length > 9) {
-          keyBufferTimer = setTimeout(() => settle(CHECKOUT_REASONS[0]), 500);
+      if (selectedIndex >= 0 && selectedIndex < reasons.length) {
+        if (keyBuffer === '1' && reasons.length > 9) {
+          keyBufferTimer = setTimeout(() => settle(reasons[0]), 500);
           return;
         }
-        settle(CHECKOUT_REASONS[selectedIndex]);
+        settle(reasons[selectedIndex]);
         return;
       }
 
       keyBuffer = event.key === '1' ? '1' : '';
-      if (keyBuffer) keyBufferTimer = setTimeout(() => settle(CHECKOUT_REASONS[0]), 500);
+      if (keyBuffer) keyBufferTimer = setTimeout(() => settle(reasons[0]), 500);
     };
 
     const onCancel = () => settle('');
@@ -1428,10 +1435,11 @@ function askCheckoutReason(employeeName) {
     el.checkoutReasonEmployee.textContent = employeeName
       ? `Punch out for ${employeeName}`
       : 'Punch out requires a reason';
-    el.checkoutReasonList.innerHTML = CHECKOUT_REASONS.map((reason, index) => `
-      <button type="button" class="reason-option" data-reason="${esc(reason)}">
+    el.checkoutReasonList.classList.toggle('reason-grid-simple', reasons.length <= 3);
+    el.checkoutReasonList.innerHTML = reasons.map((reason, index) => `
+      <button type="button" class="reason-option reason-${reason.toLowerCase().replace(/\s+/g, '-')}" data-reason="${esc(reason)}">
         <span class="reason-hotkey">${index + 1}</span>
-        <span>${esc(reason)}</span>
+        ${CHECKOUT_REASON_HINTS[reason] ? `<span class="reason-text"><strong>${esc(reason)}</strong><small>${esc(CHECKOUT_REASON_HINTS[reason])}</small></span>` : `<span>${esc(reason)}</span>`}
       </button>
     `).join('');
     el.checkoutReasonList.querySelectorAll('.reason-option').forEach(button => {
@@ -2203,6 +2211,7 @@ function openSettings() {
   el.stReqCodeCam.checked   = false;
   el.stAutoCaptureCamera.checked = t.autoCaptureCamera !== false;
   el.stAutoFullscreen.checked = !!t.autoFullscreen;
+  if (el.stClassicTheme) el.stClassicTheme.checked = !!t.classicTheme;
 
   const st = kioskState.syncTarget;
   if (st) {
@@ -2327,8 +2336,10 @@ async function saveSettings() {
     requireCodeWithCamera: false,
     autoCaptureCamera: el.stAutoCaptureCamera.checked,
     autoFullscreen: el.stAutoFullscreen.checked,
+    classicTheme: !!el.stClassicTheme?.checked,
   });
   if (kioskState) kioskState.terminal = terminal;
+  applyKioskTheme();
   applyModeSecurity();
   closeSettings();
   await performSync();

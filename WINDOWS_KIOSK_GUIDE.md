@@ -27,6 +27,20 @@ dist-kiosk
 - IP camera proof punch by snapshot or MJPEG URL
 - DigitalPersona U.are.U / URU4500 or SecuGen Hamster Pro fingerprint identification through `URU4500Bridge.exe`
 
+## Optional: Three Exit Buttons, Attendance Policy, Classic Theme
+
+By default the kiosk uses the standard checkout list (End of Shift, Lunch Break, …), the shift rules, and the readable navy theme with a red close button on every dialog. Two things are optional:
+
+**Company option "Kiosk: three exit buttons only"** (portal Settings → Company Options & Attendance Policy). When on, the checkout prompt offers exactly three choices (hotkeys 1–3):
+
+1. **Duty Off** — finished for the day. With the policy rule "Duty Off before the branch half time counts as a leave", a duty off before the branch half time (Master Data → Branch → *Half time*, or the policy default) records the day as a leave.
+2. **Personal Out** — a temporary exit; scanning again brings the employee back. The minutes are deducted from worked time and counted against the branch's personal-out allowance; the record is flagged when the allowance is exceeded.
+3. **Office Work** — out on company work; scanning again brings them back. With the option "Office work exits do not affect attendance" the time is neither deducted nor counted.
+
+When the attendance policy is filled in, late and half-day decisions use the branch opening time plus the policy minutes. The kiosk downloads the options, the policy and the branch timings on every sync and applies them offline.
+
+**Classic dark theme** (kiosk Settings → Punch Options): restores the original deep-navy palette and the small neutral close button. Off (the default) keeps the readable theme: lighter panels, stronger borders and a clearly visible red close button on every dialog.
+
 ## Fingerprint Requirements
 
 1. Install the DigitalPersona U.are.U SDK/driver or SecuGen FDx SDK Pro for Windows on the kiosk machine.

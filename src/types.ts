@@ -60,6 +60,12 @@ export interface Branch {
   geofenceLongitude?: number;
   geofenceRadiusMeters?: number;
   establishmentType?: EstablishmentType;
+  /** Branch opening time (HH:MM); late and half-day minutes in the attendance policy count from here. */
+  openingTime?: string;
+  /** A "Duty Off" punch-out before this time (HH:MM) makes the day a leave when the policy says so. */
+  halfTimeCutoff?: string;
+  /** Personal-out minutes allowed per day at this branch (overrides the policy default). */
+  personalOutAllowanceMinutes?: number;
 }
 
 export type EstablishmentType = 'Factory' | 'Shop / Commercial' | 'Industrial / Other';
@@ -344,6 +350,12 @@ export interface AttendanceLog {
   locationRisk?: string;
   /** Set on the "On Leave" entry created for each day of an approved leave. */
   leaveRequestId?: string;
+  /** The attendance policy turned this day into a leave (e.g. duty off before the branch half time). */
+  policyLeave?: boolean;
+  policyLeaveReason?: string;
+  /** Minutes spent on personal exits today (office work exits are not counted). */
+  personalOutMinutes?: number;
+  personalOutExceeded?: boolean;
 }
 
 export interface BiometricMatchEvidence {
@@ -478,6 +490,49 @@ export interface StatutoryConfig {
   exportTemplates?: import('./data/exportTemplates').ExportTemplate[];
   establishmentRules?: Partial<Record<EstablishmentType, EstablishmentRule>>;
   leaveEntitlements?: Partial<Record<Exclude<LeaveRequest['leaveType'], 'Unpaid'>, number>>;
+  /** Company attendance policy (late fines, half-day timing, absent factor, leave-first marking); see src/data/attendancePolicy.ts. */
+  attendancePolicy?: AttendancePolicy;
+  /** Optional company features; every switch is off by default so existing installations keep their current behaviour. */
+  companyOptions?: CompanyOptions;
+}
+
+export interface CompanyOptions {
+  /** Kiosk shows only Duty Off / Personal Out / Office Work instead of the standard checkout list. */
+  kioskThreeExitButtons?: boolean;
+  /** Office Work / official exits are not deducted from worked time and do not count as personal time. */
+  officialExitsNotDeducted?: boolean;
+  /** Per-run Unpaid / Paid salary register (cash hand-over) instead of bank payment exceptions only. */
+  salaryPaymentRegister?: boolean;
+  /** Full allowance / deduction catalogue and CSV import for commission and tips. */
+  extendedPayComponents?: boolean;
+  /** Position and Branch columns on the attendance and leave registers. */
+  registerShowsPosition?: boolean;
+}
+
+/** One step of an escalating late-fine table: the fine charged for each late day up to `uptoLateDays` in the month. */
+export interface LateFineBand { uptoLateDays: number; finePerDay: number }
+
+export interface AttendancePolicy {
+  /** Minutes after opening that are still on time (10 = late from the 11th minute). Overrides the shift grace when set. */
+  lateGraceMinutes?: number;
+  /** Minutes after opening from which the day is a half day (20 = from the 21st minute). Overrides the shift when set. */
+  halfDayAfterMinutes?: number;
+  /** Escalating late fine by number of late days in the month; empty = no fine. */
+  lateFineBands?: LateFineBand[];
+  /** Days of pay deducted per absent day (1.5 = one and a half days); unpaid leave always costs one day. */
+  absentDeductionDays?: number;
+  /** What a working day without any punch becomes in the register: the system marks leave first and HR decides absences. */
+  noPunchDayStatus?: 'Absent' | 'Unpaid Leave';
+  /** A "Duty Off" before the branch half time makes the day a leave. */
+  dutyOffBeforeHalfTimeIsLeave?: boolean;
+  /** Half time used when a branch has none (HH:MM). */
+  defaultHalfTimeCutoff?: string;
+  /** Personal-out minutes allowed per day when a branch has none. */
+  defaultPersonalOutAllowanceMinutes?: number;
+  /** Reward per day the employee arrived early (0 = no reward). */
+  earlyComingRewardPerDay?: number;
+  /** How many minutes before opening count as early (0 = at or before opening). */
+  earlyComingMinutes?: number;
 }
 
 export type JournalAccountKey = 'salaryExpense' | 'reimbursementExpense' | 'eobiExpense' | 'socialSecurityExpense' | 'providentFundExpense'
@@ -581,7 +636,11 @@ export interface TaxDepositRecord {
   recordedBy: string;
 }
 
-export type PayrollAdjustmentType = 'Bonus' | 'Commission' | 'Arrears' | 'Reimbursement' | 'Deduction' | 'Tax Adjustment';
+export type PayrollAdjustmentType = 'Bonus' | 'Commission' | 'Arrears' | 'Reimbursement' | 'Deduction' | 'Tax Adjustment'
+  | 'Funeral Allowance' | 'Fuel Allowance' | 'Tip' | 'Grading Reward' | 'Surprise Reward'
+  | 'Penalty / Warning' | 'Short Cash' | 'Shopping' | 'Uniform' | 'Advance (STA)' | 'Loan (LTA)' | 'EOBI';
+
+export interface PayslipAdjustmentLine { type: PayrollAdjustmentType; amount: number; kind: 'earning' | 'deduction' }
 
 export interface PayrollAdjustment {
   id: string;
@@ -685,7 +744,12 @@ export interface Payslip {
   settlementLeaveEncashment?: number;
   settlementNoticePay?: number;
   settlementPendingSalary?: number;
-  paymentStatus?: 'Paid' | 'Failed' | 'Retried';
+  /** Unset = not yet paid out. Cash / per-employee payroll marks each payslip Paid (or back to Unpaid); bank payroll uses Failed / Retried. */
+  paymentStatus?: 'Paid' | 'Unpaid' | 'Failed' | 'Retried';
+  paidAt?: string;
+  paidById?: string;
+  paidBy?: string;
+  paymentReference?: string;
   paymentFailureReason?: string;
   paymentFailedAt?: string;
   paymentFailedById?: string;
@@ -696,6 +760,14 @@ export interface Payslip {
   retryBankAccountNumber?: string;
   retryIban?: string;
   explicitAbsentDays?: number;
+  /** Attendance-policy outcomes for the month. */
+  lateDays?: number;
+  lateFineDeduction?: number;
+  earlyDays?: number;
+  earlyComingReward?: number;
+  absentDeductionDays?: number;
+  /** Approved manual adjustments beyond bonus / commission / arrears / reimbursement, itemised for the payslip. */
+  adjustmentLines?: PayslipAdjustmentLine[];
   statutoryConfigId?: string;
   calculationVersion?: string;
   periodMonth?: number;

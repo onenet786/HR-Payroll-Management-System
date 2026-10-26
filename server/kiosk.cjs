@@ -16,10 +16,11 @@ const pick = (record, fields) => Object.fromEntries(fields.filter(field => recor
 const SYNC = {
   employees: { table: 'employees', fields: ['id', 'employeeCode', 'fullName', 'status', 'companyId', 'branchId', 'departmentId', 'designationId', 'shift', 'pictureUrl', 'imageUrl', 'photoUrl', 'profileImage', 'faceDescriptors', 'fingerprintTemplates'] },
   biometricTemplates: { table: 'biometric_templates', fields: ['id', 'employeeId', 'employeeCode', 'fullName', 'fingerprintTemplates', 'faceDescriptors', 'updatedAt'] },
-  branches: { table: 'branches', fields: ['id', 'companyId', 'name', 'code', 'city', 'province'] },
+  branches: { table: 'branches', fields: ['id', 'companyId', 'name', 'code', 'city', 'province', 'openingTime', 'halfTimeCutoff', 'personalOutAllowanceMinutes'] },
   departments: { table: 'departments', fields: ['id', 'branchId', 'name', 'code'] },
   designations: { table: 'designations', fields: ['id', 'departmentId', 'title', 'code'] },
-  statConfig: { table: 'stat_config', fields: ['id', 'lowConfidenceBiometricPercent'] },
+  // attendancePolicy / companyOptions (optional, see src/types.ts) drive the kiosk's exit buttons and late rules offline.
+  statConfig: { table: 'stat_config', fields: ['id', 'updatedAt', 'lowConfidenceBiometricPercent', 'attendancePolicy', 'companyOptions'] },
   attendances: { table: 'attendances', fields: null },
 };
 const PUNCH_METHODS = new Set(['Biometric', 'Camera', 'RFID', 'Mobile Kiosk']);

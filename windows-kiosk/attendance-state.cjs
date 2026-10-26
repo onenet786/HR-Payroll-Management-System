@@ -1,6 +1,8 @@
 'use strict';
 
 const RETURNABLE_OUT_REASONS = new Set([
+  'Personal Out',
+  'Office Work',
   'Lunch Break',
   'Tea Break',
   'Official Duty',

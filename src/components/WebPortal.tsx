@@ -52,6 +52,8 @@ import { downloadEmployeeDocument } from '../utils/employeeDocuments';
 import { ComplianceAlertsPanel } from './ComplianceAlertsPanel';
 import { EmployeeLifecycleModule } from './EmployeeLifecycleModule';
 import { PaymentExceptionsModal } from './PaymentExceptionsModal';
+import { AttendancePolicyEditor } from './AttendancePolicyEditor';
+import { PAYROLL_COMPONENTS, STANDARD_ADJUSTMENT_TYPES, isNonTaxableType, parseAdjustmentCsv } from '../data/payrollComponents';
 import { PayrollReportsPanel } from './PayrollReportsPanel';
 import { StatutoryGovernancePanel } from './StatutoryGovernancePanel';
 import { leaveBalances } from '../data/leavePolicy';
@@ -197,6 +199,8 @@ export interface WebPortalProps {
   onRecordTaxDeposit: (runId: string, cprNumber: string, amount: number, depositedOn: string) => void;
   onMarkPaymentFailed: (payslipId: string, reason: string) => void;
   onRecordPaymentRetry: (payslipIds: string[], reference: string) => void;
+  onMarkPaymentPaid: (payslipIds: string[], reference: string) => void;
+  onMarkPaymentUnpaid: (payslipId: string) => void;
   onRetroRecalculate: (payslipId: string, reason: string, target: { month: number; year: number }) => void | Promise<void>;
   onRecordParallelRun: (runId: string, record: Omit<ParallelRunRecord, 'comparedAt' | 'comparedById' | 'comparedBy'>) => void | Promise<void>;
   onRecordBankAdvice: (runId: string, checksum: string, employeeCount: number, total: number, profile: PayrollRun['bankAdviceProfile'], batch?: { batchReference: string; controlHash: string; verified: boolean }) => void | Promise<void>;
@@ -533,6 +537,8 @@ export function WebPortal({
   onRecordTaxDeposit,
   onMarkPaymentFailed,
   onRecordPaymentRetry,
+  onMarkPaymentPaid,
+  onMarkPaymentUnpaid,
   onRetroRecalculate,
   onRecordParallelRun,
   onRecordBankAdvice,
@@ -650,8 +656,11 @@ export function WebPortal({
   const payrollEmployee = (employee: Employee) => editionEmployee(features, employee);
   const payrollStatConfig = editionStatConfig(features, statConfig);
   // Settings edit the pending proposal (maker-checker); payroll always uses the live statConfig/taxSlabs.
-  const pendingStatutoryChange = statutoryChangeRequests.find(item => item.status === 'Pending');
+  // Without maker-checker (lite edition) settings save straight to the live config, so a leftover proposal must not mask the edits.
+  const pendingStatutoryChange = dualControl ? statutoryChangeRequests.find(item => item.status === 'Pending') : undefined;
   const editableStatConfig = pendingStatutoryChange?.proposedConfig || statConfig;
+  // Optional company features (all off by default): see CompanyOptions in src/types.ts.
+  const companyOptions = statConfig.companyOptions || {};
   const editableTaxSlabs = pendingStatutoryChange?.proposedTaxSlabs || taxSlabs;
   const activeTaxSlabs = editableTaxSlabs && editableTaxSlabs.length > 0 ? editableTaxSlabs : DEFAULT_TAX_SLABS;
   const [payslipUrdu, setPayslipUrdu] = useState(false);
@@ -3558,6 +3567,7 @@ export function WebPortal({
                               <thead className="bg-slate-50 font-bold text-slate-500 uppercase tracking-wider">
                                 <tr>
                                   <th className="px-3 py-2.5">Employee</th>
+                                  {companyOptions.registerShowsPosition && <><th className="px-3 py-2.5">Position</th><th className="px-3 py-2.5">Branch</th></>}
                                   <th className="px-3 py-2.5 text-center">Present</th>
                                   <th className="px-3 py-2.5 text-center">Late</th>
                                   <th className="px-3 py-2.5 text-center">Half Day</th>
@@ -3584,6 +3594,7 @@ export function WebPortal({
                                         <img src={empAvatarUrl(emp)} alt="" className="w-5 h-5 rounded-full object-cover border" />
                                         <span>{emp.fullName}</span>
                                       </td>
+                                      {companyOptions.registerShowsPosition && <><td className="px-3 py-2.5 text-slate-600">{designations.find(item => item.id === emp.designationId)?.title || '—'}</td><td className="px-3 py-2.5 text-slate-600">{branches.find(item => item.id === emp.branchId)?.name || '—'}</td></>}
                                       <td className="px-3 py-2.5 text-center font-bold text-emerald-600">{present}</td>
                                       <td className="px-3 py-2.5 text-center text-orange-500">{late}</td>
                                       <td className="px-3 py-2.5 text-center text-amber-500">{half}</td>
@@ -3608,6 +3619,7 @@ export function WebPortal({
                               <thead className="bg-slate-50 font-bold text-slate-500 uppercase tracking-wider">
                                 <tr>
                                   <th className="px-3 py-2.5">Employee</th>
+                                  {companyOptions.registerShowsPosition && <><th className="px-3 py-2.5">Position</th><th className="px-3 py-2.5">Branch</th></>}
                                   <th className="px-3 py-2.5 text-center">Present Days</th>
                                   <th className="px-3 py-2.5 text-center">Late Days</th>
                                   <th className="px-3 py-2.5 text-center">Half Days</th>
@@ -3630,6 +3642,7 @@ export function WebPortal({
                                         <img src={empAvatarUrl(emp)} alt="" className="w-5 h-5 rounded-full object-cover border" />
                                         <span>{emp.fullName}</span>
                                       </td>
+                                      {companyOptions.registerShowsPosition && <><td className="px-3 py-2.5 text-slate-600">{designations.find(item => item.id === emp.designationId)?.title || '—'}</td><td className="px-3 py-2.5 text-slate-600">{branches.find(item => item.id === emp.branchId)?.name || '—'}</td></>}
                                       <td className="px-3 py-2.5 text-center font-bold text-emerald-600">{present}</td>
                                       <td className="px-3 py-2.5 text-center text-orange-500">{late}</td>
                                       <td className="px-3 py-2.5 text-center text-amber-500">{half}</td>
@@ -3924,6 +3937,7 @@ export function WebPortal({
                               <thead className="bg-slate-50 font-bold text-slate-500 uppercase tracking-wider">
                                 <tr>
                                   <th className="px-3 py-2.5">Employee</th>
+                                  {companyOptions.registerShowsPosition && <><th className="px-3 py-2.5">Position</th><th className="px-3 py-2.5">Branch</th></>}
                                   <th className="px-3 py-2.5 text-center">Casual</th>
                                   <th className="px-3 py-2.5 text-center">Sick</th>
                                   <th className="px-3 py-2.5 text-center">Annual</th>
@@ -3948,6 +3962,7 @@ export function WebPortal({
                                         <img src={empAvatarUrl(emp)} alt="" className="w-5 h-5 rounded-full object-cover border" />
                                         <span>{emp.fullName}</span>
                                       </td>
+                                      {companyOptions.registerShowsPosition && <><td className="px-3 py-2.5 text-slate-600">{designations.find(item => item.id === emp.designationId)?.title || '—'}</td><td className="px-3 py-2.5 text-slate-600">{branches.find(item => item.id === emp.branchId)?.name || '—'}</td></>}
                                       <td className="px-3 py-2.5 text-center font-semibold text-slate-800">{casual || '-'}</td>
                                       <td className="px-3 py-2.5 text-center font-semibold text-slate-800">{sick || '-'}</td>
                                       <td className="px-3 py-2.5 text-center font-semibold text-slate-800">{annual || '-'}</td>
@@ -3971,6 +3986,7 @@ export function WebPortal({
                               <thead className="bg-slate-50 font-bold text-slate-500 uppercase tracking-wider">
                                 <tr>
                                   <th className="px-3 py-2.5">Employee</th>
+                                  {companyOptions.registerShowsPosition && <><th className="px-3 py-2.5">Position</th><th className="px-3 py-2.5">Branch</th></>}
                                   <th className="px-3 py-2.5 text-center">Casual Approved</th>
                                   <th className="px-3 py-2.5 text-center">Sick Approved</th>
                                   <th className="px-3 py-2.5 text-center">Annual Approved</th>
@@ -3993,6 +4009,7 @@ export function WebPortal({
                                         <img src={empAvatarUrl(emp)} alt="" className="w-5 h-5 rounded-full object-cover border" />
                                         <span>{emp.fullName}</span>
                                       </td>
+                                      {companyOptions.registerShowsPosition && <><td className="px-3 py-2.5 text-slate-600">{designations.find(item => item.id === emp.designationId)?.title || '—'}</td><td className="px-3 py-2.5 text-slate-600">{branches.find(item => item.id === emp.branchId)?.name || '—'}</td></>}
                                       <td className="px-3 py-2.5 text-center font-semibold text-slate-850">{casual || '-'}</td>
                                       <td className="px-3 py-2.5 text-center font-semibold text-slate-800">{sick || '-'}</td>
                                       <td className="px-3 py-2.5 text-center font-semibold text-slate-800">{annual || '-'}</td>
@@ -4083,7 +4100,7 @@ export function WebPortal({
                         showToast('Select an employee and enter a positive amount with a reason.');
                         return;
                       }
-                      const nonTaxableType = adjustmentType === 'Reimbursement' || adjustmentType === 'Deduction' || adjustmentType === 'Tax Adjustment';
+                      const nonTaxableType = isNonTaxableType(adjustmentType);
                       await onCreatePayrollAdjustment({
                         id: `adjustment-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
                         employeeId: adjustmentEmployeeId,
@@ -4107,12 +4124,42 @@ export function WebPortal({
                         {employees.map(employee => <option key={employee.id} value={employee.id}>{employee.employeeCode} — {employee.fullName}</option>)}
                       </select>
                       <select aria-label="Adjustment type" value={adjustmentType} onChange={e => setAdjustmentType(e.target.value as PayrollAdjustmentType)} className="border border-slate-300 rounded-lg px-3 py-2 text-xs bg-white">
-                        {(['Bonus', 'Commission', 'Arrears', 'Reimbursement', 'Deduction', 'Tax Adjustment'] as PayrollAdjustmentType[]).map(type => <option key={type}>{type}</option>)}
+                        {companyOptions.extendedPayComponents ? <>
+                          <optgroup label="Allowances / rewards (manual)">{PAYROLL_COMPONENTS.filter(item => item.kind === 'earning' && item.source === 'Manual').map(item => <option key={item.type}>{item.type}</option>)}</optgroup>
+                          <optgroup label="Imported from sales (or manual)">{PAYROLL_COMPONENTS.filter(item => item.source === 'Import').map(item => <option key={item.type}>{item.type}</option>)}</optgroup>
+                          <optgroup label="Deductions (manual)">{PAYROLL_COMPONENTS.filter(item => item.kind === 'deduction').map(item => <option key={item.type}>{item.type}</option>)}</optgroup>
+                        </> : STANDARD_ADJUSTMENT_TYPES.map(type => <option key={type}>{type}</option>)}
                       </select>
                       <input required aria-required="true" aria-label="Adjustment amount" type="number" min="1" step="0.01" value={adjustmentAmount} onChange={e => setAdjustmentAmount(e.target.value)} placeholder="Amount (PKR) *" className="border border-slate-300 rounded-lg px-3 py-2 text-xs" />
                       <input required aria-required="true" aria-label="Adjustment reason" value={adjustmentReason} onChange={e => setAdjustmentReason(e.target.value)} placeholder="Reason / reference *" className="border border-slate-300 rounded-lg px-3 py-2 text-xs md:col-span-2" />
                       <button type="submit" className="bg-indigo-700 hover:bg-indigo-800 text-white font-bold text-xs px-3 py-2 rounded-lg">Submit for approval</button>
-                      {!['Reimbursement', 'Deduction', 'Tax Adjustment'].includes(adjustmentType) && <label className="md:col-span-6 flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" checked={adjustmentTaxable} onChange={e => setAdjustmentTaxable(e.target.checked)} /> Include in taxable salary</label>}
+                      {!isNonTaxableType(adjustmentType) && <label className="md:col-span-6 flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" checked={adjustmentTaxable} onChange={e => setAdjustmentTaxable(e.target.checked)} /> Include in taxable salary</label>}
+                      {companyOptions.extendedPayComponents && <div className="md:col-span-6 flex flex-wrap items-center gap-2 text-[11px] text-slate-500 border-t border-slate-100 pt-2">
+                        <span>Late fines, absent deductions and early-coming rewards are calculated by payroll from the attendance policy. Commission and tips can be imported from the sales system as a CSV (employee code, type, amount, reason):</span>
+                        <label className="cursor-pointer rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 font-bold text-indigo-700 hover:bg-indigo-100">
+                          Import Commission / Tip CSV
+                          <input type="file" accept=".csv,text/csv" className="hidden" onChange={async event => {
+                            const file = event.target.files?.[0];
+                            event.target.value = '';
+                            if (!file) return;
+                            const { rows, errors } = parseAdjustmentCsv(await file.text());
+                            const missing = rows.filter(row => !employees.some(employee => employee.employeeCode.toUpperCase() === row.employeeCode));
+                            if (errors.length || missing.length) {
+                              showToast([...errors, ...missing.map(row => `Line ${row.line}: employee code ${row.employeeCode} not found.`)].slice(0, 3).join(' '));
+                              if (!rows.length || missing.length) return;
+                            }
+                            for (const row of rows) {
+                              const employee = employees.find(item => item.employeeCode.toUpperCase() === row.employeeCode)!;
+                              await onCreatePayrollAdjustment({
+                                id: `adjustment-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                                employeeId: employee.id, periodMonth: payrollMonth, periodYear: payrollYear, type: row.type, amount: row.amount, taxable: true,
+                                reason: `${row.reason} (imported ${file.name})`, status: 'Pending', createdAt: new Date().toISOString(), createdById: currentUserAccount.id, createdBy: currentUserAccount.username,
+                              });
+                            }
+                            showToast(`${rows.length} imported adjustment(s) submitted for approval.`);
+                          }} />
+                        </label>
+                      </div>}
                     </form>
                     <div className="overflow-x-auto">
                       <table className="min-w-full text-xs">
@@ -4186,7 +4233,9 @@ export function WebPortal({
                                 {features.socialSecurity && <button type="button" onClick={() => downloadTemplateReturn('Social Security Return', run)} className="text-indigo-700 hover:underline">Social-security upload file</button>}
                                 {run.bankAdviceBatchReference && <span className="text-slate-500">Bank batch {run.bankAdviceBatchReference} · control {run.bankAdviceControlHash}{run.bankAdviceTemplateVerified ? '' : ' (unverified template)'}</span>}
                                 <button type="button" onClick={() => downloadAccountingJournal(run)} className="text-indigo-700 hover:underline">Accounting journal CSV</button>
-                                {run.status === 'Disbursed' && <button type="button" onClick={() => setPaymentExceptionRun(run)} className="text-rose-700 hover:underline">Payment exceptions{payrollPayslips.some(item => item.payrollRunId === run.id && item.paymentStatus === 'Failed') ? ' (open)' : ''}</button>}
+                                {companyOptions.salaryPaymentRegister
+                                  ? (run.status === 'Approved' || run.status === 'Disbursed') && <button type="button" onClick={() => setPaymentExceptionRun(run)} className="text-indigo-700 hover:underline">Salary paid / unpaid{(() => { const unpaid = payrollPayslips.filter(item => item.payrollRunId === run.id && (!item.paymentStatus || item.paymentStatus === 'Unpaid')).length; return unpaid ? ` (${unpaid} unpaid)` : ''; })()}{payrollPayslips.some(item => item.payrollRunId === run.id && item.paymentStatus === 'Failed') ? ' · bank returns open' : ''}</button>
+                                  : run.status === 'Disbursed' && <button type="button" onClick={() => setPaymentExceptionRun(run)} className="text-rose-700 hover:underline">Payment exceptions{payrollPayslips.some(item => item.payrollRunId === run.id && item.paymentStatus === 'Failed') ? ' (open)' : ''}</button>}
                                 {run.status === 'Disbursed' && <button type="button" onClick={async () => { try { const result = await onSendPayslips(run.id); const message = `${result.sent} sent, ${result.skipped} already delivered, ${result.failed.length} failed.`; if (result.failed.length) alert(`Payslip delivery completed with exceptions: ${message}`); else showToast(`Payslip delivery: ${message}`); } catch (error) { alert(error instanceof Error ? error.message : 'Payslips could not be sent.'); } }} className="text-indigo-700 hover:underline">Email payslips</button>}
                                 {run.status === 'Disbursed' && <button type="button" disabled={!alertChannels.sms} title={alertChannels.sms ? 'Text employees that salary was processed (no amounts)' : 'SMS provider not configured on the server'} onClick={() => sendSalaryAlerts(run.id, 'sms')} className="text-indigo-700 hover:underline disabled:cursor-not-allowed disabled:text-slate-400 disabled:no-underline">SMS alert</button>}
                                 {run.status === 'Disbursed' && <button type="button" disabled={!alertChannels.whatsapp} title={alertChannels.whatsapp ? 'WhatsApp employees that salary was processed (no amounts)' : 'WhatsApp provider not configured on the server'} onClick={() => sendSalaryAlerts(run.id, 'whatsapp')} className="text-indigo-700 hover:underline disabled:cursor-not-allowed disabled:text-slate-400 disabled:no-underline">WhatsApp alert</button>}
@@ -4566,6 +4615,15 @@ export function WebPortal({
                     </div>}
                     {attendanceExceptionQueue.length > 9 && <p className="mt-3 text-xs font-medium text-slate-600">+ {attendanceExceptionQueue.length - 9} more exception(s) in the attendance register.</p>}
                   </section>
+
+                  {/* Optional company features and attendance policy: its own section, outside the statutory card, same in both editions. */}
+                  {userPermissions.includes('manage_settings') && <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-3" aria-labelledby="company-options-title">
+                    <div>
+                      <h3 id="company-options-title" className="text-sm font-bold text-slate-900">Company Options &amp; Attendance Policy</h3>
+                      <p className="mt-1 text-xs text-slate-600">Optional features for this company. Everything here is off until switched on; the standard behaviour applies otherwise.</p>
+                    </div>
+                    <AttendancePolicyEditor policy={editableStatConfig.attendancePolicy || {}} options={editableStatConfig.companyOptions || {}} onChange={(policy, options) => onUpdateStatConfig({ ...editableStatConfig, attendancePolicy: policy, companyOptions: options, updatedAt: new Date().toISOString() })} />
+                  </section>}
 
                 </motion.div>
               )}
@@ -6866,6 +6924,10 @@ export function WebPortal({
             onClose={() => setPaymentExceptionRun(null)}
             onMarkFailed={onMarkPaymentFailed}
             onRecordRetry={onRecordPaymentRetry}
+            onMarkPaid={onMarkPaymentPaid}
+            onMarkUnpaid={onMarkPaymentUnpaid}
+            bankPayroll={features.bankPayroll !== false}
+            salaryRegister={!!companyOptions.salaryPaymentRegister}
           />
         )}
 
@@ -6960,6 +7022,18 @@ export function WebPortal({
                               <span className="text-emerald-700 font-semibold">+{showPayslipModal.overtimePay.toLocaleString()} PKR</span>
                             </div>
                           )}
+                          {(showPayslipModal.earlyComingReward || 0) > 0 && (
+                            <div className="flex justify-between">
+                              <span className="text-slate-500">Early coming reward ({showPayslipModal.earlyDays || 0} days):</span>
+                              <span className="text-emerald-700 font-semibold">+{(showPayslipModal.earlyComingReward || 0).toLocaleString()} PKR</span>
+                            </div>
+                          )}
+                          {(showPayslipModal.adjustmentLines || []).filter(line => line.kind === 'earning').map(line => (
+                            <div key={line.type} className="flex justify-between">
+                              <span className="text-slate-500">{line.type}:</span>
+                              <span className="text-emerald-700 font-semibold">+{line.amount.toLocaleString()} PKR</span>
+                            </div>
+                          ))}
                         </div>
                       </div>
 
@@ -7012,7 +7086,9 @@ export function WebPortal({
                               <span className="text-rose-700">-{showPayslipModal.unpaidLeaveDeduction.toLocaleString()} PKR</span>
                             </div>
                           )}
-                          {(showPayslipModal.otherAdjustmentsDeduction || 0) > 0 && <div className="flex justify-between"><span className="text-slate-500">Other deductions:</span><span className="text-rose-700">-{(showPayslipModal.otherAdjustmentsDeduction || 0).toLocaleString()} PKR</span></div>}
+                          {(showPayslipModal.lateFineDeduction || 0) > 0 && <div className="flex justify-between"><span className="text-slate-500">Late fine ({showPayslipModal.lateDays || 0} late days):</span><span className="text-rose-700">-{(showPayslipModal.lateFineDeduction || 0).toLocaleString()} PKR</span></div>}
+                          {(showPayslipModal.adjustmentLines || []).filter(line => line.kind === 'deduction').map(line => <div key={line.type} className="flex justify-between"><span className="text-slate-500">{line.type}:</span><span className="text-rose-700">-{line.amount.toLocaleString()} PKR</span></div>)}
+                          {(() => { const plain = (showPayslipModal.otherAdjustmentsDeduction || 0) - (showPayslipModal.adjustmentLines || []).filter(line => line.kind === 'deduction').reduce((sum, line) => sum + line.amount, 0); return plain > 0 && <div className="flex justify-between"><span className="text-slate-500">Other deductions:</span><span className="text-rose-700">-{plain.toLocaleString()} PKR</span></div>; })()}
                           {(showPayslipModal.manualTaxAdjustment || 0) > 0 && <div className="flex justify-between"><span className="text-slate-500">Tax adjustment:</span><span className="text-rose-700">-{(showPayslipModal.manualTaxAdjustment || 0).toLocaleString()} PKR</span></div>}
                         </div>
                       </div>

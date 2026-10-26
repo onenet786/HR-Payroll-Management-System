@@ -3,12 +3,13 @@
    ═══════════════════════════════════════════════════════════════════════════ */
 
 :root {
-  --bg:          #020c17;
-  --surface:     rgba(5, 15, 30, 0.92);
-  --surface-2:   rgba(8, 22, 44, 0.88);
-  --surface-3:   rgba(12, 28, 55, 0.75);
-  --border:      rgba(30, 64, 120, 0.38);
-  --border-hi:   rgba(52, 211, 153, 0.35);
+  /* Readable navy palette (default): lifted surfaces, stronger borders and secondary text for wall-mounted screens. */
+  --bg:          #0a1628;
+  --surface:     rgba(17, 32, 58, 0.97);
+  --surface-2:   rgba(24, 43, 76, 0.96);
+  --surface-3:   rgba(33, 56, 96, 0.94);
+  --border:      rgba(120, 156, 210, 0.42);
+  --border-hi:   rgba(52, 211, 153, 0.6);
 
   --em:          #10b981;
   --em-dark:     #059669;
@@ -27,10 +28,10 @@
   --red-dark:    #dc2626;
   --red-glow:    rgba(239, 68, 68, 0.18);
 
-  --t1:  #f8fafc;
-  --t2:  #cbd5e1;
-  --t3:  #64748b;
-  --t4:  #334155;
+  --t1:  #ffffff;
+  --t2:  #dbe4f0;
+  --t3:  #9fb0c8;
+  --t4:  #6b7f9c;
 
   --r-sm:  6px;
   --r:     10px;
@@ -41,6 +42,29 @@
   font-size: 14px;
   color-scheme: dark;
 }
+
+/* Optional classic dark theme (kiosk settings → "Classic dark theme"): the original deep-navy palette with the
+   small neutral close button. Off by default because dialogs were hard to read on wall-mounted screens. */
+:root[data-theme="classic"] {
+  --bg:          #020c17;
+  --surface:     rgba(5, 15, 30, 0.92);
+  --surface-2:   rgba(8, 22, 44, 0.88);
+  --surface-3:   rgba(12, 28, 55, 0.75);
+  --border:      rgba(30, 64, 120, 0.38);
+  --border-hi:   rgba(52, 211, 153, 0.35);
+  --t1:  #f8fafc;
+  --t2:  #cbd5e1;
+  --t3:  #64748b;
+  --t4:  #334155;
+}
+:root[data-theme="classic"] .dialog-close {
+  width: 32px; height: 32px;
+  border: 1px solid var(--border);
+  background: var(--surface-3);
+  color: var(--t3);
+}
+:root[data-theme="classic"] .dialog-close svg { width: 16px; height: 16px; }
+:root[data-theme="classic"] .dialog-close:hover, :root[data-theme="classic"] .dialog-close:focus-visible { border-color: var(--red); color: var(--red); background: var(--surface-3); box-shadow: none; }
 
 /* ─── Reset ─────────────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -1214,6 +1238,17 @@ body {
   font-weight: 750;
   transition: all 0.18s;
 }
+/* Three-button mode (company option): one column of large buttons with a hint under each. */
+.reason-grid.reason-grid-simple { grid-template-columns: minmax(0, 1fr); }
+.reason-grid-simple .reason-option { min-height: 64px; padding: 12px 16px; border-width: 2px; gap: 14px; font-size: 16px; }
+.reason-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.reason-text small { font-size: 12px; font-weight: 500; color: var(--t3); }
+.reason-duty-off { border-color: rgba(239, 68, 68, 0.55); }
+.reason-duty-off .reason-hotkey { color: #fca5a5; }
+.reason-personal-out { border-color: rgba(245, 158, 11, 0.55); }
+.reason-personal-out .reason-hotkey { color: #fcd34d; }
+.reason-office-work { border-color: rgba(59, 130, 246, 0.55); }
+.reason-office-work .reason-hotkey { color: #93c5fd; }
 
 .reason-option:hover,
 .reason-option:focus {
@@ -1243,15 +1278,18 @@ body {
 }
 .dialog-title { font-size: 18px; font-weight: 800; color: var(--t1); }
 .dialog-close {
-  width: 32px; height: 32px;
+  /* Clearly visible red close button on every dialog (default theme). */
+  width: 40px; height: 40px;
   border-radius: var(--r-sm);
-  border: 1px solid var(--border);
-  background: var(--surface-3);
-  color: var(--t3);
+  border: 2px solid rgba(248, 113, 113, 0.75);
+  background: rgba(239, 68, 68, 0.18);
+  color: #fecaca;
   display: grid; place-items: center;
+  flex-shrink: 0;
   transition: all 0.18s;
 }
-.dialog-close:hover { border-color: var(--red); color: var(--red); }
+.dialog-close svg { width: 20px; height: 20px; }
+.dialog-close:hover, .dialog-close:focus-visible { background: var(--red); border-color: #fca5a5; color: #fff; outline: none; box-shadow: 0 0 0 3px var(--red-glow); }
 
 .dialog-body {
   flex: 1; overflow-y: auto;

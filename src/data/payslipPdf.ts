@@ -12,12 +12,17 @@ export function payslipPdfLines(sheet: Payslip, companyName: string): Array<[str
     ['Basic earnings', '', sheet.basicEarnings], ['House rent allowance', '', sheet.houseRentAllowance], ['Conveyance allowance', '', sheet.conveyanceAllowance],
     ['Medical allowance', '', sheet.medicalAllowance], ['Other allowances', '', sheet.otherAllowances], ['Overtime', `${sheet.overtimeHours || 0} h`, sheet.overtimePay],
     ['Bonus', '', sheet.bonusEarnings], ['Commission', '', sheet.commissionEarnings], ['Arrears', '', sheet.arrearsEarnings],
+    ['Early coming reward', `${sheet.earlyDays || 0} day(s)`, sheet.earlyComingReward],
+    ...(sheet.adjustmentLines || []).filter(line => line.kind === 'earning').map(line => [line.type, '', line.amount] as [string, string, number | undefined]),
     ['Gratuity', '', sheet.settlementGratuity], ['Leave encashment', '', sheet.settlementLeaveEncashment], ['Notice pay', '', sheet.settlementNoticePay],
     ['Absence / unpaid leave deduction', `${sheet.daysAbsent || 0} day(s)`, sheet.unpaidLeaveDeduction ? -sheet.unpaidLeaveDeduction : 0],
   ];
   const deductions: Array<[string, number | undefined]> = [
     ['FBR income tax', sheet.incomeTaxDeduction], ['Tax adjustment', sheet.manualTaxAdjustment], ['EOBI (employee)', sheet.eobiEmployeeDeduction],
-    ['Provident fund (employee)', sheet.providentFundDeduction], ['Loan / advance recovery', sheet.loanRepaymentDeduction], ['Other deductions', sheet.otherAdjustmentsDeduction],
+    ['Provident fund (employee)', sheet.providentFundDeduction], ['Loan / advance recovery', sheet.loanRepaymentDeduction],
+    [`Late fine (${sheet.lateDays || 0} late day(s))`, sheet.lateFineDeduction],
+    ...(sheet.adjustmentLines || []).filter(line => line.kind === 'deduction').map(line => [line.type, line.amount] as [string, number | undefined]),
+    ['Other deductions', (sheet.otherAdjustmentsDeduction || 0) - (sheet.adjustmentLines || []).filter(line => line.kind === 'deduction').reduce((sum, line) => sum + line.amount, 0)],
   ];
   return [
     [`${companyName} - Confidential Payslip`, ''],

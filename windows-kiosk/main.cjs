@@ -13,7 +13,10 @@ const {
 } = require('./attendance-state.cjs');
 const { createChallengeManager } = require('./liveness.cjs');
 const { authorizeCameraAttempt, requireSecureEnrollment } = require('./camera-authorization.cjs');
-const { LOW_CONFIDENCE_BIOMETRIC_PERCENT, biometricMatchEvidence, evaluateAttendanceTimes } = require('./attendance-rules.cjs');
+const {
+  LOW_CONFIDENCE_BIOMETRIC_PERCENT, KIOSK_OUT_REASONS, OFFICIAL_BREAK_REASONS,
+  biometricMatchEvidence, evaluateAttendanceTimes, policyShift, halfTimeCutoffFor, personalOutAllowanceFor, personalOutMinutes,
+} = require('./attendance-rules.cjs');
 const { FACE_IDENTIFY_THRESHOLD, FACE_VERIFY_THRESHOLD, FACE_STRONG_DISTANCE, normalizeFaceDescriptor, identifyFace } = require('./face-match.cjs');
 
 dotenv.config({ quiet: true });
@@ -182,24 +185,21 @@ const withTimeout = (promise, ms, label) => new Promise((resolve, reject) => {
   promise.then(value => { clearTimeout(timer); resolve(value); }, error => { clearTimeout(timer); reject(error); });
 });
 
-const checkoutReasons = [
-  'End of Shift',
-  'Lunch Break',
-  'Tea Break',
-  'Official Duty',
-  'Client Meeting',
-  'Site Visit',
-  'Personal Work',
-  'Medical Appointment',
-  'Emergency Leave',
-  'Half-Day Leave',
-  'Sick Leave',
-  'Prayer',
+// Standard checkout list (default). With the company option "three exit buttons" the kiosk offers only
+// Duty Off / Personal Out / Office Work ("Office Work" has no effect on attendance when the matching option is on).
+const standardCheckoutReasons = [
+  'End of Shift', 'Lunch Break', 'Tea Break', 'Official Duty', 'Client Meeting', 'Site Visit',
+  'Personal Work', 'Medical Appointment', 'Emergency Leave', 'Half-Day Leave', 'Sick Leave', 'Prayer',
 ];
+const checkoutReasons = [...standardCheckoutReasons, ...KIOSK_OUT_REASONS];
+
+function activeCheckoutReasons(store) {
+  return store?.companyOptions?.kioskThreeExitButtons ? [...KIOSK_OUT_REASONS] : [...standardCheckoutReasons];
+}
 
 function normalizeCheckoutReason(value) {
-  const text = String(value || '').trim();
-  return checkoutReasons.find(reason => reason.toLowerCase() === text.toLowerCase()) || '';
+  const text = String(value || '').trim().toLowerCase();
+  return checkoutReasons.find(reason => reason.toLowerCase() === text) || '';
 }
 
 function timeToSeconds(value) {
@@ -224,6 +224,7 @@ function defaultStore() {
       autoCaptureCamera: true,
       autoCaptureConfigVersion: 1,
       autoFullscreen: true,
+      classicTheme: false,
     },
     employees: [],
     attendances: [],
@@ -600,8 +601,26 @@ async function performSyncNow() {
   // Review cutoff for weak biometric matches comes from the approved statutory configuration.
   try {
     const configs = await fetchFirestoreCollection('statConfig');
-    const percent = Number(configs[0]?.lowConfidenceBiometricPercent);
+    // The portal edits the most recently updated statutory row; mirror that choice instead of trusting row order.
+    const config = configs.slice().sort((a, b) => String(a.updatedAt || '').localeCompare(String(b.updatedAt || '')))[configs.length - 1] || {};
+    // A server older than 27 Oct 2026 strips everything but the biometric cutoff from this feed; say so instead of silently
+    // keeping the standard exit buttons. The portal always stamps updatedAt, so its absence identifies the old server.
+    if (configs.length && !('updatedAt' in config) && !('companyOptions' in config) && !('attendancePolicy' in config)) {
+      report.errors.push('server does not send company options / attendance policy to kiosks: update the server folder (server/kiosk.cjs) and restart it');
+    }
+    const percent = Number(config.lowConfidenceBiometricPercent);
     store.biometricPolicy = { lowConfidencePercent: Number.isFinite(percent) && percent >= 0 && percent <= 100 ? percent : LOW_CONFIDENCE_BIOMETRIC_PERCENT };
+    // Company attendance policy (opening-time grace, half day, duty-off cutoff, personal-out allowance) is applied at the punch.
+    const reasonsBefore = activeCheckoutReasons(store).join('|');
+    const policy = config.attendancePolicy;
+    store.attendancePolicy = policy && typeof policy === 'object' ? policy : {};
+    const options = config.companyOptions;
+    store.companyOptions = options && typeof options === 'object' ? options : {};
+    report.exitButtons = store.companyOptions.kioskThreeExitButtons ? 'three' : 'standard';
+    // Visible in the kiosk Activity panel, so a terminal that never receives the option can be spotted.
+    if (activeCheckoutReasons(store).join('|') !== reasonsBefore) {
+      addEvent('config', store.companyOptions.kioskThreeExitButtons ? 'Exit buttons: Duty Off / Personal Out / Office Work (company option on)' : 'Exit buttons: standard checkout list');
+    }
   } catch (error) {
     report.errors.push('statConfig: sync failed (using last known biometric review cutoff)');
   }
@@ -774,6 +793,7 @@ function kioskStoredEmployee(employee) {
     branchId: employee.branchId,
     departmentId: employee.departmentId,
     designationId: employee.designationId,
+    shift: employee.shift && typeof employee.shift === 'object' ? employee.shift : undefined,
     pictureUrl: employee.pictureUrl || '',
     fingerprintTemplates: getFingerprintTemplates(employee),
     faceDescriptors: getFaceDescriptors(employee),
@@ -846,9 +866,10 @@ function mergeEmployeeBiometricTemplates(employees, biometricRecords) {
   });
 }
 
-function computePunch(existingLog, method, terminal, evidenceId, outReason, at, shift) {
+function computePunch(existingLog, method, terminal, evidenceId, outReason, at, shift, branch, policy, options) {
+  const effectiveShift = policyShift(shift, branch, policy || {});
   if (!existingLog) {
-    const evaluated = evaluateAttendanceTimes(at, undefined, shift);
+    const evaluated = evaluateAttendanceTimes(at, undefined, effectiveShift);
     return {
       id: `att-kiosk-${Date.now()}`,
       date: todayDate(),
@@ -874,9 +895,24 @@ function computePunch(existingLog, method, terminal, evidenceId, outReason, at, 
     evidenceId: evidenceId || existingLog.evidenceId || '',
     lastPunchAt: at,
   };
-  const evaluated = evaluateAttendanceTimes(updated.punchIn, at, shift, updated.breaks);
+  const finalExit = String(outReason || '').toLowerCase() === 'duty off';
+  const evaluated = evaluateAttendanceTimes(updated.punchIn, at, effectiveShift, updated.breaks, {
+    ...(options?.officialExitsNotDeducted && { excludedBreakReasons: OFFICIAL_BREAK_REASONS }),
+    leaveIfOutBefore: finalExit ? halfTimeCutoffFor(branch, policy || {}) : undefined,
+  });
   updated.status = evaluated.status;
   updated.overtimeMinutes = evaluated.overtimeMinutes;
+  if (evaluated.policyLeave) {
+    updated.policyLeave = true;
+    updated.policyLeaveReason = 'Duty off before the branch half time';
+  } else {
+    delete updated.policyLeave;
+    delete updated.policyLeaveReason;
+  }
+  const personalMinutes = personalOutMinutes(updated.breaks);
+  const allowance = personalOutAllowanceFor(branch, policy || {});
+  updated.personalOutMinutes = personalMinutes;
+  updated.personalOutExceeded = !!(allowance && personalMinutes > allowance);
   return updated;
 }
 
@@ -924,7 +960,7 @@ function savePunch(store, employee, method, evidence, meta) {
       message: 'Select checkout reason before punching out.',
       employee: kioskEmployee(employee),
       action: 'OUT',
-      reasons: checkoutReasons,
+      reasons: activeCheckoutReasons(store),
     };
   }
   const matchKind = method === 'Camera' ? 'face' : method === 'Biometric' ? 'fingerprint' : null;
@@ -937,8 +973,9 @@ function savePunch(store, employee, method, evidence, meta) {
         evidenceId: evidence?.id,
       })
     : null;
+  const employeeBranch = (store.branches || []).find(item => item.id === employee.branchId);
   const log = {
-    ...(resumed?.log || computePunch(existing, method, store.terminal, evidence?.id, outReason, at, employee.shift)),
+    ...(resumed?.log || computePunch(existing, method, store.terminal, evidence?.id, outReason, at, employee.shift, employeeBranch, store.attendancePolicy, store.companyOptions)),
     ...(biometricMatch && { biometricMatch }),
     ...(biometricMatch?.lowConfidence && existing?.regularizationApproved === undefined && {
       regularizationRequested: true,
@@ -991,6 +1028,10 @@ function savePunch(store, employee, method, evidence, meta) {
     returnedFromBreak: isReturningFromBreak,
     breakReason: resumed?.breakReason || '',
     outReason: log.punchOut ? (log.outReason || outReason) : '',
+    policyLeave: !!log.policyLeave,
+    personalOutMinutes: log.personalOutMinutes || 0,
+    personalOutExceeded: !!log.personalOutExceeded,
+    personalOutAllowanceMinutes: personalOutAllowanceFor(employeeBranch, store.attendancePolicy || {}) || 0,
   };
 }
 
@@ -1027,6 +1068,7 @@ ipcMain.handle('kiosk:get-state', async () => {
     }),
     branches,
     assignedBranch: branches.find(branch => branch.id === store.terminal.branchId) || null,
+    outReasons: activeCheckoutReasons(store),
     syncTarget: {
       portalUrl: kioskPortalUrl,
       backend: 'PostgreSQL',
@@ -1123,6 +1165,7 @@ ipcMain.handle('kiosk:save-settings', async (_event, settings) => {
     requireCodeWithCamera: false,
     autoCaptureCamera: settings.autoCaptureCamera !== false,
     autoFullscreen: !!settings.autoFullscreen,
+    classicTheme: !!settings.classicTheme,
   };
   writeStore(store);
 

@@ -13,6 +13,9 @@ import {
 import { countScheduledWorkingDays } from './attendanceRules';
 import { registerPayrollSummary } from './attendancePeriod';
 import { establishmentRule, socialSecurityContribution } from './provincialCompliance';
+import { attendancePolicyOf, lateFineForLateDays, policyShift } from './attendancePolicy';
+import { effectiveShiftForDate } from './attendanceRules';
+import { DEDICATED_LINE_TYPES, isDeductionType } from './payrollComponents';
 import type { WageType } from '../types';
 import { resolveWageBasis } from './masterData';
 
@@ -670,6 +673,24 @@ export function computePayslipDetails(
   const absentDays = explicitAbsentDays + unpaidLeaveDays;
   const scheduledWorkingDays = countScheduledWorkingDays(year, month, employee.shift, holidays);
   const absenceDeductionBasis = statConfigs.absenceDeductionBasis || 'Calendar Days';
+
+  // Company attendance policy: escalating late fines, absences costing more than a day, early-coming reward.
+  // A day turned into leave carries no fine or reward because it is no longer a "Late" or worked day.
+  const policy = attendancePolicyOf(statConfigs);
+  const absentDeductionDays = policy.absentDeductionDays ?? 1;
+  const chargeableAbsentDays = explicitAbsentDays * absentDeductionDays + unpaidLeaveDays;
+  const lateDays = register ? registerRows!.filter(row => row.employeeId === employee.id && row.status === 'Late').length : empAtts.filter(a => a.status === 'Late').length;
+  const lateFineDeduction = lateFineForLateDays(policy.lateFineBands, lateDays);
+  const earlyRewardPerDay = Math.max(0, policy.earlyComingRewardPerDay || 0);
+  const earlyShift = policyShift(employee.shift, branch, policy);
+  const earlyDays = earlyRewardPerDay > 0 ? empAtts.filter(a => {
+    if (!a.punchIn || !['Present', 'Late', 'Half Day'].includes(a.status)) return false;
+    const dayShift = effectiveShiftForDate(earlyShift, a.date);
+    const [hours, minutes] = (dayShift?.startTime || '09:00').split(':').map(Number);
+    const [inHours, inMinutes] = a.punchIn.split(':').map(Number);
+    return inHours * 60 + inMinutes <= hours * 60 + minutes - (policy.earlyComingMinutes || 0);
+  }).length : 0;
+  const earlyComingReward = Math.round(earlyDays * earlyRewardPerDay);
   
   // Allowances calculation: For salaried employees, Basic Wage is usually configured as 100% and broken into:
   // Base Wage = 50%
@@ -725,7 +746,7 @@ export function computePayslipDetails(
     const deductionDivisor = absenceDeductionBasis === 'Scheduled Working Days' ? Math.max(1, scheduledWorkingDays)
       : absenceDeductionBasis === 'Fixed 30 Days' ? 30 : totalDaysInMonth;
     unpaidLeaveDeduction = Math.min(baseContractSalary,
-      absentDays * (baseContractSalary / deductionDivisor) + notJoinedDays * (baseContractSalary / totalDaysInMonth));
+      chargeableAbsentDays * (baseContractSalary / deductionDivisor) + notJoinedDays * (baseContractSalary / totalDaysInMonth));
     
     // Base basic earnings
     basicEarnings = basicComponent;
@@ -742,13 +763,24 @@ export function computePayslipDetails(
   const commissionEarnings = adjustmentTotal('Commission');
   const arrearsEarnings = adjustmentTotal('Arrears');
   const reimbursements = adjustmentTotal('Reimbursement');
-  const otherAdjustmentsDeduction = adjustmentTotal('Deduction');
   const manualTaxAdjustment = adjustmentTotal('Tax Adjustment');
-  const taxableAdjustments = periodAdjustments.filter(item => item.taxable && !['Deduction', 'Tax Adjustment', 'Reimbursement'].includes(item.type)).reduce((sum, item) => sum + item.amount, 0);
+  // Every other approved component is itemised: earnings (fuel, rewards, tips…) and deductions (penalties, uniform, advances…).
+  const adjustmentLines = periodAdjustments
+    .filter(item => !DEDICATED_LINE_TYPES.includes(item.type))
+    .reduce<NonNullable<Payslip['adjustmentLines']>>((lines, item) => {
+      const kind = isDeductionType(item.type) ? 'deduction' : 'earning';
+      const existing = lines.find(line => line.type === item.type);
+      if (existing) existing.amount += item.amount; else lines.push({ type: item.type, amount: item.amount, kind });
+      return lines;
+    }, []);
+  const otherEarningAdjustments = adjustmentLines.filter(line => line.kind === 'earning').reduce((sum, line) => sum + line.amount, 0);
+  // The plain "Deduction" type keeps its old single line; catalogue deductions are itemised on top of it.
+  const otherAdjustmentsDeduction = adjustmentTotal('Deduction') + adjustmentLines.filter(line => line.kind === 'deduction').reduce((sum, line) => sum + line.amount, 0);
+  const taxableAdjustments = periodAdjustments.filter(item => item.taxable && !isDeductionType(item.type) && item.type !== 'Reimbursement').reduce((sum, item) => sum + item.amount, 0);
   const baseGrossSalary = Math.round(
     basicEarnings + houseRentAllowance + conveyanceAllowance + medicalAllowance + otherAllowances + overtimePay - unpaidLeaveDeduction
   );
-  const grossSalary = baseGrossSalary + bonusEarnings + commissionEarnings + arrearsEarnings;
+  const grossSalary = baseGrossSalary + bonusEarnings + commissionEarnings + arrearsEarnings + otherEarningAdjustments + earlyComingReward;
   const perquisitesValue = Math.max(0, (employee.perquisiteVehicleMonthly || 0) + (employee.perquisiteAccommodationMonthly || 0) + (employee.perquisiteOtherMonthly || 0));
   const exemptAllowance = isDailyWager ? 0 : Math.round(Math.min(medicalAllowance, basicEarnings * Math.max(0, statConfigs.medicalAllowanceExemptPercentOfBasic ?? 0) / 100));
   const taxableGrossSalary = Math.max(0, baseGrossSalary + taxableAdjustments + perquisitesValue - exemptAllowance);
@@ -795,7 +827,7 @@ export function computePayslipDetails(
   const loanRepaymentDeduction = activeLoans.reduce((sum, l) => sum + l.monthlyInstallment, 0);
 
   const totalDeductions = Math.round(
-    incomeTaxDeduction + manualTaxAdjustment + eobiEmployeeDeduction + providentFundDeduction + loanRepaymentDeduction + otherAdjustmentsDeduction
+    incomeTaxDeduction + manualTaxAdjustment + eobiEmployeeDeduction + providentFundDeduction + loanRepaymentDeduction + otherAdjustmentsDeduction + lateFineDeduction
   );
 
   const netSalary = Math.max(0, grossSalary + reimbursements - totalDeductions);
@@ -861,6 +893,12 @@ export function computePayslipDetails(
     absenceDeductionBasis,
     attendanceSource: register ? 'Certified Register' : 'Attendance Logs',
     explicitAbsentDays,
+    lateDays,
+    lateFineDeduction,
+    earlyDays,
+    earlyComingReward,
+    absentDeductionDays,
+    adjustmentLines,
     taxableIncomeThisPeriod: taxableGrossSalary,
     perquisitesValue,
     exemptAllowance,
