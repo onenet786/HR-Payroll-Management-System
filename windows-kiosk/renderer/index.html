@@ -416,6 +416,8 @@
 
       <div class="dialog-body">
         <p class="form-help req-note">Fields marked <span class="req" aria-hidden="true">*</span> are required.</p>
+        <div class="dialog-columns">
+        <div class="dialog-col">
         <div class="dialog-section">
           <h3 class="dialog-section-title">Server Registration</h3>
           <p class="form-help" id="stRegStatus">Checking registration…</p>
@@ -462,6 +464,12 @@
         </div>
 
         <div class="dialog-section">
+          <h3 class="dialog-section-title">Sync Target</h3>
+          <div class="info-box" id="stSyncInfo">Loading…</div>
+        </div>
+        </div>
+        <div class="dialog-col">
+        <div class="dialog-section">
           <h3 class="dialog-section-title">Punch Options</h3>
           <div class="toggle-list">
             <label class="toggle-row security-sensitive">
@@ -507,11 +515,6 @@
           </div>
         </div>
 
-        <div class="dialog-section">
-          <h3 class="dialog-section-title">Sync Target</h3>
-          <div class="info-box" id="stSyncInfo">Loading…</div>
-        </div>
-
         <div class="dialog-section danger-zone">
           <h3 class="dialog-section-title">Danger Zone</h3>
           <div class="danger-action">
@@ -526,6 +529,8 @@
         <div class="dialog-section">
           <h3 class="dialog-section-title">Recent Events Log</h3>
           <div class="events-table" id="stEventsLog"></div>
+        </div>
+        </div>
         </div>
       </div>
 

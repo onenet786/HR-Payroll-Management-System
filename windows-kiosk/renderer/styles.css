@@ -1168,7 +1168,8 @@ body {
 }
 
 .dialog {
-  width: 100%; max-width: 760px;
+  /* Uses the screen: two columns of settings above 1100px instead of one narrow strip in the middle. */
+  width: 100%; max-width: min(1240px, 100%);
   max-height: calc(100vh - 40px);
   background: var(--surface);
   border: 1px solid var(--border);
@@ -1258,13 +1259,28 @@ body {
   display: flex; flex-direction: column; gap: 20px;
 }
 
-.dialog-section { display: flex; flex-direction: column; gap: 12px; }
-.dialog-section-title {
-  font-size: 12px; font-weight: 800;
-  color: var(--t3); letter-spacing: 0.1em; text-transform: uppercase;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--border);
+.dialog-columns { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
+.dialog-col { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+@media (min-width: 1100px) {
+  .dialog-columns { grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 22px; align-items: start; }
 }
+.dialog-section {
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 16px 18px 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: rgba(8, 22, 44, 0.55);
+}
+.dialog-section .toggle-row, .dialog-section .form-input, .dialog-section .events-table { background: rgba(2, 12, 23, 0.45); }
+.dialog-section-title {
+  font-size: 11px; font-weight: 800;
+  color: var(--t2); letter-spacing: 0.12em; text-transform: uppercase;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 8px;
+}
+.dialog-section-title::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--em); box-shadow: 0 0 8px var(--em); }
+.danger-zone .dialog-section-title::before { background: var(--red); box-shadow: 0 0 8px var(--red); }
 
 .form-grid {
   display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
@@ -1670,3 +1686,51 @@ select.form-input option { background: #071426; color: var(--t1); }
   display: none !important;
 }
 
+
+
+/* ─── Professional polish (all sizes) ────────────────────────────────────── */
+.topbar {
+  background: linear-gradient(180deg, rgba(8, 22, 44, 0.95), rgba(5, 15, 30, 0.92));
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+}
+.status-pill { text-transform: uppercase; letter-spacing: 0.06em; font-size: 10px; padding: 6px 11px; }
+.stats-bar { padding: 0 14px; }
+.stat-chip { padding: 7px 12px; border-radius: var(--r); background: rgba(255, 255, 255, 0.025); border: 1px solid rgba(255, 255, 255, 0.04); }
+.panel { box-shadow: 0 14px 40px rgba(0, 0, 0, 0.22); }
+.dialog-header {
+  background: linear-gradient(90deg, rgba(16, 185, 129, 0.10), transparent 60%);
+}
+.dialog-title::before {
+  content: ''; display: inline-block; width: 10px; height: 10px; margin-right: 10px;
+  border-radius: 50%; background: var(--em); box-shadow: 0 0 10px var(--em); vertical-align: 2px;
+}
+.dialog-footer { background: rgba(2, 9, 18, 0.5); }
+.dialog-body { gap: 16px; }
+.req-note { margin-bottom: -4px; }
+
+/* ─── Large monitors: the three-panel workspace and the type scale grow with the screen ─── */
+@media (min-width: 1600px) {
+  .shell { padding: 18px; gap: 12px; }
+  .workspace { grid-template-columns: 370px minmax(0, 1fr) 330px; gap: 12px; }
+  .topbar { height: 78px; padding: 0 24px; }
+  .brand-logo { width: 48px; height: 48px; font-size: 15px; }
+  .brand-name { font-size: 16px; }
+  .clock-time { font-size: 30px; }
+  .stats-bar { height: 58px; gap: 16px; padding: 0 18px; }
+  .stat-val { font-size: 24px; }
+  .input-panel { padding: 18px; }
+  .dialog { max-width: min(1320px, 100%); }
+}
+@media (min-width: 1900px) {
+  .shell { padding: 22px; gap: 14px; }
+  .workspace { grid-template-columns: 420px minmax(0, 1fr) 380px; gap: 14px; }
+  .topbar { height: 84px; }
+  .clock-time { font-size: 34px; }
+  .mode-btn { padding: 10px 20px; font-size: 14px; }
+  .dialog { max-width: min(1440px, 100%); }
+  .dialog-body { padding: 24px 28px; }
+}
+@media (min-width: 2400px) {
+  :root { font-size: 15px; }
+  .workspace { grid-template-columns: 480px minmax(0, 1fr) 420px; }
+}

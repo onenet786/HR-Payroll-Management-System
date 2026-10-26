@@ -175,6 +175,8 @@ const kioskPortalUrl = (process.env.PORTAL_URL || process.env.VITE_API_BASE_URL 
 // screen said "Loading".
 const KIOSK_HTTP_TIMEOUT_MS = 10000;
 const STARTUP_SYNC_TIMEOUT_MS = 8000;
+// Set whenever the attendance server answers at all (any HTTP status); a sync that never moves it ran offline.
+let lastServerContact = 0;
 const withTimeout = (promise, ms, label) => new Promise((resolve, reject) => {
   const timer = setTimeout(() => reject(new Error(`${label} is taking too long; continuing with the local cache`)), ms);
   promise.then(value => { clearTimeout(timer); resolve(value); }, error => { clearTimeout(timer); reject(error); });
@@ -481,6 +483,7 @@ function requestJson(method, url, body) {
     const deviceKey = readDeviceRegistration()?.key;
     if (deviceKey) headers['X-Kiosk-Token'] = deviceKey;
     const req = transport.request(targetUrl, { method, headers }, res => {
+      lastServerContact = Date.now();
       let data = '';
       res.setEncoding('utf8');
       res.on('data', chunk => { data += chunk; });
@@ -580,7 +583,8 @@ function performSync() {
 
 async function performSyncNow() {
   const store = readStore();
-  const report = { employees: 0, attendances: 0, branches: 0, departments: 0, designations: 0, biometricTemplates: 0, pushed: 0, changed: false, errors: [] };
+  const report = { employees: 0, attendances: 0, branches: 0, departments: 0, designations: 0, biometricTemplates: 0, pushed: 0, changed: false, errors: [], reachable: true };
+  const contactBefore = lastServerContact;
   // Without a device key the server refuses every download, so the kiosk keeps matching an old employee list.
   report.notRegistered = !readDeviceRegistration();
 
@@ -685,7 +689,9 @@ async function performSyncNow() {
   store.pendingSync = remaining;
   store.employees = mergeEmployeeBiometricTemplates(store.employees || [], store.biometricTemplates || []);
   // Only a sync that reached the server counts; otherwise "last synced" would hide that nothing downloaded.
-  if (!report.notRegistered) store.lastSync = new Date().toISOString();
+  report.reachable = lastServerContact > contactBefore;
+  if (!report.reachable) report.errors.push('attendance server unreachable (offline); punches stay queued');
+  if (report.reachable && !report.notRegistered) store.lastSync = new Date().toISOString();
   store.lastSyncReport = report;
   writeStore(store);
   addEvent('sync', 'Kiosk sync completed', report);

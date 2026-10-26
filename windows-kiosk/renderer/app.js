@@ -1936,7 +1936,7 @@ async function refreshStats() {
 
     if (stats.lastSync) {
       const t = new Date(stats.lastSync);
-      el.syncStatus.textContent = `Last sync: ${t.toLocaleTimeString('en-GB', { hour12: false, hour: '2-digit', minute: '2-digit' })}`;
+      el.syncStatus.textContent = `Last sync: ${t.toLocaleTimeString('en-GB', { hour12: false, hour: '2-digit', minute: '2-digit' })}${serverReachable === false ? ' · offline, punches queued' : ''}`;
     } else {
       el.syncStatus.textContent = 'Not yet synced';
     }
@@ -2139,6 +2139,13 @@ async function renderEventLog() {
 }
 
 // ─── Sync ────────────────────────────────────────────────────────────────────
+// null until the first sync; false when the last sync never reached the server (Wi-Fi/LAN off, server down).
+let serverReachable = null;
+function onlinePillState(report) {
+  if (report?.reachable === false || report?.notRegistered) return 'offline';
+  return (report?.errors?.length || 0) > 0 ? 'warning' : 'online';
+}
+
 async function performSync() {
   el.syncBtn.classList.add('spinning');
   el.syncStatus.textContent = 'Syncing…';
@@ -2148,12 +2155,15 @@ async function performSync() {
     updateRegistrationBanner();
     applyModeSecurity();
     const errs = report.errors?.length || 0;
-    el.syncStatus.textContent = report.notRegistered
-      ? 'Not registered — open Settings to register this kiosk'
-      : errs
-        ? `${errs} sync warning(s)`
-        : `Synced: ${report.employees} emp, ${report.biometricTemplates || 0} bio, ${report.departments || 0} dept, ${report.pushed} pushed`;
-    setPill(el.pillOnline, report.notRegistered ? 'offline' : 'online');
+    serverReachable = report.reachable !== false;
+    el.syncStatus.textContent = !serverReachable
+      ? 'Server unreachable — offline mode, punches are queued'
+      : report.notRegistered
+        ? 'Not registered — open Settings to register this kiosk'
+        : errs
+          ? `${errs} sync warning(s)`
+          : `Synced: ${report.employees} emp, ${report.biometricTemplates || 0} bio, ${report.departments || 0} dept, ${report.pushed} pushed`;
+    setPill(el.pillOnline, onlinePillState(report));
     renderDirectory(el.dirSearch.value);
     refreshTodayFeed();
     refreshStats();
@@ -2646,10 +2656,14 @@ function bindEvents() {
   // Auto-sync complete notification from main process
   api.onSyncComplete(data => {
     const errs = data?.report?.errors?.length || 0;
-    el.syncStatus.textContent = errs
-      ? `Auto-sync: ${errs} warning(s)`
-      : `Auto-synced at ${new Date(data.timestamp).toLocaleTimeString('en-GB', { hour12: false, hour: '2-digit', minute: '2-digit' })}`;
+    serverReachable = data?.report?.reachable !== false;
+    el.syncStatus.textContent = !serverReachable
+      ? 'Server unreachable — offline mode, punches are queued'
+      : errs
+        ? `Auto-sync: ${errs} warning(s)`
+        : `Auto-synced at ${new Date(data.timestamp).toLocaleTimeString('en-GB', { hour12: false, hour: '2-digit', minute: '2-digit' })}`;
     setPill(el.pillSync, errs > 0 ? 'warning' : 'online');
+    setPill(el.pillOnline, onlinePillState(data?.report));
     // Refresh state after auto-sync
     api.getState().then(s => {
       kioskState = s;
@@ -2707,6 +2721,9 @@ async function boot() {
     // Initial UI
     setPill(el.pillBridge, kioskState.bridgeRunning ? 'online' : 'offline');
     setPill(el.pillOnline, 'warning');
+    // The OS knows first when the cable or Wi-Fi goes: flip the pill at once, and re-sync as soon as it is back.
+    window.addEventListener('offline', () => { serverReachable = false; setPill(el.pillOnline, 'offline'); });
+    window.addEventListener('online', () => { performSync().catch(() => {}); });
     setPill(el.pillSync, (kioskState.pendingSync || []).length > 0 ? 'warning' : 'online');
 
     refreshTodayFeed();
