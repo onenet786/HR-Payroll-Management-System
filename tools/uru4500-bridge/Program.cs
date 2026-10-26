@@ -16,12 +16,21 @@ namespace Uru4500Bridge
 {
     internal static class Program
     {
-        private const int Port = 15896;
+        // ws://127.0.0.1:15896 by default; "--port N" lets a second copy run for diagnostics without touching a live bridge.
+        private static int Port = 15896;
         private static readonly object CaptureLock = new object();
         private static readonly string LogPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "bridge.log");
 
         private static void Main(string[] args)
         {
+            for (var i = 0; i + 1 < args.Length; i++)
+            {
+                int port;
+                if (args[i].Equals("--port", StringComparison.OrdinalIgnoreCase) && int.TryParse(args[i + 1], out port) && port > 0 && port < 65536)
+                {
+                    Port = port;
+                }
+            }
             if (args.Length > 0 && args[0].Equals("--service", StringComparison.OrdinalIgnoreCase))
             {
                 ServiceBase.Run(new BridgeService());
@@ -33,8 +42,14 @@ namespace Uru4500Bridge
             {
                 server.Start();
                 Console.WriteLine("Biometric bridge listening on ws://localhost:" + Port);
-                Console.WriteLine("Keep this window open while using the HR biometric module.");
                 Thread.Sleep(Timeout.Infinite);
+            }
+            catch (SocketException ex)
+            {
+                // Started twice (auto-start entry plus the kiosk, or a second logon): the running copy serves
+                // everyone, so this one leaves quietly instead of crashing with an error dialog.
+                Log("Port " + Port + " is already in use (" + ex.SocketErrorCode + "); another bridge is running, exiting.");
+                return;
             }
             catch (Exception ex)
             {
@@ -212,7 +227,8 @@ namespace Uru4500Bridge
                 foreach (Reader reader in readers)
                 {
                     var sn = reader.Description.SerialNumber ?? "URU4500";
-                    var name = reader.Description.Name ?? "U.are.U 4500";
+                    var name = FriendlyReaderName(reader.Description.Name);
+                    Log("DigitalPersona reader detected: " + name);
                     parts.Add("{\"sn\":\"" + Json(sn) + "\",\"id\":\"" + Json(sn) + "\",\"provider\":\"digitalpersona\",\"type\":\"" + Json(name) + "\",\"name\":\"" + Json(name) + "\"}");
                 }
             }
@@ -260,7 +276,8 @@ namespace Uru4500Bridge
                 }
                 catch (Exception ex)
                 {
-                    return ErrorJson("Fingerprint capture failed.");
+                    Log("Capture failed: " + ex.Message);
+                    return ErrorJson("Fingerprint capture failed: " + ex.Message);
                 }
             }
         }
@@ -351,6 +368,25 @@ namespace Uru4500Bridge
                     var bestEmployeeId = "";
                     var bestScore = int.MaxValue;
 
+                    // Templates only match on the reader family that made them: a SecuGen template never matches a
+                    // U.are.U capture and vice versa. Say so instead of silently reporting "not recognized".
+                    var secuGenTemplates = 0;
+                    var digitalPersonaTemplates = 0;
+                    foreach (var item in gallery)
+                    {
+                        if (item.Template.StartsWith("SGFDX:", StringComparison.OrdinalIgnoreCase)) secuGenTemplates++;
+                        else digitalPersonaTemplates++;
+                    }
+                    if (captured.Provider == "secugen" && secuGenTemplates == 0)
+                    {
+                        return ErrorJson("Finger captured on the SecuGen reader, but the enrolled templates were made on a U.are.U (HID DigitalPersona) reader. Enroll this employee on the same reader type, or plug in the U.are.U reader.");
+                    }
+                    if (captured.Provider != "secugen" && digitalPersonaTemplates == 0)
+                    {
+                        return ErrorJson("Finger captured on the U.are.U (HID DigitalPersona) reader, but the enrolled templates were made on a SecuGen reader. Enroll this employee on the same reader type, or plug in the SecuGen reader.");
+                    }
+                    var importFailures = 0;
+
                     if (captured.Provider == "secugen")
                     {
                         foreach (var item in gallery)
@@ -382,7 +418,8 @@ namespace Uru4500Bridge
                                 var enrolledResult = Importer.ImportFmd(bytes, Constants.Formats.Fmd.ANSI, Constants.Formats.Fmd.ANSI);
                                 if (enrolledResult == null || enrolledResult.Data == null || enrolledResult.ResultCode != Constants.ResultCode.DP_SUCCESS)
                                 {
-                                    Log("ImportFmd failed for employee=[REDACTED]");
+                                    importFailures++;
+                                    Log("ImportFmd failed for employee=[REDACTED] result=" + (enrolledResult == null ? "null" : enrolledResult.ResultCode.ToString()));
                                     continue;
                                 }
 
@@ -400,6 +437,13 @@ namespace Uru4500Bridge
                         }
                     }
 
+                    if (captured.Provider != "secugen" && digitalPersonaTemplates > 0 && importFailures == digitalPersonaTemplates)
+                    {
+                        // Every stored template was rejected by the SDK: they were not produced by a U.are.U capture
+                        // (typically saved from the browser "HID Diagnostic" or "Simulate" mode of the HR module).
+                        return ErrorJson("None of the enrolled templates can be read by the U.are.U SDK, so they were not captured on a real reader. Re-enroll this employee in the HR biometric module using Connect Bridge with the reader attached.");
+                    }
+
                     var matched = bestEmployeeId.Length > 0 && bestScore <= threshold;
                     return "{\"status\":\"IdentifyComplete\",\"matched\":" + (matched ? "true" : "false") +
                         ",\"employeeId\":\"" + Json(matched ? bestEmployeeId : "") +
@@ -412,12 +456,52 @@ namespace Uru4500Bridge
                 }
                 catch (Exception ex)
                 {
-                    return ErrorJson("Fingerprint identification failed.");
+                    Log("Identify failed: " + ex.Message);
+                    return ErrorJson("Fingerprint identification failed: " + ex.Message);
                 }
             }
         }
 
+        // Tries the U.are.U (HID DigitalPersona) reader first, then the SecuGen reader. A U.are.U failure (driver,
+        // busy reader, timeout) no longer hides a working SecuGen reader, and the final error says what happened.
         private static CapturedFmd CaptureFmd()
+        {
+            Exception digitalPersonaError = null;
+            try
+            {
+                var captured = CaptureDigitalPersonaTemplate();
+                if (captured != null) return captured;
+            }
+            catch (Exception ex)
+            {
+                digitalPersonaError = ex;
+                Log("DigitalPersona capture failed: " + ex.Message);
+            }
+
+            var secuGenAvailable = FindSecuGenAssemblyPath().Length > 0 || FindSecuGenNativePath().Length > 0;
+            if (secuGenAvailable)
+            {
+                Log(digitalPersonaError == null ? "No DigitalPersona reader found; trying SecuGen FDx SDK." : "Falling back to the SecuGen FDx SDK.");
+                try
+                {
+                    return CaptureSecuGenTemplate();
+                }
+                catch (Exception ex)
+                {
+                    Log("SecuGen capture failed: " + ex.Message);
+                    if (digitalPersonaError != null)
+                    {
+                        throw new Exception("U.are.U reader: " + digitalPersonaError.Message + " | SecuGen reader: " + ex.Message);
+                    }
+                    throw new Exception("No U.are.U reader was detected and the SecuGen reader failed: " + ex.Message);
+                }
+            }
+
+            if (digitalPersonaError != null) throw new Exception("U.are.U reader: " + digitalPersonaError.Message);
+            throw new Exception("No fingerprint reader was detected. Plug in the U.are.U 4500 (HID DigitalPersona) or SecuGen Hamster Pro reader and check that its driver is installed.");
+        }
+
+        private static CapturedFmd CaptureDigitalPersonaTemplate()
         {
             Reader reader = null;
             try
@@ -426,8 +510,7 @@ namespace Uru4500Bridge
                 Log("ReaderCollection.GetReaders count=" + (readers == null ? 0 : readers.Count));
                 if (readers == null || readers.Count == 0)
                 {
-                    Log("No DigitalPersona reader found; trying SecuGen FDx SDK.");
-                    return CaptureSecuGenTemplate();
+                    return null;
                 }
 
                 reader = readers[0];
@@ -467,7 +550,7 @@ namespace Uru4500Bridge
                 }
 
                 var sn = reader.Description.SerialNumber ?? "URU4500";
-                var name = reader.Description.Name ?? "U.are.U 4500";
+                var name = FriendlyReaderName(reader.Description.Name);
                 return new CapturedFmd
                 {
                     Fmd = fmd.Data,
@@ -1034,6 +1117,17 @@ namespace Uru4500Bridge
             frame.AddRange(payload);
             var bytes = frame.ToArray();
             stream.Write(bytes, 0, bytes.Length);
+        }
+
+        // The SDK reports the USB device path (e.g. "05ba&000a&0103{guid}") as the name; show the product instead.
+        private static string FriendlyReaderName(string name)
+        {
+            var raw = (name ?? "").Trim();
+            if (raw.Length == 0 || raw.IndexOf('{') >= 0 || raw.StartsWith("05ba&", StringComparison.OrdinalIgnoreCase))
+            {
+                return raw.IndexOf("&000a", StringComparison.OrdinalIgnoreCase) >= 0 ? "DigitalPersona U.are.U 4500 Fingerprint Reader" : "DigitalPersona U.are.U Fingerprint Reader";
+            }
+            return raw;
         }
 
         private static string ErrorJson(string message)

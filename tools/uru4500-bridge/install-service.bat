@@ -8,6 +8,18 @@ if errorlevel 1 (
   exit /b 1
 )
 
+echo.
+echo WARNING: a Windows service runs in session 0, where the DigitalPersona SDK cannot see
+echo U.are.U / HID 4500 readers at all (SecuGen readers still work, which hides the problem).
+echo Use install-startup-task.bat instead, or let the Attendance Kiosk start the bridge itself.
+echo Only continue if every reader on this PC is a SecuGen reader.
+set "CONFIRM="
+set /p CONFIRM=Type YES to install the service anyway:
+if /i not "%CONFIRM%"=="YES" (
+  echo Cancelled. Nothing was changed.
+  exit /b 1
+)
+
 call "%~dp0build.bat" || exit /b 1
 
 set "EXE=%~dp0bin\URU4500Bridge.exe"

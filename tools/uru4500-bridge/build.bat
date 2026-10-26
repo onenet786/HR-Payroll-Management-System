@@ -19,7 +19,7 @@ if not exist "%SDK%\Lib\.NET\DPUruNet.dll" (
 
 if not exist "%OUT%" mkdir "%OUT%"
 
-"%CSC%" /nologo /platform:x64 /target:exe /out:"%OUT%\URU4500Bridge.exe" /reference:System.ServiceProcess.dll /reference:"%SDK%\Lib\.NET\DPUruNet.dll" "%~dp0Program.cs"
+"%CSC%" /nologo /platform:x64 /target:winexe /out:"%OUT%\URU4500Bridge.exe" /reference:System.ServiceProcess.dll /reference:"%SDK%\Lib\.NET\DPUruNet.dll" "%~dp0Program.cs"
 if errorlevel 1 exit /b 1
 
 copy /Y "%SDK%\Lib\.NET\DPUruNet.dll" "%OUT%\" >nul

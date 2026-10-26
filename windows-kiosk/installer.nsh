@@ -1,17 +1,18 @@
 ; Custom steps for the kiosk installer (all-users install, runs as administrator).
 ;
-; The fingerprint bridge (URU4500Bridge.exe, bundled under resources\uru4500-bridge) is registered as an
-; auto-start Windows service, so the reader works from boot, before anyone logs in, and restarts on its own
-; if it crashes. The kiosk only starts its own copy when that service is missing or stopped.
+; The fingerprint bridge (URU4500Bridge.exe, bundled under resources\uru4500-bridge) is started by the kiosk
+; itself, inside the logged-in user's session. Earlier versions registered it as a Windows service; a service
+; runs in session 0, where the DigitalPersona SDK cannot see U.are.U / HID readers at all (SecuGen readers
+; still worked, which hid the problem). Setup therefore removes any existing service on install or upgrade.
 
 !define BRIDGE_SERVICE "URU4500Bridge"
 ; Auto-start entry the kiosk writes for itself (Electron's setLoginItemSettings).
 !define AUTOSTART_VALUE "electron.app.${PRODUCT_NAME}"
 
-; Order on every install or upgrade: (1) customCheckAppRunning stops the kiosk, the bridge service and any
+; Order on every install or upgrade: (1) customCheckAppRunning stops the kiosk, the legacy bridge service and any
 ; stray copies; (2) electron-builder silently runs the previous version's uninstaller (per-user and all-users
 ; installs alike), keeping queued punches, settings and the device key, which live in the user profile;
-; (3) the new files are copied and customInstall re-registers the bridge service.
+; (3) the new files are copied and customInstall removes the legacy service registration for good.
 
 ; Replaces electron-builder's "is the app running?" check, which showed "cannot be closed" because the kiosk
 ; auto-starts at Windows login and runs as several processes. This version stops the bridge service, closes
@@ -102,40 +103,37 @@
 !macro customInstall
   Var /GLOBAL bridgeExe
   StrCpy $bridgeExe "$INSTDIR\resources\uru4500-bridge\URU4500Bridge.exe"
+  ; The bridge must run in the user's session; remove the legacy service and the old per-user startup task so
+  ; neither grabs port 15896 from session 0 or starts a second copy.
+  nsExec::Exec `"$SYSDIR\sc.exe" query ${BRIDGE_SERVICE}`
+  Pop $0
+  ${If} $0 == 0
+    DetailPrint "Removing the legacy fingerprint bridge Windows service (readers are now served from the user session)..."
+    nsExec::Exec `"$SYSDIR\sc.exe" stop ${BRIDGE_SERVICE}`
+    Pop $0
+    nsExec::Exec `"$SYSDIR\sc.exe" delete ${BRIDGE_SERVICE}`
+    Pop $0
+  ${EndIf}
+  nsExec::Exec `"$SYSDIR\schtasks.exe" /Delete /TN ${BRIDGE_SERVICE} /F`
+  Pop $0
   ${If} ${FileExists} "$bridgeExe"
-    DetailPrint "Installing the fingerprint bridge Windows service..."
-    ; An older per-user startup task would launch a second copy that fights the service for the port.
-    nsExec::Exec `"$SYSDIR\schtasks.exe" /Delete /TN ${BRIDGE_SERVICE} /F`
-    Pop $0
-    nsExec::Exec `"$SYSDIR\sc.exe" query ${BRIDGE_SERVICE}`
-    Pop $0
-    ${If} $0 == 0
-      ; Already registered (earlier kiosk or tools\uru4500-bridge\install-service.bat): point it at this copy.
-      nsExec::Exec `"$SYSDIR\sc.exe" config ${BRIDGE_SERVICE} binPath= "\"$bridgeExe\" --service" start= auto DisplayName= "URU 4500 Fingerprint Bridge"`
-    ${Else}
-      nsExec::Exec `"$SYSDIR\sc.exe" create ${BRIDGE_SERVICE} binPath= "\"$bridgeExe\" --service" start= auto DisplayName= "URU 4500 Fingerprint Bridge"`
-    ${EndIf}
-    Pop $0
-    ${If} $0 != 0
-      DetailPrint "Could not register the fingerprint bridge service (error $0); the kiosk will start the bridge itself."
-    ${Else}
-      nsExec::Exec `"$SYSDIR\sc.exe" description ${BRIDGE_SERVICE} "Local fingerprint reader bridge (ws://127.0.0.1:15896) for ${PRODUCT_NAME}."`
-      Pop $0
-      nsExec::Exec `"$SYSDIR\sc.exe" failure ${BRIDGE_SERVICE} reset= 86400 actions= restart/5000/restart/10000/restart/30000`
-      Pop $0
-      nsExec::Exec `"$SYSDIR\sc.exe" start ${BRIDGE_SERVICE}`
-      Pop $0
-    ${EndIf}
+    ; Auto-start for every user at logon, inside that user's session (the service-like behaviour the reader
+    ; needs). The kiosk still starts and watches the bridge itself; a second copy exits quietly.
+    DetailPrint "Registering the fingerprint bridge to start at every Windows login..."
+    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "${BRIDGE_SERVICE}" '"$bridgeExe"'
+    Exec '"$bridgeExe"'
   ${EndIf}
 !macroend
 
 !macro customUnInstall
   nsExec::Exec `"$SYSDIR\sc.exe" stop ${BRIDGE_SERVICE}`
   Pop $0
-  ; On an upgrade the new version re-points the service at its own copy, so keep the registration.
+  nsExec::Exec `"$SYSDIR\sc.exe" delete ${BRIDGE_SERVICE}`
+  Pop $0
   ${IfNot} ${isUpdated}
-    nsExec::Exec `"$SYSDIR\sc.exe" delete ${BRIDGE_SERVICE}`
+    nsExec::Exec `"$SYSDIR\taskkill.exe" /F /IM "URU4500Bridge.exe"`
     Pop $0
+    DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "${BRIDGE_SERVICE}"
     ; A full uninstall also stops the kiosk starting at Windows login.
     DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "${AUTOSTART_VALUE}"
   ${EndIf}

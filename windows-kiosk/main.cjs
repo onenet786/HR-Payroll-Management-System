@@ -170,6 +170,16 @@ function closeSplashWindow() {
 
 const kioskPortalUrl = (process.env.PORTAL_URL || process.env.VITE_API_BASE_URL || process.env.APP_URL || 'https://attendance.binishaqsoft.com').replace(/\/$/, '');
 
+// Offline-first: every server call gives up after this long, so a dead, slow or captive network can never stall
+// the terminal. Without it a sync of seven collections could sit on TCP connects for minutes while the splash
+// screen said "Loading".
+const KIOSK_HTTP_TIMEOUT_MS = 10000;
+const STARTUP_SYNC_TIMEOUT_MS = 8000;
+const withTimeout = (promise, ms, label) => new Promise((resolve, reject) => {
+  const timer = setTimeout(() => reject(new Error(`${label} is taking too long; continuing with the local cache`)), ms);
+  promise.then(value => { clearTimeout(timer); resolve(value); }, error => { clearTimeout(timer); reject(error); });
+});
+
 const checkoutReasons = [
   'End of Shift',
   'Lunch Break',
@@ -337,6 +347,18 @@ async function ensureBiometricDriverHost() {
   return { ...started, running: await isBridgePortOpen() };
 }
 
+// A bridge registered as a Windows service (older installers, tools\uru4500-bridge\install-service.bat) runs
+// in session 0, where the DigitalPersona SDK enumerates no U.are.U / HID reader at all; SecuGen readers still
+// work there, which hides the cause. The kiosk cannot remove a service itself, so it says so loudly.
+let serviceWarningShown = false;
+async function warnIfBridgeRunsAsService() {
+  if (process.platform !== 'win32' || serviceWarningShown) return;
+  const state = await queryBridgeService();
+  if (state !== 'RUNNING' && state !== 'START_PENDING') return;
+  serviceWarningShown = true;
+  addEvent('error', 'The fingerprint bridge is running as a Windows service, where U.are.U / HID DigitalPersona readers cannot be detected. Install the latest kiosk setup (it removes the service) or run tools\\uru4500-bridge\\uninstall-service.bat as administrator, then restart the kiosk so it starts the bridge in this session.');
+}
+
 function startDriverWatchdog() {
   if (driverWatchTimer) clearInterval(driverWatchTimer);
   driverWatchTimer = setInterval(async () => {
@@ -480,6 +502,9 @@ function requestJson(method, url, body) {
       });
     });
     req.on('error', reject);
+    req.setTimeout(KIOSK_HTTP_TIMEOUT_MS, () => {
+      req.destroy(Object.assign(new Error('The attendance server did not respond in time'), { code: 'ETIMEDOUT' }));
+    });
     if (payload) req.write(payload);
     req.end();
   });
@@ -543,7 +568,17 @@ async function loadCrossBranchAttendanceContext(store, employeeId) {
 
 // ─── Core Sync Logic ────────────────────────────────────────────────────────
 
-async function performSync() {
+// One sync at a time: the startup sync, the renderer's first sync and the 5-minute timer can now overlap, and two
+// syncs writing the store together could push the same queued punch twice or drop each other's changes.
+let syncInFlight = null;
+function performSync() {
+  if (!syncInFlight) {
+    syncInFlight = performSyncNow().finally(() => { syncInFlight = null; });
+  }
+  return syncInFlight;
+}
+
+async function performSyncNow() {
   const store = readStore();
   const report = { employees: 0, attendances: 0, branches: 0, departments: 0, designations: 0, biometricTemplates: 0, pushed: 0, changed: false, errors: [] };
   // Without a device key the server refuses every download, so the kiosk keeps matching an old employee list.
@@ -1569,15 +1604,19 @@ if (!gotLock) {
 
     await ensureBiometricDriverHost();
     startDriverWatchdog();
+    warnIfBridgeRunsAsService();
 
-    try {
-      const result = await performSync();
-      addEvent('sync', result.report.changed ? 'Startup sync updated local kiosk data' : 'Startup sync checked local kiosk data', result.report);
-    } catch (err) {
-      addEvent('sync', 'Startup sync failed; kiosk will use local cache');
-    }
-
+    // The kiosk opens from its local cache straight away; the startup sync runs in the background and is bounded,
+    // so with no internet the terminal still comes up and punches queue for the next successful sync.
     createWindow();
+    withTimeout(performSync(), STARTUP_SYNC_TIMEOUT_MS, 'Startup sync')
+      .then(result => {
+        addEvent('sync', result.report.changed ? 'Startup sync updated local kiosk data' : 'Startup sync checked local kiosk data', result.report);
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('kiosk:sync-complete', { report: result.report, timestamp: result.store.lastSync });
+        }
+      })
+      .catch(err => addEvent('sync', `Startup sync skipped; kiosk is using the local cache (${err?.message || err})`));
 
     // Auto-sync every 5 minutes after window is ready
     mainWindow.once('ready-to-show', () => {

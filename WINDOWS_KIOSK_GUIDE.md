@@ -33,8 +33,16 @@ dist-kiosk
    - For SecuGen Hamster Pro (HUPx), the bridge must be able to load `SecuGen.FDxSDKPro.Windows.dll` and `sgfplib.dll`.
    - Install the SecuGen FDx SDK/driver, copy both DLLs beside `URU4500Bridge.exe`, or set `SECUGEN_FDX_SDK` to the SDK `bin` folder before building/running the bridge.
 2. Enroll employee fingerprints from the HR biometric module so `fingerprintTemplates` are saved on employee records.
-3. Start the kiosk. It automatically starts `URU4500Bridge.exe`.
-4. Use Fingerprint mode. The kiosk sends enrolled templates to the bridge, captures a live finger, and the native SDK returns the matched employee.
+   - Enroll with **Connect Bridge** and the reader attached. The **HID Diagnostic** and **Simulate** buttons only test the browser and the UI; their captures are not real templates and are refused for enrollment.
+   - Enroll on the **same reader family the kiosk uses**. A template made on a U.are.U / HID DigitalPersona reader never matches a finger captured on a SecuGen reader, and vice versa. The kiosk reports this mismatch by name.
+3. The bridge starts by itself at every Windows login (the kiosk setup registers `URU4500Bridge.exe` under the all-users Run key), and the kiosk also starts and watches it. Do **not** install the bridge as a Windows service: a service runs in session 0, where the DigitalPersona SDK cannot see U.are.U / HID readers (SecuGen still works there, which hides the problem). The kiosk setup removes a legacy service automatically.
+   - HR PCs that use only the web biometric module (no kiosk): run `tools\uru4500-bridge\install-autostart.bat` once as administrator. It removes any old service and registers the same login auto-start; `uninstall-autostart.bat` reverses it.
+   - A second copy started while one is already listening on port 15896 exits quietly, so the Run entry and the kiosk never fight.
+4. Use Fingerprint mode. The kiosk sends enrolled templates to the bridge, captures a live finger, and the native SDK returns the matched employee. The bridge tries the U.are.U reader first and falls back to SecuGen; **Test Fingerprint Scanner** in kiosk settings shows which reader captured and the exact reason when a capture fails.
+
+## Working Without Internet
+
+The kiosk opens from its local cache immediately; it never waits for the server. The startup sync runs in the background for at most 8 seconds and every server request gives up after 10 seconds. Punches made offline are queued and uploaded on the next successful sync (automatic every 5 minutes, or the Sync button).
 
 The bridge now supports:
 

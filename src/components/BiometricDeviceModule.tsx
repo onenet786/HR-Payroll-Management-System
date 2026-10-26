@@ -566,7 +566,12 @@ export function BiometricDeviceModule({
       enrollSamples.length < 3
     ) {
       prevCapturedRef.current = capturedTemplate;
-      if (captureQuality >= 60) {
+      if (isSimMode || isWebHID) {
+        // Simulation and the browser HID diagnostic produce made-up template bytes: they would be saved to the
+        // employee and the kiosk could never match them. Only the native bridge capture is enrollable.
+        setEnrollMsg({ type: 'err', text: `${isSimMode ? 'Simulated' : 'Browser HID diagnostic'} captures cannot be enrolled. Press Connect Bridge and capture on the real reader.` });
+        log('✗ Diagnostic capture rejected for enrollment; use Connect Bridge.');
+      } else if (captureQuality >= 60) {
         setEnrollSamples(prev => [...prev, capturedTemplate!]);
         log(`✓ Enroll sample ${enrollSamples.length + 1}/3 accepted (quality: ${captureQuality}%)`);
       } else {
@@ -574,7 +579,7 @@ export function BiometricDeviceModule({
         setTimeout(() => setEnrollMsg(null), 3000);
       }
     }
-  }, [captureState, capturedTemplate, captureQuality, activeTab, enrollSamples.length, log]);
+  }, [captureState, capturedTemplate, captureQuality, activeTab, enrollSamples.length, isSimMode, isWebHID, log]);
 
   const handleEnrollCapture = () => {
     if (enrollSamples.length >= 3) return;
@@ -584,6 +589,10 @@ export function BiometricDeviceModule({
   const handleSaveEnrollment = async () => {
     const emp = employees.find(e => e.id === enrollEmpId);
     if (!emp || enrollSamples.length === 0) return;
+    if (isSimMode || isWebHID) {
+      setEnrollMsg({ type: 'err', text: 'Simulated or diagnostic samples are never saved. Connect the bridge and enroll on the real reader.' });
+      return;
+    }
     const updated: Employee = { ...emp, fingerprintTemplates: enrollSamples };
     try {
       await onUpdateEmployee(updated);
@@ -955,6 +964,11 @@ export function BiometricDeviceModule({
   const verifyAndPunch = useCallback(() => {
     const emp = employees.find(e => e.id === attEmpId);
     if (!emp) { setAttResult('failed'); setAttSummary('Employee not found.'); return; }
+    if (isSimMode || isWebHID) {
+      setAttResult('failed');
+      setAttSummary('Simulated or diagnostic captures cannot mark attendance. Use Connect Bridge or the kiosk.');
+      return;
+    }
 
     const hasTemplates = (emp.fingerprintTemplates?.length || 0) > 0;
     if (!hasTemplates) {
@@ -994,7 +1008,7 @@ export function BiometricDeviceModule({
       setCaptureState('idle');
       setCaptureQuality(0);
     }, 5000);
-  }, [attEmpId, employees, attendances, captureQuality, onSimulatePunch, log]);
+  }, [attEmpId, employees, attendances, captureQuality, onSimulatePunch, isSimMode, isWebHID, log]);
 
   // ── Derived data ──────────────────────────────────────────────────────────────
   const todayBioLogs = attendances.filter(a => a.date === todayStr() && a.method === 'Biometric');
