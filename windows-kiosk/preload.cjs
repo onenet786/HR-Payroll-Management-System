@@ -26,11 +26,17 @@ contextBridge.exposeInMainWorld('kioskApi', {
   unregisterDevice: () => ipcRenderer.invoke('kiosk:unregister-device'),
   punchByCode: payload => ipcRenderer.invoke('kiosk:punch-by-code', payload),
   punchCamera: invokeCameraPunch,
-  beginCameraLiveness: () => ipcRenderer.invoke('kiosk:begin-camera-liveness'),
+  beginCameraLiveness: cameraId => ipcRenderer.invoke('kiosk:begin-camera-liveness', typeof cameraId === 'string' ? cameraId.slice(0, 16) : undefined),
   cancelCameraLiveness: challengeId => ipcRenderer.invoke('kiosk:cancel-camera-liveness', challengeId),
   punchFingerprint: payload => ipcRenderer.invoke('kiosk:punch-fingerprint', payload),
   testFingerprintScanner: () => ipcRenderer.invoke('kiosk:test-fingerprint-scanner'),
   saveEvidence: payload => ipcRenderer.invoke('kiosk:save-evidence', payload),
+  startIpCameraStream: cameraIds => ipcRenderer.invoke('kiosk:start-ip-camera-stream', Array.isArray(cameraIds) ? cameraIds.map(String).slice(0, 4) : undefined),
+  stopIpCameraStream: () => ipcRenderer.invoke('kiosk:stop-ip-camera-stream'),
+  onIpCameraFrame: (callback) => {
+    ipcRenderer.on('kiosk:ip-camera-frame', (_event, data) => callback(data));
+  },
+  testIpCamera: payload => ipcRenderer.invoke('kiosk:test-ip-camera', { url: String(payload?.url || '').slice(0, 512), user: String(payload?.user || '').slice(0, 64), password: String(payload?.password || '').slice(0, 128), cameraId: String(payload?.cameraId || '').slice(0, 16), zoom: Number(payload?.zoom) || 1 }),
   startBridge: () => ipcRenderer.invoke('kiosk:start-bridge'),
   checkBridge: () => ipcRenderer.invoke('kiosk:check-bridge'),
   exit: () => ipcRenderer.invoke('kiosk:exit'),

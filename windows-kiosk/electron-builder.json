@@ -4,7 +4,7 @@
   "icon": "assets/icon.png",
   "extraMetadata": {
     "main": "windows-kiosk/main.cjs",
-    "version": "1.0.23"
+    "version": "1.0.34"
   },
   "directories": {
     "output": "dist-kiosk"
@@ -63,5 +63,8 @@
     "uninstallerIcon": "assets/icon.ico",
     "installerHeaderIcon": "assets/icon.ico",
     "include": "windows-kiosk/installer.nsh"
-  }
+  },
+  "asarUnpack": [
+    "windows-kiosk/ffmpeg-bin/**"
+  ]
 }

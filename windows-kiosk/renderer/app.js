@@ -11,10 +11,12 @@ const MODE = { CODE: 'code', FP: 'fingerprint', CAM: 'camera' };
 const RESULT_AUTO_RESET_MS = 7000;
 const LOOKUP_DEBOUNCE_MS = 280;
 const DIR_RENDER_LIMIT = 80;
-const IP_CAM_REFRESH_MS = 2000;
 const AUTO_GOOD_FRAMES_NEEDED = 3;
 const AUTO_LOOP_MS = 700;
 const AUTO_PUNCH_COOLDOWN_MS = 8000;
+// After a punch (or "already recorded") the same employee is not recognised again for a minute; matches the kiosk's
+// 60-second minimum between punches.
+const FACE_COOLDOWN_MS = 60 * 1000;
 // Standard checkout list (default). The server side of the kiosk sends the active list in state.outReasons:
 // with the company option "three exit buttons" it is Duty Off / Personal Out / Office Work only.
 const CHECKOUT_REASONS = [
@@ -40,7 +42,6 @@ function applyKioskTheme() {
 let activeMode = MODE.FP;
 let preview = null;          // from kiosk:lookup-employee
 let cameraStream = null;
-let ipCamRefreshTimer = null;
 let lookupTimer = null;
 let resetTimer = null;
 let countdownRaf = null;
@@ -54,7 +55,6 @@ let autoCaptureHoldUntil = 0;
 let autoCaptureAwaitingFaceExit = false;
 let kioskCamMode = 'multi';
 let multiFaceTimer = null;
-let multiFaceTrackers = new Map();
 const employeeSessions = new Map();
 let nextTrackId = 1;
 let messageResolver = null;
@@ -180,7 +180,17 @@ const el = {
   stTerminalId:   id('stTerminalId'),
   stLocation:     id('stLocation'),
   stBranchId:     id('stBranchId'),
-  stIpCamUrl:     id('stIpCamUrl'),
+  stCameraSource: id('stCameraSource'),
+  stIpCameraFields: id('stIpCameraFields'),
+  stOutCameraReason: id('stOutCameraReason'),
+  appVersion:     id('appVersion'),
+  cameraView2:    id('cameraView2'),
+  ipcamEl2:       id('ipcamEl2'),
+  multiFaceCanvas2: id('multiFaceCanvas2'),
+  camSourceBadge2: id('camSourceBadge2'),
+  camDirectionTag: id('camDirectionTag'),
+  camDirectionTag2: id('camDirectionTag2'),
+  camSelectBar:   id('camSelectBar'),
   stAllowCodeOnlyPunch: id('stAllowCodeOnlyPunch'),
   stReqCodeFp:    id('stReqCodeFp'),
   stReqCodeCam:   id('stReqCodeCam'),
@@ -507,20 +517,139 @@ function drawTemplateFingerprintPreview(ctx, canvas, templateSeed, quality) {
 }
 
 // ─── Camera ──────────────────────────────────────────────────────────────────
+// An rtsp:// camera is real video (FFmpeg decodes it at ~12 fps), so face detection, the liveness head-turn challenge
+// and recognition run on it like on a webcam. JPEG/MJPEG http URLs stay evidence-only: a still image or a picture
+// refreshed now and then cannot show the head turning, so it cannot prove the person is live.
+const isLiveIpCameraUrl = url => /^rtsps?:\/\//i.test(String(url || '').trim());
+const DIRECTION_TAGS = { both: 'IN · OUT', in: 'IN', out: 'OUT' };
+// Settings → Camera: source "webcam" or "ip" with up to two IP cameras, each In & Out / In only / Out only.
+let selectedCameraIndex = 0;            // camera used by the 1-on-1 challenge when two are configured
+const tileTrackers = [new Map(), new Map()];
+const tileBusy = [false, false];
+// The visible <img> changes ~12 times a second and is blank while each new frame decodes, so face detection, the
+// identity embedding and the evidence photo read a canvas that only ever holds a fully decoded frame.
+const ipFrameCanvases = [1, 2].map(n => Object.assign(document.createElement('canvas'), { id: `ipcamFrame${n}`, width: 0, height: 0 }));
+const pendingFrames = [null, null];
+const decodingFrames = [false, false];
+function resetIpFrames() {
+  ipFrameCanvases.forEach((canvas, index) => { canvas.width = 0; canvas.height = 0; pendingFrames[index] = null; });
+}
+async function decodeIpFrame(index, dataUrl) {
+  pendingFrames[index] = dataUrl;
+  if (decodingFrames[index]) return;
+  decodingFrames[index] = true;
+  try {
+    while (pendingFrames[index]) {
+      const url = pendingFrames[index];
+      pendingFrames[index] = null;
+      const image = new Image();
+      image.src = url;
+      try { await image.decode(); } catch { continue; }
+      const canvas = ipFrameCanvases[index];
+      if (canvas.width !== image.naturalWidth || canvas.height !== image.naturalHeight) {
+        canvas.width = image.naturalWidth;
+        canvas.height = image.naturalHeight;
+      }
+      canvas.getContext('2d').drawImage(image, 0, 0);
+    }
+  } finally {
+    decodingFrames[index] = false;
+  }
+}
+function activeIpCameras() {
+  const terminal = kioskState?.terminal;
+  return terminal?.cameraSource === 'ip' ? (terminal.ipCameras || []).filter(camera => camera.url) : [];
+}
+function tileElements(index) {
+  return index === 0
+    ? { index: 0, view: el.cameraView, img: el.ipcamEl, frame: ipFrameCanvases[0], canvas: el.multiFaceCanvas, badge: el.camSourceBadge, tag: el.camDirectionTag, trackers: tileTrackers[0] }
+    : { index: 1, view: el.cameraView2, img: el.ipcamEl2, frame: ipFrameCanvases[1], canvas: el.multiFaceCanvas2, badge: el.camSourceBadge2, tag: el.camDirectionTag2, trackers: tileTrackers[1] };
+}
+/** Tiles on screen: the webcam; both IP cameras in Multi-Face mode; or the selected IP camera in the 1-on-1 challenge. */
+function cameraTiles() {
+  const cameras = activeIpCameras();
+  if (!cameras.length) return [{ camera: null, ...tileElements(0), source: el.webcamEl }];
+  if (kioskCamMode !== 'multi' || cameras.length === 1) {
+    return [{ camera: cameras[Math.min(selectedCameraIndex, cameras.length - 1)], ...tileElements(0), source: ipFrameCanvases[0] }];
+  }
+  return cameras.slice(0, 2).map((camera, index) => ({ camera, ...tileElements(index), source: ipFrameCanvases[index] }));
+}
+const selectedTile = () => cameraTiles()[0];
+// rtsp:// cameras and the webcam are live video; snapshot / MJPEG URLs only attach a photo.
+const tileFaceAllowed = tile => !tile.camera || isLiveIpCameraUrl(tile.camera.url);
+function ipCameraFaceAllowed() { return tileFaceAllowed(selectedTile()); }
+/** The element face detection reads from: the selected IP camera picture, or the local webcam. */
+function faceSource() { return selectedTile().source; }
+const sourceLabel = source => source === el.webcamEl ? 'webcam' : 'ip-camera';
+const cameraMeta = tile => ({ camera: tile.camera ? 'ip-camera' : 'webcam', ...(tile.camera ? { cameraId: tile.camera.id } : {}) });
+
+function renderCameraLayout(tiles = cameraTiles()) {
+  const dual = tiles.length > 1;
+  el.cameraView2?.classList.toggle('hidden', !dual);
+  el.cameraStack?.classList.toggle('dual-cams', dual);
+  [0, 1].forEach(index => {
+    const { tag } = tileElements(index);
+    const camera = tiles[index]?.camera;
+    if (!tag) return;
+    tag.classList.toggle('hidden', !camera);
+    if (camera) {
+      tag.dataset.direction = camera.direction;
+      tag.textContent = DIRECTION_TAGS[camera.direction] || '';
+    }
+  });
+  const cameras = activeIpCameras();
+  const showSelect = cameras.length > 1 && kioskCamMode !== 'multi';
+  if (!el.camSelectBar) return;
+  el.camSelectBar.classList.toggle('hidden', !showSelect);
+  const current = Math.min(selectedCameraIndex, cameras.length - 1);
+  el.camSelectBar.innerHTML = showSelect
+    ? cameras.map((camera, index) => `<button type="button" class="kiosk-cam-mode-btn${index === current ? ' active' : ''}" data-cam-index="${index}">${esc(camera.name)} · ${DIRECTION_TAGS[camera.direction] || ''}</button>`).join('')
+    : '';
+}
+
+function renderAppVersion() {
+  if (el.appVersion) el.appVersion.textContent = kioskState?.appVersion ? `v${kioskState.appVersion}` : '';
+}
+const sourceSize = source => source instanceof HTMLVideoElement ? [source.videoWidth, source.videoHeight]
+  : source instanceof HTMLCanvasElement ? [source.width, source.height] : [source.naturalWidth, source.naturalHeight];
+// IP camera frames are pushed by the main process, which holds the camera connection (HTTP Digest/Basic login, MJPEG
+// stream or back-to-back snapshots) and sends same-origin data URLs, so the preview, the evidence canvas and the face
+// embedding work without CORS or mixed-content exceptions.
+function onIpCameraFrame(frame) {
+  if (activeMode !== MODE.CAM) return;
+  const tile = cameraTiles().find(item => item.camera && item.camera.id === frame?.cameraId);
+  if (!tile) return;
+  if (frame.ok && frame.dataUrl) {
+    tile.img.src = frame.dataUrl;
+    decodeIpFrame(tile.index, frame.dataUrl);
+    tile.badge.textContent = `${tile.camera.name} · live`;
+  } else if (frame.message) {
+    tile.badge.textContent = `${tile.camera.name}: ${frame.message}`;
+  }
+}
+
 async function startCamera() {
-  const ipUrl = kioskState?.terminal?.ipCameraUrl?.trim();
   el.webcamEl.classList.remove('active');
   el.ipcamEl.classList.remove('active');
+  el.ipcamEl2?.classList.remove('active');
+  resetIpFrames();
+  const tiles = cameraTiles();
+  renderCameraLayout(tiles);
+  // Smaller oval on IP cameras: the face is expected to fill less of the picture.
+  el.cameraView?.classList.toggle('ip-camera', !!tiles[0].camera);
 
-  if (ipUrl) {
-    el.camSourceBadge.textContent = 'IP Camera';
-    el.ipcamEl.src = withTs(ipUrl);
-    el.ipcamEl.classList.add('active');
-    // Periodically refresh snapshot
-    clearInterval(ipCamRefreshTimer);
-    ipCamRefreshTimer = setInterval(() => {
-      if (activeMode === MODE.CAM) el.ipcamEl.src = withTs(ipUrl);
-    }, IP_CAM_REFRESH_MS);
+  if (tiles[0].camera) {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(track => track.stop());
+      cameraStream = null;
+    }
+    tiles.forEach(tile => {
+      tile.img.classList.add('active');
+      tile.badge.textContent = `${tile.camera.name} · connecting…`;
+    });
+    api.startIpCameraStream(tiles.map(tile => tile.camera.id))
+      .then(result => { if (result && !result.ok) tiles[0].badge.textContent = `IP Camera: ${result.message}`; })
+      .catch(error => { tiles[0].badge.textContent = `IP Camera: ${error.message}`; });
     return;
   }
 
@@ -559,7 +688,7 @@ async function startCamera() {
 }
 
 function stopCamera() {
-  clearInterval(ipCamRefreshTimer);
+  api.stopIpCameraStream().catch(() => {});
   stopMultiFaceLoop();
   if (cameraStream) {
     cameraStream.getTracks().forEach(t => t.stop());
@@ -567,20 +696,20 @@ function stopCamera() {
   }
   el.webcamEl.srcObject = null;
   el.webcamEl.classList.remove('active');
-  el.ipcamEl.removeAttribute('src');
-  el.ipcamEl.classList.remove('active');
+  for (const img of [el.ipcamEl, el.ipcamEl2]) {
+    img?.removeAttribute('src');
+    img?.classList.remove('active');
+  }
   clearCapturedPhoto();
   resetLivenessUI();
 }
 
-async function captureEvidence() {
+async function captureEvidence(source = faceSource()) {
   const canvas = el.snapCanvas;
   const ctx = canvas.getContext('2d');
-  const source = kioskState?.terminal?.ipCameraUrl ? el.ipcamEl : el.webcamEl;
   const readiness = getCameraSourceReadiness(source);
   if (!readiness.ok) throw new Error(readiness.message);
-  const sourceWidth = source instanceof HTMLVideoElement ? source.videoWidth : source.naturalWidth;
-  const sourceHeight = source instanceof HTMLVideoElement ? source.videoHeight : source.naturalHeight;
+  const [sourceWidth, sourceHeight] = sourceSize(source);
   const scale = Math.min(1, 1280 / sourceWidth, 720 / sourceHeight);
   canvas.width = Math.max(1, Math.round(sourceWidth * scale));
   canvas.height = Math.max(1, Math.round(sourceHeight * scale));
@@ -590,7 +719,7 @@ async function captureEvidence() {
   return api.saveEvidence({
     dataUrl,
     type: 'camera',
-    source: kioskState?.terminal?.ipCameraUrl ? 'ip-camera' : 'webcam',
+    source: sourceLabel(source),
   });
 }
 
@@ -612,6 +741,10 @@ function getCameraSourceReadiness(source) {
     if (!source.srcObject || source.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || source.videoWidth <= 0 || source.videoHeight <= 0) {
       return { ok: false, message: 'Camera is not showing a live frame yet. Wait for the preview, then try again.' };
     }
+  } else if (source instanceof HTMLCanvasElement) {
+    if (source.width <= 0 || source.height <= 0) {
+      return { ok: false, message: 'IP camera picture is not ready yet. Wait for the live preview, then try again.' };
+    }
   } else if (source instanceof HTMLImageElement) {
     if (!source.complete || source.naturalWidth <= 0 || source.naturalHeight <= 0) {
       return { ok: false, message: 'IP camera image is not loaded yet. Wait for the preview, then try again.' };
@@ -621,8 +754,7 @@ function getCameraSourceReadiness(source) {
 }
 
 // Identity embedding (face-api, 128 numbers) for the face inside cropBox, or the most prominent face.
-async function captureCameraDescriptor(cropBox = null) {
-  const source = kioskState?.terminal?.ipCameraUrl ? el.ipcamEl : el.webcamEl;
+async function captureCameraDescriptor(cropBox = null, source = faceSource()) {
   const readiness = getCameraSourceReadiness(source);
   if (!readiness.ok) throw new Error(readiness.message);
   if (!window.computeFaceEmbedding) await window.faceEmbeddingReady;
@@ -631,7 +763,7 @@ async function captureCameraDescriptor(cropBox = null) {
     version: 4,
     vector,
     capturedAt: new Date().toISOString(),
-    source: kioskState?.terminal?.ipCameraUrl ? 'ip-camera' : 'webcam',
+    source: sourceLabel(source),
   };
 }
 
@@ -643,10 +775,10 @@ function descriptorDistance(a, b) {
 
 // Two embeddings a moment apart, averaged. If they disagree the person moved or a different face slid into
 // the box, so nothing is matched.
-async function captureStableDescriptor(getBox) {
-  const first = await captureCameraDescriptor(getBox());
+async function captureStableDescriptor(getBox, source = faceSource()) {
+  const first = await captureCameraDescriptor(getBox(), source);
   await new Promise(resolve => setTimeout(resolve, 120));
-  const second = await captureCameraDescriptor(getBox());
+  const second = await captureCameraDescriptor(getBox(), source);
   if (descriptorDistance(first.vector, second.vector) > 0.32) throw new Error('Hold still and look at the camera.');
   return { ...second, vector: first.vector.map((value, i) => Math.round(((value + second.vector[i]) / 2) * 1e6) / 1e6) };
 }
@@ -658,8 +790,10 @@ async function primaryFaceBox(source) {
 }
 
 async function detectFaceInsideGuide(source) {
-  const width = source instanceof HTMLVideoElement ? source.videoWidth : source.naturalWidth;
-  const height = source instanceof HTMLVideoElement ? source.videoHeight : source.naturalHeight;
+  // An IP camera is mounted metres away (often high), so a face fills far less of its frame than of a webcam's at arm's
+  // length. 7% of a 960 px frame is still ~70 px across, enough for detection, liveness and the identity model.
+  const distantCamera = source !== el.webcamEl;
+  const [width, height] = sourceSize(source);
   if (!width || !height) return { ok: false, message: 'Camera is not showing a live frame yet. Wait for the preview, then try again.' };
 
   try {
@@ -677,19 +811,21 @@ async function detectFaceInsideGuide(source) {
     const centerIsInGuide =
       faceCenterX >= 0.32 &&
       faceCenterX <= 0.68 &&
-      faceCenterY >= 0.22 &&
-      faceCenterY <= 0.78;
+      faceCenterY >= (distantCamera ? 0.16 : 0.22) &&
+      faceCenterY <= (distantCamera ? 0.84 : 0.78);
     const sizeIsValid =
-      faceWidth >= 0.18 &&
+      faceWidth >= (distantCamera ? 0.07 : 0.18) &&
       faceWidth <= 0.64 &&
-      faceHeight >= 0.24 &&
+      faceHeight >= (distantCamera ? 0.10 : 0.24) &&
       faceHeight <= 0.82;
 
     if (!centerIsInGuide) {
       return { ok: false, message: 'Face is not inside the oval marker. Center your full face, then try again.' };
     }
     if (!sizeIsValid) {
-      return { ok: false, message: 'Face is not fully visible. Move closer and keep the full face inside the oval.' };
+      return { ok: false, message: distantCamera
+        ? 'Face is too far from the camera. Step towards it and look straight at it.'
+        : 'Face is not fully visible. Move closer and keep the full face inside the oval.' };
     }
 
     return { ok: true, message: 'Face is centered inside the oval.' };
@@ -703,7 +839,7 @@ async function assessCameraFrame() {
   const brightnessCanvas = document.createElement('canvas');
   brightnessCanvas.width = 48;
   brightnessCanvas.height = 60;
-  const source = kioskState?.terminal?.ipCameraUrl ? el.ipcamEl : el.webcamEl;
+  const source = faceSource();
   const readiness = getCameraSourceReadiness(source);
   if (!readiness.ok) return { ok: false, descriptor: null, message: readiness.message };
   const guideFace = await detectFaceInsideGuide(source);
@@ -886,7 +1022,7 @@ async function assessCameraFrame() {
 // ─── Auto-Capture (Face Recognition without Employee Code) ───────────────────
 function isAutoCaptureEnabled() {
   return activeMode === MODE.CAM &&
-    !kioskState?.terminal?.ipCameraUrl &&
+    ipCameraFaceAllowed() &&
     kioskState?.terminal?.autoCaptureCamera !== false;
 }
 
@@ -1034,6 +1170,8 @@ function setKioskCamMode(mode) {
   el.cameraView?.classList.toggle('mode-multi-face', isMulti);
   el.btnModeMultiFace?.classList.toggle('active', isMulti);
   el.btnModeSingleFace?.classList.toggle('active', !isMulti);
+  // Two IP cameras: Multi-Face shows both, the challenge shows the selected one.
+  if (activeMode === MODE.CAM && activeIpCameras().length) startCamera();
 
   if (isMulti) {
     stopAutoCapture();
@@ -1069,10 +1207,16 @@ function identifyInQueue(task) {
   return run;
 }
 
+// Every camera tile on screen (two with an entrance and an exit camera) runs its own detection and face trackers.
 function startMultiFaceLoop() {
   stopMultiFaceLoop();
-  multiFaceTrackers.clear();
-  multiFaceTimer = setInterval(runMultiFaceStep, 100);
+  multiFaceTimer = setInterval(() => {
+    cameraTiles().forEach((tile, index) => {
+      if (tileBusy[index]) return;
+      tileBusy[index] = true;
+      runMultiFaceStep(tile).catch(() => undefined).finally(() => { tileBusy[index] = false; });
+    });
+  }, 100);
 }
 
 function stopMultiFaceLoop() {
@@ -1080,23 +1224,25 @@ function stopMultiFaceLoop() {
     clearInterval(multiFaceTimer);
     multiFaceTimer = null;
   }
-  multiFaceTrackers.clear();
-  if (el.multiFaceCanvas) {
-    const ctx = el.multiFaceCanvas.getContext('2d');
-    if (ctx) ctx.clearRect(0, 0, el.multiFaceCanvas.width, el.multiFaceCanvas.height);
+  for (const index of [0, 1]) {
+    const { trackers, canvas } = tileElements(index);
+    trackers.clear();
+    const ctx = canvas?.getContext('2d');
+    if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
   }
 }
 
-async function runMultiFaceStep() {
+async function runMultiFaceStep(tile) {
   if (activeMode !== MODE.CAM || kioskCamMode !== 'multi') return;
-  const video = el.webcamEl;
-  if (!video || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
+  if (!tileFaceAllowed(tile)) return;
+  const video = tile.source;
+  const multiFaceTrackers = tile.trackers;
+  if (!video || !getCameraSourceReadiness(video).ok) return;
 
-  const vw = video.videoWidth || 640;
-  const vh = video.videoHeight || 480;
-  if (el.multiFaceCanvas.width !== vw || el.multiFaceCanvas.height !== vh) {
-    el.multiFaceCanvas.width = vw;
-    el.multiFaceCanvas.height = vh;
+  const [vw, vh] = sourceSize(video).map((size, index) => size || (index ? 480 : 640));
+  if (tile.canvas.width !== vw || tile.canvas.height !== vh) {
+    tile.canvas.width = vw;
+    tile.canvas.height = vh;
   }
 
   let detectedFaces = [];
@@ -1168,7 +1314,9 @@ async function runMultiFaceStep() {
     if (isCoolingDown) {
       tracker.status = 'cooldown';
       tracker.employeeName = session.fullName || tracker.employeeName;
-      tracker.statusText = session.statusText || 'Already Recorded';
+      // Live countdown until this employee can be recognised again.
+      const secondsLeft = Math.max(1, Math.ceil((session.cooldownUntil - now) / 1000));
+      tracker.statusText = `${session.statusText || 'Already Recorded'} · ${secondsLeft}s`;
     } else if (!tracker.isPunching) {
       // If previous cooldown expired, reset matchedEmployeeCode so they can punch anew
       if (tracker.matchedEmployeeCode && session && now >= session.cooldownUntil) {
@@ -1185,14 +1333,14 @@ async function runMultiFaceStep() {
           (async () => {
             try {
               const result = await identifyInQueue(async () => {
-                const descriptor = await captureStableDescriptor(() => tracker.box);
-                const evidence = await captureEvidence().catch(() => null);
+                const descriptor = await captureStableDescriptor(() => tracker.box, video);
+                const evidence = await captureEvidence(video).catch(() => null);
                 const code = el.codeInput?.value?.trim() || '';
                 // Employees already shown on another face in view cannot be matched again.
                 const excludeEmployeeIds = [...multiFaceTrackers.values()]
                   .filter(other => other !== tracker && other.matchedEmployeeId && Date.now() - other.lastSeen < 1500)
                   .map(other => other.matchedEmployeeId);
-                const payload = { mode: 'multi-face', code, descriptor, evidence, excludeEmployeeIds, meta: { camera: 'webcam' } };
+                const payload = { mode: 'multi-face', code, descriptor, evidence, excludeEmployeeIds, meta: cameraMeta(tile) };
                 const response = await api.punchCamera(payload);
                 // Claim the employee before the next face is identified (a checkout-reason prompt may follow).
                 if (response?.employee) tracker.matchedEmployeeId = response.employee.id || response.employee.employeeCode;
@@ -1218,22 +1366,30 @@ async function runMultiFaceStep() {
                 if (finalResult.ok) {
                   const timeStr = (finalResult.eventTime || '').slice(0, 5) || new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
                   employeeSessions.set(empCode, {
-                    cooldownUntil: Date.now() + (5 * 60 * 1000), // 5 min cooldown for THIS employee only
+                    cooldownUntil: Date.now() + FACE_COOLDOWN_MS, // for THIS employee only
                     statusText: `${finalResult.action === 'OUT' ? 'Punched Out' : 'Punched In'} · ${timeStr}`,
                     fullName: emp.fullName,
                   });
                   tracker.status = 'matched';
                   tracker.statusText = `${finalResult.action === 'OUT' ? 'PUNCHED OUT' : 'PUNCHED IN'} · ${timeStr}`;
                   handlePunchResult(finalResult);
+                } else if (finalResult.directionMismatch) {
+                  // Entrance / exit camera: e.g. someone already inside walking past the In camera. Shown on the face only,
+                  // no popup and no employee-wide cooldown, so the right camera still works straight away.
+                  tracker.status = 'cooldown';
+                  tracker.statusText = tile.camera?.direction === 'in' ? 'Already In' : 'Not punched In';
+                  tracker.matchedEmployeeCode = null;
                 } else if (finalResult.alreadyRecorded || finalResult.cooldownSeconds || String(finalResult.message || '').toLowerCase().includes('before punching again') || String(finalResult.message || '').toLowerCase().includes('already completed') || isAlreadyCooling) {
-                  // This specific employee already punched today or is in their 1-minute guard
+                  // This specific employee already punched today or is in their 1-minute guard. Use the kiosk's own
+                  // remaining seconds when it sent them, so the countdown on the face matches the punch rule.
+                  const waitMs = finalResult.cooldownSeconds ? Number(finalResult.cooldownSeconds) * 1000 : FACE_COOLDOWN_MS;
                   employeeSessions.set(empCode, {
-                    cooldownUntil: Date.now() + (5 * 60 * 1000), // Cooldown ONLY for this employee
+                    cooldownUntil: Date.now() + waitMs, // Cooldown ONLY for this employee
                     statusText: 'Already Recorded',
                     fullName: emp.fullName,
                   });
                   tracker.status = 'cooldown';
-                  tracker.statusText = 'Already Recorded';
+                  tracker.statusText = `Already Recorded · ${Math.ceil(waitMs / 1000)}s`;
                 } else {
                   tracker.status = 'unknown';
                   tracker.statusText = finalResult?.message?.slice(0, 30) || 'Unknown Person';
@@ -1274,13 +1430,13 @@ async function runMultiFaceStep() {
     });
   }
 
-  drawKioskMultiFaceHUD(el.multiFaceCanvas, renderList);
+  drawKioskMultiFaceHUD(tile.canvas, renderList);
 }
 
 // ─── Auto-Capture (Face Recognition without Employee Code) ───────────────────
 function isAutoCaptureEnabled() {
   return activeMode === MODE.CAM &&
-    !kioskState?.terminal?.ipCameraUrl &&
+    ipCameraFaceAllowed() &&
     kioskState?.terminal?.autoCaptureCamera !== false;
 }
 
@@ -1507,6 +1663,8 @@ function setLivenessProgress(phase, message, failed = false, order = null) {
   if (!el.livenessRail) return;
   el.livenessRail.classList.toggle('failed', failed);
   el.livenessAction.textContent = message;
+  // Also on the picture itself, where the person is looking ("Turn LEFT", "Return to center").
+  if (phase >= 0 && phase < 5 && !failed) setAutoCaptureStatus('scanning', message);
   const steps = el.livenessRail.querySelectorAll('.liveness-steps span');
   if (order && steps.length >= 5) {
     steps[1].textContent = order[0] === 'left' ? 'Left' : 'Right';
@@ -1519,7 +1677,7 @@ function setLivenessProgress(phase, message, failed = false, order = null) {
 }
 
 async function captureLivenessObservation() {
-  const video = el.webcamEl;
+  const video = faceSource();
   const faces = await window.detectFaceGeometry(video);
   if (!faces || faces.length === 0) throw new Error('Keep your face inside the oval.');
   const plausible = faces.filter(f => f.width >= 0.12);
@@ -1533,7 +1691,7 @@ async function captureLivenessObservation() {
 async function runCameraLivenessChallenge() {
   if (!window.detectFaceGeometry) await window.faceLandmarkerReady;
   if (!window.detectFaceGeometry) throw new Error('The bundled face landmark model could not start.');
-  const issued = await api.beginCameraLiveness();
+  const issued = await api.beginCameraLiveness(selectedTile().camera?.id);
   if (!issued?.ok) throw new Error(issued?.message || 'Could not start privileged liveness challenge.');
   const targets = ['center', issued.order[0], 'center', issued.order[1], 'center'];
   const labels = ['Center your face', `Turn ${issued.order[0].toUpperCase()}`, 'Return to center', `Turn ${issued.order[1].toUpperCase()}`, 'Return to center'];
@@ -1567,7 +1725,7 @@ async function runCameraLivenessChallenge() {
       }
       if (consecutive >= 3) {
         if (base === null) base = resting.slice(-3).reduce((sum, value) => sum + value, 0) / 3;
-        if (phase === 4) { setLivenessProgress(5, 'Live person verified', false, issued.order); return { challengeId: issued.id, observations }; }
+        if (phase === 4) { setLivenessProgress(5, 'Live person verified', false, issued.order); return { challengeId: issued.id, observations, expiresAt: issued.expiresAt }; }
         phase += 1;
         consecutive = 0;
       }
@@ -1594,9 +1752,9 @@ async function punchCamera() {
 
 async function performCameraPunch() {
   const code = el.codeInput.value.trim();
-  if (kioskState?.terminal?.ipCameraUrl) {
-    showResult('err', 'IP Camera Blocked', 'IP camera still images cannot prove liveness. Use the local webcam or fingerprint.');
-    return { ok: false, message: 'IP camera attendance is blocked for security.' };
+  if (!ipCameraFaceAllowed()) {
+    showResult('err', 'IP Camera Blocked', 'A snapshot / MJPEG camera URL cannot prove liveness. Use an rtsp:// camera URL, the local webcam or the fingerprint reader.');
+    return { ok: false, message: 'Face punches need live video (rtsp:// or webcam).' };
   }
   clearCapturedPhoto();
   showResult('busy', 'Capturing Evidence…', 'Saving camera snapshot as attendance proof…');
@@ -1606,7 +1764,7 @@ async function performCameraPunch() {
 
   if (kioskCamMode === 'multi') {
     try {
-      const source = el.webcamEl;
+      const source = faceSource();
       let targetBox = null;
       if (window.detectFaceGeometry) {
         const faces = await window.detectFaceGeometry(source).catch(() => []);
@@ -1614,8 +1772,8 @@ async function performCameraPunch() {
           targetBox = faces[0].box;
         }
       }
-      descriptor = await captureStableDescriptor(() => targetBox);
-      evidence = await captureEvidence();
+      descriptor = await captureStableDescriptor(() => targetBox, source);
+      evidence = await captureEvidence(source);
     } catch (err) {
       const message = err?.message || 'Could not detect face in camera.';
       showResult('err', 'Face Scan Failed', message);
@@ -1626,7 +1784,7 @@ async function performCameraPunch() {
       code,
       descriptor,
       evidence,
-      meta: { camera: 'webcam' },
+      meta: cameraMeta(selectedTile()),
     };
     return runPunchAction(async () => {
       const firstResult = await api.punchCamera(cameraPayload);
@@ -1639,20 +1797,25 @@ async function performCameraPunch() {
 
   try {
     livenessProof = await runCameraLivenessChallenge();
-    let lastReadyFrame = null;
-    for (let i = 0; i < 3; i += 1) {
-      const frame = await assessCameraFrame();
-      if (!frame.ok) {
-        showResult('err', 'Face Not Ready', frame.message);
-        return { ok: false, message: frame.message };
+    // Identity capture right after the turns. One frame from a distant or high IP camera is often not clear enough for
+    // the identity model (head tilted, motion blur), so keep trying fresh frames for a few seconds, while the passed
+    // challenge is still valid, instead of failing on the first one. Multi-Face mode retries the same way.
+    const deadline = Math.min(Date.now() + 5000, (livenessProof.expiresAt || Infinity) - 1500);
+    for (;;) {
+      try {
+        const frame = await assessCameraFrame();
+        if (!frame.ok) throw new Error(frame.message);
+        const source = faceSource();
+        const box = await primaryFaceBox(source);
+        descriptor = await captureStableDescriptor(() => box, source);
+        evidence = await captureEvidence(source);
+        break;
+      } catch (attemptError) {
+        if (Date.now() >= deadline) throw attemptError;
+        setAutoCaptureStatus('scanning', 'Hold still and look at the camera…');
+        await new Promise(resolve => setTimeout(resolve, 150));
       }
-      lastReadyFrame = frame;
-      if (i < 2) await new Promise(resolve => setTimeout(resolve, 140));
     }
-    const source = kioskState?.terminal?.ipCameraUrl ? el.ipcamEl : el.webcamEl;
-    const box = await primaryFaceBox(source);
-    descriptor = await captureStableDescriptor(() => box);
-    evidence = await captureEvidence();
   } catch (err) {
     const message = err?.message || 'Could not complete active liveness.';
     setLivenessProgress(-1, message, true);
@@ -1664,7 +1827,7 @@ async function performCameraPunch() {
     descriptor,
     evidence,
     livenessProof,
-    meta: { camera: kioskState?.terminal?.ipCameraUrl ? 'ip-camera' : 'webcam' },
+    meta: cameraMeta(selectedTile()),
   };
   return runPunchAction(async () => {
     const firstResult = await api.punchCamera(cameraPayload);
@@ -1712,6 +1875,39 @@ async function punchFingerprint() {
     }
   }
   handlePunchResult(result);
+}
+
+// Tries the camera with the values typed in Settings (unsaved password allowed) so a wrong user or password is caught
+// before the preview loop starts; on Hikvision cameras repeated failures trigger the illegal-login lock.
+const cameraFields = n => ({
+  name: id(`stCam${n}Name`), direction: id(`stCam${n}Direction`), zoom: id(`stCam${n}Zoom`), url: id(`stCam${n}Url`),
+  user: id(`stCam${n}User`), password: id(`stCam${n}Password`), test: id(`stCam${n}Test`), result: id(`stCam${n}TestResult`),
+});
+async function testIpCamera(n) {
+  const fields = cameraFields(n);
+  if (!fields.result) return;
+  if (!fields.url.value.trim()) { fields.result.textContent = 'Enter the camera URL first.'; return; }
+  fields.result.textContent = 'Testing…';
+  fields.test.disabled = true;
+  try {
+    const result = await api.testIpCamera({
+      cameraId: `cam${n}`,
+      zoom: Number(fields.zoom?.value) || 1,
+      url: fields.url.value.trim(),
+      user: fields.user.value.trim(),
+      password: fields.password.value || '',
+    });
+    fields.result.textContent = result?.ok
+      ? `Camera OK: image received (${Math.max(1, Math.round((result.bytes || 0) / 1024))} KB). Save settings to use it.`
+      : `Failed: ${result?.message || 'no image'}`;
+  } catch (error) {
+    fields.result.textContent = `Failed: ${error.message}`;
+  } finally {
+    fields.test.disabled = false;
+  }
+}
+function updateCameraSourceFields() {
+  el.stIpCameraFields?.classList.toggle('hidden', el.stCameraSource?.value !== 'ip');
 }
 
 async function testFingerprintScanner() {
@@ -2205,7 +2401,28 @@ function openSettings() {
     }),
   ].join('');
   el.stBranchId.value = t.branchId || '';
-  el.stIpCamUrl.value       = t.ipCameraUrl || '';
+  if (el.stCameraSource) el.stCameraSource.value = t.cameraSource === 'ip' ? 'ip' : 'webcam';
+  [1, 2].forEach(n => {
+    const camera = (t.ipCameras || [])[n - 1] || {};
+    const fields = cameraFields(n);
+    if (!fields.url) return;
+    fields.name.value = camera.name || `Camera ${n}`;
+    fields.direction.value = camera.direction || 'both';
+    if (fields.zoom) fields.zoom.value = String(camera.zoom || 1);
+    fields.url.value = camera.url || '';
+    fields.user.value = camera.user || '';
+    fields.password.value = '';
+    fields.password.placeholder = camera.passwordSet ? '•••••••• saved; leave blank to keep' : 'camera password';
+    fields.result.textContent = '';
+  });
+  if (el.stOutCameraReason) {
+    const reasons = activeCheckoutReasons();
+    const saved = t.outCameraReason || '';
+    el.stOutCameraReason.innerHTML = ['<option value="">Ask on screen</option>',
+      ...[...new Set([...reasons, ...(saved ? [saved] : [])])].map(reason => `<option value="${esc(reason)}">${esc(reason)}</option>`)].join('');
+    el.stOutCameraReason.value = saved;
+  }
+  updateCameraSourceFields();
   el.stAllowCodeOnlyPunch.checked = !!t.allowCodeOnlyPunch;
   el.stReqCodeFp.checked    = !!t.requireCodeWithFingerprint;
   el.stReqCodeCam.checked   = false;
@@ -2330,7 +2547,12 @@ async function saveSettings() {
     id: el.stTerminalId.value.trim() || 'KIOSK-WIN-01',
     location: el.stLocation.value.trim() || 'Main Entrance Gate-1',
     branchId: el.stBranchId.value,
-    ipCameraUrl: el.stIpCamUrl.value.trim(),
+    cameraSource: el.stCameraSource?.value === 'ip' ? 'ip' : 'webcam',
+    ipCameras: [1, 2].map(n => {
+      const fields = cameraFields(n);
+      return { name: fields.name.value.trim(), direction: fields.direction.value, zoom: Number(fields.zoom?.value) || 1, url: fields.url.value.trim(), user: fields.user.value.trim(), password: fields.password.value || '' };
+    }),
+    outCameraReason: el.stOutCameraReason?.value || '',
     allowCodeOnlyPunch: el.stAllowCodeOnlyPunch.checked,
     requireCodeWithFingerprint: el.stReqCodeFp.checked,
     requireCodeWithCamera: false,
@@ -2339,12 +2561,16 @@ async function saveSettings() {
     classicTheme: !!el.stClassicTheme?.checked,
   });
   if (kioskState) kioskState.terminal = terminal;
+  [1, 2].forEach(n => { const fields = cameraFields(n); if (fields.password) fields.password.value = ''; });
+  selectedCameraIndex = 0;
   applyKioskTheme();
   applyModeSecurity();
+  if (activeMode === MODE.CAM) startCamera();
   closeSettings();
   await performSync();
   const branchName = kioskState?.assignedBranch?.name || 'Branch not assigned';
   el.terminalLine.textContent = `${branchName} · ${terminal.location} · ${terminal.id}`;
+  renderAppVersion();
   if (activeMode === MODE.CAM) {
     const autoCapture = !!terminal.autoCaptureCamera;
     el.camCaptureBtn.classList.remove('hidden');
@@ -2519,6 +2745,14 @@ function bindEvents() {
   el.punchBtn.addEventListener('click', punchByCode);
   el.fpScanBtn.addEventListener('click', punchFingerprint);
   el.fpTestBtn.addEventListener('click', testFingerprintScanner);
+  [1, 2].forEach(n => cameraFields(n).test?.addEventListener('click', () => testIpCamera(n)));
+  el.stCameraSource?.addEventListener('change', updateCameraSourceFields);
+  el.camSelectBar?.addEventListener('click', event => {
+    const button = event.target.closest('[data-cam-index]');
+    if (!button) return;
+    selectedCameraIndex = Number(button.dataset.camIndex) || 0;
+    setKioskCamMode(kioskCamMode);
+  });
   el.camCaptureBtn.addEventListener('click', punchCamera);
 
   // Camera Mode Toggle (Multi-Face Stream vs 1-on-1 Challenge)
@@ -2665,6 +2899,8 @@ function bindEvents() {
   });
 
   // Auto-sync complete notification from main process
+  api.onIpCameraFrame(onIpCameraFrame);
+
   api.onSyncComplete(data => {
     const errs = data?.report?.errors?.length || 0;
     serverReachable = data?.report?.reachable !== false;
@@ -2711,9 +2947,6 @@ function todayStr() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function withTs(url) {
-  return `${url}${url.includes('?') ? '&' : '?'}_ts=${Date.now()}`;
-}
 
 // ─── Boot ──────────────────────────────────────────────────────────────────
 async function boot() {
@@ -2728,6 +2961,7 @@ async function boot() {
     // Terminal info
     const branchName = kioskState.assignedBranch?.name || 'Branch not assigned';
     el.terminalLine.textContent = `${branchName} · ${kioskState.terminal.location} · ${kioskState.terminal.id}`;
+    renderAppVersion();
 
     // Initial UI
     setPill(el.pillBridge, kioskState.bridgeRunning ? 'online' : 'offline');

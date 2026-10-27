@@ -1,5 +1,7 @@
 'use strict';
 
+const { normalizeCameraSettings, resolveCamera, cameraSupportsFaces } = require('./camera-config.cjs');
+
 function authorizeCameraAttempt({ payload = {}, terminal = {}, terminalId, challengeManager, reasonAuthorizations, now = Date.now }) {
   const authorizationId = typeof payload.cameraAuthorization === 'string' ? payload.cameraAuthorization : '';
   const authorization = authorizationId ? reasonAuthorizations.get(authorizationId) : null;
@@ -20,9 +22,13 @@ function authorizeCameraAttempt({ payload = {}, terminal = {}, terminalId, chall
 
   // Employee code is optional. Without it, identity is selected from all
   // securely enrolled local employees after liveness has been validated.
-  if (terminal.ipCameraUrl || payload?.meta?.camera === 'ip-camera') return { ok: false, message: 'IP camera attendance is blocked: it cannot provide the live landmark sequence required for photo replay protection. Use the local webcam or fingerprint.', liveness };
+  // A webcam or an rtsp:// camera is live video and gives the landmark sequence liveness needs; snapshot / MJPEG URLs
+  // cannot. The camera is looked up from the terminal's own settings by id, never taken from the payload, and a
+  // payload claiming an IP camera on a webcam terminal is refused as well.
+  const resolved = resolveCamera(normalizeCameraSettings(terminal), payload?.meta?.cameraId);
+  if (!cameraSupportsFaces(resolved) || (payload?.meta?.camera === 'ip-camera' && resolved.source !== 'ip')) return { ok: false, message: 'A snapshot / MJPEG camera URL cannot provide the live landmark sequence required for photo replay protection. Use an rtsp:// camera URL, the local webcam or fingerprint.', liveness };
   if (!liveness.ok) return { ok: false, message: liveness.message, lockedUntil: liveness.lockedUntil, liveness };
-  return { ok: true, code, liveness };
+  return { ok: true, code, liveness, camera: resolved.camera };
 }
 
 function requireSecureEnrollment(descriptorCount) {

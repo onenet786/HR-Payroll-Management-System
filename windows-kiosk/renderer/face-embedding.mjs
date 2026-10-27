@@ -72,8 +72,17 @@ function cropAround(source, box) {
 window.computeFaceEmbedding = async (source, box = null) => {
   await ready();
   const canvas = cropAround(source, box);
-  const options = new faceapi.TinyFaceDetectorOptions({ inputSize: box ? DETECT_SIZE : FULL_FRAME_SIZE, scoreThreshold: 0.35 });
-  const result = await faceapi.detectSingleFace(canvas, options).withFaceLandmarks().withFaceDescriptor();
+  // First the usual detector settings; then, for the same frame, a larger input and a lower score. MediaPipe has
+  // already found a face in this box, so the second try only helps a tilted or distant face to be aligned; whether it
+  // is the right person is still decided by the strict descriptor distance in the kiosk process.
+  const attempts = box
+    ? [{ inputSize: DETECT_SIZE, scoreThreshold: 0.35 }, { inputSize: FULL_FRAME_SIZE, scoreThreshold: 0.2 }]
+    : [{ inputSize: FULL_FRAME_SIZE, scoreThreshold: 0.35 }, { inputSize: FULL_FRAME_SIZE, scoreThreshold: 0.25 }];
+  let result = null;
+  for (const attempt of attempts) {
+    result = await faceapi.detectSingleFace(canvas, new faceapi.TinyFaceDetectorOptions(attempt)).withFaceLandmarks().withFaceDescriptor();
+    if (result) break;
+  }
   if (!result) throw new Error('No clear face found. Look straight at the camera.');
   const faceWidth = result.detection.box.width / canvas.width;
   if (box && faceWidth < 0.25) throw new Error('Face is too small. Move closer to the camera.');

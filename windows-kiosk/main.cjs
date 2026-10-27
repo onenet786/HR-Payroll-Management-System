@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, session, safeStorage } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, session, safeStorage, net: electronNet } = require('electron');
 const { execFile, spawn } = require('child_process');
 const fs = require('fs');
 const net = require('net');
@@ -11,6 +11,9 @@ const {
   canReturnFromTemporaryExit,
   resumeFromTemporaryExit,
 } = require('./attendance-state.cjs');
+const { fetchIpCameraFrame, IpCameraStream } = require('./ip-camera.cjs');
+const { isRtspUrl, grabRtspFrame, RtspCameraStream } = require('./rtsp-camera.cjs');
+const { normalizeCameraSettings, activeIpCameras, resolveCamera, cameraSupportsFaces, publicCameras, mergeSubmittedCameras, directionRefusal, DIRECTION_LABELS, CAMERA_ZOOMS } = require('./camera-config.cjs');
 const { createChallengeManager } = require('./liveness.cjs');
 const { authorizeCameraAttempt, requireSecureEnrollment } = require('./camera-authorization.cjs');
 const {
@@ -217,7 +220,7 @@ function defaultStore() {
       id: 'KIOSK-WIN-01',
       location: 'Main Entrance Gate-1',
       branchId: '',
-      ipCameraUrl: '',
+      cameraSource: 'webcam',
       allowCodeOnlyPunch: false,
       requireCodeWithFingerprint: false,
       requireCodeWithCamera: false,
@@ -246,7 +249,8 @@ function readStore() {
     if (fs.existsSync(file)) {
       const loaded = JSON.parse(fs.readFileSync(file, 'utf8'));
       const defaults = defaultStore();
-      const store = { ...defaults, ...loaded, terminal: { ...defaults.terminal, ...(loaded.terminal || {}) } };
+      // Camera settings of earlier builds (one ipCameraUrl) migrate to camera slot 1.
+      const store = { ...defaults, ...loaded, terminal: normalizeCameraSettings({ ...defaults.terminal, ...(loaded.terminal || {}) }) };
       // Earlier builds hardcoded auto-capture off and exposed no usable choice.
       // Migrate that legacy value once; subsequent user changes are preserved.
       if (!loaded.terminal?.autoCaptureConfigVersion) {
@@ -472,6 +476,22 @@ function publicDeviceRegistration() {
   return registration
     ? { registered: true, name: registration.name, registeredAt: registration.registeredAt, portalUrl: registration.portalUrl || kioskPortalUrl }
     : { registered: false, portalUrl: kioskPortalUrl };
+}
+
+// IP camera credentials live only on the terminal: the password is encrypted with Windows DPAPI when available and is
+// never sent to the renderer or the server. See windows-kiosk/ip-camera.cjs for the frame fetch.
+function encryptSecret(text) {
+  const encrypted = safeStorage.isEncryptionAvailable();
+  return { encrypted, value: encrypted ? safeStorage.encryptString(text).toString('base64') : text };
+}
+function decryptSecret(secret) {
+  if (!secret || typeof secret.value !== 'string') return '';
+  try { return secret.encrypted ? safeStorage.decryptString(Buffer.from(secret.value, 'base64')) : secret.value; } catch { return ''; }
+}
+// Terminal as sent to the renderer: camera passwords are replaced by "passwordSet".
+function publicTerminal(terminal) {
+  const normalized = normalizeCameraSettings(terminal || {});
+  return { ...normalized, ipCameras: publicCameras(normalized.ipCameras) };
 }
 
 function requestJson(method, url, body) {
@@ -916,6 +936,9 @@ function computePunch(existingLog, method, terminal, evidenceId, outReason, at, 
   return updated;
 }
 
+// The same employee cannot punch twice within a minute (a second scan of the same face would otherwise end the visit).
+const PUNCH_MIN_GAP_SECONDS = 60;
+
 function savePunch(store, employee, method, evidence, meta) {
   const date = todayDate();
   const existing = (store.attendances || []).find(log => log.employeeId === employee.id && log.date === date);
@@ -940,19 +963,26 @@ function savePunch(store, employee, method, evidence, meta) {
   const lastPunchTime = existing?.lastPunchAt || existing?.punchOut || existing?.punchIn || '';
   if (lastPunchTime) {
     const secondsSinceLastPunch = timeToSeconds(at) - timeToSeconds(lastPunchTime);
-    if (secondsSinceLastPunch >= 0 && secondsSinceLastPunch < 120) {
-      const remaining = 120 - secondsSinceLastPunch;
+    if (secondsSinceLastPunch >= 0 && secondsSinceLastPunch < PUNCH_MIN_GAP_SECONDS) {
+      const remaining = PUNCH_MIN_GAP_SECONDS - secondsSinceLastPunch;
       return {
         ok: false,
         alreadyRecorded: true,
-        message: `Please wait ${remaining} second${remaining === 1 ? '' : 's'} before punching again. Minimum delay is 2 minutes between punches.`,
+        message: `Please wait ${remaining} second${remaining === 1 ? '' : 's'} before punching again. Minimum delay is 1 minute between punches.`,
         cooldownSeconds: remaining,
         employee: kioskEmployee(employee),
       };
     }
   }
+  // A camera bound to one direction (entrance / exit) only records that direction.
+  const presence = isReturningFromBreak ? 'away' : existing?.punchIn && !existing?.punchOut ? 'in' : 'none';
+  const refusal = directionRefusal(meta?.direction, presence);
+  if (refusal) {
+    return { ok: false, directionMismatch: true, message: refusal, employee: kioskEmployee(employee), action: meta?.direction === 'in' ? 'IN' : 'OUT' };
+  }
   const isPunchOut = existing?.punchIn && !existing?.punchOut;
-  const outReason = isPunchOut ? normalizeCheckoutReason(meta?.outReason || meta?.reason) : '';
+  // An Out camera records the reason chosen in Settings, or asks when none is set.
+  const outReason = isPunchOut ? normalizeCheckoutReason(meta?.outReason || meta?.reason || (meta?.direction === 'out' ? store.terminal.outCameraReason : '')) : '';
   if (isPunchOut && !outReason) {
     return {
       ok: false,
@@ -1046,7 +1076,8 @@ ipcMain.handle('kiosk:get-state', async () => {
     city: branch.city || '',
   }));
   return {
-    terminal: store.terminal,
+    terminal: publicTerminal(store.terminal),
+    appVersion: app.getVersion(),
     lastSync: store.lastSync || null,
     employees: (store.employees || []).map(kioskEmployee),
     attendances: (store.attendances || []).map(log => {
@@ -1151,32 +1182,113 @@ ipcMain.handle('kiosk:clear-local-attendance-cache', async () => {
 
 ipcMain.handle('kiosk:save-settings', async (_event, settings) => {
   const store = readStore();
-  const prevUrl = store.terminal.ipCameraUrl;
+  const before = normalizeCameraSettings(store.terminal);
   const prevBranchId = store.terminal.branchId;
+  const ipCameras = mergeSubmittedCameras(before.ipCameras, Array.isArray(settings.ipCameras) ? settings.ipCameras : [], encryptSecret);
 
-  store.terminal = {
+  store.terminal = normalizeCameraSettings({
     ...store.terminal,
     id: settings.id || store.terminal.id,
     location: settings.location || store.terminal.location,
     branchId: settings.branchId ?? store.terminal.branchId,
-    ipCameraUrl: settings.ipCameraUrl || '',
+    cameraSource: settings.cameraSource === 'ip' ? 'ip' : 'webcam',
+    ipCameras,
+    outCameraReason: typeof settings.outCameraReason === 'string' ? settings.outCameraReason : '',
     allowCodeOnlyPunch: !!settings.allowCodeOnlyPunch,
     requireCodeWithFingerprint: !!settings.requireCodeWithFingerprint,
     requireCodeWithCamera: false,
     autoCaptureCamera: settings.autoCaptureCamera !== false,
     autoFullscreen: !!settings.autoFullscreen,
     classicTheme: !!settings.classicTheme,
-  };
+  });
   writeStore(store);
 
   if (settings.branchId !== prevBranchId) {
     addEvent('config', `Terminal branch changed to ${settings.branchId || 'unassigned'}`);
   }
-  if (settings.ipCameraUrl !== prevUrl) {
-    addEvent('config', settings.ipCameraUrl ? `IP camera configured: ${settings.ipCameraUrl}` : 'IP camera removed');
+  if (before.cameraSource !== store.terminal.cameraSource) {
+    addEvent('config', `Camera source: ${store.terminal.cameraSource === 'ip' ? 'IP camera' : 'webcam'}`);
   }
+  store.terminal.ipCameras.forEach((camera, index) => {
+    const old = before.ipCameras[index];
+    if (camera.url !== old.url || camera.direction !== old.direction || camera.name !== old.name || camera.zoom !== old.zoom) {
+      addEvent('config', camera.url ? `${camera.name} (${DIRECTION_LABELS[camera.direction]}, zoom ${camera.zoom}x) configured: ${camera.url}` : `${old.name} removed`);
+    }
+    const typed = settings.ipCameras?.[index]?.password;
+    if (camera.url && typeof typed === 'string' && typed) addEvent('config', `${camera.name} credentials updated for user ${camera.user || '(none)'}`);
+  });
+  // The renderer reopens the live streams with the new URLs / credentials when it is in camera mode.
+  stopIpCameraStream();
 
-  return store.terminal;
+  return publicTerminal(store.terminal);
+});
+
+// Live IP camera picture: the main process holds the connection (it can answer the camera's Digest/Basic login) and
+// pushes frames to the renderer. After a refused login the stream waits a minute before trying again: Hikvision and
+// similar cameras lock the account (or the kiosk's address) after a handful of failed attempts.
+// One stream per camera id; the renderer asks for the cameras it shows (both in Multi-Face mode, the selected one in
+// the 1-on-1 challenge) and frames carry the camera id.
+const ipCameraStreams = new Map();
+function stopIpCameraStream(keepIds = []) {
+  for (const [id, stream] of ipCameraStreams) {
+    if (keepIds.includes(id)) continue;
+    stream.stop();
+    ipCameraStreams.delete(id);
+  }
+}
+function sendToKiosk(channel, data) {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, data);
+}
+function startCameraStream(camera) {
+  let refusalLogged = false;
+  // rtsp:// URLs are decoded by FFmpeg (H.264/H.265 cameras); http(s) URLs are MJPEG streams or snapshots.
+  const Stream = isRtspUrl(camera.url) ? RtspCameraStream : IpCameraStream;
+  const stream = new Stream({
+    url: camera.url,
+    zoom: camera.zoom || 1,
+    user: camera.user || '',
+    password: decryptSecret(camera.password),
+    request: options => electronNet.request(options),
+    spawn,
+    onFrame: dataUrl => { if (ipCameraStreams.get(camera.id) === stream) sendToKiosk('kiosk:ip-camera-frame', { cameraId: camera.id, ok: true, dataUrl }); },
+    onStatus: (message, outcome) => {
+      if (ipCameraStreams.get(camera.id) !== stream) return;
+      sendToKiosk('kiosk:ip-camera-frame', { cameraId: camera.id, ok: false, message: outcome?.rejected ? `${message} Not retried for a minute to avoid locking the camera account; correct it in Settings (Test camera) and save.` : message });
+      if (outcome?.rejected && !refusalLogged) {
+        refusalLogged = true;
+        addEvent('config', `${camera.name} login refused for user ${camera.user || '(none)'}: ${message}`);
+      }
+    },
+  });
+  ipCameraStreams.set(camera.id, stream);
+  stream.start();
+}
+ipcMain.handle('kiosk:start-ip-camera-stream', async (_event, cameraIds) => {
+  const { terminal } = readStore();
+  const cameras = activeIpCameras(terminal);
+  if (!cameras.length) { stopIpCameraStream(); return { ok: false, message: 'No IP camera is configured.' }; }
+  const wanted = Array.isArray(cameraIds) && cameraIds.length ? cameras.filter(camera => cameraIds.includes(camera.id)) : cameras;
+  stopIpCameraStream(wanted.map(camera => camera.id));
+  for (const camera of wanted) if (!ipCameraStreams.has(camera.id)) startCameraStream(camera);
+  return { ok: true, cameraIds: wanted.map(camera => camera.id) };
+});
+ipcMain.handle('kiosk:stop-ip-camera-stream', async () => { stopIpCameraStream(); return { ok: true }; });
+app.on('before-quit', () => stopIpCameraStream());
+
+// Settings → "Test camera": tries the values as typed (an unsaved password included) once, so a wrong user or
+// password is caught before the preview loop starts.
+ipcMain.handle('kiosk:test-ip-camera', async (_event, payload) => {
+  const { terminal } = readStore();
+  const url = String(payload?.url || '').trim();
+  const user = String(payload?.user || '').trim();
+  const typed = String(payload?.password || '');
+  const saved = (terminal.ipCameras || []).find(camera => camera.id === payload?.cameraId);
+  const password = typed || (user && saved && user === saved.user ? decryptSecret(saved.password) : '');
+  const result = isRtspUrl(url)
+    ? await grabRtspFrame({ url, user, password, spawn, zoom: CAMERA_ZOOMS.includes(Number(payload?.zoom)) ? Number(payload.zoom) : 1 })
+    : await fetchIpCameraFrame({ url, user, password, request: options => electronNet.request(options) });
+  const bytes = result.ok ? Math.round((result.dataUrl.length - result.dataUrl.indexOf(',') - 1) * 3 / 4) : 0;
+  return { ok: result.ok, message: result.message || '', bytes };
 });
 
 ipcMain.handle('kiosk:device-status', async () => publicDeviceRegistration());
@@ -1248,9 +1360,11 @@ ipcMain.handle('kiosk:punch-by-code', async (_event, payload) => {
   return savePunch(store, employee, payload.method || 'RFID', payload.evidence || null, payload.meta || {});
 });
 
-ipcMain.handle('kiosk:begin-camera-liveness', async () => {
+ipcMain.handle('kiosk:begin-camera-liveness', async (_event, cameraId) => {
   const store = readStore();
-  if (store.terminal.ipCameraUrl) return { ok: false, message: 'IP camera attendance is blocked because still-image streams cannot prove liveness. Use the local webcam or fingerprint.' };
+  if (!cameraSupportsFaces(resolveCamera(store.terminal, typeof cameraId === 'string' ? cameraId : undefined))) {
+    return { ok: false, message: 'This camera cannot prove liveness (snapshot / MJPEG URL, or not configured). Use an rtsp:// camera URL, the local webcam or fingerprint.' };
+  }
   return cameraChallenges.begin(store.terminal.id || 'kiosk');
 });
 
@@ -1322,9 +1436,14 @@ ipcMain.handle('kiosk:punch-camera', async (_event, payload) => {
   if (employee.status === 'Terminated') return { ok: false, message: 'This employee account is terminated.' };
   if (employee.status === 'Suspended') return { ok: false, message: 'This employee account is suspended.' };
 
+  // Direction and camera identity come from the terminal's settings (resolved by authorizeCameraAttempt), not the payload.
+  const camera = authorization.camera;
   const result = await savePunch(store, employee, 'Camera', payload.evidence || null, {
     ...(payload.meta || {}),
-    camera: payload.meta?.camera || 'webcam',
+    camera: camera ? 'ip-camera' : 'webcam',
+    cameraId: camera?.id || '',
+    cameraName: camera?.name || '',
+    direction: camera?.direction || 'both',
     score: match.score,
     threshold: matchThreshold,
     recognizedBy: crossBranch ? 'cross-branch-code-face-liveness' : typedEmployee ? 'camera-code-face-liveness' : 'camera-face-liveness',

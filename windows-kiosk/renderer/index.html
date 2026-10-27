@@ -19,7 +19,7 @@
         <div class="brand-logo">HR</div>
         <div class="brand-text">
           <div class="brand-name">HR Attendance Kiosk</div>
-          <div class="brand-sub" id="terminalLine">Attendance Terminal · Initializing…</div>
+          <div class="brand-sub"><span id="terminalLine">Attendance Terminal · Initializing…</span> <span class="app-version" id="appVersion"></span></div>
         </div>
       </div>
 
@@ -216,6 +216,8 @@
               <span>1-on-1 Challenge (Oval)</span>
             </button>
           </div>
+          <!-- Two IP cameras: choose which one the 1-on-1 challenge uses (Multi-Face shows both). -->
+          <div class="cam-select-bar hidden" id="camSelectBar" role="group" aria-label="Camera"></div>
           <div class="captured-photo-card hidden" id="capturedPhotoCard" aria-live="polite">
             <img id="capturedPhotoImg" alt="Captured attendance photo" />
             <span>CAPTURED</span>
@@ -227,11 +229,21 @@
           <canvas id="snapCanvas" class="snap-canvas" width="1280" height="720"></canvas>
           <div class="cam-hud">
             <div class="cam-source-badge" id="camSourceBadge">Webcam</div>
+            <div class="cam-direction-tag hidden" id="camDirectionTag"></div>
             <div class="cam-face-guide" id="camFaceGuide"></div>
             <div class="cam-auto-status hidden" id="camAutoStatus">
               <span class="auto-scan-dot"></span>
               <span id="camAutoLabel">Scanning for face…</span>
             </div>
+          </div>
+        </div>
+        <!-- Second IP camera (Multi-Face Stream with two cameras, e.g. entrance and exit). -->
+        <div class="camera-view hidden" id="cameraView2">
+          <img id="ipcamEl2" alt="IP Camera 2" />
+          <canvas id="multiFaceCanvas2" class="multi-face-canvas"></canvas>
+          <div class="cam-hud">
+            <div class="cam-source-badge" id="camSourceBadge2">Camera 2</div>
+            <div class="cam-direction-tag hidden" id="camDirectionTag2"></div>
           </div>
         </div>
         <div class="liveness-rail" id="livenessRail" aria-live="assertive">
@@ -456,10 +468,61 @@
               </select>
               <small class="form-help">Other-branch employees must use Camera and provide their complete employee ID for ID + face verification.</small>
             </label>
+          </div>
+        </div>
+
+        <div class="dialog-section">
+          <h3 class="dialog-section-title">Camera</h3>
+          <div class="form-grid">
             <label class="form-field full">
-              <span class="form-label">IP Camera URL <small>(MJPEG stream or snapshot URL)</small></span>
-              <input id="stIpCamUrl" class="form-input" placeholder="http://192.168.1.100/snapshot.jpg" />
+              <span class="form-label">Camera source</span>
+              <select id="stCameraSource" class="form-input">
+                <option value="webcam">Webcam (USB or built-in camera on this PC)</option>
+                <option value="ip">IP camera(s) (network camera, up to two)</option>
+              </select>
             </label>
+          </div>
+          <div id="stIpCameraFields">
+            <fieldset class="cam-fieldset" data-cam="1">
+              <legend>IP camera 1</legend>
+              <div class="form-grid">
+                <label class="form-field"><span class="form-label">Name</span><input id="stCam1Name" class="form-input" placeholder="Entrance" maxlength="40" /></label>
+                <label class="form-field"><span class="form-label">Use for</span>
+                  <select id="stCam1Direction" class="form-input"><option value="both">In &amp; Out (one camera)</option><option value="in">In only (entrance)</option><option value="out">Out only (exit)</option></select>
+                </label>
+                <label class="form-field"><span class="form-label">Zoom <small>(rtsp:// only)</small></span>
+                  <select id="stCam1Zoom" class="form-input"><option value="1">None (full picture)</option><option value="1.5">1.5× (centre)</option><option value="2">2× (centre)</option><option value="2.5">2.5× (centre)</option><option value="3">3× (centre)</option></select>
+                </label>
+                <label class="form-field full"><span class="form-label">URL <small>(rtsp:// for live video and face punches)</small></span><input id="stCam1Url" class="form-input" placeholder="rtsp://192.168.1.45:554/Streaming/Channels/102" /></label>
+                <label class="form-field"><span class="form-label">Username</span><input id="stCam1User" class="form-input" placeholder="camera operator user" autocomplete="off" /></label>
+                <label class="form-field"><span class="form-label">Password</span><input id="stCam1Password" class="form-input" type="password" placeholder="camera password" autocomplete="new-password" /></label>
+                <div class="form-field full"><div class="dialog-footer-left"><button class="btn btn-ghost" id="stCam1Test" type="button">Test camera 1</button><small class="form-help" id="stCam1TestResult"></small></div></div>
+              </div>
+            </fieldset>
+            <fieldset class="cam-fieldset" data-cam="2">
+              <legend>IP camera 2 <small>(optional, e.g. the exit)</small></legend>
+              <div class="form-grid">
+                <label class="form-field"><span class="form-label">Name</span><input id="stCam2Name" class="form-input" placeholder="Exit" maxlength="40" /></label>
+                <label class="form-field"><span class="form-label">Use for</span>
+                  <select id="stCam2Direction" class="form-input"><option value="both">In &amp; Out</option><option value="in">In only (entrance)</option><option value="out">Out only (exit)</option></select>
+                </label>
+                <label class="form-field"><span class="form-label">Zoom <small>(rtsp:// only)</small></span>
+                  <select id="stCam2Zoom" class="form-input"><option value="1">None (full picture)</option><option value="1.5">1.5× (centre)</option><option value="2">2× (centre)</option><option value="2.5">2.5× (centre)</option><option value="3">3× (centre)</option></select>
+                </label>
+                <label class="form-field full"><span class="form-label">URL <small>(leave empty for one camera)</small></span><input id="stCam2Url" class="form-input" placeholder="rtsp://192.168.1.46:554/Streaming/Channels/102" /></label>
+                <label class="form-field"><span class="form-label">Username</span><input id="stCam2User" class="form-input" placeholder="camera operator user" autocomplete="off" /></label>
+                <label class="form-field"><span class="form-label">Password</span><input id="stCam2Password" class="form-input" type="password" placeholder="camera password" autocomplete="new-password" /></label>
+                <div class="form-field full"><div class="dialog-footer-left"><button class="btn btn-ghost" id="stCam2Test" type="button">Test camera 2</button><small class="form-help" id="stCam2TestResult"></small></div></div>
+              </div>
+            </fieldset>
+            <div class="form-grid">
+              <label class="form-field full">
+                <span class="form-label">Out camera checkout reason</span>
+                <select id="stOutCameraReason" class="form-input"><option value="">Ask on screen</option></select>
+                <small class="form-help">Used when someone is recognised on an "Out only" camera, so nobody has to touch the screen at the exit. "Ask on screen" shows the reason list.</small>
+              </label>
+            </div>
+            <small class="form-help">Best setup: one camera at the entrance set to "In only" and one at the exit set to "Out only". Each recognises faces on its own; an In camera ignores people already inside and an Out camera ignores people who have not punched in. With one camera choose "In &amp; Out". Use rtsp:// URLs (Hikvision: rtsp://CAMERA-IP:554/Streaming/Channels/102, needs FFmpeg on this PC) for live video and face punches; a snapshot …/picture URL only attaches a photo. Users must be camera device users with Remote: Live View. Test before saving; passwords stay encrypted on this PC and a blank password keeps the saved one.</small>
           </div>
         </div>
 
