@@ -75,7 +75,7 @@ copy(path.join(root, 'server.cjs'), path.join(appStage, 'server.cjs'));
 for (const dir of ['server', path.join('server', 'legacy-import')]) {
   for (const file of fs.readdirSync(path.join(root, dir))) if (file.endsWith('.cjs') && !/\.(test|integration)\.cjs$/.test(file)) copy(path.join(root, dir, file), path.join(appStage, dir, file));
 }
-for (const script of ['postgres-migrate.cjs', 'postgres-backup.cjs', 'postgres-backup-verify.cjs', 'postgres-restore.cjs', 'backup-crypto.cjs', 'seed-tax-slabs.cjs', 'cyberap-import.cjs', 'setup-installation.cjs', 'reset-admin-password.cjs']) {
+for (const script of ['postgres-migrate.cjs', 'postgres-backup.cjs', 'postgres-backup-verify.cjs', 'postgres-restore.cjs', 'backup-crypto.cjs', 'seed-tax-slabs.cjs', 'cyberap-import.cjs', 'setup-installation.cjs', 'reset-admin-password.cjs', 'db-maintenance.cjs']) {
   copy(path.join(root, 'scripts', script), path.join(appStage, 'scripts', script));
 }
 copy(path.join(root, 'postgres', 'migrations'), path.join(appStage, 'postgres', 'migrations'));
@@ -148,6 +148,10 @@ const guide = path.join(root, 'docs', 'HR-Payroll-Windows-Server-Guide.pdf');
 if (fs.existsSync(guide)) copy(guide, path.join(stage, 'docs', path.basename(guide)));
 const migrationGuide = path.join(root, 'docs', 'CyberAP-Data-Migration-Guide.pdf');
 if (fs.existsSync(migrationGuide)) copy(migrationGuide, path.join(stage, 'docs', path.basename(migrationGuide)));
+for (const name of ['HR-Payroll-Database-Commands.pdf', 'HR-Payroll-Database-Queries.sql']) {
+  const file = path.join(root, 'docs', name);
+  if (fs.existsSync(file)) copy(file, path.join(stage, 'docs', name));
+}
 fs.writeFileSync(path.join(stage, 'README.txt'), [
   `HR & Payroll ${version} — Windows Server package`,
   '',

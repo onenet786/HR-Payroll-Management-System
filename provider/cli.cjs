@@ -5,7 +5,7 @@
 //   node provider/cli.cjs create-owner <email> "<name>"   first owner account (prints a temporary password)
 //   node provider/cli.cjs releases                        list installed application releases
 //   node provider/cli.cjs refresh-template [release]      create/refresh the template database
-//   node provider/cli.cjs nightly                         backup-all + check-domains + health  (aaPanel Cron, 02:00)
+//   node provider/cli.cjs nightly                         backup-all + optimise databases + check-domains + health  (aaPanel Cron, 02:00)
 //   node provider/cli.cjs health                          health of every client           (aaPanel Cron, every 10 min)
 //   node provider/cli.cjs backup-all | check-domains
 const crypto = require('node:crypto');
@@ -37,9 +37,11 @@ const { config, assertConfig } = require('./lib/config.cjs');
       case 'backup-all': print(await clients.backupAll('cron')); break;
       case 'nightly': {
         const backups = await clients.backupAll('nightly');
+        // Optimise only clients whose backup succeeded tonight (deep optimisation must follow a good backup).
+        const optimized = backups.every(item => item.ok) ? await clients.optimizeAll() : [];
         const domains = await clients.checkAllDomains();
         const health = await clients.checkAllHealth();
-        print({ backups, domains, health: health.map(item => ({ client: item.client, ok: item.ok, error: item.error })) });
+        print({ backups, optimized, domains, health: health.map(item => ({ client: item.client, ok: item.ok, error: item.error })) });
         if (backups.some(item => !item.ok) || domains.problems.length || health.some(item => !item.ok)) process.exitCode = 2;
         break;
       }

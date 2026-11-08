@@ -145,6 +145,15 @@ CREATE USER [NT AUTHORITY\\NETWORK SERVICE] FOR LOGIN [NT AUTHORITY\\NETWORK SER
 ALTER ROLE db_datareader ADD MEMBER [NT AUTHORITY\\NETWORK SERVICE];</pre>
 <p class="muted">For a SQL Server on another machine use the computer account instead, e.g. <code>[DOMAIN\\HEADOFFICE$]</code>. The SQL password is used only for the export in progress; it is never saved or written to a log. Each package creation is recorded in the audit log (server, database and login name).</p>
 
+<h2>Database maintenance and speed</h2>
+<p>The embedded database looks after itself; nothing has to be done by hand.</p>
+${table(['What', 'When and how'], [
+  ['Memory', 'Setup and every update size the database memory to this server (about 10% of RAM as cache when SQL Server runs here too, 20% otherwise). An update restarts the database service once when the size changes.'],
+  ['Quick optimisation', 'Every night after the backup: refreshes the statistics the database uses to plan queries and makes space from changed rows reusable. Safe while people work.'],
+  ['Deep optimisation (shrink)', 'First Sunday of the month after the backup: rewrites every table compactly and gives disk space back. Each table is locked briefly (the attendance table can take a few minutes), which is why it runs at night.'],
+  ['By hand', 'Data Backup &rarr; <b>Database health &amp; optimisation</b>: size, largest tables, unused space, memory, and <b>Quick optimise</b> / <b>Deep optimise (shrink)</b> (deep takes a backup first). Results are listed there and in <code>logs\\backup.log</code>.'],
+], ['24%'])}
+
 <h2>Daily administration</h2>
 ${table(['Task', 'How'], [
   ['See the state', '<code>powershell -ExecutionPolicy Bypass -File C:\\HRPayroll\\tools\\hrpayroll-status.ps1</code> — services, health, addresses, database size, last backup, free disk.'],
@@ -153,7 +162,7 @@ ${table(['Task', 'How'], [
   ['Logs', '<code>C:\\HRPayrollData\\logs\\app</code> (application), <code>logs\\postgresql</code> (database, one file per weekday), <code>logs\\backup.log</code>.'],
   ['Disk space', 'Watch the data disk: the database grows with attendance; 14 backups are kept.'],
   ['Forgotten administrator password', 'As Administrator: <code>powershell -ExecutionPolicy Bypass -File C:\\HRPayroll\\tools\\Reset-AdminPassword.ps1 -Email it@company.com</code>. Type a new password, or press Enter to have one generated and shown once. The generated setup password is shown only on the final setup screen and is not stored anywhere.'],
-  ['Reports and history', 'Daily screens load only current staff (plus recent leavers and those with an unpaid settlement, open loan or pending request) and the current and previous month of attendance; everything else is in <b>Reports</b> (Employee, Attendance, Payroll, Statutory). <b>View reports</b> opens employee and attendance reports for read-only managers (not salaries). To change what browsers load, set <code>attendanceReadMonths</code> or <code>employeesIncludeFormer</code> in the <code>dataLimits</code> setting (not recommended with large history).'],
+  ['Reports and history', 'Daily screens load only current staff (plus recent leavers and those with an unpaid settlement, open loan or pending request) and the current and previous month of attendance; everything else is in <b>Reports</b> (Employee, Attendance, Payroll, Statutory, Leave, Devices, Audit, CyberAP Archive). <b>View reports</b> opens employee, attendance, leave and device reports for read-only managers (not salaries, audit or the archive). To change what browsers load, set <code>attendanceReadMonths</code> or <code>employeesIncludeFormer</code> in the <code>dataLimits</code> setting (not recommended with large history).'],
   ['Tools on another drive', 'All tools find the installation by themselves (through the HR Payroll Application service). If not, add <code>-InstallDir D:\\HRPayroll</code>.'],
 ], ['22%'])}
 

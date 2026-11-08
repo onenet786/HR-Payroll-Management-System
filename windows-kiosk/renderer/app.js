@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   Bin Ishaq Attendance Kiosk — Professional Frontend
+   AlJannatMall Attendance Kiosk — Professional Frontend
    ═══════════════════════════════════════════════════════════════════════════ */
 
 'use strict';
@@ -180,6 +180,7 @@ const el = {
   stRegAccountFields: id('stRegAccountFields'),
   stRegSetupCode:     id('stRegSetupCode'),
   stRegCodePreview:   id('stRegCodePreview'),
+  stRegServerUrl: id('stRegServerUrl'),
   stRegEmail:     id('stRegEmail'),
   stRegPassword:  id('stRegPassword'),
   stRegister:     id('stRegister'),
@@ -1024,20 +1025,6 @@ async function assessCameraFrame() {
   // facial hair, and off-axis laptop cameras produce large differences even
   // for a correctly centered employee. Descriptor matching remains mandatory.
   return { ok: true, descriptor, message: 'Face frame looks ready.' };
-}
-
-// ─── Auto-Capture (Face Recognition without Employee Code) ───────────────────
-function isAutoCaptureEnabled() {
-  return activeMode === MODE.CAM &&
-    ipCameraFaceAllowed() &&
-    kioskState?.terminal?.autoCaptureCamera !== false;
-}
-
-function setAutoCaptureStatus(state, text) {
-  if (!el.camAutoStatus) return;
-  el.camAutoStatus.classList.remove('hidden');
-  el.camAutoStatus.dataset.state = state;
-  if (el.camAutoLabel) el.camAutoLabel.textContent = text;
 }
 
 // ─── Multi-Face Continuous HUD & Recognition ───────────────────────────────
@@ -2198,12 +2185,20 @@ function refreshTodayOnlyFeedLegacy() {
   }).join('');
 }
 
+// Every employee of every branch is synced so anyone can punch here, but the screen shows only attendance marked at
+// this kiosk (atThisKiosk is decided in the main process) and the employees who marked it.
+function isLocalLog(log) { return !!log.atThisKiosk; }
+function localEmployees() {
+  const ids = new Set((kioskState?.attendances || []).filter(isLocalLog).map(l => l.employeeId));
+  return (kioskState?.employees || []).filter(e => ids.has(e.id) || ids.has(e.employeeCode));
+}
+
 function refreshTodayFeed() {
   if (!kioskState) return;
-  el.todayDateLabel.textContent = 'Last 10 across all employees';
+  el.todayDateLabel.textContent = 'Last 10 at this kiosk';
 
   const employees = kioskState.employees || [];
-  const transactions = (kioskState.attendances || []).flatMap(log => {
+  const transactions = (kioskState.attendances || []).filter(isLocalLog).flatMap(log => {
     const items = [];
     if (log.punchIn) items.push({ log, action: 'IN', at: `${log.date || ''}T${log.punchIn}` });
     for (const attendanceBreak of Array.isArray(log.breaks) ? log.breaks : []) {
@@ -2231,7 +2226,7 @@ function refreshTodayFeed() {
   }).sort((a, b) => String(b.at).localeCompare(String(a.at))).slice(0, 10);
 
   if (!transactions.length) {
-    el.todayFeed.innerHTML = '<div class="feed-empty">No punches recorded yet.</div>';
+    el.todayFeed.innerHTML = '<div class="feed-empty">No attendance marked at this kiosk yet.</div>';
     return;
   }
 
@@ -2271,15 +2266,20 @@ function renderDirectory(filter) {
   const today = todayStr();
   const todayLogs = (kioskState.attendances || []).filter(l => l.date === today);
 
-  const list = (kioskState.employees || [])
-    .filter(e => e.status !== 'Terminated')
+  // The list shows this kiosk's people; a search covers every synced employee (all branches) so staff can check that
+  // someone is on the terminal before their first punch here.
+  const employees = localEmployees();
+  const synced = (kioskState.employees || []).filter(e => e.status !== 'Terminated');
+  const list = (q ? synced : employees.filter(e => e.status !== 'Terminated'))
     .filter(e => !q || `${e.fullName} ${e.employeeCode}`.toLowerCase().includes(q))
     .slice(0, DIR_RENDER_LIMIT);
 
-  el.dirCount.textContent = String((kioskState.employees || []).filter(e => e.status === 'Active').length);
+  el.dirCount.textContent = String(employees.filter(e => e.status === 'Active').length);
 
   if (!list.length) {
-    el.dirList.innerHTML = '<div class="feed-empty">No employees found.</div>';
+    el.dirList.innerHTML = q
+      ? '<div class="feed-empty">No employees found.</div>'
+      : `<div class="feed-empty">${synced.length} employees synced from all branches. They are listed here after they mark attendance at this kiosk. Search to find anyone.</div>`;
     return;
   }
 
@@ -2491,6 +2491,8 @@ function renderRegistration(registration) {
   el.stUnregister.classList.toggle('hidden', !registered);
   el.stRegPassword.value = '';
   if (registered && el.stRegSetupCode) el.stRegSetupCode.value = '';
+  // Start from the address the kiosk uses now, so a new client only has to overwrite it.
+  if (el.stRegServerUrl && !registered && !el.stRegServerUrl.value) el.stRegServerUrl.value = registration?.portalUrl || '';
   updateRegistrationMethod();
 }
 
@@ -2542,6 +2544,19 @@ async function registerKiosk() {
       el.stRegSetupCode.focus();
       return;
     }
+  } else {
+    // Point at the empty box instead of sending an incomplete request.
+    const missing = [
+      [el.stRegServerUrl, 'Enter the server address.'],
+      [el.stRegEmail, 'Enter the kiosk account email or username.'],
+      [el.stRegPassword, 'Enter the kiosk account password.'],
+    ].find(([input]) => input && !input.value.trim());
+    if (missing) {
+      el.stRegStatus.textContent = missing[1];
+      el.stRegStatus.style.color = 'var(--red)';
+      missing[0].focus();
+      return;
+    }
   }
   el.stRegister.disabled = true;
   el.stRegStatus.textContent = 'Registering…';
@@ -2549,7 +2564,7 @@ async function registerKiosk() {
   try {
     const result = await api.registerDevice(useCode
       ? { setupCode: el.stRegSetupCode.value }
-      : { email: el.stRegEmail.value, password: el.stRegPassword.value });
+      : { email: el.stRegEmail.value, password: el.stRegPassword.value, serverUrl: el.stRegServerUrl?.value || '' });
     el.stRegPassword.value = '';
     if (!result.ok) {
       el.stRegStatus.textContent = result.error || 'Registration failed.';
@@ -2849,7 +2864,7 @@ function bindEvents() {
   el.settingsBtn.addEventListener('click', openSettings);
   el.regBannerBtn?.addEventListener('click', () => {
     openSettings();
-    (registrationMethod() === 'code' ? el.stRegSetupCode : el.stRegEmail)?.focus();
+    (registrationMethod() === 'code' ? el.stRegSetupCode : (el.stRegServerUrl || el.stRegEmail))?.focus();
   });
   el.settingsClose.addEventListener('click', closeSettings);
   el.stSave.addEventListener('click', saveSettings);

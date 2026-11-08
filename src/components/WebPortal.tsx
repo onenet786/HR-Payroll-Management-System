@@ -4,7 +4,11 @@
  */
 
 import { JURISDICTIONS } from '../data/provincialCompliance';
+import { SearchableSelect } from './SearchableSelect';
 import { ReportsPanel } from './ReportsPanel';
+import { DatabaseMaintenancePanel } from './DatabaseMaintenancePanel';
+import { MegaNavList, MegaNavPanel, visibleModules, type MegaBadge, type MegaItem, type MegaModule } from './MegaNav';
+import { BarChart3, Building2, CalendarCheck, ClipboardList, Clock, Coins, Landmark, Receipt, Scale, Settings2, SlidersHorizontal, UserCheck, Wallet } from 'lucide-react';
 import { DataImportPanel } from './DataImportPanel';
 import { LicenceBanner } from './LicenceBanner';
 import { apiBase } from '../data/apiBase';
@@ -274,7 +278,7 @@ export interface WebPortalProps {
   edition: AppEdition;
 }
 
-type PortalTab = 'dashboard' | 'lifecycle' | 'employees' | 'attendance' | 'leaves' | 'payroll' | 'settings' | 'company-setup' | 'master-data' | 'access' | 'maintenance' | 'holidays' | 'loans' | 'revisions' | 'performance' | 'assets' | 'recruitment' | 'gratuity' | 'notifications' | 'biometric' | 'help' | 'data-import' | 'reports';
+type PortalTab = 'dashboard' | 'lifecycle' | 'employees' | 'attendance' | 'leaves' | 'payroll' | 'settings' | 'company-setup' | 'master-data' | 'access' | 'maintenance' | 'holidays' | 'loans' | 'revisions' | 'performance' | 'assets' | 'recruitment' | 'gratuity' | 'notifications' | 'biometric' | 'help' | 'data-import' | 'reports' | 'company-options';
 type NavGroupKey = 'people' | 'time' | 'payroll' | 'system';
 
 interface FlowStep {
@@ -322,6 +326,7 @@ const TAB_HEADINGS_UR: Record<PortalTab, string> = {
   help: 'تعمیل کی مکمل رہنمائی اور پورٹل گائیڈ۔',
   'data-import': 'پرانے سسٹم (CyberAP) سے ڈیٹا منتقل کریں۔',
   reports: 'ملازمین، حاضری، پے رول اور قانونی رپورٹس: کسی بھی مدت کے لیے، سرور سے۔',
+  'company-options': 'کمپنی کے اختیاری فیچرز اور حاضری کی پالیسی۔',
 };
 
 const TAB_HELP_UR: Record<PortalTab, string> = {
@@ -348,6 +353,7 @@ const TAB_HELP_UR: Record<PortalTab, string> = {
   help: 'انکم ٹیکس آرڈیننس 2001، ای او بی آئی ایکٹ 1976، صوبائی سوشل سیکیورٹی اور فیکٹریز ایکٹ کی رہنمائی۔',
   'data-import': 'ایکسپورٹ فائل اپ لوڈ کریں، پہلے تجزیہ کریں، پھر امپورٹ کریں۔',
   reports: 'رپورٹ منتخب کریں، فلٹر لگائیں، پھر CSV یا PDF میں محفوظ کریں۔',
+  'company-options': 'ہر آپشن بند رہتا ہے جب تک آپ اسے آن نہ کریں؛ ورنہ معیاری طریقہ لاگو ہوتا ہے۔',
 };
 
 const TAB_WORKFLOW_META: Record<PortalTab, {
@@ -489,10 +495,16 @@ const TAB_WORKFLOW_META: Record<PortalTab, {
     guideContent: 'Analyse first and review the warnings with HR. "Remove all current data" is only for a new setup: a safety backup is taken first, and it is locked once payroll has been paid.'
   },
   reports: {
-    heading: 'Employee, attendance, payroll and statutory reports for any period, read from the server when you open them.',
+    heading: 'Employee, attendance, payroll, statutory, leave, device and audit reports, and the CyberAP archive: read from the server when you open them.',
     help: 'Pick a report, set the filters and press Show. Download CSV for Excel, or Print / PDF. History, including imported CyberAP data, lives here instead of in the daily screens.',
     guideTitle: 'Guide for Reports',
     guideContent: 'Daily screens keep only current staff and recent attendance so they stay fast. Use Reports for anything older or larger: monthly registers, summaries for a year, an employee\'s full history, joiners and leavers, missing data. Every CSV download is recorded in the audit log.'
+  },
+  'company-options': {
+    heading: 'Optional features and the attendance policy for this company.',
+    help: 'Everything here is off until switched on; the standard behaviour applies otherwise. Changes go through the same statutory change control as the payroll settings.',
+    guideTitle: 'Guide for Company Options & Attendance Policy',
+    guideContent: 'Switch on only the rules your company has agreed in writing (for example late-arrival deductions, half-day rules or personal-exit limits). Each option explains its effect; the attendance register and payroll apply them from the moment they are saved.'
   }
 };
 
@@ -516,10 +528,14 @@ const SEARCHABLE_PAGES: Array<{ tab: PortalTab; label: string; category: string 
   { tab: 'access', label: 'User Management', category: 'System' },
   { tab: 'master-data', label: 'Master Data Lists', category: 'System' },
   { tab: 'notifications', label: 'Notifications Center', category: 'System' },
+  { tab: 'company-options', label: 'Company Options & Attendance Policy', category: 'Set Up (Do Once)' },
   { tab: 'reports', label: 'Employee Reports', category: 'Reports' },
   { tab: 'reports', label: 'Attendance Reports', category: 'Reports' },
   { tab: 'reports', label: 'Payroll Reports', category: 'Reports' },
   { tab: 'reports', label: 'Statutory Reports (Tax, EOBI, Social Security)', category: 'Reports' },
+  { tab: 'reports', label: 'Leave Reports', category: 'Reports' },
+  { tab: 'reports', label: 'Audit Reports', category: 'Reports' },
+  { tab: 'reports', label: 'CyberAP Archive', category: 'Reports' },
   { tab: 'help', label: 'User Guide & Labor Laws', category: 'Help' },
 ];
 
@@ -631,7 +647,8 @@ export function WebPortal({
   edition
 }: WebPortalProps) {
   const [activeTab, setActiveTab] = useState<PortalTab>('dashboard');
-  const [reportsGroup, setReportsGroup] = useState<'employees' | 'attendance' | 'payroll' | 'statutory'>('attendance');
+  const [openMegaId, setOpenMegaId] = useState<string | null>(null);
+  const [reportsGroup, setReportsGroup] = useState<'employees' | 'attendance' | 'payroll' | 'statutory' | 'leave' | 'devices' | 'audit' | 'archive'>('attendance');
   const [clientDataImport, setClientDataImport] = useState(false);
   useEffect(() => {
     let active = true;
@@ -861,7 +878,8 @@ export function WebPortal({
     if (tab === 'lifecycle') return userPermissions.includes('manage_employees');
     if (tab === 'notifications') return true;
     if (tab === 'help') return true;
-    if (tab === 'reports') return isCanonicalSuperAdmin || ['manage_employees', 'manage_attendance', 'manage_payroll', 'view_reports'].some(permission => userPermissions.includes(permission));
+    if (tab === 'company-options') return userPermissions.includes('manage_settings');
+    if (tab === 'reports') return isCanonicalSuperAdmin || ['manage_employees', 'manage_attendance', 'manage_payroll', 'manage_leaves', 'manage_access', 'manage_data_import', 'view_reports'].some(permission => userPermissions.includes(permission));
     if (tab === 'data-import') return clientDataImport && (isCanonicalSuperAdmin || userPermissions.includes('manage_data_import'));
     if (tab === 'biometric') return userPermissions.includes('manage_attendance') || userPermissions.includes('manage_employees');
     return false;
@@ -1484,6 +1502,17 @@ export function WebPortal({
   const [employeeStatusFilter, setEmployeeStatusFilter] = useState('all');
   const [employeeDepartmentFilter, setEmployeeDepartmentFilter] = useState('all');
   const [attendanceSearch, setAttendanceSearch] = useState('');
+  // Attendance stream and employee directory draw nothing until a filter is chosen, then 50 rows per page:
+  // rendering thousands of rows (with photos) on every visit was the slow part.
+  const [attDayFilter, setAttDayFilter] = useState('');
+  const [attEmployeeFilter, setAttEmployeeFilter] = useState('');
+  const [attDepartmentFilter, setAttDepartmentFilter] = useState('');
+  const [attStatusFilter, setAttStatusFilter] = useState('');
+  const [attPage, setAttPage] = useState(1);
+  const [empPage, setEmpPage] = useState(1);
+  // Onboard System User form: role and linked employee (searchable dropdowns).
+  const [onboardRoleId, setOnboardRoleId] = useState('');
+  const [onboardEmployeeId, setOnboardEmployeeId] = useState('');
   const [leaveSearch, setLeaveSearch] = useState('');
   const [leaveStatusFilter, setLeaveStatusFilter] = useState('all');
   const [payrollSearch, setPayrollSearch] = useState('');
@@ -1502,6 +1531,32 @@ export function WebPortal({
     );
   };
   const searchedEmployees = (query: string) => employees.filter(emp => employeeMatches(emp, query));
+  const employeeById = useMemo(() => new Map(employees.map(emp => [emp.id, emp] as const)), [employees]);
+  useEffect(() => { setEmpPage(1); }, [employeeSearch, employeeStatusFilter, employeeDepartmentFilter]);
+  useEffect(() => { setAttPage(1); }, [attendanceSearch, attDayFilter, attEmployeeFilter, attDepartmentFilter, attStatusFilter]);
+  const attendanceFilterActive = Boolean(attDayFilter || attEmployeeFilter || attDepartmentFilter || attStatusFilter || attendanceSearch.trim());
+  // Today's counts for the empty state (one pass, no rows drawn).
+  const attendanceToday = useMemo(() => {
+    const day = new Date(Date.now() + 5 * 3_600_000).toISOString().slice(0, 10);
+    const counts: Record<string, number> = {};
+    for (const att of attendances) if (att.date === day) counts[att.status] = (counts[att.status] || 0) + 1;
+    return { day, counts };
+  }, [attendances]);
+  const attendanceStreamRows = useMemo(() => {
+    if (!attendanceFilterActive) return [];
+    const rows = attendances.filter(att => {
+      if (attDayFilter && att.date !== attDayFilter) return false;
+      if (attEmployeeFilter && att.employeeId !== attEmployeeFilter) return false;
+      if (attStatusFilter && att.status !== attStatusFilter) return false;
+      const emp = employeeById.get(att.employeeId);
+      if (attDepartmentFilter && emp?.departmentId !== attDepartmentFilter) return false;
+      return !attendanceSearch.trim() || employeeMatches(emp, attendanceSearch, att.date, att.status, att.method, att.punchIn, att.punchOut, att.address,
+        att.regularizationRequested && att.regularizationApproved === undefined ? 'pending review' : '');
+    });
+    // Newest day first, latest punch first within a day.
+    return rows.sort((a, b) => (b.date || '').localeCompare(a.date || '') || String(b.punchIn || '').localeCompare(String(a.punchIn || '')));
+  }, [attendances, employeeById, attendanceFilterActive, attDayFilter, attEmployeeFilter, attDepartmentFilter, attStatusFilter, attendanceSearch]); // eslint-disable-line react-hooks/exhaustive-deps
+  const ROWS_PER_PAGE = 50;
   const filteredLeaves = leaves.filter(lv =>
     (leaveStatusFilter === 'all' || lv.status === leaveStatusFilter) &&
     employeeMatches(employees.find(e => e.id === lv.employeeId), leaveSearch, lv.leaveType, lv.startDate, lv.endDate, lv.reason, lv.status));
@@ -2107,6 +2162,95 @@ export function WebPortal({
     closeSidebar();
   };
 
+  // ── Mega menus: modules in the sidebar, each opening a panel of grouped sub-menus ──
+  const FLOW_STEP_OF: Partial<Record<PortalTab, number>> = { settings: 1, 'company-setup': 2, employees: 3, holidays: 4, leaves: 5, biometric: 6, attendance: 7, loans: 8, revisions: 9, payroll: 10, gratuity: 11, lifecycle: 12 };
+  const statutoryNeedsFix = !statConfig?.minimumWage || (features.incomeTax && (!statConfig?.taxYear || !taxSlabs || taxSlabs.length === 0));
+  const companyNeedsFix = features.incomeTax && !primaryCompany?.ntn && !primaryCompany?.taxRegistrationNumber;
+  const pendingLoansCount = loanAdvances.filter(item => item.status === 'Pending').length;
+  const pendingLifecycleCount = lifecycleRequests.filter(item => item.status === 'Pending').length;
+  const openPostingsCount = jobPostings.filter(item => item.status === 'Open').length;
+  const megaItem = (tab: PortalTab, english: string, urdu: string, extra: { fix?: boolean; count?: number; info?: string } = {}): MegaItem[] => {
+    if (!hasPermission(tab)) return [];
+    const step = FLOW_STEP_OF[tab];
+    const badge: MegaBadge | undefined = extra.fix ? { text: navLabel('fix', 'درست کریں'), tone: 'red' }
+      : extra.count ? { text: String(extra.count), tone: 'amber' }
+      : extra.info ? { text: extra.info, tone: 'slate' }
+      : step ? { text: navLabel(`Step ${step}`, `مرحلہ ${step}`), tone: 'blue' } : undefined;
+    return [{ id: tab, label: navLabel(english, urdu), badge, active: activeTab === tab, onSelect: () => navigateFromSidebar(tab) }];
+  };
+  const reportGroupAllowed = (permissions: string[]) => isCanonicalSuperAdmin || permissions.some(permission => userPermissions.includes(permission));
+  const reportItem = (group: typeof reportsGroup, english: string, urdu: string, permissions: string[]): MegaItem[] => (hasPermission('reports') && reportGroupAllowed(permissions)
+    ? [{ id: `reports-${group}`, label: navLabel(english, urdu), active: activeTab === 'reports' && reportsGroup === group, onSelect: () => { setReportsGroup(group); navigateFromSidebar('reports'); } }]
+    : []);
+  const megaModules = visibleModules([
+    {
+      id: 'people', title: navLabel('People', 'افراد'), chip: navLabel('HR', 'ایچ آر'), icon: Users, tone: 'blue',
+      subtitle: navLabel('Employee records, hiring, performance, company assets and the employee life cycle.', 'ملازمین کا ریکارڈ، بھرتی، کارکردگی، اثاثے اور ملازمت کا دورانیہ۔'),
+      columns: [
+        { title: navLabel('Directory', 'فہرست'), tag: navLabel('Records', 'ریکارڈ'), tone: 'blue', icon: UserCheck, items: [...megaItem('employees', 'Employee Directory', 'ملازمین کی فہرست'), ...megaItem('lifecycle', 'Employee Lifecycle', 'ملازمت کا دورانیہ', { count: pendingLifecycleCount })] },
+        { title: navLabel('Talent', 'صلاحیت'), tag: navLabel('Growth', 'ترقی'), tone: 'emerald', icon: Briefcase, items: [...megaItem('recruitment', 'Recruitment', 'بھرتی', { count: openPostingsCount }), ...megaItem('performance', 'Performance', 'کارکردگی')] },
+        { title: navLabel('Resources', 'وسائل'), tag: navLabel('Custody', 'تحویل'), tone: 'amber', icon: ClipboardList, items: [...megaItem('assets', 'Asset Management', 'اثاثہ جات', { info: companyAssets.length ? String(companyAssets.length) : undefined })] },
+      ],
+    },
+    {
+      id: 'time', title: navLabel('Time & Attendance', 'وقت اور حاضری'), chip: navLabel('Time', 'وقت'), icon: Clock, tone: 'emerald',
+      subtitle: navLabel('Daily attendance and corrections, leave, holidays, and the biometric kiosks that record punches.', 'روزانہ حاضری اور درستگی، چھٹیاں، تعطیلات اور بایومیٹرک کیوسک۔'),
+      columns: [
+        { title: navLabel('Attendance', 'حاضری'), tag: navLabel('Daily', 'روزانہ'), tone: 'emerald', icon: CalendarCheck, items: [...megaItem('attendance', 'Attendance Register', 'حاضری رجسٹر', { count: pendingRegularizationsCount }), ...megaItem('holidays', 'Holiday Calendar', 'تعطیلات کا کیلنڈر')] },
+        { title: navLabel('Leave', 'چھٹیاں'), tag: navLabel('Requests', 'درخواستیں'), tone: 'blue', icon: CalendarDays, items: [...megaItem('leaves', 'Leave Management', 'چھٹیوں کا انتظام', { count: pendingLeavesCount })] },
+        { title: navLabel('Devices', 'آلات'), tag: navLabel('Kiosks', 'کیوسک'), tone: 'amber', icon: Fingerprint, items: [...megaItem('biometric', 'Biometric Devices & Kiosks', 'بایومیٹرک آلات')] },
+      ],
+    },
+    {
+      id: 'payroll', title: navLabel('Payroll', 'پے رول'), chip: navLabel('Payroll', 'پے رول'), icon: Wallet, tone: 'amber',
+      subtitle: navLabel('Monthly payroll runs, loans and advances, salary revisions, gratuity and final settlements.', 'ماہانہ پے رول، قرضے اور ایڈوانس، تنخواہ میں ترمیم، گریجویٹی اور تصفیہ۔'),
+      columns: [
+        { title: navLabel('Processing', 'پروسیسنگ'), tag: navLabel('Monthly', 'ماہانہ'), tone: 'amber', icon: Coins, items: [...megaItem('payroll', 'Payroll Processing', 'پے رول')] },
+        { title: navLabel('Adjustments', 'ترامیم'), tag: navLabel('Deductions', 'کٹوتیاں'), tone: 'emerald', icon: Receipt, items: [...megaItem('loans', 'Loans & Advances', 'قرضے اور ایڈوانس', { count: pendingLoansCount }), ...megaItem('revisions', 'Salary Revisions', 'تنخواہ میں ترمیم')] },
+        { title: navLabel('Separation', 'علیحدگی'), tag: navLabel('Final pay', 'حتمی ادائیگی'), tone: 'rose', icon: Scale, items: [...megaItem('gratuity', 'Gratuity & Settlement', 'گریجویٹی اور تصفیہ')] },
+      ],
+    },
+    {
+      id: 'reports', title: navLabel('Reports', 'رپورٹس'), chip: navLabel('Analytics', 'تجزیہ'), icon: BarChart3, tone: 'violet',
+      subtitle: navLabel('Read from the server when you open them: any period, including imported history. Export as CSV or PDF.', 'سرور سے، کسی بھی مدت کے لیے۔ CSV یا PDF میں محفوظ کریں۔'),
+      columns: [
+        { title: navLabel('People & Time', 'افراد اور وقت'), tag: navLabel('Operations', 'آپریشنز'), tone: 'blue', icon: Users, items: [
+          ...reportItem('employees', 'Employee Reports', 'ملازمین کی رپورٹس', ['manage_employees', 'manage_payroll', 'view_reports']),
+          ...reportItem('attendance', 'Attendance Reports', 'حاضری کی رپورٹس', ['manage_attendance', 'manage_payroll', 'view_reports']),
+          ...reportItem('leave', 'Leave Reports', 'چھٹیوں کی رپورٹس', ['manage_leaves', 'manage_employees', 'view_reports']),
+        ] },
+        { title: navLabel('Pay & Compliance', 'تنخواہ اور قوانین'), tag: navLabel('Statutory', 'قانونی'), tone: 'emerald', icon: Landmark, items: [
+          ...reportItem('payroll', 'Payroll Reports', 'پے رول رپورٹس', ['manage_payroll']),
+          ...reportItem('statutory', 'Statutory Reports (Tax, EOBI, SS)', 'قانونی رپورٹس', ['manage_payroll']),
+        ] },
+        { title: navLabel('Control', 'نگرانی'), tag: navLabel('Audit', 'آڈٹ'), tone: 'amber', icon: ShieldCheck, items: [
+          ...reportItem('devices', 'Device Reports', 'آلات کی رپورٹس', ['manage_employees', 'manage_attendance', 'view_reports']),
+          ...reportItem('audit', 'Audit Reports', 'آڈٹ رپورٹس', ['manage_access']),
+          ...reportItem('archive', 'CyberAP Archive', 'سائبر اے پی آرکائیو', ['manage_payroll', 'manage_data_import']),
+        ] },
+      ],
+      footerNote: navLabel('Export ready: CSV (Excel) and PDF · every CSV download is recorded in the audit log', 'CSV اور PDF میں ایکسپورٹ · ہر ڈاؤن لوڈ آڈٹ لاگ میں درج ہوتا ہے'),
+    },
+    {
+      id: 'admin', title: navLabel('Setup & Administration', 'ترتیب اور انتظام'), chip: navLabel('Admin only', 'صرف ایڈمن'), icon: Settings2, tone: 'rose',
+      subtitle: navLabel('Company identity, statutory rules, company options and attendance policy, users and roles, backups and data import.', 'کمپنی، قانونی قواعد، کمپنی آپشنز اور حاضری پالیسی، صارفین، بیک اپ اور ڈیٹا امپورٹ۔'),
+      columns: [
+        { title: navLabel('Organization', 'ادارہ'), tag: navLabel('Company', 'کمپنی'), tone: 'amber', icon: Building2, items: [...megaItem('company-setup', 'Company & Master Data', 'کمپنی اور ماسٹر ڈیٹا', { fix: companyNeedsFix }), ...megaItem('master-data', 'Master Data Lists', 'ماسٹر ڈیٹا')] },
+        { title: navLabel('Rules & Policy', 'قواعد اور پالیسی'), tag: navLabel('Rules', 'قواعد'), tone: 'emerald', icon: SlidersHorizontal, items: [
+          ...megaItem('settings', statutoryPayroll ? 'Statutory Config & Tax Slabs' : 'Payroll Settings', statutoryPayroll ? 'قانونی ترتیبات' : 'پے رول کی ترتیبات', { fix: statutoryNeedsFix }),
+          ...megaItem('company-options', 'Company Options & Attendance Policy', 'کمپنی آپشنز اور حاضری پالیسی'),
+        ] },
+        { title: navLabel('System & Data', 'سسٹم اور ڈیٹا'), tag: navLabel('Security', 'سیکیورٹی'), tone: 'blue', icon: Database, items: [
+          ...megaItem('access', 'Users, Roles & Permissions', 'صارفین اور کردار'),
+          ...megaItem('maintenance', 'Data Backup', 'ڈیٹا بیک اپ'),
+          ...megaItem('data-import', 'Data Import (CyberAP)', 'ڈیٹا امپورٹ'),
+          ...megaItem('notifications', 'Notifications Center', 'اطلاعات'),
+        ] },
+      ],
+      footerNote: <>{navLabel('Logged in as', 'لاگ ان')}: <b className="text-slate-700">{currentUserAccount.username}</b> ({currentUserRole?.name || '—'})</>,
+    },
+  ] as MegaModule[]);
+
   const getFlowStepState = (step: FlowStep): { className: string; statusText: string } => {
     const currentStepObj = FLOW_STEPS.find(s => s.tab === activeTab);
     const currentStepNum = currentStepObj ? currentStepObj.step : 12;
@@ -2287,261 +2431,25 @@ export function WebPortal({
             <button type="button" onClick={togglePortalLanguage} className="mx-2 mb-2 w-[calc(100%-1rem)] rounded-lg border border-slate-700 py-1.5 text-[11px] font-bold text-emerald-300 hover:bg-slate-800">{portalLanguage === 'ur' ? 'English' : 'اردو'}</button>
             {/* Dashboard */}
             {hasPermission('dashboard') && (
-              <button
-                type="button"
-                onClick={() => navigateFromSidebar('dashboard')}
-                className={`side-item ${activeTab === 'dashboard' ? 'on' : ''}`}
-              >
+              <button type="button" onClick={() => { setOpenMegaId(null); navigateFromSidebar('dashboard'); }} className={`side-item ${activeTab === 'dashboard' ? 'on' : ''}`}>
                 <span>{navLabel('Operations Dashboard', 'آپریشنز ڈیش بورڈ')}</span>
               </button>
             )}
 
-            {/* Section: SET UP (DO ONCE) */}
-            <div className="sec"><span>{navLabel('SET UP (DO ONCE)', 'ابتدائی ترتیب')}</span></div>
-            {hasPermission('settings') && (
-              <button
-                type="button"
-                onClick={() => navigateFromSidebar('settings')}
-                className={`side-item ${activeTab === 'settings' ? 'on' : ''}`}
-              >
-                <span>{navLabel(statutoryPayroll ? '1. Statutory Config' : '1. Payroll Settings', statutoryPayroll ? '1. قانونی ترتیبات' : '1. پے رول کی ترتیبات')}</span>
-                {(!statConfig?.minimumWage || (features.incomeTax && (!statConfig?.taxYear || !taxSlabs || taxSlabs.length === 0))) && (
-                  <span className="n" style={{ background: '#B91C1C', color: '#fff' }}>fix</span>
-                )}
-              </button>
-            )}
-            {hasPermission('company-setup') && (
-              <button
-                type="button"
-                onClick={() => navigateFromSidebar('company-setup')}
-                className={`side-item ${activeTab === 'company-setup' ? 'on' : ''}`}
-              >
-                <span>{navLabel('2. Company & Master Data', '2. کمپنی اور ماسٹر ڈیٹا')}</span>
-                {features.incomeTax && (!primaryCompany?.ntn && !primaryCompany?.taxRegistrationNumber) && (
-                  <span className="n" style={{ background: '#B91C1C', color: '#fff' }}>fix</span>
-                )}
-              </button>
-            )}
+            {/* Modules: each opens its mega menu (MegaNavPanel below) */}
+            <MegaNavList modules={megaModules} openId={openMegaId} heading={navLabel('MODULES', 'ماڈیولز')}
+              onOpen={id => { setOpenMegaId(id); if (id) closeSidebar(); }} />
 
-            {/* Section: PEOPLE */}
-            <div className="sec"><span>{navLabel('PEOPLE', 'افراد')}</span></div>
-            {hasPermission('employees') && (
-              <button
-                type="button"
-                onClick={() => navigateFromSidebar('employees')}
-                className={`side-item ${activeTab === 'employees' ? 'on' : ''}`}
-              >
-                <span>{navLabel('3. Employee Directory', '3. ملازمین کی فہرست')}</span>
-              </button>
-            )}
-            {hasPermission('recruitment') && (
-              <button
-                type="button"
-                onClick={() => navigateFromSidebar('recruitment')}
-                className={`side-item ${activeTab === 'recruitment' ? 'on' : ''}`}
-              >
-                <span>{navLabel('Recruitment', 'بھرتی')}</span>
-                {jobPostings.filter(j => j.status === 'Open').length > 0 && (
-                  <span className="tag">{jobPostings.filter(j => j.status === 'Open').length}</span>
-                )}
-              </button>
-            )}
-            {hasPermission('performance') && (
-              <button
-                type="button"
-                onClick={() => navigateFromSidebar('performance')}
-                className={`side-item ${activeTab === 'performance' ? 'on' : ''}`}
-              >
-                <span>{navLabel('Performance', 'کارکردگی')}</span>
-              </button>
-            )}
-            {hasPermission('assets') && (
-              <button
-                type="button"
-                onClick={() => navigateFromSidebar('assets')}
-                className={`side-item ${activeTab === 'assets' ? 'on' : ''}`}
-              >
-                <span>{navLabel('Asset Management', 'اثاثہ جات')}</span>
-                {companyAssets.length > 0 && (
-                  <span className="n">{companyAssets.length}</span>
-                )}
-              </button>
-            )}
-
-            {/* Section: TIME */}
-            <div className="sec"><span>{navLabel('TIME', 'وقت')}</span></div>
-            {hasPermission('holidays') && (
-              <button
-                type="button"
-                onClick={() => navigateFromSidebar('holidays')}
-                className={`side-item ${activeTab === 'holidays' ? 'on' : ''}`}
-              >
-                <span>{navLabel('4. Holiday Calendar', '4. تعطیلات کا کیلنڈر')}</span>
-              </button>
-            )}
-            {hasPermission('leaves') && (
-              <button
-                type="button"
-                onClick={() => navigateFromSidebar('leaves')}
-                className={`side-item ${activeTab === 'leaves' ? 'on' : ''}`}
-              >
-                <span>{navLabel('5. Leave Management', '5. چھٹیوں کا انتظام')}</span>
-                {pendingLeavesCount > 0 && (
-                  <span className="n">{pendingLeavesCount}</span>
-                )}
-              </button>
-            )}
-            {hasPermission('biometric') && (
-              <button
-                type="button"
-                onClick={() => navigateFromSidebar('biometric')}
-                className={`side-item ${activeTab === 'biometric' ? 'on' : ''}`}
-              >
-                <span>{navLabel('6. Biometric Devices', '6. بایومیٹرک آلات')}</span>
-              </button>
-            )}
-            {hasPermission('attendance') && (
-              <button
-                type="button"
-                onClick={() => navigateFromSidebar('attendance')}
-                className={`side-item ${activeTab === 'attendance' ? 'on' : ''}`}
-              >
-                <span>{navLabel('7. Attendance', '7. حاضری')}</span>
-                {pendingRegularizationsCount > 0 && (
-                  <span className="n">{pendingRegularizationsCount}</span>
-                )}
-              </button>
-            )}
-
-            {/* Section: PAYROLL */}
-            <div className="sec"><span>{navLabel('PAYROLL', 'پے رول')}</span></div>
-            {hasPermission('loans') && (
-              <button
-                type="button"
-                onClick={() => navigateFromSidebar('loans')}
-                className={`side-item ${activeTab === 'loans' ? 'on' : ''}`}
-              >
-                <span>{navLabel('8. Loans & Advances', '8. قرضے اور ایڈوانس')}</span>
-                {loanAdvances.filter(l => l.status === 'Pending').length > 0 && (
-                  <span className="n">{loanAdvances.filter(l => l.status === 'Pending').length}</span>
-                )}
-              </button>
-            )}
-            {hasPermission('revisions') && (
-              <button
-                type="button"
-                onClick={() => navigateFromSidebar('revisions')}
-                className={`side-item ${activeTab === 'revisions' ? 'on' : ''}`}
-              >
-                <span>{navLabel('9. Salary Revisions', '9. تنخواہ میں ترمیم')}</span>
-              </button>
-            )}
-            {hasPermission('payroll') && (
-              <button
-                type="button"
-                onClick={() => navigateFromSidebar('payroll')}
-                className={`side-item ${activeTab === 'payroll' ? 'on' : ''}`}
-              >
-                <span>{navLabel('10. Payroll Processing', '10. پے رول')}</span>
-              </button>
-            )}
-            {hasPermission('gratuity') && (
-              <button
-                type="button"
-                onClick={() => navigateFromSidebar('gratuity')}
-                className={`side-item ${activeTab === 'gratuity' ? 'on' : ''}`}
-              >
-                <span>{navLabel('11. Gratuity & Settlement', '11. گریجویٹی اور تصفیہ')}</span>
-              </button>
-            )}
-
-            {hasPermission('lifecycle') && (
-              <button
-                type="button"
-                onClick={() => navigateFromSidebar('lifecycle')}
-                className={`side-item ${activeTab === 'lifecycle' ? 'on' : ''}`}
-              >
-                <span>{navLabel('12. Employee Lifecycle', '12. ملازمت کا دورانیہ')}{lifecycleRequests.some(item => item.status === 'Pending') ? ` (${lifecycleRequests.filter(item => item.status === 'Pending').length})` : ''}</span>
-              </button>
-            )}
-
-            {/* Section: REPORTS (read on the server, on demand) */}
-            {hasPermission('reports') && (
-              <>
-                <div className="sec"><span>{navLabel('REPORTS', 'رپورٹس')}</span></div>
-                {(isCanonicalSuperAdmin || ['manage_employees', 'manage_payroll', 'view_reports'].some(permission => userPermissions.includes(permission))) && (
-                  <button type="button" onClick={() => { setReportsGroup('employees'); navigateFromSidebar('reports'); }} className={`side-item ${activeTab === 'reports' && reportsGroup === 'employees' ? 'on' : ''}`}>
-                    <span>{navLabel('Employee Reports', 'ملازمین کی رپورٹس')}</span>
-                  </button>
-                )}
-                {(isCanonicalSuperAdmin || ['manage_attendance', 'manage_payroll', 'view_reports'].some(permission => userPermissions.includes(permission))) && (
-                  <button type="button" onClick={() => { setReportsGroup('attendance'); navigateFromSidebar('reports'); }} className={`side-item ${activeTab === 'reports' && reportsGroup === 'attendance' ? 'on' : ''}`}>
-                    <span>{navLabel('Attendance Reports', 'حاضری کی رپورٹس')}</span>
-                  </button>
-                )}
-                {(isCanonicalSuperAdmin || userPermissions.includes('manage_payroll')) && (
-                  <>
-                    <button type="button" onClick={() => { setReportsGroup('payroll'); navigateFromSidebar('reports'); }} className={`side-item ${activeTab === 'reports' && reportsGroup === 'payroll' ? 'on' : ''}`}>
-                      <span>{navLabel('Payroll Reports', 'پے رول رپورٹس')}</span>
-                    </button>
-                    <button type="button" onClick={() => { setReportsGroup('statutory'); navigateFromSidebar('reports'); }} className={`side-item ${activeTab === 'reports' && reportsGroup === 'statutory' ? 'on' : ''}`}>
-                      <span>{navLabel('Statutory Reports', 'قانونی رپورٹس')}</span>
-                    </button>
-                  </>
-                )}
-              </>
-            )}
-
-            {/* Section: SYSTEM */}
-            <div className="sec"><span>{navLabel('SYSTEM', 'سسٹم')}</span></div>
-            {hasPermission('maintenance') && (
-              <button
-                type="button"
-                onClick={() => navigateFromSidebar('maintenance')}
-                className={`side-item ${activeTab === 'maintenance' ? 'on' : ''}`}
-              >
-                <span>{navLabel('Data Backup', 'ڈیٹا بیک اپ')}</span>
-              </button>
-            )}
-            {hasPermission('access') && (
-              <button
-                type="button"
-                onClick={() => navigateFromSidebar('access')}
-                className={`side-item ${activeTab === 'access' ? 'on' : ''}`}
-              >
-                <span>{navLabel('User Management', 'صارفین کا انتظام')}</span>
-              </button>
-            )}
-            {hasPermission('master-data') && (
-              <button
-                type="button"
-                onClick={() => navigateFromSidebar('master-data')}
-                className={`side-item ${activeTab === 'master-data' ? 'on' : ''}`}
-              >
-                <span>{navLabel('Master Data', 'ماسٹر ڈیٹا')}</span>
-              </button>
-            )}
-            {hasPermission('data-import') && (
-              <button
-                type="button"
-                onClick={() => navigateFromSidebar('data-import')}
-                className={`side-item ${activeTab === 'data-import' ? 'on' : ''}`}
-              >
-                <span>{navLabel('Data Import', 'ڈیٹا امپورٹ')}</span>
-              </button>
-            )}
-
-            {/* Section: HELP */}
             <div className="sec"><span>{navLabel('HELP', 'مدد')}</span></div>
-            <button
-              type="button"
-              onClick={() => setShowGuideModal(true)}
-              className="side-item"
-            >
+            <button type="button" onClick={() => { setOpenMegaId(null); setShowGuideModal(true); }} className="side-item">
               <span>{navLabel('❓ Guide for this page', '❓ اس صفحے کی رہنمائی')}</span>
             </button>
           </div>
         </nav>
+
+        {/* Mega menu panel (covers the content area, not the sidebar) */}
+        <MegaNavPanel module={megaModules.find(module => module.id === openMegaId) || null} onClose={() => setOpenMegaId(null)}
+          closeHint={navLabel('Quick key: press ESC to close the menu', 'فوری کلید: مینو بند کرنے کے لیے ESC دبائیں')} />
 
         {/* Dynamic Display Area */}
         <main className="flex-1 overflow-y-auto overflow-x-hidden pt-3 px-3 sm:px-4 xl:px-6 pb-6 bg-slate-50 min-w-0 w-full" id="web-main-panel">
@@ -2815,21 +2723,28 @@ export function WebPortal({
                         <option value="all">All statuses</option>
                         {(['Active', 'On Leave', 'Suspended', 'Terminated'] as const).map(status => <option key={status} value={status}>{status}</option>)}
                       </select>
-                      <select aria-label="Filter by department" value={employeeDepartmentFilter} onChange={e => setEmployeeDepartmentFilter(e.target.value)} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-100">
+                      <SearchableSelect aria-label="Filter by department" value={employeeDepartmentFilter} onChange={e => setEmployeeDepartmentFilter(e.target.value)} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-100">
                         <option value="all">All departments</option>
                         {localDepartments.map(dept => <option key={dept.id} value={dept.id}>{dept.name}</option>)}
-                      </select>
+                      </SearchableSelect>
                       {employeeStatusFilter === 'Terminated' && (
                         <button type="button" onClick={() => { setReportsGroup('employees'); setActiveTab('reports'); }} className="text-xs font-semibold text-emerald-700 hover:underline" title="This list shows recent leavers and those with open settlements or loans">
                           All former staff: Reports → Employee directory
                         </button>
                       )}
-                      {filtersActive && <span className="text-xs text-slate-500" aria-live="polite">Showing {filteredEmployees.length} of {employees.length}</span>}
+                      {filtersActive && <span className="text-xs text-slate-500" aria-live="polite">Showing {Math.min(filteredEmployees.length, ROWS_PER_PAGE * empPage) - Math.min(filteredEmployees.length, ROWS_PER_PAGE * (empPage - 1))} of {filteredEmployees.length.toLocaleString()} found ({employees.length.toLocaleString()} in total)</span>}
+                      {filtersActive && filteredEmployees.length > ROWS_PER_PAGE && (
+                        <span className="flex items-center gap-2 text-xs text-slate-500">
+                          page {empPage} of {Math.ceil(filteredEmployees.length / ROWS_PER_PAGE)}
+                          <button type="button" disabled={empPage <= 1} onClick={() => setEmpPage(page => page - 1)} className="rounded border border-slate-300 px-2 py-1 font-semibold disabled:opacity-40">‹ Prev</button>
+                          <button type="button" disabled={empPage >= Math.ceil(filteredEmployees.length / ROWS_PER_PAGE)} onClick={() => setEmpPage(page => page + 1)} className="rounded border border-slate-300 px-2 py-1 font-semibold disabled:opacity-40">Next ›</button>
+                        </span>
+                      )}
                       {filtersActive && <button type="button" onClick={clearFilters} className="text-xs font-bold text-emerald-700 hover:underline">Reset</button>}
                     </div>
                   </div>
                   {(<>
-                    /* Grid or Table listing of employees */
+                    {/* Grid or Table listing of employees */}
                     <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                       <div className="overflow-x-auto">
                         <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
@@ -2845,7 +2760,20 @@ export function WebPortal({
                           </thead>
                           <tbody className="divide-y divide-slate-200 text-slate-700">
                             {filtersActive && filteredEmployees.length === 0 && <NoSearchResults query={employeeSearch.trim() || 'these filters'} colSpan={6} onClear={clearFilters} />}
-                            {filteredEmployees.map(emp => {
+                            {!filtersActive && (
+                              <tr><td colSpan={6} className="px-6 py-8 text-center">
+                                <p className="text-sm font-semibold text-slate-700">Search by name, code or CNIC, or choose a status or department to list employees.</p>
+                                <p className="mt-1 text-xs text-slate-500">Employees are listed only after a search or filter, 50 per page.</p>
+                                <div className="mt-3 flex flex-wrap items-center justify-center gap-2 text-xs">
+                                  {(['Active', 'On Leave', 'Suspended', 'Terminated'] as const).map(status => {
+                                    const count = employees.filter(emp => emp.status === status).length;
+                                    return count ? <button key={status} type="button" onClick={() => setEmployeeStatusFilter(status)} className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 font-semibold text-slate-700 hover:border-emerald-400">{status}: {count.toLocaleString()}</button> : null;
+                                  })}
+                                  <button type="button" onClick={() => setEmployeeStatusFilter('Active')} className="rounded-lg bg-emerald-600 px-3 py-1.5 font-bold text-white hover:bg-emerald-500">Show active staff</button>
+                                </div>
+                              </td></tr>
+                            )}
+                            {(filtersActive ? filteredEmployees.slice((empPage - 1) * ROWS_PER_PAGE, empPage * ROWS_PER_PAGE) : []).map(emp => {
                               const branch = localBranches.find(b => b.id === emp.branchId);
                               const dept = localDepartments.find(d => d.id === emp.departmentId);
                               const desig = localDesignations.find(ds => ds.id === emp.designationId);
@@ -2864,7 +2792,7 @@ export function WebPortal({
                                         })}
                                         title="Click to view full photo"
                                       >
-                                        <img 
+                                        <img loading="lazy" decoding="async" 
                                           src={empAvatarUrl(emp)}
                                           alt={emp.fullName} 
                                           className="w-9 h-9 rounded-full object-cover border border-slate-200 group-hover:ring-2 group-hover:ring-emerald-500 transition-all" 
@@ -3020,7 +2948,7 @@ export function WebPortal({
                             });
                             setMobileDutyForm(previous => ({ ...previous, employeeId: '', instructions: '', assignedLocation: '' }));
                           }}>
-                            <select required aria-required="true" aria-label="Mobile duty employee" value={mobileDutyForm.employeeId} onChange={e => setMobileDutyForm(p => ({ ...p, employeeId: e.target.value }))} className="rounded-lg border border-indigo-200 bg-white p-2 text-xs"><option value="">Select employee *</option>{employees.filter(employee => employee.status === 'Active').map(employee => <option key={employee.id} value={employee.id}>{employee.fullName} ({employee.employeeCode})</option>)}</select>
+                            <SearchableSelect required aria-required="true" aria-label="Mobile duty employee" value={mobileDutyForm.employeeId} onChange={e => setMobileDutyForm(p => ({ ...p, employeeId: e.target.value }))} className="rounded-lg border border-indigo-200 bg-white p-2 text-xs"><option value="">Select employee *</option>{employees.filter(employee => employee.status === 'Active').map(employee => <option key={employee.id} value={employee.id}>{employee.fullName} ({employee.employeeCode})</option>)}</SearchableSelect>
                             <select value={mobileDutyForm.dutyType} onChange={e => setMobileDutyForm(p => ({ ...p, dutyType: e.target.value as MobileDutyType }))} className="rounded-lg border border-indigo-200 bg-white p-2 text-xs">{(['Work from home', 'Out of station', 'Client visit', 'Market / field duty', 'Official travel', 'Direct reporting to worksite', 'Emergency duty'] as MobileDutyType[]).map(type => <option key={type}>{type}</option>)}</select>
                             <DateField required aria-required="true" value={mobileDutyForm.validFrom} onChange={e => setMobileDutyForm(p => ({ ...p, validFrom: e.target.value }))} className="rounded-lg border border-indigo-200 bg-white p-2 text-xs" aria-label="Mobile duty valid from" />
                             <DateField required aria-required="true" value={mobileDutyForm.validTo} onChange={e => setMobileDutyForm(p => ({ ...p, validTo: e.target.value }))} className="rounded-lg border border-indigo-200 bg-white p-2 text-xs" aria-label="Mobile duty valid to" />
@@ -3102,6 +3030,45 @@ export function WebPortal({
                           <h3 className="font-bold text-sm text-slate-700">Digital Attendance Stream</h3>
                           <span className="text-xs bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded font-mono font-bold">Live Stream</span>
                         </div>
+                        {/* Filters: nothing is listed until one is chosen (performance), then 50 rows per page. */}
+                        <div className="flex flex-wrap items-end gap-2 border-b border-slate-200 bg-white px-6 py-3">
+                          <label className="flex flex-col text-[11px] font-semibold text-slate-500">Day
+                            <input type="date" value={attDayFilter} onChange={event => setAttDayFilter(event.target.value)} className="mt-0.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-700 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-100" />
+                          </label>
+                          <div className="flex gap-1">
+                            <button type="button" onClick={() => setAttDayFilter(attendanceToday.day)} className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold ${attDayFilter === attendanceToday.day ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-slate-300 bg-white text-slate-700 hover:border-emerald-500'}`}>Today</button>
+                            <button type="button" onClick={() => { const yesterday = new Date(Date.parse(`${attendanceToday.day}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10); setAttDayFilter(yesterday); }} className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:border-emerald-500">Yesterday</button>
+                          </div>
+                          <label className="flex min-w-[220px] flex-col text-[11px] font-semibold text-slate-500">Employee
+                            <SearchableSelect aria-label="Attendance employee filter" value={attEmployeeFilter} onChange={event => setAttEmployeeFilter(event.target.value)} className="mt-0.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-700">
+                              <option value="">All employees</option>
+                              {employees.map(employee => <option key={employee.id} value={employee.id}>{employee.employeeCode} — {employee.fullName}</option>)}
+                            </SearchableSelect>
+                          </label>
+                          <label className="flex min-w-[180px] flex-col text-[11px] font-semibold text-slate-500">Department
+                            <SearchableSelect aria-label="Attendance department filter" value={attDepartmentFilter} onChange={event => setAttDepartmentFilter(event.target.value)} className="mt-0.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-700">
+                              <option value="">All departments</option>
+                              {localDepartments.map(dept => <option key={dept.id} value={dept.id}>{dept.name}</option>)}
+                            </SearchableSelect>
+                          </label>
+                          <label className="flex flex-col text-[11px] font-semibold text-slate-500">Status
+                            <select value={attStatusFilter} onChange={event => setAttStatusFilter(event.target.value)} className="mt-0.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-700 focus:border-emerald-500 focus:outline-none">
+                              <option value="">All</option>
+                              {['Present', 'Late', 'Half Day', 'Absent', 'On Leave', 'Holiday'].map(status => <option key={status} value={status}>{status}</option>)}
+                            </select>
+                          </label>
+                          {attendanceFilterActive && (
+                            <button type="button" onClick={() => { setAttDayFilter(''); setAttEmployeeFilter(''); setAttDepartmentFilter(''); setAttStatusFilter(''); setAttendanceSearch(''); }} className="px-1 py-1.5 text-xs font-bold text-emerald-700 hover:underline">Reset</button>
+                          )}
+                          {attendanceFilterActive && attendanceStreamRows.length > ROWS_PER_PAGE && (
+                            <span className="ml-auto flex items-center gap-2 text-xs text-slate-500">
+                              {attendanceStreamRows.length.toLocaleString()} records · page {attPage} of {Math.ceil(attendanceStreamRows.length / ROWS_PER_PAGE)}
+                              <button type="button" disabled={attPage <= 1} onClick={() => setAttPage(page => page - 1)} className="rounded border border-slate-300 px-2 py-1 font-semibold disabled:opacity-40">‹ Prev</button>
+                              <button type="button" disabled={attPage >= Math.ceil(attendanceStreamRows.length / ROWS_PER_PAGE)} onClick={() => setAttPage(page => page + 1)} className="rounded border border-slate-300 px-2 py-1 font-semibold disabled:opacity-40">Next ›</button>
+                            </span>
+                          )}
+                          {attendanceFilterActive && attendanceStreamRows.length <= ROWS_PER_PAGE && <span className="ml-auto text-xs text-slate-500">{attendanceStreamRows.length.toLocaleString()} records</span>}
+                        </div>
                         
                         <div className="overflow-x-auto">
                           <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
@@ -3119,14 +3086,27 @@ export function WebPortal({
                             </thead>
                             <tbody className="divide-y divide-slate-100 text-slate-700 font-sans">
                               {(() => {
-                                const streamRows = attendances.slice().reverse().filter(att => employeeMatches(
-                                  employees.find(e => e.id === att.employeeId), attendanceSearch,
-                                  att.date, att.status, att.method, att.punchIn, att.punchOut, att.address,
-                                  att.regularizationRequested && att.regularizationApproved === undefined ? 'pending review' : ''));
-                                return attendanceSearch.trim() && !streamRows.length
-                                  ? <NoSearchResults query={attendanceSearch} colSpan={8} onClear={() => setAttendanceSearch('')} />
+                                if (!attendanceFilterActive) {
+                                  return (
+                                    <tr><td colSpan={8} className="px-6 py-8 text-center">
+                                      <p className="text-sm font-semibold text-slate-700">Choose a day, an employee, a department or a status to list attendance.</p>
+                                      <p className="mt-1 text-xs text-slate-500">Records are listed only after a filter is chosen, 50 per page. For longer periods use Reports → Attendance Reports.</p>
+                                      <div className="mt-3 flex flex-wrap items-center justify-center gap-2 text-xs">
+                                        <span className="text-slate-500">Today:</span>
+                                        {Object.keys(attendanceToday.counts).length === 0 && <span className="text-slate-400">no records yet</span>}
+                                        {Object.entries(attendanceToday.counts).map(([status, count]) => (
+                                          <button key={status} type="button" onClick={() => { setAttDayFilter(attendanceToday.day); setAttStatusFilter(status); }} className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 font-semibold text-slate-700 hover:border-emerald-400">{status}: {count.toLocaleString()}</button>
+                                        ))}
+                                        <button type="button" onClick={() => setAttDayFilter(attendanceToday.day)} className="rounded-lg bg-emerald-600 px-3 py-1.5 font-bold text-white hover:bg-emerald-500">Show today</button>
+                                      </div>
+                                    </td></tr>
+                                  );
+                                }
+                                const streamRows = attendanceStreamRows.slice((attPage - 1) * ROWS_PER_PAGE, attPage * ROWS_PER_PAGE);
+                                return !streamRows.length
+                                  ? <NoSearchResults query={attendanceSearch.trim() || 'these filters'} colSpan={8} onClear={() => { setAttDayFilter(''); setAttEmployeeFilter(''); setAttDepartmentFilter(''); setAttStatusFilter(''); setAttendanceSearch(''); }} />
                                   : streamRows.map(att => {
-                                const emp = employees.find(e => e.id === att.employeeId);
+                                const emp = employeeById.get(att.employeeId);
                                 const legacyLocation = Number.isFinite(att.latitude) && Number.isFinite(att.longitude)
                                   ? {
                                       latitude: Number(att.latitude), longitude: Number(att.longitude),
@@ -3144,7 +3124,7 @@ export function WebPortal({
                                   <tr key={att.id} className="hover:bg-slate-50/50">
                                     <td className="px-6 py-3 whitespace-nowrap">
                                       <div className="flex items-center space-x-2">
-                                        <img src={empAvatarUrl(emp)} alt="" className="w-6 h-6 rounded-full object-cover border" />
+                                        <img loading="lazy" decoding="async" src={empAvatarUrl(emp)} alt="" className="w-6 h-6 rounded-full object-cover border" />
                                         <div>
                                           <div className="font-semibold text-slate-800 text-xs">{emp?.fullName || 'Wager employee'}</div>
                                           <div className="text-[10px] text-slate-400 font-mono">{emp?.fullName ? emp.employeeCode : 'SYSTEM'}</div>
@@ -3459,7 +3439,7 @@ export function WebPortal({
                                           return (
                                             <tr key={l.id} className="hover:bg-slate-50">
                                               <td className="px-3 py-2.5 font-medium flex items-center space-x-2">
-                                                <img src={empAvatarUrl(emp)} alt="" className="w-5 h-5 rounded-full object-cover border" />
+                                                <img loading="lazy" decoding="async" src={empAvatarUrl(emp)} alt="" className="w-5 h-5 rounded-full object-cover border" />
                                                 <span>{emp?.fullName}</span>
                                               </td>
                                               <td className="px-3 py-2.5">
@@ -3544,7 +3524,7 @@ export function WebPortal({
                                   return (
                                     <tr key={emp.id} className="hover:bg-slate-50">
                                       <td className="px-3 py-2.5 font-medium flex items-center space-x-2">
-                                        <img src={empAvatarUrl(emp)} alt="" className="w-5 h-5 rounded-full object-cover border" />
+                                        <img loading="lazy" decoding="async" src={empAvatarUrl(emp)} alt="" className="w-5 h-5 rounded-full object-cover border" />
                                         <span>{emp.fullName}</span>
                                       </td>
                                       {companyOptions.registerShowsPosition && <><td className="px-3 py-2.5 text-slate-600">{designations.find(item => item.id === emp.designationId)?.title || '—'}</td><td className="px-3 py-2.5 text-slate-600">{branches.find(item => item.id === emp.branchId)?.name || '—'}</td></>}
@@ -3591,7 +3571,7 @@ export function WebPortal({
                                   return (
                                     <tr key={emp.id} className="hover:bg-slate-50">
                                       <td className="px-3 py-2.5 font-medium flex items-center space-x-2">
-                                        <img src={empAvatarUrl(emp)} alt="" className="w-5 h-5 rounded-full object-cover border" />
+                                        <img loading="lazy" decoding="async" src={empAvatarUrl(emp)} alt="" className="w-5 h-5 rounded-full object-cover border" />
                                         <span>{emp.fullName}</span>
                                       </td>
                                       {companyOptions.registerShowsPosition && <><td className="px-3 py-2.5 text-slate-600">{designations.find(item => item.id === emp.designationId)?.title || '—'}</td><td className="px-3 py-2.5 text-slate-600">{branches.find(item => item.id === emp.branchId)?.name || '—'}</td></>}
@@ -3704,10 +3684,10 @@ export function WebPortal({
                       setAdjustmentReason('');
                       showToast('Adjustment submitted for independent approval.');
                     }}>
-                      <select required aria-required="true" aria-label="Adjustment employee" value={adjustmentEmployeeId} onChange={e => setAdjustmentEmployeeId(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-2 text-xs bg-white">
+                      <SearchableSelect required aria-required="true" aria-label="Adjustment employee" value={adjustmentEmployeeId} onChange={e => setAdjustmentEmployeeId(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-2 text-xs bg-white">
                         <option value="">Select employee *</option>
                         {employees.map(employee => <option key={employee.id} value={employee.id}>{employee.employeeCode} — {employee.fullName}</option>)}
-                      </select>
+                      </SearchableSelect>
                       <select aria-label="Adjustment type" value={adjustmentType} onChange={e => setAdjustmentType(e.target.value as PayrollAdjustmentType)} className="border border-slate-300 rounded-lg px-3 py-2 text-xs bg-white">
                         {companyOptions.extendedPayComponents ? <>
                           <optgroup label="Allowances / rewards (manual)">{PAYROLL_COMPONENTS.filter(item => item.kind === 'earning' && item.source === 'Manual').map(item => <option key={item.type}>{item.type}</option>)}</optgroup>
@@ -4201,14 +4181,12 @@ export function WebPortal({
                     {attendanceExceptionQueue.length > 9 && <p className="mt-3 text-xs font-medium text-slate-600">+ {attendanceExceptionQueue.length - 9} more exception(s) in the attendance register.</p>}
                   </section>
 
-                  {/* Optional company features and attendance policy: its own section, outside the statutory card, same in both editions. */}
-                  {userPermissions.includes('manage_settings') && <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-3" aria-labelledby="company-options-title">
-                    <div>
-                      <h3 id="company-options-title" className="text-sm font-bold text-slate-900">Company Options &amp; Attendance Policy</h3>
-                      <p className="mt-1 text-xs text-slate-600">Optional features for this company. Everything here is off until switched on; the standard behaviour applies otherwise.</p>
-                    </div>
-                    <AttendancePolicyEditor policy={editableStatConfig.attendancePolicy || {}} options={editableStatConfig.companyOptions || {}} onChange={(policy, options) => onUpdateStatConfig({ ...editableStatConfig, attendancePolicy: policy, companyOptions: options, updatedAt: new Date().toISOString() })} />
-                  </section>}
+                  {/* Company Options & Attendance Policy now has its own page (Setup & Administration → Rules & Policy). */}
+                  {hasPermission('company-options') && (
+                    <button type="button" onClick={() => setActiveTab('company-options')} className="w-full rounded-xl border border-dashed border-emerald-300 bg-emerald-50/50 p-4 text-left text-sm text-emerald-800 hover:bg-emerald-50">
+                      <b>Company Options &amp; Attendance Policy</b> has its own page now → open it (Setup &amp; Administration → Rules &amp; Policy)
+                    </button>
+                  )}
 
                 </motion.div>
               )}
@@ -4234,7 +4212,7 @@ export function WebPortal({
                       <span className={`rounded px-2 py-1 text-[10px] font-bold ${mfaRecoveryRequests.length ? 'bg-rose-100 text-rose-800' : 'bg-slate-100 text-slate-600'}`}>{mfaRecoveryRequests.length} pending</span>
                     </div>
                     <div className="mt-3 grid gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto]">
-                      <select aria-required="true" aria-label="User needing MFA recovery" value={adminRecoveryTargetId} onChange={event => setAdminRecoveryTargetId(event.target.value)} className="rounded border border-slate-300 bg-white px-2 py-1.5 text-xs"><option value="">Select user for recovery *</option>{users.filter(user => user.mfaEnabled).map(user => <option key={user.id} value={user.id}>{user.username}</option>)}</select>
+                      <SearchableSelect aria-required="true" aria-label="User needing MFA recovery" value={adminRecoveryTargetId} onChange={event => setAdminRecoveryTargetId(event.target.value)} className="rounded border border-slate-300 bg-white px-2 py-1.5 text-xs"><option value="">Select user for recovery *</option>{users.filter(user => user.mfaEnabled).map(user => <option key={user.id} value={user.id}>{user.username}</option>)}</SearchableSelect>
                       <input aria-required="true" aria-label="Administrator recovery reason" value={adminRecoveryReason} onChange={event => setAdminRecoveryReason(event.target.value)} maxLength={500} placeholder="Identity-verification reason (min 10 characters) *" className="rounded border border-slate-300 px-2 py-1.5 text-xs" />
                       <button type="button" disabled={!adminRecoveryTargetId || adminRecoveryReason.trim().length < 10 || mfaRecoverySubmitting} onClick={() => submitMfaRecoveryRequest(adminRecoveryTargetId, adminRecoveryReason)} className="rounded bg-amber-700 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50">Request reset</button>
                     </div>
@@ -4351,13 +4329,17 @@ export function WebPortal({
                           const form = e.target as any;
                           const username = form.elements.username.value;
                           const email = form.elements.email.value;
-                          const roleId = form.elements.roleId.value;
-                          const employeeId = form.elements.employeeId.value;
+                          const roleId = onboardRoleId;
+                          const employeeId = onboardEmployeeId;
                           const password = form.elements.password.value;
                           
                            if (!username || !email || !password) {
                             alert('Please enter username, email, and password.');
                             return;
+                           }
+                           if (!roleId) {
+                             alert('Choose a role for the new user.');
+                             return;
                            }
 
                            if (roleId === 'role-employee' && !employeeId) {
@@ -4385,6 +4367,8 @@ export function WebPortal({
                               password
                             });
                             form.reset();
+                            setOnboardRoleId('');
+                            setOnboardEmployeeId('');
                             alert('Success: User account and HR profile created.');
                           } catch (error) {
                             const message = (error as Error)?.message || 'Unable to create the user account. No partial HR profile was saved.';
@@ -4406,22 +4390,22 @@ export function WebPortal({
                           </div>
                           <div>
                             <label htmlFor="roleId" className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Assign Initial Role:<RequiredMark /></label>
-                            <select id="roleId" name="roleId" required aria-required="true" defaultValue="" className="w-full text-xs p-2 bg-white border border-slate-300 rounded focus:ring-1">
+                            <SearchableSelect id="roleId" required aria-required="true" value={onboardRoleId} onChange={event => setOnboardRoleId(event.target.value)} className="w-full text-xs p-2 bg-white border border-slate-300 rounded focus:ring-1">
                               {/* No default: the first role is Super Admin, which must never be granted by accident. */}
                               <option value="" disabled>Select a role…</option>
                               {roles.map(r => (
                                 <option key={r.id} value={r.id}>{r.name}</option>
                               ))}
-                            </select>
+                            </SearchableSelect>
                           </div>
                           <div>
                             <label htmlFor="employeeId" className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Link Employee (Required for Mobile):</label>
-                            <select id="employeeId" name="employeeId" className="w-full text-xs p-2 bg-white border border-slate-300 rounded focus:ring-1">
+                            <SearchableSelect id="employeeId" value={onboardEmployeeId} onChange={event => setOnboardEmployeeId(event.target.value)} className="w-full text-xs p-2 bg-white border border-slate-300 rounded focus:ring-1">
                               <option value="">-- No Link --</option>
                               {employees.map(e => (
                                 <option key={e.id} value={e.id}>{e.fullName} ({e.employeeCode})</option>
                               ))}
-                            </select>
+                            </SearchableSelect>
                           </div>
                           <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 rounded text-xs shadow-xs">
                             Create Account
@@ -4549,9 +4533,9 @@ export function WebPortal({
                             <span className="mt-1 block text-[10px] font-normal text-slate-400">Email is unique and read-only for identity security.</span>
                           </label>
                           <label className="text-xs font-semibold text-slate-700">Role<RequiredMark />
-                            <select required aria-required="true" value={editingUser.roleId} onChange={event => setEditingUser({ ...editingUser, roleId: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 bg-white p-2.5 text-sm">
+                            <SearchableSelect required aria-required="true" value={editingUser.roleId} onChange={event => setEditingUser({ ...editingUser, roleId: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 bg-white p-2.5 text-sm">
                               {roles.map(role => <option key={role.id} value={role.id}>{role.name}</option>)}
-                            </select>
+                            </SearchableSelect>
                           </label>
                           <label className="text-xs font-semibold text-slate-700">Account Status
                             <select value={editingUser.status} onChange={event => setEditingUser({ ...editingUser, status: event.target.value as UserAccount['status'] })} className="mt-1 w-full rounded-lg border border-slate-300 bg-white p-2.5 text-sm">
@@ -4562,13 +4546,13 @@ export function WebPortal({
                         </div>
 
                         <label className="block text-xs font-semibold text-slate-700">Linked Employee — required for mobile
-                          <select value={editingUser.employeeId || ''} onChange={event => setEditingUser({ ...editingUser, employeeId: event.target.value || undefined })} className="mt-1 w-full rounded-lg border border-slate-300 bg-white p-2.5 text-sm">
+                          <SearchableSelect value={editingUser.employeeId || ''} onChange={event => setEditingUser({ ...editingUser, employeeId: event.target.value || undefined })} className="mt-1 w-full rounded-lg border border-slate-300 bg-white p-2.5 text-sm">
                             <option value="">Not linked</option>
                             {employees.map(employee => {
                               const linkedElsewhere = users.some(user => user.id !== editingUser.id && user.employeeId === employee.id);
                               return <option key={employee.id} value={employee.id} disabled={linkedElsewhere}>{employee.fullName} ({employee.employeeCode}){linkedElsewhere ? ' — already linked' : ''}</option>;
                             })}
-                          </select>
+                          </SearchableSelect>
                         </label>
 
                         <label className="block text-xs font-semibold text-slate-700">Reset password (optional)
@@ -4591,8 +4575,24 @@ export function WebPortal({
               {/* TAB 8: DATA BACKUP & RESTORE */}
               {activeTab === 'maintenance' && (
                 <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="h-full">
+                  {(isCanonicalSuperAdmin || userPermissions.includes('manage_access') || userPermissions.includes('manage_settings')) && <div className="mb-4"><DatabaseMaintenancePanel /></div>}
                   <FirestoreMaintenanceModule />
                 </motion.div>
+              )}
+
+              {activeTab === 'company-options' && hasPermission('company-options') && (
+                <div className="space-y-4">
+                  <div className="flex flex-wrap items-end justify-between gap-2">
+                    <div>
+                      <h2 className="text-xl font-bold text-slate-900">Company Options &amp; Attendance Policy</h2>
+                      <p className="text-xs text-slate-500">Optional features for this company. Everything here is off until switched on; the standard behaviour applies otherwise.</p>
+                    </div>
+                    {pendingStatutoryChange && <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700">A settings change is waiting for approval: you are editing the proposed version.</span>}
+                  </div>
+                  <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <AttendancePolicyEditor policy={editableStatConfig.attendancePolicy || {}} options={editableStatConfig.companyOptions || {}} onChange={(policy, options) => onUpdateStatConfig({ ...editableStatConfig, attendancePolicy: policy, companyOptions: options, updatedAt: new Date().toISOString() })} />
+                  </section>
+                </div>
               )}
 
               {activeTab === 'reports' && hasPermission('reports') && (
@@ -5063,7 +5063,7 @@ export function WebPortal({
                           }}
                           title={newEmpForm.pictureUrl ? 'Click to view high-resolution photo' : 'No photo uploaded'}
                         >
-                          <img
+                          <img loading="lazy" decoding="async"
                             src={empAvatarUrl({ pictureUrl: newEmpForm.pictureUrl, gender: newEmpForm.gender })}
                             alt="Preview"
                             className="w-full h-full object-cover"
@@ -5131,7 +5131,7 @@ export function WebPortal({
                       <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
                         <span>Department:<RequiredMark /></span>
                       </label>
-                      <select
+                      <SearchableSelect
                         required aria-required="true"
                         aria-label="Department"
                         value={newEmpForm.departmentId}
@@ -5142,13 +5142,13 @@ export function WebPortal({
                         {localDepartments.filter(d => d.branchId === newEmpForm.branchId).map(d => (
                           <option key={d.id} value={d.id}>{d.name}</option>
                         ))}
-                      </select>
+                      </SearchableSelect>
                     </div>
                     <div className="min-w-0 sm:col-span-2 lg:col-span-1">
                       <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
                         <span>Designation:<RequiredMark /></span>
                       </label>
-                      <select
+                      <SearchableSelect
                         required aria-required="true"
                         aria-label="Designation"
                         value={newEmpForm.designationId}
@@ -5159,7 +5159,7 @@ export function WebPortal({
                         {localDesignations.filter(ds => ds.departmentId === newEmpForm.departmentId).map(ds => (
                           <option key={ds.id} value={ds.id}>{ds.title} (Grade {ds.grade})</option>
                         ))}
-                      </select>
+                      </SearchableSelect>
                     </div>
                   </div>
 
@@ -5169,7 +5169,7 @@ export function WebPortal({
                         <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
                           <span>Zone:</span>
                         </label>
-                        <select
+                        <SearchableSelect
                           aria-label="Zone"
                           value={newEmpForm.zoneId}
                           onChange={(e) => setNewEmpForm({ ...newEmpForm, zoneId: e.target.value, ucTownId: '' })}
@@ -5177,13 +5177,13 @@ export function WebPortal({
                         >
                           <option value="">{activeZones.length ? 'Select Zone' : 'No zones configured in Master Data'}</option>
                           {activeZones.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
-                        </select>
+                        </SearchableSelect>
                       </div>
                       <div className="min-w-0">
                         <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
                           <span>UC / Town Information:</span>
                         </label>
-                        <select
+                        <SearchableSelect
                           aria-label="UC / Town"
                           value={newEmpForm.ucTownId}
                           onChange={(e) => setNewEmpForm({ ...newEmpForm, ucTownId: e.target.value })}
@@ -5192,7 +5192,7 @@ export function WebPortal({
                         >
                           <option value="">{!newEmpForm.zoneId ? 'Select a zone first' : ucTowns.filter(item => item.zoneId === newEmpForm.zoneId && item.status === 'Active').length ? 'Select UC / Town' : 'No UC/Towns configured in Master Data'}</option>
                           {ucTowns.filter(item => item.zoneId === newEmpForm.zoneId && item.status === 'Active').map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
-                        </select>
+                        </SearchableSelect>
                       </div>
                       <div className="sm:col-span-2 flex items-center space-x-3 pt-6">
                         <label className="flex items-center space-x-2 font-medium select-none cursor-pointer">
@@ -5848,7 +5848,7 @@ export function WebPortal({
                           }}
                           title={editEmpForm.pictureUrl ? 'Click to view high-resolution photo' : 'No photo uploaded'}
                         >
-                          <img
+                          <img loading="lazy" decoding="async"
                             src={empAvatarUrl({ pictureUrl: editEmpForm.pictureUrl, gender: editEmpForm.gender })}
                             alt="Preview"
                             className="w-full h-full object-cover"
@@ -5976,7 +5976,7 @@ export function WebPortal({
                         <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
                           <span>UC / Town Information:</span>
                         </label>
-                        <select
+                        <SearchableSelect
                           aria-label="UC / Town"
                           value={editEmpForm.ucTownId}
                           onChange={(e) => setEditEmpForm({ ...editEmpForm, ucTownId: e.target.value })}
@@ -5985,7 +5985,7 @@ export function WebPortal({
                         >
                           <option value="">{!editEmpForm.zoneId ? 'Choose a master Zone first' : !editEmpForm.ucTownId && editEmpForm.ucTown ? `Choose UC / Town (saved: ${editEmpForm.ucTown})` : editUcTownOptions.length ? 'Choose UC / Town' : 'No UC/Towns configured for this Zone'}</option>
                           {editUcTownOptions.map(item => <option key={item.id} value={item.id}>{item.name}{item.status === 'Inactive' ? ' (Inactive — current)' : ''}</option>)}
-                        </select>
+                        </SearchableSelect>
                         {!editEmpForm.zoneId && <p className="mt-1 text-[10px] leading-tight text-amber-700">Select a Zone to enable UC / Town.</p>}
                         {editEmpForm.zoneId && !editEmpForm.ucTownId && editEmpForm.ucTown && <p className="mt-1 text-[10px] leading-tight text-amber-700">Saved UC / Town “{editEmpForm.ucTown}” is not linked to this Zone. Choose its replacement.</p>}
                         {editEmpForm.zoneId && editUcTownOptions.length === 0 && <p className="mt-1 text-[10px] leading-tight text-amber-700">No UC / Town records are configured for this Zone.</p>}
@@ -6397,7 +6397,7 @@ export function WebPortal({
               <div className="p-5 space-y-4 text-xs select-none">
                 <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-2">
                   <div className="flex items-center space-x-3">
-                    <img 
+                    <img loading="lazy" decoding="async" 
                       src={empAvatarUrl(showOffboardModal)}
                       alt="" 
                       className="w-10 h-10 rounded-full object-cover border border-slate-200" 
@@ -6799,9 +6799,9 @@ export function WebPortal({
 
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
                   <label className="block text-[11px] font-bold text-amber-950">Bank file template</label>
-                  <select aria-label="Bank file template" value={selectedBankTemplate?.id || ''} onChange={event => setBankAdviceProfile(event.target.value)} className="mt-1 h-9 w-full rounded border border-amber-300 bg-white px-2 text-xs text-slate-900">
+                  <SearchableSelect aria-label="Bank file template" value={selectedBankTemplate?.id || ''} onChange={event => setBankAdviceProfile(event.target.value)} className="mt-1 h-9 w-full rounded border border-amber-300 bg-white px-2 text-xs text-slate-900">
                     {bankTemplates.map(item => <option key={item.id} value={item.id}>{item.verified ? '✓ Verified — ' : '⚠ Not verified — '}{item.name}</option>)}
-                  </select>
+                  </SearchableSelect>
                   <label className="mt-2 block text-[11px] font-bold text-amber-950">Value date
                     <DateField value={bankValueDate} onChange={event => setBankValueDate(event.target.value)} className="mt-1 h-9 w-full rounded border border-amber-300 bg-white px-2 text-xs text-slate-900" />
                   </label>
@@ -6898,7 +6898,7 @@ export function WebPortal({
                 <RequiredNote className="-mt-1" />
                 <div>
                   <label className="block font-bold mb-1 text-slate-650">Select Employee:<RequiredMark /></label>
-                  <select
+                  <SearchableSelect
                     aria-label="Select Employee"
                     value={newAttendanceForm.employeeId}
                     onChange={(e) => setNewAttendanceForm({ ...newAttendanceForm, employeeId: e.target.value })}
@@ -6909,7 +6909,7 @@ export function WebPortal({
                     {employees.map(emp => (
                       <option key={emp.id} value={emp.id}>{emp.fullName} ({emp.employeeCode})</option>
                     ))}
-                  </select>
+                  </SearchableSelect>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
@@ -7021,7 +7021,7 @@ export function WebPortal({
                 <RequiredNote className="-mt-1" />
                 <div>
                   <label className="block font-bold mb-1 text-slate-650">Select Employee:<RequiredMark /></label>
-                  <select
+                  <SearchableSelect
                     aria-label="Select Employee for Leave"
                     value={newLeaveForm.employeeId}
                     onChange={(e) => setNewLeaveForm({ ...newLeaveForm, employeeId: e.target.value })}
@@ -7032,7 +7032,7 @@ export function WebPortal({
                     {employees.map(emp => (
                       <option key={emp.id} value={emp.id}>{emp.fullName} ({emp.employeeCode})</option>
                     ))}
-                  </select>
+                  </SearchableSelect>
                 </div>
 
                 <div>
@@ -7252,7 +7252,7 @@ export function WebPortal({
 
             {/* Modal Body / Image Stage */}
             <div className="flex-1 overflow-auto p-4 flex items-center justify-center bg-slate-950 min-h-[300px]">
-              <img
+              <img loading="lazy" decoding="async"
                 src={viewImageModal.url}
                 alt={viewImageModal.title}
                 className="max-h-[70vh] max-w-full object-contain rounded-lg shadow-lg border border-slate-800"

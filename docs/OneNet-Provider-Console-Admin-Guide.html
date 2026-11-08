@@ -41,7 +41,7 @@
   <h1>Provider Console<br>Admin Guide</h1>
   <p class="sub">For the console owner: security model, provider users, template database, release roll-out, backup and restore, licensing policy, client lifecycle and troubleshooting.</p>
   
-  <div class="meta"><div><b>Product</b>OneNet Provider Console</div><div><b>Server</b>Ubuntu 24.04 · aaPanel</div><div><b>Issued</b>07 November 2026</div></div>
+  <div class="meta"><div><b>Product</b>OneNet Provider Console</div><div><b>Server</b>Ubuntu 24.04 · aaPanel</div><div><b>Issued</b>08 November 2026</div></div>
 </section>
 <section class="page"><h1>Contents</h1><ol class="toc"><li>How the hosting works</li><li>Security model</li><li>Provider users</li><li>Server, template database and releases</li><li>Rolling out a new release</li><li>Backups and restoring a client</li><li>Licences and suspension</li><li>Client data import (self-service)</li><li>Client lifecycle: archive and delete</li><li>Monitoring and scheduled tasks</li><li>Self-hosted clients</li><li>Security checklist</li><li>Troubleshooting</li></ol>
 
@@ -89,7 +89,7 @@ CONFIRM_DATABASE_RESTORE=RESTORE_HR_PAYROLL_DATABASE \
 <ul><li><b>Archive</b> (owner): stops the aaPanel project and hides the client from daily checks. Database, files and backups stay. <b>Restore from archive</b> starts it again.</li><li><b>Permanent deletion</b> is deliberately not a button. After the contract's retention period, and after giving the client an export if required: delete the aaPanel project; in PostgreSQL <code>DROP DATABASE hr_&lt;name&gt;; DROP ROLE hr_&lt;name&gt;;</code>; remove <code>/www/hr-clients/&lt;name&gt;</code> and, when no longer required, <code>/www/hr-backups/&lt;name&gt;</code>. Record it in the client notes first.</li></ul>
 
 <h2>Monitoring and scheduled tasks</h2>
-<table><tr><th style="width:30%">Task (aaPanel Cron)</th><th style="width:18%">Schedule</th><th>Does</th></tr><tr><td><code>cli.cjs nightly</code></td><td>Daily 02:00</td><td>Backs up every active client, re-checks every domain (DNS, certificate, registration) and health. Exit code 2 when something needs attention.</td></tr><tr><td><code>cli.cjs health</code></td><td>Every 10 minutes</td><td>Answers, response time, database size, active staff, attendance today, kiosks online.</td></tr></table>
+<table><tr><th style="width:30%">Task (aaPanel Cron)</th><th style="width:18%">Schedule</th><th>Does</th></tr><tr><td><code>cli.cjs nightly</code></td><td>Daily 02:00</td><td>Backs up every active client, then optimises each client database (quick every night; deep "shrink" on the first Sunday of the month, only after a good backup), re-checks every domain (DNS, certificate, registration) and health. Exit code 2 when something needs attention.</td></tr><tr><td><code>cli.cjs health</code></td><td>Every 10 minutes</td><td>Answers, response time, database size, active staff, attendance today, kiosks online.</td></tr></table>
 <p>Set aaPanel to notify you when a Cron task fails (aaPanel → Cron → notification), and look at the dashboard's "Needs attention" every morning.</p>
 
 <h2>Self-hosted clients</h2>

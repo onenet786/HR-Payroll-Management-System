@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { SearchableSelect } from './SearchableSelect';
 import { Copy, Plus, Trash2 } from 'lucide-react';
 import type { PayrollRun, Payslip, StatutoryConfig } from '../types';
 import { BATCH_TOKENS, ROW_TOKENS, STARTER_EXPORT_TEMPLATES, renderExport, type ColumnFormat, type ExportColumn, type ExportKind, type ExportTemplate } from '../data/exportTemplates';
@@ -39,9 +40,9 @@ export function ExportTemplateEditor({ editableConfig, onUpdateStatConfig }: { e
           <p className="mt-1 text-slate-500">Transcribe each bank's or regulator's file specification here. Any edit clears “verified”; tick it only after a test batch is accepted. Changes follow the statutory approval control.</p>
         </div>
         <div className="flex gap-2">
-          <select aria-label="Export template" value={template.id} onChange={event => setSelectedId(event.target.value)} className="rounded border border-slate-300 bg-white p-1.5">
+          <SearchableSelect aria-label="Export template" value={template.id} onChange={event => setSelectedId(event.target.value)} className="rounded border border-slate-300 bg-white p-1.5">
             {templates.map(item => <option key={item.id} value={item.id}>{item.verified ? '✓ ' : '⚠ '}{item.name}</option>)}
-          </select>
+          </SearchableSelect>
           <button type="button" onClick={() => addTemplate(template)} className="flex items-center gap-1 rounded border border-slate-300 px-2" title="Duplicate"><Copy size={13} />Copy</button>
           <button type="button" onClick={() => addTemplate()} className="flex items-center gap-1 rounded border border-slate-300 px-2"><Plus size={13} />New</button>
           <button type="button" disabled={templates.length <= 1} onClick={() => { if (window.confirm(`Remove template "${template.name}"?`)) { save(templates.filter(item => item.id !== template.id)); setSelectedId(templates[0].id); } }} className="flex items-center gap-1 rounded border border-rose-300 px-2 text-rose-700 disabled:opacity-40"><Trash2 size={13} />Remove</button>

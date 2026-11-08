@@ -73,3 +73,38 @@ function Start-HRApp($install) {
     Set-Content -Path (Join-Path $install.configDir 'portable.pid') -Value $proc.Id
   } else { Start-Service HRPayrollApp }
 }
+
+# Memory for the embedded database, sized to this server. SQL Server (CyberAP) often runs on the same machine,
+# so the share is smaller when an MSSQL service exists. Returns the settings as name -> value.
+function Get-HRMemoryPlan {
+  $ramMb = [math]::Floor((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1MB)
+  $sqlServer = @(Get-Service -Name 'MSSQL*' -ErrorAction SilentlyContinue).Count -gt 0
+  $clamp = { param($value, $min, $max) [math]::Max($min, [math]::Min($max, [math]::Floor($value))) }
+  $shared = & $clamp ($ramMb * $(if ($sqlServer) { 0.10 } else { 0.20 })) 256 4096
+  $cache = & $clamp ($ramMb * $(if ($sqlServer) { 0.25 } else { 0.50 })) 1024 16384
+  $maint = & $clamp ($ramMb * 0.05) 128 1024
+  $work = $(if ($ramMb -ge 16000) { 32 } else { 16 })
+  return [ordered]@{
+    shared_buffers = "${shared}MB"; effective_cache_size = "${cache}MB"; work_mem = "${work}MB"; maintenance_work_mem = "${maint}MB"
+    random_page_cost = '1.1'; effective_io_concurrency = '100'; ramMb = $ramMb; sqlServer = $sqlServer
+  }
+}
+
+# Applies Get-HRMemoryPlan with ALTER SYSTEM (database superuser from config\database-admin.txt).
+# Returns $true when the database service must restart for shared_buffers to take effect.
+function Set-HRDatabaseMemory($install) {
+  $plan = Get-HRMemoryPlan
+  $adminFile = Join-Path $install.configDir 'database-admin.txt'
+  if (-not (Test-Path $adminFile)) { Write-Host '    (database admin file not found: memory left as it is)'; return $false }
+  $env:PGPASSWORD = ((Get-Content $adminFile) | Where-Object { $_ -like 'password=*' }) -replace '^password=', ''
+  try {
+    $psql = Join-Path $install.pgBin 'psql.exe'
+    foreach ($name in @('shared_buffers', 'effective_cache_size', 'work_mem', 'maintenance_work_mem', 'random_page_cost', 'effective_io_concurrency')) {
+      & $psql -h localhost -p $install.dbPort -U postgres -d postgres -q -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET $name = '$($plan[$name])'" 2>&1 | Out-Null
+    }
+    & $psql -h localhost -p $install.dbPort -U postgres -d postgres -q -t -A -c "SELECT pg_reload_conf()" 2>&1 | Out-Null
+    $pending = & $psql -h localhost -p $install.dbPort -U postgres -d postgres -t -A -c "SELECT count(*) FROM pg_settings WHERE pending_restart" 2>$null
+    Write-Host ("    Database memory: cache {0}, planner {1}, work {2} (server RAM {3} MB{4})" -f $plan.shared_buffers, $plan.effective_cache_size, $plan.work_mem, $plan.ramMb, $(if ($plan.sqlServer) { ', SQL Server present' } else { '' }))
+    return ([int]("0$pending".Trim()) -gt 0)
+  } finally { Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue }
+}

@@ -442,6 +442,27 @@ async function backupAll(trigger = 'nightly') {
   return results;
 }
 
+/**
+ * Database optimisation of every client after the nightly backup: quick every night (statistics, reusable space),
+ * deep (VACUUM FULL, shrinks) on the first Sunday of the month. See server/db-maintenance.cjs.
+ */
+async function optimizeAll(now = new Date()) {
+  const { optimize, recordRun } = require('../../server/db-maintenance.cjs');
+  const mode = now.getDay() === 0 && now.getDate() <= 7 ? 'deep' : 'quick';
+  const clients = (await pool.query(`SELECT * FROM clients WHERE status IN ('active','suspended')`)).rows;
+  const results = [];
+  for (const client of clients) {
+    const startedAt = new Date().toISOString();
+    try {
+      const db = clientPool(client.db_name);
+      const result = await optimize(mode, { db });
+      await recordRun({ mode, state: 'done', startedAt, finishedAt: new Date().toISOString(), sizeBefore: result.sizeBefore, sizeAfter: result.sizeAfter, error: null, by: 'scheduled' }, db);
+      results.push({ client: client.slug, ok: true, mode, sizeBefore: result.sizeBefore, sizeAfter: result.sizeAfter });
+    } catch (error) { results.push({ client: client.slug, ok: false, mode, error: error.message }); }
+  }
+  return results;
+}
+
 // ─── Health ───────────────────────────────────────────────────────────────────
 
 async function checkHealth(client) {
@@ -518,6 +539,7 @@ async function unarchiveClient(idOrSlug, actor) {
 }
 
 module.exports = {
+  optimizeAll,
   getClient, refreshTemplate, templateInfo, startProvisioning, revealAdminPassword, updateClientSettings, writeClientSettings,
   addDomain, removeDomain, setPrimaryDomain, checkAllDomains, restartClient, switchRelease, runBackup, backupAll, checkHealth, checkAllHealth,
   createKioskCode, mobileCode, archiveClient, unarchiveClient, platformUrl, probe,

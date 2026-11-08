@@ -4,6 +4,7 @@
  */
 
 import React, { useState } from 'react';
+import { SearchableSelect } from './SearchableSelect';
 import { DateField } from './DateField';
 import { RequiredMark, RequiredNote } from './RequiredMark';
 import { Plus, Package, Laptop, Smartphone, Car, Wrench } from 'lucide-react';
@@ -293,12 +294,12 @@ export function AssetModule({ assets, employees, canManage, onAddAsset, onUpdate
               <RequiredNote />
               <div>
                 <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Assign To Employee<RequiredMark /></label>
-                <select value={assignToId} onChange={e => setAssignToId(e.target.value)}
+                <SearchableSelect value={assignToId} onChange={e => setAssignToId(e.target.value)}
                   aria-label="Assign To Employee" aria-required="true"
                   className="w-full bg-white border border-slate-200 text-slate-900 text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500">
                   <option value="">— Select Employee —</option>
                   {employees.filter(e => e.status === 'Active').map(e => <option key={e.id} value={e.id}>{e.fullName}</option>)}
-                </select>
+                </SearchableSelect>
               </div>
               <div className="flex gap-3">
                 <button onClick={() => setAssignModal(null)}

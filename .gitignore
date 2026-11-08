@@ -4,6 +4,7 @@ dist/
 dist.zip
 dist-kiosk*/
 dist-windows*/
+dist-tutorials*/
 coverage/
 backups/
 .history/

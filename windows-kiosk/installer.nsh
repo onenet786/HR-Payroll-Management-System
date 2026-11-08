@@ -8,6 +8,21 @@
 !define BRIDGE_SERVICE "URU4500Bridge"
 ; Auto-start entry the kiosk writes for itself (Electron's setLoginItemSettings).
 !define AUTOSTART_VALUE "electron.app.${PRODUCT_NAME}"
+; Name of the kiosk before it was renamed (program file and auto-start entry), so an upgrade from it closes and
+; removes it like the current one. The appId is unchanged, so the same install/uninstall registry keys are used.
+!define LEGACY_NAME "Bin Ishaq Attendance Kiosk"
+!define LEGACY_EXE "Bin Ishaq Attendance Kiosk.exe"
+
+; An upgrade proposes the previous install folder (registry InstallLocation). When that is the old-named folder
+; (...\Bin Ishaq Attendance Kiosk, 27 characters with the backslash), install into ...\<new name> next to it
+; instead; removePreviousVersion still deletes the old folder via InstallLocation.
+!macro customInit
+  StrCpy $R9 "$INSTDIR" "" -27
+  ${If} $R9 == "\${LEGACY_NAME}"
+    StrCpy $R8 "$INSTDIR" -27
+    StrCpy $INSTDIR "$R8\${APP_FILENAME}"
+  ${EndIf}
+!macroend
 
 ; Order on every install or upgrade: (1) customCheckAppRunning stops the kiosk, the legacy bridge service and any
 ; stray copies; (2) electron-builder silently runs the previous version's uninstaller (per-user and all-users
@@ -28,7 +43,7 @@
   Pop $0
   ${Do}
     ; PowerShell exits 0 once no kiosk or bridge process is left, 1 if some survive.
-    nsExec::Exec `"$PowerShellPath" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Stop-Service -Name '${BRIDGE_SERVICE}' -Force -ErrorAction SilentlyContinue; $$n = @('${PRODUCT_FILENAME}', 'URU4500Bridge'); for ($$i = 0; $$i -lt 10; $$i++) { $$p = Get-Process -Name $$n -ErrorAction SilentlyContinue; if (-not $$p) { exit 0 }; $$p | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 700 }; if (Get-Process -Name $$n -ErrorAction SilentlyContinue) { exit 1 } else { exit 0 }"`
+    nsExec::Exec `"$PowerShellPath" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Stop-Service -Name '${BRIDGE_SERVICE}' -Force -ErrorAction SilentlyContinue; $$n = @('${PRODUCT_FILENAME}', '${LEGACY_NAME}', 'URU4500Bridge'); for ($$i = 0; $$i -lt 10; $$i++) { $$p = Get-Process -Name $$n -ErrorAction SilentlyContinue; if (-not $$p) { exit 0 }; $$p | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 700 }; if (Get-Process -Name $$n -ErrorAction SilentlyContinue) { exit 1 } else { exit 0 }"`
     Pop $0
     ${If} $0 == 0
       ${Break}
@@ -37,6 +52,8 @@
     nsExec::Exec `"$SYSDIR\sc.exe" stop ${BRIDGE_SERVICE}`
     Pop $0
     nsExec::Exec `"$SYSDIR\taskkill.exe" /F /T /IM "${APP_EXECUTABLE_FILENAME}"`
+    Pop $0
+    nsExec::Exec `"$SYSDIR\taskkill.exe" /F /T /IM "${LEGACY_EXE}"`
     Pop $0
     nsExec::Exec `"$SYSDIR\taskkill.exe" /F /IM "URU4500Bridge.exe"`
     Pop $0
@@ -71,6 +88,7 @@
     StrCpy $previousDir "$INSTDIR"
   ${EndIf}
   ${If} ${FileExists} "$previousDir\${APP_EXECUTABLE_FILENAME}"
+  ${OrIf} ${FileExists} "$previousDir\${LEGACY_EXE}"
     DetailPrint "Uninstalling the previous version from $previousDir..."
     StrCpy $1 0
     ${Do}
@@ -136,5 +154,6 @@
     DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "${BRIDGE_SERVICE}"
     ; A full uninstall also stops the kiosk starting at Windows login.
     DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "${AUTOSTART_VALUE}"
+    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "electron.app.${LEGACY_NAME}"
   ${EndIf}
 !macroend

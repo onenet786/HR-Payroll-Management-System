@@ -212,7 +212,7 @@ ${bullets([
 
 <h2>Monitoring and scheduled tasks</h2>
 ${table(['Task (aaPanel Cron)', 'Schedule', 'Does'], [
-  ['<code>cli.cjs nightly</code>', 'Daily 02:00', 'Backs up every active client, re-checks every domain (DNS, certificate, registration) and health. Exit code 2 when something needs attention.'],
+  ['<code>cli.cjs nightly</code>', 'Daily 02:00', 'Backs up every active client, then optimises each client database (quick every night; deep "shrink" on the first Sunday of the month, only after a good backup), re-checks every domain (DNS, certificate, registration) and health. Exit code 2 when something needs attention.'],
   ['<code>cli.cjs health</code>', 'Every 10 minutes', 'Answers, response time, database size, active staff, attendance today, kiosks online.'],
 ], ['30%', '18%'])}
 <p>Set aaPanel to notify you when a Cron task fails (aaPanel → Cron → notification), and look at the dashboard\'s "Needs attention" every morning.</p>

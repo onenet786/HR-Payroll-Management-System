@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { SearchableSelect } from './SearchableSelect';
 import { CheckCircle, ClipboardList, FileText, UserCheck } from 'lucide-react';
 import { DateField } from './DateField';
 import { RequiredMark, RequiredNote } from './RequiredMark';
@@ -95,7 +96,7 @@ export function EmployeeLifecycleModule({ employees, branches, departments, desi
           <label className="block text-slate-600">Request type<select value={form.type} onChange={e => setForm({ ...form, type: e.target.value as LifecycleRequestType })} className={input}>{TYPES.map(type => <option key={type}>{type}</option>)}</select></label>
           <label className="block text-slate-600">Effective date<RequiredMark /><DateField required aria-required="true" value={form.effectiveDate} onChange={e => setForm({ ...form, effectiveDate: e.target.value })} className={input} /></label>
           {form.type === 'Transfer' && <>
-            <label className="block text-slate-600">Destination branch<select value={form.newBranchId} onChange={e => setForm({ ...form, newBranchId: e.target.value, newDepartmentId: '', newDesignationId: '' })} className={input}><option value="">Same branch</option>{branches.map(branch => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>
+            <label className="block text-slate-600">Destination branch<SearchableSelect value={form.newBranchId} onChange={e => setForm({ ...form, newBranchId: e.target.value, newDepartmentId: '', newDesignationId: '' })} className={input}><option value="">Same branch</option>{branches.map(branch => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</SearchableSelect></label>
             <label className="block text-slate-600">Destination department<select value={form.newDepartmentId} onChange={e => setForm({ ...form, newDepartmentId: e.target.value, newDesignationId: '' })} className={input}><option value="">Same department</option>{destinationDepartments.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
           </>}
           {(form.type === 'Transfer' || form.type === 'Promotion') && <label className="block text-slate-600">{form.type === 'Promotion' ? 'New designation' : 'Designation'}{(form.type === 'Promotion' || !!form.newDepartmentId) && <RequiredMark />}<select required={form.type === 'Promotion' || !!form.newDepartmentId} aria-required={form.type === 'Promotion' || !!form.newDepartmentId || undefined} value={form.newDesignationId} onChange={e => setForm({ ...form, newDesignationId: e.target.value })} className={input}><option value="">Select designation</option>{destinationDesignations.map(item => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>}

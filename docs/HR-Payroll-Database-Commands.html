@@ -1,0 +1,249 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>HR &amp; Payroll — Database Commands Reference</title><style>
+  @page { size: A4; margin: 16mm 15mm 18mm 15mm;
+    @bottom-left { content: "HR & Payroll · Database commands"; font: 7.5pt system-ui, sans-serif; color: #94a3b8; }
+    @bottom-right { content: "Page " counter(page) " of " counter(pages); font: 7.5pt system-ui, sans-serif; color: #94a3b8; } }
+  @page :first { margin: 0; @bottom-left { content: none; } @bottom-right { content: none; } }
+  :root { --ink:#1e293b; --muted:#64748b; --line:#e2e8f0; --brand:#047857; --brand-dk:#064e3b; --soft:#ecfdf5; --warn:#b45309; --warnbg:#fffbeb; --bad:#b91c1c; --badbg:#fef2f2; --code:#0f172a; }
+  * { box-sizing: border-box; }
+  body { margin:0; font: 10pt/1.5 "Segoe UI", system-ui, -apple-system, sans-serif; color: var(--ink); -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  h1 { font-size: 19pt; margin: 0 0 4mm; color: var(--brand-dk); letter-spacing: -.01em; }
+  h2 { font-size: 13pt; margin: 7mm 0 2.5mm; color: var(--brand-dk); padding-bottom: 1.5mm; border-bottom: 1.5px solid var(--line); break-after: avoid; }
+  h3 { font-size: 10.5pt; margin: 5mm 0 1.5mm; break-after: avoid; }
+  p { margin: 0 0 2.5mm; } ul, ol { margin: 0 0 3mm; padding-left: 5.5mm; } li { margin-bottom: 1mm; }
+  code { font-family: "Cascadia Mono", Consolas, monospace; font-size: 8.8pt; background: #f1f5f9; padding: .2mm 1.2mm; border-radius: 1mm; }
+  pre { background: var(--code); color: #e2e8f0; padding: 3mm 4mm; border-radius: 2mm; font: 8.4pt/1.55 "Cascadia Mono", Consolas, monospace; white-space: pre-wrap; margin: 0 0 3.5mm; break-inside: avoid; }
+  pre .c { color: #6ee7b7; }
+  table { width: 100%; border-collapse: collapse; margin: 0 0 4mm; font-size: 9pt; }
+  th { text-align: left; background: #f8fafc; color: var(--muted); font-weight: 600; font-size: 8pt; text-transform: uppercase; letter-spacing: .04em; }
+  th, td { padding: 1.6mm 2.5mm; border-bottom: 1px solid var(--line); vertical-align: top; } tr { break-inside: avoid; }
+  .page { break-before: page; }
+  .note, .warn, .bad { border-left: 3px solid var(--brand); background: var(--soft); padding: 2.5mm 3.5mm; border-radius: 0 2mm 2mm 0; margin: 0 0 4mm; break-inside: avoid; }
+  .warn { border-color: var(--warn); background: var(--warnbg); } .bad { border-color: var(--bad); background: var(--badbg); }
+  .note b:first-child, .warn b:first-child, .bad b:first-child { display: block; margin-bottom: .8mm; }
+  .steps { counter-reset: s; list-style: none; padding: 0; }
+  .steps > li { counter-increment: s; position: relative; padding-left: 10mm; margin-bottom: 2.5mm; break-inside: avoid; }
+  .steps > li::before { content: counter(s); position: absolute; left: 0; top: .2mm; width: 6.5mm; height: 6.5mm; border-radius: 50%; background: var(--brand); color: #fff; font-weight: 700; font-size: 9pt; display: grid; place-items: center; }
+  .check { padding-left: 6mm; } .check li { list-style: none; position: relative; }
+  .check li::before { content: ""; position: absolute; left: -6mm; top: .9mm; width: 3.2mm; height: 3.2mm; border: 1.3px solid var(--muted); border-radius: .6mm; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 5mm; } .card { border: 1px solid var(--line); border-radius: 2mm; padding: 3mm 4mm; break-inside: avoid; } .card h3 { margin-top: 0; }
+  figure { margin: 2mm 0 5mm; break-inside: avoid; } figure img { width: 100%; border: 1px solid var(--line); border-radius: 2mm; box-shadow: 0 1mm 3mm rgba(15,23,42,.08); }
+  figcaption { font-size: 8.5pt; color: var(--muted); margin-top: 1.2mm; text-align: center; }
+  .toc { columns: 2; column-gap: 10mm; } .toc li { margin-bottom: 1.2mm; break-inside: avoid; }
+  .flow { display: flex; gap: 2mm; margin: 2mm 0 5mm; } .flow div { flex: 1; background: var(--soft); border: 1px solid #a7f3d0; border-radius: 2mm; padding: 2.5mm; font-size: 8.5pt; text-align: center; } .flow b { display: block; color: var(--brand-dk); font-size: 9.5pt; margin-bottom: .8mm; }
+  .cover { height: 297mm; padding: 26mm 22mm; color: #fff; background: linear-gradient(140deg, #064e3b 0%, #065f46 38%, #0f172a 100%); display: flex; flex-direction: column; }
+  .cover .tag { display: inline-block; align-self: flex-start; background: #10b981; color: #fff; font-weight: 700; font-size: 8.5pt; letter-spacing: .08em; text-transform: uppercase; padding: 1.2mm 3mm; border-radius: 1mm; }
+  .cover h1 { color: #fff; font-size: 32pt; line-height: 1.12; margin: 12mm 0 5mm; } .cover .sub { font-size: 12.5pt; color: #a7f3d0; max-width: 150mm; }
+  .cover .meta { margin-top: auto; display: grid; grid-template-columns: repeat(3, 1fr); gap: 4mm; border-top: 1px solid rgba(255,255,255,.18); padding-top: 6mm; font-size: 9pt; color: #cbd5e1; } .cover .meta b { display: block; color: #fff; font-size: 10.5pt; }
+  .cover .flow div { background: rgba(255,255,255,.07); border-color: rgba(255,255,255,.16); color: #e2e8f0; } .cover .flow b { color: #6ee7b7; }
+</style></head><body>
+<section class="cover">
+  <span class="tag">OneNet · Windows Server · Database administration</span>
+  <h1>HR &amp; Payroll<br>Database Commands</h1>
+  <p class="sub">Every command your IT administrator needs to look after the HR &amp; Payroll database on Windows Server: status, services, backups, restore, optimisation, connecting with pgAdmin or psql, ready-made queries, exports, logs and fixes.</p>
+  <div class="flow" style="margin-top:16mm"><div><b>Check</b>Status, services, logs</div><div><b>Protect</b>Backup and restore</div><div><b>Tune</b>Optimise and monitor</div><div><b>Look</b>pgAdmin, psql, queries</div></div>
+  <div class="meta"><div><b>Database</b>PostgreSQL 16 (built in)</div><div><b>Port</b>5433, this server only</div><div><b>Issued</b>08 November 2026</div></div>
+</section>
+<section class="page"><h1>Contents</h1><ol class="toc"><li>Before you start</li><li>Where everything is</li><li>Status and services</li><li>Backups</li><li>Restoring a backup</li><li>Optimising the database</li><li>Connecting with pgAdmin 4</li><li>Connecting with psql</li><li>Ready-made queries</li><li>Exporting data</li><li>A separate copy for testing</li><li>Logs</li><li>Passwords and sign-in</li><li>Updating</li><li>Problems and fixes</li><li>Rules to keep the data safe</li></ol>
+
+<h2>Before you start</h2>
+<ol class="steps"><li>Sign in to the server (HEADOFFICE) with an administrator account, directly or by Remote Desktop.</li><li>Open <b>Windows PowerShell as Administrator</b>: Start &rarr; type <i>PowerShell</i> &rarr; right-click &rarr; <b>Run as administrator</b>. Every command below is typed there.</li><li>This guide uses the HEADOFFICE folders <code>D:\HRPayroll</code> and <code>D:\HRPayrollData</code>. If HR &amp; Payroll was installed somewhere else (the default is <code>C:\HRPayroll</code> and <code>C:\HRPayrollData</code>), change the drive letter in each command.</li></ol>
+<div class="note"><b>Copying commands</b>Type or paste one block at a time and press Enter. Lines starting with <code>#</code> are explanations and are ignored by PowerShell. In SQL, lines starting with <code>--</code> are explanations.</div>
+
+<h2>Where everything is</h2>
+<table><tr><th style="width:34%">What</th><th>Where / value</th></tr><tr><td>Program folder</td><td><code>D:\HRPayroll</code> (application in <code>app\&lt;version&gt;</code>)</td></tr><tr><td>Data folder</td><td><code>D:\HRPayrollData</code> (database in <code>pgdata</code>, uploads in <code>documents</code>)</td></tr><tr><td>Tools (status, backup, restore, update, password reset)</td><td><code>D:\HRPayroll\tools</code></td></tr><tr><td>Database programs (psql, pg_dump, pg_restore)</td><td><code>D:\HRPayroll\runtime\pgsql\bin</code></td></tr><tr><td>Database server</td><td>host <code>localhost</code>, port <b>5433</b>, database <b>hr_payroll</b>. Accepts connections from this server only.</td></tr><tr><td>Database administrator</td><td>user <code>postgres</code>; password in <code>D:\HRPayroll\config\database-admin.txt</code></td></tr><tr><td>Application database user</td><td>user <code>hr_app</code>; password inside <code>DATABASE_URL</code> in <code>D:\HRPayroll\config\.env</code> (between <code>hr_app:</code> and <code>@</code>)</td></tr><tr><td>Windows services</td><td><code>HRPayrollDB</code> (database) and <code>HRPayrollApp</code> (application; depends on the database)</td></tr><tr><td>Nightly backup task</td><td><code>HR Payroll Nightly Backup</code> (Task Scheduler)</td></tr><tr><td>Backups</td><td><code>D:\HRPayrollData\backups</code>, files <code>hr-payroll-&lt;date&gt;.dump.enc</code> (encrypted, newest 14 kept)</td></tr><tr><td>Logs</td><td><code>D:\HRPayrollData\logs</code>: <code>app</code>, <code>postgresql</code>, <code>backup.log</code></td></tr></table>
+<div class="warn"><b>The config folder is locked</b>Only Administrators can open <code>D:\HRPayroll\config</code>. To read a password file, open Notepad with <b>Run as administrator</b>, or in the administrator PowerShell: <code>notepad D:\HRPayroll\config\database-admin.txt</code></div>
+
+<h2>Status and services</h2>
+<p><b>Overall status</b> (services, health, addresses, database size, last backup, free disk):</p>
+<pre>powershell -ExecutionPolicy Bypass -File D:\HRPayroll\tools\hrpayroll-status.ps1</pre>
+<p><b>See the two services:</b></p>
+<pre>Get-Service HRPayrollDB, HRPayrollApp</pre>
+<p><b>Restart the application</b> (most problems; the database keeps running):</p>
+<pre>Restart-Service HRPayrollApp</pre>
+<p><b>Restart everything</b>, in the right order (stop the application first, start the database first):</p>
+<pre>Stop-Service HRPayrollApp
+Stop-Service HRPayrollDB
+Start-Service HRPayrollDB
+Start-Service HRPayrollApp</pre>
+<p><b>Is the application answering?</b> (change the port if yours is not 8080):</p>
+<pre>Invoke-WebRequest http://localhost:8080/api/health -UseBasicParsing | Select-Object StatusCode, Content</pre>
+<p><b>Is the database listening?</b></p>
+<pre>&amp; "D:\HRPayroll\runtime\pgsql\bin\pg_isready.exe" -h localhost -p 5433</pre>
+
+<h2>Backups</h2>
+<p>A backup runs automatically every night. Run one by hand before any risky change:</p>
+<pre>powershell -ExecutionPolicy Bypass -File D:\HRPayroll\tools\hrpayroll-backup.ps1</pre>
+<p><b>List the backups</b>, newest first:</p>
+<pre>Get-ChildItem D:\HRPayrollData\backups\hr-payroll-*.dump.enc | Sort-Object LastWriteTime -Descending | Select-Object Name, LastWriteTime, @{n='MB';e={[math]::Round($_.Length/1MB,1)}}</pre>
+<p><b>Did last night's backup run?</b></p>
+<pre>Get-ScheduledTaskInfo -TaskName 'HR Payroll Nightly Backup' | Select-Object LastRunTime, LastTaskResult, NextRunTime
+Get-Content D:\HRPayrollData\logs\backup.log -Tail 20</pre>
+<p><code>LastTaskResult</code> 0 means success. <b>Run the nightly task now:</b></p>
+<pre>Start-ScheduledTask -TaskName 'HR Payroll Nightly Backup'</pre>
+<p><b>Copy backups to another disk or a network share</b> (do this regularly; a backup on the same disk does not survive a disk failure):</p>
+<pre>robocopy D:\HRPayrollData\backups \\FILESERVER\Backups\HRPayroll hr-payroll-*.dump.enc /XO</pre>
+<div class="warn"><b>Keep the backup key</b>Backups are encrypted with <code>BACKUP_ENCRYPTION_KEY</code> in <code>D:\HRPayroll\config\.env</code>. Keep a copy of that key somewhere safe outside the server: without it no backup can be restored.</div>
+
+<h2>Restoring a backup</h2>
+<p>A restore <b>replaces the whole database</b> with the backup: everything entered after that backup is lost. The tool takes a safety backup of the current database first, stops the application, restores, and starts it again.</p>
+<pre>powershell -ExecutionPolicy Bypass -File D:\HRPayroll\tools\hrpayroll-restore.ps1 -BackupFile D:\HRPayrollData\backups\hr-payroll-2026-11-07T20-00-00-000Z.dump.enc</pre>
+<p>Type <b>RESTORE</b> when asked. Use the real file name from the backup list above.</p>
+
+<h2>Optimising the database</h2>
+<p>Normally nothing has to be done: every night after the backup a <b>quick</b> optimisation runs, and on the first Sunday of the month a <b>deep</b> one (shrink). The easiest way to run them by hand is in the application: <b>Data Backup &rarr; Database health &amp; optimisation</b>.</p>
+<p><b>Quick optimisation now</b> (also takes a backup first; safe while people work):</p>
+<pre>powershell -ExecutionPolicy Bypass -File D:\HRPayroll\tools\hrpayroll-backup.ps1</pre>
+<p><b>Deep optimisation (shrink) now</b>: run outside working hours, each table is locked while it is rewritten:</p>
+<pre>$env:HR_DEEP_OPTIMIZE = '1'
+powershell -ExecutionPolicy Bypass -File D:\HRPayroll\tools\hrpayroll-backup.ps1
+Remove-Item Env:HR_DEEP_OPTIMIZE</pre>
+<p>The result is written to <code>D:\HRPayrollData\logs\backup.log</code>. The same in SQL, for one table (in pgAdmin or psql, connected to <b>hr_payroll</b>):</p>
+<pre>-- quick: refresh statistics, make space reusable (no lock)
+VACUUM (ANALYZE) attendances;
+-- deep: rewrite and shrink (locks the table while it runs)
+VACUUM (FULL, ANALYZE) attendances;</pre>
+
+<h2>Connecting with pgAdmin 4</h2>
+<p>Run pgAdmin on the server itself (the database does not accept connections from other computers).</p>
+<ol class="steps"><li>In pgAdmin: right-click <b>Servers</b> &rarr; <b>Register</b> &rarr; <b>Server…</b></li><li><b>General</b> tab: Name <code>HR Payroll (embedded)</code>.</li><li><b>Connection</b> tab: Host <code>localhost</code>, Port <b>5433</b>, Maintenance database <code>hr_payroll</code>, Username <code>postgres</code> (or <code>hr_app</code>), Password from the files above. Tick <i>Save password</i> if you wish. <b>Save</b>.</li><li>Open the tree with the small arrows: <b>Servers &rarr; HR Payroll (embedded) &rarr; Databases &rarr; hr_payroll &rarr; Schemas &rarr; public &rarr; Tables</b>.</li><li>Right-click a table &rarr; <b>View/Edit Data &rarr; First 100 Rows</b>. To type a query: select <b>hr_payroll</b>, then <b>Tools &rarr; Query Tool</b>, paste the query and press <b>F5</b>.</li></ol>
+<table><tr><th>SQL Server (SSMS)</th><th>pgAdmin 4</th></tr><tr><td>Server</td><td>Servers &rarr; HR Payroll (embedded)</td></tr><tr><td>Database</td><td>Databases &rarr; hr_payroll</td></tr><tr><td>Schema dbo</td><td>Schemas &rarr; public</td></tr><tr><td>New Query</td><td>Tools &rarr; Query Tool (F5 runs)</td></tr><tr><td>TOP 100</td><td><code>LIMIT 100</code> at the end of the query</td></tr></table>
+<div class="note"><b>Where the data is</b>Each kind of record has its own table: <code>employees</code>, <code>attendances</code>, <code>users</code>, <code>roles</code>, <code>departments</code>, <code>leaves</code>, <code>payroll_runs</code>, <code>payroll_payslips</code>, <code>legacy_records</code> (imported CyberAP history), <code>hr_audit_log</code>, <code>app_settings</code>. The details of each record (name, code, CNIC, punch times …) are in its <b>data</b> column, read like <code>data-&gt;&gt;'fullName'</code>. The table <code>hr_documents</code> is from an older version and is not used.</div>
+
+<h2>Connecting with psql</h2>
+<p>psql is the command-line client included with the database. Start it (it asks for the password from <code>database-admin.txt</code>):</p>
+<pre>&amp; "D:\HRPayroll\runtime\pgsql\bin\psql.exe" -h localhost -p 5433 -U postgres -d hr_payroll</pre>
+<p>Run one query without opening psql:</p>
+<pre>&amp; "D:\HRPayroll\runtime\pgsql\bin\psql.exe" -h localhost -p 5433 -U postgres -d hr_payroll -c "SELECT count(*) FROM employees;"</pre>
+<table><tr><th style="width:30%">Inside psql</th><th>Does</th></tr><tr><td><code>\dt</code></td><td>list tables</td></tr><tr><td><code>\d employees</code></td><td>columns of a table</td></tr><tr><td><code>\l</code></td><td>list databases</td></tr><tr><td><code>\x</code></td><td>switch to one-field-per-line display (good for the data column)</td></tr><tr><td><code>\timing</code></td><td>show how long each query takes</td></tr><tr><td><code>\i D:\file.sql</code></td><td>run the queries in a file</td></tr><tr><td><code>\q</code></td><td>quit</td></tr></table>
+<p>End every SQL statement with a semicolon <code>;</code>.</p>
+
+<h2>Ready-made queries</h2>
+<p>All of these only <b>read</b> data; they change nothing. They are also in <code>HR-Payroll-Database-Queries.sql</code> next to this PDF, ready to paste.</p>
+<h3>People</h3><p><b>Record count of every table</b></p><pre>SELECT relname AS table_name, n_live_tup AS records
+FROM pg_stat_user_tables
+ORDER BY n_live_tup DESC;</pre><p><b>Employee list (first 100 by code)</b></p><pre>SELECT id, data-&gt;&gt;'employeeCode' AS code, data-&gt;&gt;'fullName' AS name, data-&gt;&gt;'cnic' AS cnic,
+       COALESCE(data-&gt;&gt;'status', 'Active') AS status, data-&gt;&gt;'dateOfJoining' AS joined
+FROM employees
+ORDER BY data-&gt;&gt;'employeeCode'
+LIMIT 100;</pre><p><b>Find an employee by name, code or CNIC (change the text)</b></p><pre>SELECT id, data-&gt;&gt;'employeeCode' AS code, data-&gt;&gt;'fullName' AS name, data-&gt;&gt;'cnic' AS cnic, COALESCE(data-&gt;&gt;'status', 'Active') AS status
+FROM employees
+WHERE data-&gt;&gt;'fullName' ILIKE '%ahmed%'
+   OR data-&gt;&gt;'employeeCode' = '1001'
+   OR data-&gt;&gt;'cnic' = '35202-1234567-1';</pre><p><b>Staff count by status</b></p><pre>SELECT COALESCE(data-&gt;&gt;'status', 'Active') AS status, count(*) AS staff
+FROM employees
+GROUP BY 1
+ORDER BY 2 DESC;</pre><p><b>Current staff by department</b></p><pre>SELECT COALESCE(d.data-&gt;&gt;'name', '(no department)') AS department, count(*) AS staff
+FROM employees e
+LEFT JOIN departments d ON d.id = e.data-&gt;&gt;'departmentId'
+WHERE COALESCE(e.data-&gt;&gt;'status', 'Active') &lt;&gt; 'Terminated'
+GROUP BY 1
+ORDER BY 2 DESC;</pre><p><b>Duplicate employee codes</b></p><pre>SELECT data-&gt;&gt;'employeeCode' AS code, count(*) AS times
+FROM employees
+WHERE COALESCE(data-&gt;&gt;'employeeCode', '') &lt;&gt; ''
+GROUP BY 1 HAVING count(*) &gt; 1;</pre><p><b>Duplicate CNICs</b></p><pre>SELECT data-&gt;&gt;'cnic' AS cnic, count(*) AS times
+FROM employees
+WHERE COALESCE(data-&gt;&gt;'cnic', '') &lt;&gt; ''
+GROUP BY 1 HAVING count(*) &gt; 1;</pre><h3>Attendance</h3><p><b>Attendance of one day (change the date)</b></p><pre>SELECT e.data-&gt;&gt;'employeeCode' AS code, e.data-&gt;&gt;'fullName' AS name,
+       COALESCE(a.status, a.data-&gt;&gt;'status') AS status, a.data-&gt;&gt;'punchIn' AS punch_in, a.data-&gt;&gt;'punchOut' AS punch_out
+FROM attendances a
+JOIN employees e ON e.id = a.employee_id
+WHERE a.date = '2026-11-08'
+ORDER BY 1;</pre><p><b>Totals by status for today</b></p><pre>SELECT COALESCE(status, data-&gt;&gt;'status') AS status, count(*) AS records
+FROM attendances
+WHERE date = current_date
+GROUP BY 1
+ORDER BY 2 DESC;</pre><p><b>One employee, this month (change the code)</b></p><pre>SELECT a.date, COALESCE(a.status, a.data-&gt;&gt;'status') AS status, a.data-&gt;&gt;'punchIn' AS punch_in, a.data-&gt;&gt;'punchOut' AS punch_out
+FROM attendances a
+JOIN employees e ON e.id = a.employee_id
+WHERE e.data-&gt;&gt;'employeeCode' = '1001'
+  AND a.date &gt;= date_trunc('month', current_date)
+ORDER BY a.date;</pre><p><b>Punched in yesterday but no punch out</b></p><pre>SELECT e.data-&gt;&gt;'employeeCode' AS code, e.data-&gt;&gt;'fullName' AS name, a.data-&gt;&gt;'punchIn' AS punch_in
+FROM attendances a
+JOIN employees e ON e.id = a.employee_id
+WHERE a.date = current_date - 1
+  AND COALESCE(a.data-&gt;&gt;'punchIn', '') &lt;&gt; ''
+  AND COALESCE(a.data-&gt;&gt;'punchOut', '') = '';</pre><p><b>Attendance records per month</b></p><pre>SELECT to_char(date, 'YYYY-MM') AS month, count(*) AS records
+FROM attendances
+GROUP BY 1
+ORDER BY 1 DESC;</pre><h3>Users, payroll, history</h3><p><b>Login users and their roles</b></p><pre>SELECT u.data-&gt;&gt;'username' AS username, u.data-&gt;&gt;'email' AS email,
+       COALESCE(r.data-&gt;&gt;'name', r.name, u.data-&gt;&gt;'roleId') AS role, COALESCE(u.status, u.data-&gt;&gt;'status') AS status
+FROM users u
+LEFT JOIN roles r ON r.id = COALESCE(u.role_id, u.data-&gt;&gt;'roleId')
+ORDER BY 2;</pre><p><b>Roles</b></p><pre>SELECT id, COALESCE(data-&gt;&gt;'name', name) AS name, status
+FROM roles
+ORDER BY id;</pre><p><b>Latest payslips</b></p><pre>SELECT r.data-&gt;&gt;'title' AS payroll_run, p.data-&gt;&gt;'employeeCode' AS code, p.data-&gt;&gt;'employeeName' AS name,
+       p.data-&gt;&gt;'grossSalary' AS gross, p.data-&gt;&gt;'totalDeductions' AS deductions, p.data-&gt;&gt;'netSalary' AS net
+FROM payroll_payslips p
+JOIN payroll_runs r ON r.id = p.payroll_run_id
+ORDER BY p.created_at DESC
+LIMIT 50;</pre><p><b>Imported CyberAP history, by kind</b></p><pre>SELECT kind, count(*) AS records, min(record_date) AS first_date, max(record_date) AS last_date
+FROM legacy_records
+GROUP BY kind
+ORDER BY kind;</pre><p><b>Last 50 actions in the audit log</b></p><pre>SELECT created_at, actor_uid, action, collection_name, document_id
+FROM hr_audit_log
+ORDER BY created_at DESC
+LIMIT 50;</pre><p><b>Saved settings</b></p><pre>SELECT key, updated_at
+FROM app_settings
+ORDER BY key;</pre><h3>Health and performance</h3><p><b>Database size</b></p><pre>SELECT pg_size_pretty(pg_database_size(current_database())) AS database_size;</pre><p><b>Largest tables and unused rows</b></p><pre>SELECT relname AS table_name, pg_size_pretty(pg_total_relation_size(relid)) AS total_size,
+       n_live_tup AS records, n_dead_tup AS unused_rows
+FROM pg_stat_user_tables
+ORDER BY pg_total_relation_size(relid) DESC
+LIMIT 15;</pre><p><b>Who is connected right now</b></p><pre>SELECT pid, usename, client_addr, state, now() - query_start AS running_for, left(query, 80) AS query
+FROM pg_stat_activity
+WHERE datname = current_database()
+ORDER BY query_start;</pre><p><b>Queries running for more than a minute</b></p><pre>SELECT pid, now() - query_start AS running_for, left(query, 120) AS query
+FROM pg_stat_activity
+WHERE state = 'active' AND now() - query_start &gt; interval '1 minute';</pre><p><b>When tables were last cleaned and analysed</b></p><pre>SELECT relname AS table_name, GREATEST(last_vacuum, last_autovacuum) AS last_cleaned,
+       GREATEST(last_analyze, last_autoanalyze) AS last_analysed
+FROM pg_stat_user_tables
+ORDER BY n_live_tup DESC;</pre><p><b>Memory settings</b></p><pre>SELECT name, setting, unit
+FROM pg_settings
+WHERE name IN ('shared_buffers', 'effective_cache_size', 'work_mem', 'maintenance_work_mem', 'max_connections', 'port');</pre><p><b>PostgreSQL version</b></p><pre>SELECT version();</pre>
+
+<h2>Exporting data</h2>
+<p><b>Easiest:</b> the application's <b>Reports</b> menu exports every report to CSV (Excel) and PDF. For anything else, export a query to a CSV file with psql (one line):</p>
+<pre>&amp; "D:\HRPayroll\runtime\pgsql\bin\psql.exe" -h localhost -p 5433 -U postgres -d hr_payroll -c "\copy (SELECT data-&gt;&gt;'employeeCode' AS code, data-&gt;&gt;'fullName' AS name, data-&gt;&gt;'cnic' AS cnic FROM employees ORDER BY 1) TO 'D:\employees.csv' WITH (FORMAT csv, HEADER)"</pre>
+<p>In pgAdmin: run the query, then use the <b>Save results to file</b> button (download icon) above the results.</p>
+
+<h2>A separate copy for testing</h2>
+<p>To try something risky, make an <b>unencrypted</b> copy and load it into a separate database, so the live one is never touched. Delete the dump file afterwards: it contains salaries and CNICs in readable form.</p>
+<pre>$pg = "D:\HRPayroll\runtime\pgsql\bin"
+# 1. dump the live database (asks for the postgres password)
+&amp; "$pg\pg_dump.exe" -h localhost -p 5433 -U postgres -Fc -f D:\hr_copy.dump hr_payroll
+# 2. create an empty test database and load the copy into it
+&amp; "$pg\createdb.exe" -h localhost -p 5433 -U postgres hr_payroll_copy
+&amp; "$pg\pg_restore.exe" -h localhost -p 5433 -U postgres -d hr_payroll_copy --no-owner D:\hr_copy.dump
+# 3. when finished: remove the test database and the dump
+&amp; "$pg\dropdb.exe" -h localhost -p 5433 -U postgres hr_payroll_copy
+Remove-Item D:\hr_copy.dump</pre>
+<div class="warn"><b>Never</b>Never restore into or drop <code>hr_payroll</code> with these commands. For a real restore use <code>hrpayroll-restore.ps1</code> (above).</div>
+
+<h2>Logs</h2>
+<pre># application (newest file, last 50 lines)
+Get-ChildItem D:\HRPayrollData\logs\app | Sort-Object LastWriteTime -Descending | Select-Object -First 1 | Get-Content -Tail 50
+# database
+Get-ChildItem D:\HRPayrollData\logs\postgresql | Sort-Object LastWriteTime -Descending | Select-Object -First 1 | Get-Content -Tail 50
+# backups and optimisation
+Get-Content D:\HRPayrollData\logs\backup.log -Tail 30
+# follow a log live (Ctrl+C stops)
+Get-Content D:\HRPayrollData\logs\backup.log -Tail 10 -Wait</pre>
+
+<h2>Passwords and sign-in</h2>
+<p><b>Forgotten application administrator password:</b></p>
+<pre>powershell -ExecutionPolicy Bypass -File D:\HRPayroll\tools\Reset-AdminPassword.ps1 -Email onenetpk@gmail.com -Generate</pre>
+<p>It prints a new password once; sign in with it and change it. Leave out <code>-Generate</code> to type your own.</p>
+<p><b>Database passwords</b> (<code>postgres</code>, <code>hr_app</code>): read them from the files in "Where everything is". Do not change them in pgAdmin: the application would no longer be able to connect.</p>
+
+<h2>Updating</h2>
+<p>Unzip the new package, then (change the version in the folder name):</p>
+<pre>cd D:\HRPayroll-Windows-Setup-2026.11.08-0.0.15\setup
+powershell -ExecutionPolicy Bypass -File .\Update-HRPayroll.ps1 -InstallDir D:\HRPayroll</pre>
+<p>The update backs up the database first and rolls back by itself if the new version does not start. Afterwards press <b>Ctrl+F5</b> in each browser.</p>
+
+<h2>Problems and fixes</h2>
+<table><tr><th style="width:26%">Problem</th><th>Try</th></tr><tr><td>The site does not open</td><td><code>Get-Service HRPayrollDB, HRPayrollApp</code>; if one is stopped, start the database first, then the application. Then read the application log.</td></tr><tr><td>Very slow</td><td>Run the "Queries running for more than a minute" and "Largest tables" queries. A high <i>unused_rows</i> count: run a deep optimisation at night.</td></tr><tr><td>A query is stuck</td><td>Find its <code>pid</code> with "Who is connected", then in SQL: <code>SELECT pg_cancel_backend(12345);</code> (stops the query) or <code>SELECT pg_terminate_backend(12345);</code> (closes that connection).</td></tr><tr><td>pgAdmin cannot connect</td><td>Use port <b>5433</b> (not 5432), host <code>localhost</code>, and run pgAdmin on the server itself. Check the database service is running.</td></tr><tr><td>"password authentication failed"</td><td>Copy the password again from the file (no spaces). <code>postgres</code> and <code>hr_app</code> have different passwords.</td></tr><tr><td>Disk filling up</td><td>Check free space with the status tool; old backups beyond 14 are removed automatically. Run a deep optimisation. Move old copies from <code>D:\HRPayrollData\backups</code> to another disk.</td></tr><tr><td>Backup failed</td><td>Read <code>D:\HRPayrollData\logs\backup.log</code>. Usually: disk full, or the database service stopped.</td></tr></table>
+
+<h2>Rules to keep the data safe</h2>
+<table><tr><th>Do</th><th>Do not</th></tr><tr><td>Use the application (screens, Reports) for daily work and changes.</td><td>Change records with <code>UPDATE</code> / <code>DELETE</code> in pgAdmin: it bypasses the application's checks and the audit log.</td></tr><tr><td>Take a backup before anything unusual.</td><td>Stop the database service while the application is running.</td></tr><tr><td>Keep copies of backups and of the backup key off the server.</td><td>Edit files in <code>pgdata</code> or the PostgreSQL settings by hand.</td></tr><tr><td>Sign in to pgAdmin as <code>hr_app</code> when you only want to look.</td><td>Share the <code>postgres</code> password or open port 5433 to the network.</td></tr></table>
+
+</body></html>

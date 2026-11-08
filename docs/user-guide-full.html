@@ -527,6 +527,27 @@
   <div class="page-break"></div>
   <h1>2. Complete Menu-by-Menu User Guide</h1>
 
+  <!-- NAVIGATION -->
+  <div class="menu-card avoid-break">
+    <div class="menu-header">
+      <span class="menu-title">Finding your way: modules and mega menus</span>
+      <span class="menu-step-badge">Navigation</span>
+    </div>
+    <p>The left menu shows <strong>Dashboard</strong> and five modules. Click a module to open its menu: a card with the related screens appears over the page you are on (the page stays underneath). Click a screen to open it; press <strong>ESC</strong> or the &times; to close the panel. Yellow numbers are pending work (leave requests, attendance corrections, loans, lifecycle requests); a red <strong>fix</strong> marks setup that is incomplete; <strong>Step 1&ndash;12</strong> matches the 12-step flow bar at the top of every page.</p>
+    <table>
+      <thead><tr><th>Module</th><th>Cards and screens</th></tr></thead>
+      <tbody>
+        <tr><td>People</td><td>Directory (Employee Directory, Employee Lifecycle) &middot; Talent (Recruitment, Performance) &middot; Resources (Asset Management)</td></tr>
+        <tr><td>Time &amp; Attendance</td><td>Attendance (Attendance Register, Holiday Calendar) &middot; Leave (Leave Management) &middot; Devices (Biometric Devices &amp; Kiosks)</td></tr>
+        <tr><td>Payroll</td><td>Processing (Payroll Processing) &middot; Adjustments (Loans &amp; Advances, Salary Revisions) &middot; Separation (Gratuity &amp; Settlement)</td></tr>
+        <tr><td>Reports</td><td>People &amp; Time (Employee, Attendance, Leave) &middot; Pay &amp; Compliance (Payroll, Statutory) &middot; Control (Devices, Audit, CyberAP Archive)</td></tr>
+        <tr><td>Setup &amp; Administration</td><td>Organization (Company &amp; Master Data, Master Data Lists) &middot; Rules &amp; Policy (Statutory Config &amp; Tax Slabs, <strong>Company Options &amp; Attendance Policy</strong>) &middot; System &amp; Data (Users, Roles &amp; Permissions, Data Backup, Data Import, Notifications)</td></tr>
+      </tbody>
+    </table>
+    <p><strong>Fast lists:</strong> Attendance and Employee Directory open with their filters only. Choose a day (or <strong>Today</strong>), an employee, a department or a status (attendance), or search / choose a status or department (employees); records then appear 50 per page with Previous / Next. Long dropdowns (employees, departments, branches, users) have a search box: type part of a name or code. For longer periods use Reports.</p>
+    <p>You only see the screens your role allows. On a phone, open the menu with the &#9776; button.</p>
+  </div>
+
   <!-- MENU 1: DASHBOARD -->
   <div class="menu-card avoid-break">
     <div class="menu-header">
@@ -929,7 +950,7 @@
   <div class="page-break"></div>
   <div class="menu-card avoid-break">
     <div class="menu-header">
-      <span class="menu-title">Reports: Employee, Attendance, Payroll &amp; Statutory</span>
+      <span class="menu-title">Reports: Employee, Attendance, Payroll, Statutory, Leave, Devices, Audit &amp; CyberAP Archive</span>
       <span class="menu-step-badge">History on demand</span>
     </div>
     <p><strong>Business Purpose:</strong> The daily screens keep only the working set so they stay fast, even with years of imported history: current staff (plus former staff who left in the last two months, or still have an unpaid settlement, an open loan or a pending lifecycle request) and the current and previous month of attendance. In Employee Directory, the "Terminated" filter therefore shows recent leavers only; use Reports &rarr; Employee directory with status "Left" or "Everyone" for all former staff. Everything older or larger is a report: the server reads it when you open the report, for any period, and you can download it as CSV (opens in Excel, Urdu names included) or print it / save it as PDF.</p>
@@ -995,9 +1016,42 @@
       </tbody>
     </table>
 
+    <h4>Leave reports:</h4>
+    <table>
+      <thead><tr><th>Report</th><th>What it shows</th></tr></thead>
+      <tbody>
+        <tr><td>Leave register</td><td>Every leave request that overlaps a period, filtered by type and status, with approver and reason.</td></tr>
+        <tr><td>Leave taken per employee</td><td>Approved days per type (annual, casual, sick, maternity / paternity / Hajj, unpaid) and pending days, for leave starting in a period.</td></tr>
+        <tr><td>Leave balances</td><td>Entitled, taken and remaining annual, casual and sick leave per current employee for a calendar year, calculated exactly as in the leave screen (annual and casual pro-rata for joiners; pending requests reduce what is left).</td></tr>
+      </tbody>
+    </table>
+
+    <h4>Device reports:</h4>
+    <table>
+      <thead><tr><th>Report</th><th>What it shows</th></tr></thead>
+      <tbody>
+        <tr><td>Kiosk terminals</td><td>Each registered terminal with its account, registration date, last contact, status (active / revoked) and attendance days recorded in a period.</td></tr>
+        <tr><td>Punches by method and branch</td><td>Attendance days per punch method (kiosk, fingerprint, camera, mobile, manual) and branch, with employees and punches made at another branch.</td></tr>
+        <tr><td>Biometric enrolment</td><td>Current employees missing a fingerprint or a face (or fully enrolled), to plan enrolment.</td></tr>
+      </tbody>
+    </table>
+
+    <h4>Audit reports:</h4>
+    <table>
+      <thead><tr><th>Report</th><th>What it shows</th></tr></thead>
+      <tbody>
+        <tr><td>Audit log</td><td>Every recorded change, approval, report export and data import: when, who, role, action, record and address. Filter by action and user.</td></tr>
+        <tr><td>Sign-ins</td><td>Sessions started in a period with last activity, how they ended (signed out, expired, active) and the address.</td></tr>
+        <tr><td>Data import runs</td><td>Every CyberAP analysis and import with its options and result counts.</td></tr>
+      </tbody>
+    </table>
+
+    <h4>CyberAP archive:</h4>
+    <p>At import, every row of the old system's tables (salary sheets, loans, holidays, settings and more) was kept unchanged. <strong>Reports &rarr; CyberAP Archive</strong> lets you browse them: choose a table (the list shows how many rows each has), then filter by employee, an optional date range or any text. Columns are the old table's own columns; passwords, photos and fingerprint data are never shown. Old CyberAP payroll is found here, not in the Payroll reports.</p>
+
     <div class="callout callout-statutory">
       <strong>Who can see reports</strong>
-      Employee reports need the Employees or Payroll permission; attendance reports need the Attendance or Payroll permission; payroll and statutory reports need the Payroll permission. The <strong>View reports</strong> permission (User Management &rarr; Roles) opens employee and attendance reports for read-only managers, but never salaries. Super Admin sees all reports.
+      Employee reports need the Employees or Payroll permission; attendance reports the Attendance or Payroll permission; payroll and statutory reports the Payroll permission; leave reports the Leave or Employees permission; device reports the Employees or Attendance permission; audit reports the User Management permission; the CyberAP archive the Payroll or Data import permission. The <strong>View reports</strong> permission (User Management &rarr; Roles) opens employee, attendance, leave and device reports for read-only managers, but never salaries, audit or the archive. Super Admin sees all reports.
     </div>
   </div>
 

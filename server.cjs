@@ -268,8 +268,11 @@ if (!process.env.DATA_BACKEND || (process.env.DATA_BACKEND || '').trim().toLower
   originRegistry = installation.createOriginRegistry(getPool);
   const licenceGate = installation.licenceGate(getPool);
   app.use('/api/vendor', edition.router);
+  // Signed photo links from employee lists (no session: <img> tags cannot send one). See server/employee-photos.cjs.
+  app.use('/api/employee-photos', require('./server/employee-photos.cjs').router);
   app.use('/api/documents', authenticate, licenceGate, documentRoutes);
   app.use('/api/reports', authenticate, licenceGate, require('./server/reports.cjs').router);
+  app.use('/api/maintenance/database', authenticate, require('./server/db-maintenance.cjs').router);
   app.use('/api/employee-documents', authenticate, licenceGate, employeeDocumentRoutes);
   app.use('/api/payroll-delivery', authenticate, licenceGate, payrollDeliveryRoutes);
   app.use('/api/auth/mfa', mfaPublicRoutes);

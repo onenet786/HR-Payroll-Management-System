@@ -17,6 +17,20 @@ try {
     if ($LASTEXITCODE -ge 8) { throw "Copy to $($install.backupCopyTo) failed (robocopy $LASTEXITCODE)." }
     Log "Copied to $($install.backupCopyTo)."
   }
+  # Database optimisation after a good backup: quick every night, deep (shrink) on the first Sunday of the month.
+  # A failure here is logged but does not fail the backup.
+  $maintenance = Join-Path $install.releasePath 'scripts\db-maintenance.cjs'
+  if (Test-Path $maintenance) {
+    $today = Get-Date
+    $deep = ($today.DayOfWeek -eq 'Sunday' -and $today.Day -le 7) -or $env:HR_DEEP_OPTIMIZE -eq '1'
+    try {
+      $arguments = @(); if ($deep) { $arguments = @('--deep') }
+      $result = Invoke-HRNode $install $maintenance $arguments
+      Log ($result -split "`n" | Select-Object -Last 1)
+    } catch {
+      Log "Database optimisation skipped: $($_.Exception.Message)"
+    }
+  }
   exit 0
 } catch {
   Log "BACKUP FAILED: $($_.Exception.Message)"

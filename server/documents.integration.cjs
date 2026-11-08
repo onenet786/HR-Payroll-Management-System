@@ -91,6 +91,8 @@ test.before(async () => {
   }
   const app = express();
   app.use(express.json({ limit: '2mb' }));
+  // Photo links need no session (like server.cjs, which mounts them before authentication).
+  app.use('/api/employee-photos', require('./employee-photos.cjs').router);
   app.use(async (req, _res, next) => { req.identity = await identityFor(req.get('x-test-user')); req.correlationId = crypto.randomUUID(); next(); });
   app.use(documentRoutes);
   app.use((error, _req, res, _next) => { if (!error.status) console.error('[integration] server error:', error.message); res.status(error.status || 500).json({ error: error.message }); });
@@ -423,5 +425,52 @@ test('browsers get current staff plus former staff who still matter; long-gone l
   } finally {
     await pool.query(`DELETE FROM loan_advances WHERE id='ws-loan-1'`);
     await pool.query(`DELETE FROM employees WHERE id LIKE 'ws-%'`);
+  }
+});
+
+test('polls can ask for changes only; the row count reveals deletions', async () => {
+  await seed('branches', 'dl-1', { name: 'Delta one' });
+  const first = await fetch(`${base}/branches`, { headers: { 'x-test-user': 'u-hr' } });
+  const count = Number(first.headers.get('x-collection-count'));
+  assert.equal(count, (await first.json()).documents.length, 'the count matches a full read');
+  const mark = new Date(Date.now() + 10_000).toISOString(); // later than every row (minus the 5 s overlap the server adds)
+  const none = await (await fetch(`${base}/branches?since=${encodeURIComponent(mark)}`, { headers: { 'x-test-user': 'u-hr' } })).json();
+  assert.equal(none.documents.length, 0, 'nothing changed after the mark');
+  await pool.query(`UPDATE branches SET updated_at = now() + interval '20 seconds', version = version + 1 WHERE id = 'dl-1'`);
+  const delta = await fetch(`${base}/branches?since=${encodeURIComponent(mark)}`, { headers: { 'x-test-user': 'u-hr' } });
+  assert.equal(delta.headers.get('x-delta'), '1');
+  assert.deepEqual((await delta.json()).documents.map(item => item.document_id), ['dl-1'], 'only the changed row is sent');
+  await pool.query(`DELETE FROM branches WHERE id = 'dl-1'`);
+  const after = await fetch(`${base}/branches?since=${encodeURIComponent(mark)}`, { headers: { 'x-test-user': 'u-hr' } });
+  assert.equal(Number(after.headers.get('x-collection-count')), count - 1, 'the count drops after a delete, so the browser reloads');
+});
+
+test('employee lists carry photo links; the link serves the photo; saving the link keeps the stored photo', async () => {
+  const pixel = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+  await seed('employees', 'ph-1', { fullName: 'Photo person', status: 'Active', pictureUrl: pixel });
+  try {
+    const list = (await (await fetch(`${base}/employees`, { headers: { 'x-test-user': 'u-hr' } })).json()).documents;
+    const link = list.find(item => item.document_id === 'ph-1').data.pictureUrl;
+    assert.match(link, /^\/api\/employee-photos\/ph-1\?v=[\w-]+&s=[\w-]+$/, 'the list carries a link, not the image');
+    const photo = await fetch(`${base}${link}`);
+    assert.equal(photo.status, 200);
+    assert.equal(photo.headers.get('content-type'), 'image/png');
+    assert.match(photo.headers.get('cache-control'), /immutable/);
+    assert.equal((await fetch(`${base}${link.replace(/s=[\w-]+/, 's=forged000000000000000')}`)).status, 403, 'a forged link is refused');
+    assert.equal(await put('u-hr', 'employees', 'ph-1', { ...list.find(item => item.document_id === 'ph-1').data, fullName: 'Photo person 2' }), 200);
+    assert.equal((await current('employees', 'ph-1')).pictureUrl, pixel, 'saving with the link keeps the stored photo');
+  } finally {
+    await pool.query(`DELETE FROM employees WHERE id = 'ph-1'`);
+  }
+});
+
+test('notifications older than 90 days are not sent to browsers', async () => {
+  await seed('notifications', 'nt-old', { title: 'Old', createdAt: '2020-01-01T00:00:00.000Z', readBy: [] });
+  await seed('notifications', 'nt-new', { title: 'New', createdAt: new Date().toISOString(), readBy: [] });
+  try {
+    const ids = (await (await fetch(`${base}/notifications`, { headers: { 'x-test-user': 'u-hr' } })).json()).documents.map(item => item.document_id);
+    assert.ok(ids.includes('nt-new')); assert.ok(!ids.includes('nt-old'));
+  } finally {
+    await pool.query(`DELETE FROM notifications WHERE id IN ('nt-old', 'nt-new')`);
   }
 });

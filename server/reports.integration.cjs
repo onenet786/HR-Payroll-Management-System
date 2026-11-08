@@ -35,6 +35,9 @@ async function seed(table, id, data, extra = {}) {
 async function cleanup() {
   for (const table of ['payroll_payslips', 'payroll_runs', 'loan_advances', 'salary_revisions', 'gratuity_settlements']) await pool.query(`DELETE FROM ${table} WHERE id LIKE 'rpt-%'`);
   await pool.query(`DELETE FROM attendances WHERE id LIKE 'rpt-%'`);
+  await pool.query(`DELETE FROM leaves WHERE id LIKE 'rpt-%'`);
+  await pool.query(`DELETE FROM legacy_records WHERE kind = 'rpt_table'`).catch(() => undefined);
+  await pool.query(`DELETE FROM kiosk_devices WHERE name = 'rpt kiosk'`).catch(() => undefined);
   await pool.query(`DELETE FROM employees WHERE id LIKE 'rpt-%'`);
   for (const table of ['branches', 'departments', 'designations']) await pool.query(`DELETE FROM ${table} WHERE id LIKE 'rpt-%'`);
 }
@@ -66,6 +69,14 @@ test.before(async () => {
   await seed('loan_advances', 'rpt-loan', { employeeId: 'rpt-e1', type: 'Loan', approvedAmount: 50000, totalRepaid: 20000, monthlyInstallment: 5000, totalInstallments: 10, remainingInstallments: 6, status: 'Active' }, { employee_id: 'rpt-e1', status: 'Active' });
   await seed('salary_revisions', 'rpt-rev', { employeeId: 'rpt-e1', previousSalary: 50000, newSalary: 55000, incrementAmount: 5000, incrementPercentage: 10, effectiveDate: day(1), type: 'Annual Increment', status: 'Approved' }, { employee_id: 'rpt-e1' });
   await seed('gratuity_settlements', 'rpt-grat', { employeeId: 'rpt-e3', separationType: 'Resignation', separationDate: day(2), gratuityAmount: 100000, totalSettlementAmount: 150000, status: 'Pending' }, { employee_id: 'rpt-e3', status: 'Pending' });
+  // Leave, devices, archive
+  await seed('leaves', 'rpt-l1', { employeeId: 'rpt-e1', leaveType: 'Annual', startDate: day(3), endDate: day(4), totalDays: 2, status: 'Approved', reason: 'Family' }, { employee_id: 'rpt-e1', leave_type: 'Annual', status: 'Approved' });
+  await seed('leaves', 'rpt-l2', { employeeId: 'rpt-e1', leaveType: 'Sick', startDate: day(5), endDate: day(5), totalDays: 1, status: 'Pending' }, { employee_id: 'rpt-e1', leave_type: 'Sick', status: 'Pending' });
+  await pool.query(`INSERT INTO kiosk_devices(id, user_id, name, token_hash) VALUES (gen_random_uuid(), 'rpt-admin', 'rpt kiosk', md5(random()::text) || md5(random()::text))`);
+  await pool.query(`UPDATE attendances SET data = data || jsonb_build_object('kioskDeviceId', (SELECT id::text FROM kiosk_devices WHERE name = 'rpt kiosk')) WHERE id = 'rpt-a1'`);
+  await pool.query(`INSERT INTO legacy_records(source, kind, legacy_id, employee_id, record_date, data) VALUES
+    ('cyberap', 'rpt_table', '1', 'rpt-e1', $1, '{"salary_id": 1, "net_amount": 45000, "user_password": "secret"}'),
+    ('cyberap', 'rpt_table', '2', 'rpt-e2', '2015-03-01', '{"salary_id": 2, "net_amount": 30000}')`, [day(1)]);
   const app = express();
   app.use((req, _res, next) => { req.identity = identities[req.get('x-who')] || identities.nobody; req.correlationId = require('node:crypto').randomUUID(); next(); });
   app.use(router);
@@ -80,16 +91,16 @@ test.after(async () => {
 });
 
 test('catalog follows permissions', async () => {
-  assert.deepEqual((await get('/catalog')).body.groups.map(group => group.id), ['employees', 'attendance', 'payroll', 'statutory']);
-  assert.deepEqual((await get('/catalog', 'hr')).body.groups.map(group => group.id), ['employees'], 'HR without attendance permission sees employee reports only');
-  assert.equal((await get('/catalog', 'viewer')).body.groups.length, 2, 'View reports opens both groups');
+  assert.deepEqual((await get('/catalog')).body.groups.map(group => group.id), ['employees', 'attendance', 'payroll', 'statutory', 'leave', 'devices', 'audit', 'archive']);
+  assert.deepEqual((await get('/catalog', 'hr')).body.groups.map(group => group.id), ['employees', 'leave', 'devices'], 'HR without attendance or payroll permission');
+  assert.deepEqual((await get('/catalog', 'viewer')).body.groups.map(group => group.id), ['employees', 'attendance', 'leave', 'devices'], 'View reports: no salaries, audit or archive');
   assert.equal((await get('/catalog', 'nobody')).body.groups.length, 0);
   assert.equal((await get(`/run/daily-attendance?date=${day(1)}`, 'hr')).status, 403, 'a report outside the user\'s groups is refused');
 });
 
 test('every report runs with its default filters', async () => {
   for (const report of REPORTS) {
-    const params = new URLSearchParams({ from: `${thisMonth}-01`, to: day(28), date: day(1), month: thisMonth, branchId: '' });
+    const params = new URLSearchParams({ from: `${thisMonth}-01`, to: day(28), date: day(1), month: thisMonth, branchId: '', archiveKind: 'rpt_table' });
     const { status, body } = await get(`/run/${report.id}?${params}`);
     assert.equal(status, 200, `${report.id}: ${body.error || ''}`);
     assert.ok(Array.isArray(body.rows) && Array.isArray(body.columns), report.id);
@@ -153,9 +164,10 @@ test('paging, CSV export and input checks', async () => {
 });
 
 test('payroll and statutory reports: permissions and numbers', async () => {
-  assert.deepEqual((await get('/catalog', 'viewer')).body.groups.map(group => group.id), ['employees', 'attendance'], 'View reports does not open salaries');
+  assert.ok(!(await get('/catalog', 'viewer')).body.groups.some(group => group.id === 'payroll'), 'View reports does not open salaries');
   assert.equal((await get(`/run/payroll-register?month=${thisMonth}`, 'viewer')).status, 403);
-  assert.deepEqual((await get('/catalog')).body.groups.map(group => group.id), ['employees', 'attendance', 'payroll', 'statutory']);
+  const adminGroups = (await get('/catalog')).body.groups.map(group => group.id);
+  assert.ok(adminGroups.includes('payroll') && adminGroups.includes('statutory'), 'admin sees payroll and statutory reports');
 
   const register = (await get(`/run/payroll-register?month=${thisMonth}&runStatus=all`)).body;
   const mine = register.rows.filter(row => row.employee_id.startsWith('rpt-'));
@@ -182,4 +194,36 @@ test('payroll and statutory reports: permissions and numbers', async () => {
   assert.ok((await get(`/run/salary-revisions?from=${thisMonth}-01&to=${day(28)}`)).body.rows.some(row => row.employee_id === 'rpt-e1'));
   assert.ok((await get(`/run/settlements?from=${thisMonth}-01&to=${day(28)}`)).body.rows.some(row => row.employee_id === 'rpt-e3'));
   assert.ok((await get(`/run/payslip-history?from=${thisMonth}-01&to=${day(28)}&employeeId=rpt-e1`)).body.rows.length >= 1);
+});
+
+test('leave, device, audit and archive reports', async () => {
+  const range = `from=${thisMonth}-01&to=${day(28)}`;
+  const register = (await get(`/run/leave-register?${range}`)).body.rows.filter(row => row.employee_id === 'rpt-e1');
+  assert.equal(register.length, 2);
+  const summary = (await get(`/run/leave-summary?${range}`)).body.rows.find(row => row.employee_id === 'rpt-e1');
+  assert.equal(Number(summary.annual), 2); assert.equal(Number(summary.pending), 1);
+  const balance = (await get(`/run/leave-balances?year=${thisMonth.slice(0, 4)}&employeeId=rpt-e1`)).body.rows[0];
+  assert.equal(balance.annual_taken, 2); assert.equal(balance.sick_taken, 0);
+  assert.equal(balance.sick_left, balance.sick_entitled - 1, 'pending sick leave reduces what is left');
+
+  const kiosk = (await get(`/run/kiosk-devices?${range}`)).body.rows.find(row => row.name === 'rpt kiosk');
+  assert.equal(kiosk.punch_days, 1); assert.equal(kiosk.status, 'Active');
+  assert.ok((await get(`/run/punch-methods?${range}`)).body.rows.some(row => row.method === 'Biometric'));
+  assert.ok((await get('/run/biometric-enrolment?enrolment=missing')).body.rows.some(row => row.employee_id === 'rpt-e1'));
+
+  const audit = (await get(`/run/audit-log?${range}&auditAction=report_export`)).body;
+  assert.ok(audit.rows.every(row => row.action === 'report_export'));
+  assert.equal((await get(`/run/audit-log?${range}`, 'hr')).status, 403, 'audit needs user-management rights');
+  assert.equal((await get(`/run/sign-ins?${range}`)).status, 200);
+  assert.ok(Array.isArray((await get('/options')).body.auditActions));
+
+  assert.equal((await get('/run/cyberap-archive')).status, 400, 'a table must be chosen');
+  const archive = (await get('/run/cyberap-archive?archiveKind=rpt_table')).body;
+  assert.equal(archive.total, 2);
+  assert.ok(archive.columns.some(column => column.key === 'f_net_amount'));
+  assert.ok(!archive.columns.some(column => /password/.test(column.key)), 'password-like columns are never shown');
+  assert.equal((await get(`/run/cyberap-archive?archiveKind=rpt_table&from=2015-01-01&to=2015-12-31`)).body.total, 1, 'date filter');
+  assert.equal((await get('/run/cyberap-archive?archiveKind=rpt_table&search=45000')).body.total, 1, 'text search');
+  assert.ok((await get('/options')).body.archiveKinds.some(item => item.kind === 'rpt_table' && item.rows === 2));
+  assert.equal((await get('/run/cyberap-archive?archiveKind=rpt_table', 'viewer')).status, 403);
 });

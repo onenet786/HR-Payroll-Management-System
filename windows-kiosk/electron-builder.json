@@ -1,10 +1,10 @@
 {
   "appId": "com.binishaq.hrsuite.kiosk",
-  "productName": "Bin Ishaq Attendance Kiosk",
+  "productName": "AlJannatMall Attendance Kiosk",
   "icon": "assets/icon.png",
   "extraMetadata": {
     "main": "windows-kiosk/main.cjs",
-    "version": "1.0.34"
+    "version": "1.0.43"
   },
   "directories": {
     "output": "dist-kiosk"

@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useMemo } from 'react';
+import { SearchableSelect } from './SearchableSelect';
 import { DateField } from './DateField';
 import { RequiredMark, RequiredNote } from './RequiredMark';
 import { Calculator, X } from 'lucide-react';
@@ -220,10 +221,10 @@ export function GratuityModule({ settlements, employees, statConfig, canManage, 
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label htmlFor="gratuity-employee" className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Employee<RequiredMark /></label>
-                  <select id="gratuity-employee" aria-required="true" value={calcForm.employeeId} onChange={e => setCalcForm(p => ({ ...p, employeeId: e.target.value }))}
+                  <SearchableSelect id="gratuity-employee" aria-required="true" value={calcForm.employeeId} onChange={e => setCalcForm(p => ({ ...p, employeeId: e.target.value }))}
                     className="w-full bg-white border border-slate-200 text-slate-900 text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-teal-500">
                     {employees.filter(e => e.status === 'Active').map(e => <option key={e.id} value={e.id}>{e.fullName}</option>)}
-                  </select>
+                  </SearchableSelect>
                 </div>
                 <div>
                   <label htmlFor="gratuity-separation-type" className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Separation Type</label>

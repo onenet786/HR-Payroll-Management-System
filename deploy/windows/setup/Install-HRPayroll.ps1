@@ -216,7 +216,7 @@ foreach ($d in @($appDir, $configDir, $toolsDir, $serviceDir, (Join-Path $Instal
 & robocopy (Join-Path $payload 'app') $appDir /E /NFL /NDL /NJH /NJS /NP | Out-Null
 & robocopy (Join-Path $payload 'runtime') (Join-Path $InstallDir 'runtime') /E /NFL /NDL /NJH /NJS /NP | Out-Null
 Copy-Item (Join-Path $payload 'runtime\winsw\WinSW-x64.exe') (Join-Path $serviceDir 'HRPayrollApp.exe') -Force
-foreach ($tool in @('hrpayroll-common.ps1', 'Update-HRPayroll.ps1', 'Uninstall-HRPayroll.ps1', 'hrpayroll-backup.ps1', 'hrpayroll-restore.ps1', 'hrpayroll-status.ps1')) { Copy-Item (Join-Path $here $tool) $toolsDir -Force }
+foreach ($tool in @('hrpayroll-common.ps1', 'Update-HRPayroll.ps1', 'Uninstall-HRPayroll.ps1', 'hrpayroll-backup.ps1', 'hrpayroll-restore.ps1', 'hrpayroll-status.ps1', 'Reset-AdminPassword.ps1')) { Copy-Item (Join-Path $here $tool) $toolsDir -Force }
 Info "Application $version, Node.js $(& $nodeExe -v), PostgreSQL $((& (Join-Path $pgBin 'postgres.exe') --version) -replace 'postgres \(PostgreSQL\) ','')"
 
 # -- Embedded database --------------------------------------------------------
@@ -230,16 +230,22 @@ try {
   Run (Join-Path $pgBin 'initdb.exe') @('-D', $pgData, '-U', 'postgres', '-A', 'scram-sha-256', "--pwfile=$pwFile", '-E', 'UTF8', '--locale=C') | Out-Null
 } finally { Remove-Item $pwFile -Force -ErrorAction SilentlyContinue }
 $pgLog = ("$DataDir\logs\postgresql").Replace('\', '/')
+# Memory sized to this server (less when SQL Server runs here too); see Get-HRMemoryPlan.
+. (Join-Path $here 'hrpayroll-common.ps1')
+$memoryPlan = Get-HRMemoryPlan
+Info "Database memory: cache $($memoryPlan.shared_buffers), planner $($memoryPlan.effective_cache_size) (RAM $($memoryPlan.ramMb) MB)"
 Add-Content -Path (Join-Path $pgData 'postgresql.conf') -Encoding ASCII -Value @"
 
 # --- HR & Payroll embedded database (set by setup) ---
 listen_addresses = 'localhost'
 port = $DbPort
 max_connections = 50
-shared_buffers = 256MB
-effective_cache_size = 1GB
-work_mem = 8MB
-maintenance_work_mem = 128MB
+shared_buffers = $($memoryPlan.shared_buffers)
+effective_cache_size = $($memoryPlan.effective_cache_size)
+work_mem = $($memoryPlan.work_mem)
+maintenance_work_mem = $($memoryPlan.maintenance_work_mem)
+random_page_cost = 1.1
+effective_io_concurrency = 100
 wal_buffers = 16MB
 password_encryption = scram-sha-256
 timezone = 'Asia/Karachi'

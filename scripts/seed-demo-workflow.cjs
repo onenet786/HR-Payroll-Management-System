@@ -59,7 +59,7 @@ function effectiveShiftForDate(shift = DEFAULT_SHIFT, workDate) {
   const base = inRamadan ? { ...shift, startTime: shift.ramadanStartTime || shift.startTime, endTime: shift.ramadanEndTime || shift.endTime } : shift;
   return isFriday ? { ...base, startTime: shift.fridayStartTime || base.startTime, endTime: shift.fridayEndTime || base.endTime } : base;
 }
-function evaluateAttendanceTimes(punchIn, punchOut, shift = DEFAULT_SHIFT, breaks = [], workDate) {
+function evaluateAttendanceTimes(punchIn, punchOut, shift = DEFAULT_SHIFT, breaks = [], workDate, context = {}) {
   const effectiveShift = effectiveShiftForDate(shift, workDate);
   const start = timeMinutes(effectiveShift.startTime) ?? 540;
   const end = timeMinutes(effectiveShift.endTime) ?? 1020;
@@ -71,11 +71,14 @@ function evaluateAttendanceTimes(punchIn, punchOut, shift = DEFAULT_SHIFT, break
   const status = isPlausiblyEarly || lateBy <= effectiveShift.graceMinutes ? "Present" : lateBy >= effectiveShift.halfDayMinutes ? "Half Day" : "Late";
   if (output === void 0) return { status, overtimeMinutes: 0, workedMinutes: 0 };
   const grossWorked = elapsedMinutes(input, output);
-  const recordedBreaks = completedBreakMinutes(breaks);
+  const excluded = new Set((context.excludedBreakReasons || []).map((reason) => reason.toLowerCase()));
+  const recordedBreaks = completedBreakMinutes(breaks.filter((item) => !excluded.has(String(item.reason || "").trim().toLowerCase())));
   const breakDeduction = Math.max(recordedBreaks, effectiveShift.breakMinutes || 0);
   const workedMinutes = Math.max(0, grossWorked - breakDeduction);
   const scheduledMinutes = elapsedMinutes(start, end) - (effectiveShift.breakMinutes || 0);
   const overtimeThreshold = effectiveShift.overtimeAfterMinutes ?? scheduledMinutes;
+  const cutoff = timeMinutes(context.leaveIfOutBefore);
+  if (cutoff !== void 0 && output < cutoff && !isPlausiblyEarly) return { status: "On Leave", workedMinutes, overtimeMinutes: 0, policyLeave: true };
   return { status, workedMinutes, overtimeMinutes: Math.max(0, workedMinutes - overtimeThreshold) };
 }
 function countScheduledWorkingDays(year, month, shift = DEFAULT_SHIFT, holidays = []) {
@@ -140,7 +143,7 @@ function employedDuring(employee, periodStart, periodEnd) {
   if (employee.separationDate && employee.separationDate < periodStart) return false;
   return employee.status === "Active" || employee.status === "On Leave" || employee.status === "Terminated" && Boolean(employee.separationDate);
 }
-function buildAttendanceRegister(attendances, employees, leaves, holidays, month, year) {
+function buildAttendanceRegister(attendances, employees, leaves, holidays, month, year, options = {}) {
   const attendanceByEmployeeDay = new Map(attendances.filter((item) => item.date.startsWith(`${year}-${String(month).padStart(2, "0")}`)).map((item) => [`${item.employeeId}|${item.date}`, item]));
   const holidayDates = new Set(holidays.map((item) => item.date));
   const lastDay = new Date(year, month, 0).getDate();
@@ -156,23 +159,23 @@ function buildAttendanceRegister(attendances, employees, leaves, holidays, month
     if (!attendance && date < employee.dateOfJoining) return { employeeId: employee.id, date, status: "Not Joined", source: "Roster" };
     if (!attendance && employee.separationDate && date > employee.separationDate) return { employeeId: employee.id, date, status: "Separated", source: "Roster" };
     if (attendance) {
-      const status = attendance.status === "On Leave" ? leave?.leaveType === "Unpaid" ? "Unpaid Leave" : "Paid Leave" : attendance.status === "Holiday" ? "Holiday" : attendance.status;
+      const status = attendance.status === "On Leave" ? leave ? leave.leaveType === "Unpaid" ? "Unpaid Leave" : "Paid Leave" : attendance.policyLeave ? "Unpaid Leave" : "Paid Leave" : attendance.status === "Holiday" ? "Holiday" : attendance.status;
       return { employeeId: employee.id, date, status, attendanceId: attendance.id, source: attendance.method };
     }
     if (holidayDates.has(date)) return { employeeId: employee.id, date, status: "Holiday", source: "Holiday" };
     if (leave) return { employeeId: employee.id, date, status: leave.leaveType === "Unpaid" ? "Unpaid Leave" : "Paid Leave", source: "Leave" };
     if (!workingDays.includes(weekday2)) return { employeeId: employee.id, date, status: "Weekly Off", source: "Roster" };
-    return { employeeId: employee.id, date, status: "Absent", source: "Roster" };
+    return { employeeId: employee.id, date, status: options.noPunchDayStatus || "Absent", source: "Roster" };
   }));
 }
-function createAttendancePeriod(attendances, employees, leaves, holidays, month, year, actor, now2 = (/* @__PURE__ */ new Date()).toISOString(), previous) {
+function createAttendancePeriod(attendances, employees, leaves, holidays, month, year, actor, now2 = (/* @__PURE__ */ new Date()).toISOString(), previous, options = {}) {
   if (previous && previous.status !== "Reopened") throw new Error("This attendance register is already locked. Reopen it with a documented reason before locking a new version.");
   const issues = findAttendanceLockIssues(attendances, month, year);
   if (issues.length) throw new Error(`Attendance period cannot be locked: ${issues.length} exception(s) require review.`);
   const prefix = `${year}-${String(month).padStart(2, "0")}`;
   const records = attendances.filter((item) => item.date.startsWith(prefix));
   if (!records.length) throw new Error("Attendance period cannot be locked because it contains no attendance records.");
-  const registerRows = buildAttendanceRegister(attendances, employees, leaves, holidays, month, year);
+  const registerRows = buildAttendanceRegister(attendances, employees, leaves, holidays, month, year, options);
   const unresolved = registerRows.filter((row) => row.status === "Pending Review" || row.status === "Missing Punch");
   if (unresolved.length) throw new Error(`Attendance period cannot be locked: ${unresolved.length} register day(s) require review.`);
   const lastDate = dayKey(year, month, new Date(year, month, 0).getDate());
@@ -241,6 +244,54 @@ function socialSecurityContribution(employee, province, config, wageBase, isDail
   if (config.socialSecurityEligibility === "Only employees within wage ceiling" && wageBase > ceiling) return { amount: 0, reason: `Wage above the ${policy.scheme} ceiling of PKR ${ceiling.toLocaleString()}` };
   return { amount: Math.round(Math.min(wageBase, ceiling) * (policy.socialSecurityRate / 100)), reason: "" };
 }
+
+// src/data/attendancePolicy.ts
+var attendancePolicyOf = (config) => config?.attendancePolicy || {};
+function lateFineForLateDays(bands, lateDays) {
+  const sorted = (bands || []).filter((band) => band.uptoLateDays > 0 && band.finePerDay >= 0).slice().sort((a, b) => a.uptoLateDays - b.uptoLateDays);
+  if (!sorted.length || lateDays <= 0) return 0;
+  let total = 0;
+  for (let day = 1; day <= lateDays; day += 1) {
+    const band = sorted.find((item) => day <= item.uptoLateDays) || sorted[sorted.length - 1];
+    total += band.finePerDay;
+  }
+  return Math.round(total);
+}
+function policyShift(shift, branch, policy) {
+  const overrides = {
+    ...branch?.openingTime && { startTime: branch.openingTime },
+    ...policy.lateGraceMinutes !== void 0 && { graceMinutes: policy.lateGraceMinutes },
+    ...policy.halfDayAfterMinutes !== void 0 && { halfDayMinutes: policy.halfDayAfterMinutes }
+  };
+  if (!Object.keys(overrides).length) return shift;
+  return { ...shift || DEFAULT_SHIFT, ...overrides };
+}
+
+// src/data/payrollComponents.ts
+var PAYROLL_COMPONENTS = [
+  { type: "Bonus", kind: "earning", source: "Manual", taxable: true },
+  { type: "Commission", kind: "earning", source: "Import", taxable: true },
+  { type: "Tip", kind: "earning", source: "Import", taxable: true },
+  { type: "Arrears", kind: "earning", source: "Manual", taxable: true },
+  { type: "Fuel Allowance", kind: "earning", source: "Manual", taxable: true },
+  { type: "Funeral Allowance", kind: "earning", source: "Manual", taxable: false },
+  { type: "Grading Reward", kind: "earning", source: "Manual", taxable: true },
+  { type: "Surprise Reward", kind: "earning", source: "Manual", taxable: true },
+  { type: "Reimbursement", kind: "earning", source: "Manual", taxable: false },
+  { type: "Deduction", kind: "deduction", source: "Manual", taxable: false },
+  { type: "Penalty / Warning", kind: "deduction", source: "Manual", taxable: false },
+  { type: "Short Cash", kind: "deduction", source: "Manual", taxable: false },
+  { type: "Shopping", kind: "deduction", source: "Manual", taxable: false },
+  { type: "Uniform", kind: "deduction", source: "Manual", taxable: false },
+  { type: "Advance (STA)", kind: "deduction", source: "Manual", taxable: false },
+  { type: "Loan (LTA)", kind: "deduction", source: "Manual", taxable: false },
+  { type: "EOBI", kind: "deduction", source: "Manual", taxable: false },
+  { type: "Tax Adjustment", kind: "deduction", source: "Manual", taxable: false }
+];
+var ADJUSTMENT_TYPES = PAYROLL_COMPONENTS.map((component) => component.type);
+var componentOf = (type) => PAYROLL_COMPONENTS.find((component) => component.type === type);
+var isDeductionType = (type) => componentOf(type)?.kind === "deduction";
+var DEDICATED_LINE_TYPES = ["Bonus", "Commission", "Arrears", "Reimbursement", "Deduction", "Tax Adjustment"];
 
 // src/data/masterData.ts
 function resolveWageBasis(employee, wageTypes = []) {
@@ -393,6 +444,21 @@ function computePayslipDetails(employee, month, year, attendances, leaves, statC
   const absentDays = explicitAbsentDays + unpaidLeaveDays;
   const scheduledWorkingDays = countScheduledWorkingDays(year, month, employee.shift, holidays);
   const absenceDeductionBasis = statConfigs.absenceDeductionBasis || "Calendar Days";
+  const policy = attendancePolicyOf(statConfigs);
+  const absentDeductionDays = policy.absentDeductionDays ?? 1;
+  const chargeableAbsentDays = explicitAbsentDays * absentDeductionDays + unpaidLeaveDays;
+  const lateDays = register ? registerRows.filter((row) => row.employeeId === employee.id && row.status === "Late").length : empAtts.filter((a) => a.status === "Late").length;
+  const lateFineDeduction = lateFineForLateDays(policy.lateFineBands, lateDays);
+  const earlyRewardPerDay = Math.max(0, policy.earlyComingRewardPerDay || 0);
+  const earlyShift = policyShift(employee.shift, branch, policy);
+  const earlyDays = earlyRewardPerDay > 0 ? empAtts.filter((a) => {
+    if (!a.punchIn || !["Present", "Late", "Half Day"].includes(a.status)) return false;
+    const dayShift = effectiveShiftForDate(earlyShift, a.date);
+    const [hours, minutes] = (dayShift?.startTime || "09:00").split(":").map(Number);
+    const [inHours, inMinutes] = a.punchIn.split(":").map(Number);
+    return inHours * 60 + inMinutes <= hours * 60 + minutes - (policy.earlyComingMinutes || 0);
+  }).length : 0;
+  const earlyComingReward = Math.round(earlyDays * earlyRewardPerDay);
   let baseContractSalary = employee.basicSalary;
   let basicEarnings = 0;
   let houseRentAllowance = 0;
@@ -425,7 +491,7 @@ function computePayslipDetails(employee, month, year, attendances, leaves, statC
     const deductionDivisor = absenceDeductionBasis === "Scheduled Working Days" ? Math.max(1, scheduledWorkingDays) : absenceDeductionBasis === "Fixed 30 Days" ? 30 : totalDaysInMonth;
     unpaidLeaveDeduction = Math.min(
       baseContractSalary,
-      absentDays * (baseContractSalary / deductionDivisor) + notJoinedDays * (baseContractSalary / totalDaysInMonth)
+      chargeableAbsentDays * (baseContractSalary / deductionDivisor) + notJoinedDays * (baseContractSalary / totalDaysInMonth)
     );
     basicEarnings = basicComponent;
     const otBaseHourly = basicComponent / (statConfigs.standardMonthlyHours || 208);
@@ -437,13 +503,21 @@ function computePayslipDetails(employee, month, year, attendances, leaves, statC
   const commissionEarnings = adjustmentTotal("Commission");
   const arrearsEarnings = adjustmentTotal("Arrears");
   const reimbursements = adjustmentTotal("Reimbursement");
-  const otherAdjustmentsDeduction = adjustmentTotal("Deduction");
   const manualTaxAdjustment = adjustmentTotal("Tax Adjustment");
-  const taxableAdjustments = periodAdjustments.filter((item) => item.taxable && !["Deduction", "Tax Adjustment", "Reimbursement"].includes(item.type)).reduce((sum, item) => sum + item.amount, 0);
+  const adjustmentLines = periodAdjustments.filter((item) => !DEDICATED_LINE_TYPES.includes(item.type)).reduce((lines, item) => {
+    const kind = isDeductionType(item.type) ? "deduction" : "earning";
+    const existing = lines.find((line) => line.type === item.type);
+    if (existing) existing.amount += item.amount;
+    else lines.push({ type: item.type, amount: item.amount, kind });
+    return lines;
+  }, []);
+  const otherEarningAdjustments = adjustmentLines.filter((line) => line.kind === "earning").reduce((sum, line) => sum + line.amount, 0);
+  const otherAdjustmentsDeduction = adjustmentTotal("Deduction") + adjustmentLines.filter((line) => line.kind === "deduction").reduce((sum, line) => sum + line.amount, 0);
+  const taxableAdjustments = periodAdjustments.filter((item) => item.taxable && !isDeductionType(item.type) && item.type !== "Reimbursement").reduce((sum, item) => sum + item.amount, 0);
   const baseGrossSalary = Math.round(
     basicEarnings + houseRentAllowance + conveyanceAllowance + medicalAllowance + otherAllowances + overtimePay - unpaidLeaveDeduction
   );
-  const grossSalary = baseGrossSalary + bonusEarnings + commissionEarnings + arrearsEarnings;
+  const grossSalary = baseGrossSalary + bonusEarnings + commissionEarnings + arrearsEarnings + otherEarningAdjustments + earlyComingReward;
   const perquisitesValue = Math.max(0, (employee.perquisiteVehicleMonthly || 0) + (employee.perquisiteAccommodationMonthly || 0) + (employee.perquisiteOtherMonthly || 0));
   const exemptAllowance = isDailyWager ? 0 : Math.round(Math.min(medicalAllowance, basicEarnings * Math.max(0, statConfigs.medicalAllowanceExemptPercentOfBasic ?? 0) / 100));
   const taxableGrossSalary = Math.max(0, baseGrossSalary + taxableAdjustments + perquisitesValue - exemptAllowance);
@@ -481,7 +555,7 @@ function computePayslipDetails(employee, month, year, attendances, leaves, statC
   );
   const loanRepaymentDeduction = activeLoans.reduce((sum, l) => sum + l.monthlyInstallment, 0);
   const totalDeductions = Math.round(
-    incomeTaxDeduction + manualTaxAdjustment + eobiEmployeeDeduction + providentFundDeduction + loanRepaymentDeduction + otherAdjustmentsDeduction
+    incomeTaxDeduction + manualTaxAdjustment + eobiEmployeeDeduction + providentFundDeduction + loanRepaymentDeduction + otherAdjustmentsDeduction + lateFineDeduction
   );
   const netSalary = Math.max(0, grossSalary + reimbursements - totalDeductions);
   const departmentName = departments.find((d) => d.id === employee.departmentId)?.name || "Unknown Dept";
@@ -540,6 +614,12 @@ function computePayslipDetails(employee, month, year, attendances, leaves, statC
     absenceDeductionBasis,
     attendanceSource: register ? "Certified Register" : "Attendance Logs",
     explicitAbsentDays,
+    lateDays,
+    lateFineDeduction,
+    earlyDays,
+    earlyComingReward,
+    absentDeductionDays,
+    adjustmentLines,
     taxableIncomeThisPeriod: taxableGrossSalary,
     perquisitesValue,
     exemptAllowance,
@@ -565,8 +645,9 @@ function bankAdvicePayload(payslips) {
 }
 
 // src/data/payrollPreflight.ts
-function payrollPreflight(employees, draftPayslips, historicalPayslips, branches, statutoryConfig, wageTypes = []) {
+function payrollPreflight(employees, draftPayslips, historicalPayslips, branches, statutoryConfig, wageTypes = [], features) {
   const issues = [];
+  const bankPayroll = features?.bankPayroll !== false;
   const normalizeIdentity = (value) => (value || "").replace(/[^a-z0-9]/gi, "").toUpperCase();
   const duplicateCNICs = /* @__PURE__ */ new Map();
   const duplicateBankAccounts = /* @__PURE__ */ new Map();
@@ -583,9 +664,12 @@ function payrollPreflight(employees, draftPayslips, historicalPayslips, branches
     if (!/^\d{5}-\d{7}-\d$/.test(employee.cnic || "")) add("Critical", "INVALID_CNIC", "CNIC is missing or invalid.");
     const cnicMatches = duplicateCNICs.get(normalizeIdentity(employee.cnic)) || [];
     if (cnicMatches.length > 1) add("Critical", "DUPLICATE_CNIC", `CNIC is also assigned to ${cnicMatches.filter((item) => item.id !== employee.id).map((item) => item.fullName).join(", ")}. Resolve the duplicate before payroll.`);
-    if (!employee.bankName?.trim() || !employee.bankAccountNumber?.trim()) add("Critical", "MISSING_BANK", "Bank name or account number is missing.");
+    if (!employee.bankName?.trim() || !employee.bankAccountNumber?.trim()) {
+      if (bankPayroll) add("Critical", "MISSING_BANK", "Bank name or account number is missing.");
+      else add("Warning", "MISSING_BANK", "No bank account recorded; this salary will be paid in cash.");
+    }
     if (employee.iban && !/^PK\d{2}[A-Z0-9]{20}$/i.test(employee.iban.replace(/\s/g, ""))) add("Critical", "INVALID_IBAN", "IBAN must be a valid 24-character Pakistan IBAN.");
-    if (employee.fbrEnabled !== false && !employee.ntn?.trim()) add("Warning", "MISSING_NTN", "FBR withholding is enabled but the employee NTN is not recorded.");
+    if (features?.incomeTax !== false && employee.fbrEnabled !== false && !employee.ntn?.trim()) add("Warning", "MISSING_NTN", "FBR withholding is enabled but the employee NTN is not recorded.");
     const bankIdentity = normalizeIdentity(employee.iban) || `${normalizeIdentity(employee.bankName)}:${normalizeIdentity(employee.bankAccountNumber)}`;
     const bankMatches = duplicateBankAccounts.get(bankIdentity) || [];
     if (bankIdentity !== ":" && bankMatches.length > 1) add("Warning", "DUPLICATE_BANK_ACCOUNT", `Payment account is also used by ${bankMatches.filter((item) => item.id !== employee.id).map((item) => item.fullName).join(", ")}. Confirm this shared account is legitimate before release.`);
@@ -595,8 +679,8 @@ function payrollPreflight(employees, draftPayslips, historicalPayslips, branches
       const policy = provincialPolicy(statutoryConfig, province, branches.find((branch) => branch.id === employee.branchId)?.establishmentType);
       const monthlyBasic = resolveWageBasis(employee, wageTypes) === "Daily" ? employee.basicSalary * 26 : employee.basicSalary;
       if (monthlyBasic < policy.minimumWage) add("Critical", "BELOW_MINIMUM_WAGE", `Basic wage is below the ${policy.province} configured minimum wage of PKR ${policy.minimumWage.toLocaleString()}.`);
-      if (employee.eobiEnabled === false && !employee.eobiExemptionReason?.trim()) add("Warning", "MISSING_EOBI_REASON", "EOBI is disabled without a documented exemption reason.");
-      if (!employee.socialSecurityNumber && !employee.socialSecurityExemptionReason?.trim()) add("Warning", "MISSING_SOCIAL_SECURITY_REASON", `${policy.scheme} registration is missing without a documented exemption reason.`);
+      if (features?.eobi !== false && employee.eobiEnabled === false && !employee.eobiExemptionReason?.trim()) add("Warning", "MISSING_EOBI_REASON", "EOBI is disabled without a documented exemption reason.");
+      if (features?.socialSecurity !== false && !employee.socialSecurityNumber && !employee.socialSecurityExemptionReason?.trim()) add("Warning", "MISSING_SOCIAL_SECURITY_REASON", `${policy.scheme} registration is missing without a documented exemption reason.`);
     }
     const previous = historicalPayslips.filter((item) => item.employeeId === employee.id && item.payrollRunId !== sheet.payrollRunId).sort((a, b) => (b.periodYear || 0) - (a.periodYear || 0) || (b.periodMonth || 0) - (a.periodMonth || 0))[0];
     if (previous?.netSalary > 0) {

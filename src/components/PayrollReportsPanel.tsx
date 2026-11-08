@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { SearchableSelect } from './SearchableSelect';
 import { Download, FileText } from 'lucide-react';
 import type { Company, Employee, GratuitySettlement, PayrollAdjustment, PayrollRun, Payslip, StatutoryConfig, WageType } from '../types';
 import { retroAttendanceAdjustment } from '../data/offCyclePayroll';
@@ -93,10 +94,10 @@ export function PayrollReportsPanel(props: Props) {
 
       {features.incomeTax && <div className="flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 p-3">
         <span className="font-semibold text-slate-700">Salary tax certificate (s.149):</span>
-        <select aria-label="Certificate employee" value={certificateEmployeeId} onChange={event => setCertificateEmployeeId(event.target.value)} className="rounded border border-slate-300 bg-white p-1.5">
+        <SearchableSelect aria-label="Certificate employee" value={certificateEmployeeId} onChange={event => setCertificateEmployeeId(event.target.value)} className="rounded border border-slate-300 bg-white p-1.5">
           <option value="">Select employee</option>
           {employees.map(employee => <option key={employee.id} value={employee.id}>{employee.fullName} ({employee.employeeCode})</option>)}
-        </select>
+        </SearchableSelect>
         <button type="button" disabled={!certificateEmployeeId} className={`${button} disabled:opacity-40`} onClick={() => run(() => {
           const employee = employees.find(item => item.id === certificateEmployeeId)!;
           openPrintableHtml(annualTaxCertificateHtml(employee, payrollRuns, payrollPayslips, taxYear, company));
@@ -109,10 +110,10 @@ export function PayrollReportsPanel(props: Props) {
         <RequiredNote className="mt-1" />
         <div className="mt-2 grid gap-2 md:grid-cols-[minmax(0,2fr)_6rem_minmax(0,2fr)_auto]">
           <label className="flex min-w-0 flex-col gap-0.5 text-[10px] font-semibold text-slate-600">Paid payslip<RequiredMark />
-          <select aria-label="Paid payslip to correct" aria-required="true" value={retro.payslipId} onChange={event => setRetro({ ...retro, payslipId: event.target.value })} className="rounded border border-slate-300 bg-white p-1.5 text-xs font-normal">
+          <SearchableSelect aria-label="Paid payslip to correct" aria-required="true" value={retro.payslipId} onChange={event => setRetro({ ...retro, payslipId: event.target.value })} className="rounded border border-slate-300 bg-white p-1.5 text-xs font-normal">
             <option value="">Choose paid payslip</option>
             {retroCandidates.slice(0, 300).map(item => <option key={item.id} value={item.id}>{item.periodYear}-{String(item.periodMonth).padStart(2, '0')} · {item.employeeName} ({item.employeeCode})</option>)}
-          </select></label>
+          </SearchableSelect></label>
           <label className="flex min-w-0 flex-col gap-0.5 text-[10px] font-semibold text-slate-600">Days<RequiredMark />
           <input aria-label="Days to add or recover" aria-required="true" type="number" placeholder="+/- days" value={retro.days} onChange={event => setRetro({ ...retro, days: event.target.value })} className="rounded border border-slate-300 p-1.5 text-xs font-normal" /></label>
           <label className="flex min-w-0 flex-col gap-0.5 text-[10px] font-semibold text-slate-600">Reason<RequiredMark />

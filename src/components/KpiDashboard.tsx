@@ -1,9 +1,12 @@
 import React, { useMemo, useState } from 'react';
+import { SearchableSelect } from './SearchableSelect';
 import { Bar, BarChart, CartesianGrid, Cell, LabelList, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { AlertTriangle, BarChart3, Briefcase, CalendarCheck, Lightbulb, TrendingDown, TrendingUp, UserMinus, UserPlus, Users, Wallet } from 'lucide-react';
 import type { AttendanceLog, Branch, Department, Employee, JobApplication, JobPosting, LeaveRequest, PerformanceReview } from '../types';
 import type { EditionFeatures } from '../data/edition';
 import { computeHrKpis, monthKey, type KpiMetric } from '../data/hrKpis';
+// Charts are measured after the first render; starting at 1x1 (not the library's -1x-1) avoids a console warning.
+const CHART_START_SIZE = { width: 1, height: 1 };
 
 interface Props {
   employees: Employee[];
@@ -60,7 +63,7 @@ function Donut({ data, total, centre }: { data: { label: string; value: number }
   return (
     <div className="flex items-center gap-3">
       <div className="relative h-40 w-40 shrink-0">
-        <ResponsiveContainer width="100%" height="100%">
+        <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={CHART_START_SIZE}>
           <PieChart>
             <Pie data={data} dataKey="value" nameKey="label" innerRadius={48} outerRadius={70} paddingAngle={2} stroke="none">
               {data.map((_, index) => <Cell key={index} fill={PALETTE[index % PALETTE.length]} />)}
@@ -107,7 +110,7 @@ export function KpiDashboard({ employees, attendances, leaves, departments, bran
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <label className="flex items-center gap-1.5"><span className="text-slate-400">Month</span><input type="month" aria-label="Dashboard month" value={month} max={monthKey(today)} onChange={event => event.target.value && setMonth(event.target.value)} className={select} /></label>
-          <label className="flex items-center gap-1.5"><span className="text-slate-400">Location</span><select aria-label="Dashboard branch" value={branchId} onChange={event => { setBranchId(event.target.value); setDepartmentId(''); }} className={select}><option value="">All</option>{branches.map(branch => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>
+          <label className="flex items-center gap-1.5"><span className="text-slate-400">Location</span><SearchableSelect aria-label="Dashboard branch" value={branchId} onChange={event => { setBranchId(event.target.value); setDepartmentId(''); }} className={select}><option value="">All</option>{branches.map(branch => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</SearchableSelect></label>
           <label className="flex items-center gap-1.5"><span className="text-slate-400">Department</span><select aria-label="Dashboard department" value={departmentId} onChange={event => setDepartmentId(event.target.value)} className={select}><option value="">All</option>{scopedDepartments.map(department => <option key={department.id} value={department.id}>{department.name}</option>)}</select></label>
         </div>
       </div>
@@ -128,7 +131,7 @@ export function KpiDashboard({ employees, attendances, leaves, departments, bran
       <div className="grid gap-4 lg:grid-cols-2">
         <Card title="Headcount trend" icon={<BarChart3 className="h-4 w-4 text-blue-600" />}>
           <div className="h-52">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={CHART_START_SIZE}>
               <BarChart data={kpis.trend} margin={{ top: 18, right: 8, left: -18, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                 <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} />
@@ -165,7 +168,7 @@ export function KpiDashboard({ employees, attendances, leaves, departments, bran
           <Card title="Performance rating" icon={<TrendingUp className="h-4 w-4 text-blue-600" />}>
             {kpis.reviewedEmployees === 0 ? <p className="py-10 text-center text-xs text-slate-400">No performance reviews recorded yet.</p> : (
               <div className="h-44">
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={CHART_START_SIZE}>
                   <BarChart data={kpis.performance} margin={{ top: 18, right: 4, left: -22, bottom: 0 }}>
                     <XAxis dataKey="label" tick={{ fontSize: 9, fill: '#64748b' }} axisLine={false} tickLine={false} interval={0} />
                     <YAxis tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} allowDecimals={false} />
@@ -200,7 +203,7 @@ export function KpiDashboard({ employees, attendances, leaves, departments, bran
         )}
         <Card title="Attrition rate trend" icon={<TrendingDown className="h-4 w-4 text-purple-600" />}>
           <div className="h-44">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={CHART_START_SIZE}>
               <LineChart data={kpis.trend} margin={{ top: 16, right: 12, left: -18, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                 <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} />
@@ -232,7 +235,7 @@ export function KpiDashboard({ employees, attendances, leaves, departments, bran
         <Card title={`Approved leave in ${kpis.monthLabel}`} icon={<CalendarCheck className="h-4 w-4 text-amber-600" />}>
           {kpis.leaveMix.length === 0 ? <p className="py-6 text-center text-xs text-slate-400">No approved leave touches this month.</p> : (
             <div className="h-40">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={CHART_START_SIZE}>
                 <BarChart data={kpis.leaveMix} layout="vertical" margin={{ top: 4, right: 28, left: 8, bottom: 0 }}>
                   <XAxis type="number" hide allowDecimals={false} />
                   <YAxis type="category" dataKey="label" width={64} tick={{ fontSize: 10, fill: '#475569' }} axisLine={false} tickLine={false} />

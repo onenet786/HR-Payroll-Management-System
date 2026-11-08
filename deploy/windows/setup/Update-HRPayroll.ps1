@@ -30,6 +30,10 @@ foreach ($tool in Get-ChildItem $PSScriptRoot -Filter '*.ps1') { if ($tool.Name 
 
 Write-Host '==> Stopping the application'
 Stop-HRApp $install
+Write-Host '==> Database memory'
+try {
+  if ((Set-HRDatabaseMemory $install) -and -not $install.portable) { Restart-Service HRPayrollDB; Write-Host '    Database restarted for the new memory size.' }
+} catch { Write-Host "    Memory tuning skipped: $($_.Exception.Message)" }
 if ($nodeNew -ne $nodeOld) {
   Write-Host "    Node.js $nodeOld -> $nodeNew"
   & robocopy (Join-Path $payload 'runtime\node') (Join-Path $installRoot 'runtime\node') /MIR /NFL /NDL /NJH /NJS /NP | Out-Null

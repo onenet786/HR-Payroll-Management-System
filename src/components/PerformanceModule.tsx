@@ -4,6 +4,7 @@
  */
 
 import React, { useState } from 'react';
+import { SearchableSelect } from './SearchableSelect';
 import { DateField } from './DateField';
 import { RequiredMark, RequiredNote } from './RequiredMark';
 import { Plus, ChevronDown, ChevronUp } from 'lucide-react';
@@ -195,12 +196,12 @@ export function PerformanceModule({ reviews, employees, currentUserAccount, canM
       {/* Filter */}
       <div className="flex gap-3 flex-wrap items-center">
       <ListSearch value={search} onChange={setSearch} placeholder="Search employee, code, period, status…" total={visibleReviews.length} shown={filtered.length} />
-      <select value={filterEmpId} onChange={e => setFilterEmpId(e.target.value)}
+      <SearchableSelect value={filterEmpId} onChange={e => setFilterEmpId(e.target.value)}
         aria-label="Filter performance reviews by employee"
         className="bg-white border border-slate-200 text-slate-900 text-xs rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500">
         <option value="All">All Employees</option>
         {employees.map(e => <option key={e.id} value={e.id}>{e.fullName}</option>)}
-      </select>
+      </SearchableSelect>
       </div>
 
       {/* Review Cards */}
@@ -216,7 +217,7 @@ export function PerformanceModule({ reviews, employees, currentUserAccount, canM
               <div className="flex items-center justify-between p-4 cursor-pointer hover:bg-slate-100 transition"
                 onClick={() => setExpandedId(isExpanded ? null : review.id)}>
                 <div className="flex items-center gap-3">
-                  <img src={empAvatarUrl(emp)} className="w-9 h-9 rounded-xl object-cover" alt="" />
+                  <img loading="lazy" decoding="async" src={empAvatarUrl(emp)} className="w-9 h-9 rounded-xl object-cover" alt="" />
                   <div>
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-bold text-slate-900">{getEmpName(review.employeeId)}</span>
@@ -374,10 +375,10 @@ export function PerformanceModule({ reviews, employees, currentUserAccount, canM
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label htmlFor="perf-employee" className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Employee<RequiredMark /></label>
-                  <select id="perf-employee" aria-required="true" value={form.employeeId} onChange={e => setForm(p => ({ ...p, employeeId: e.target.value }))}
+                  <SearchableSelect id="perf-employee" aria-required="true" value={form.employeeId} onChange={e => setForm(p => ({ ...p, employeeId: e.target.value }))}
                     className="w-full bg-white border border-slate-200 text-slate-900 text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500">
                     {employees.filter(e => e.status === 'Active').map(e => <option key={e.id} value={e.id}>{e.fullName}</option>)}
-                  </select>
+                  </SearchableSelect>
                 </div>
                 <div>
                   <label htmlFor="perf-period" className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Review Period<RequiredMark /></label>

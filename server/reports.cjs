@@ -22,6 +22,11 @@ const GROUPS = {
   // Salaries are sensitive: "View reports" alone does not open these.
   payroll: { title: 'Payroll', permissions: ['manage_payroll'] },
   statutory: { title: 'Statutory', permissions: ['manage_payroll'] },
+  leave: { title: 'Leave', permissions: ['manage_leaves', 'manage_employees', 'view_reports'] },
+  devices: { title: 'Devices', permissions: ['manage_employees', 'manage_attendance', 'view_reports'] },
+  audit: { title: 'Audit', permissions: ['manage_access'] },
+  // The old system's tables include salary sheets: payroll or data-import permission.
+  archive: { title: 'CyberAP archive', permissions: ['manage_payroll', 'manage_data_import'] },
 };
 function groupAllowed(identity, group) {
   if (identity.roleId === 'role-admin') return true;
@@ -129,6 +134,11 @@ function payslipWhere(f, periodCondition, initialParams) {
   employeeWhere(f, params, where);
   return { where, params };
 }
+
+// ── leave pieces ──
+const LEAVE_FROM = `FROM leaves l JOIN employees e ON e.id = l.employee_id ${EMPLOYEE_JOINS}`;
+const LEAVE_TYPE = `COALESCE(l.leave_type, l.data->>'leaveType')`;
+const LEAVE_STATUS = `COALESCE(l.status, l.data->>'status')`;
 
 // ── the reports ──────────────────────────────────────────────────────────────
 // run(filters, db, page) returns { sql, params, order, columns, totals?, summarySql? } (paged by runReport) or
@@ -640,6 +650,252 @@ const REPORTS = [
       };
     },
   },
+
+  // Leave
+  {
+    id: 'leave-register', group: 'leave', title: 'Leave register',
+    description: 'Every leave request that overlaps a period: type, dates, days, status, approver and reason.',
+    filters: ['dateRange', 'leaveType', 'leaveStatus', ...STD_FILTERS], defaults: { range: 'thisMonth' },
+    run(f) {
+      requireRange(f, 7400);
+      const params = [f.from, f.to]; const where = [`l.data->>'startDate' <= $2`, `l.data->>'endDate' >= $1`];
+      employeeWhere(f, params, where);
+      if (f.leaveType) { params.push(f.leaveType); where.push(`${LEAVE_TYPE} = $${params.length}`); }
+      if (f.leaveStatus) { params.push(f.leaveStatus); where.push(`${LEAVE_STATUS} = $${params.length}`); }
+      return {
+        sql: `SELECT ${EMPLOYEE_COLUMNS}, ${LEAVE_TYPE} AS type, l.data->>'startDate' AS start_date, l.data->>'endDate' AS end_date, ${num(`l.data->>'totalDays'`)} AS days,
+                ${LEAVE_STATUS} AS status, COALESCE(l.data->>'appliedOn', '') AS applied, COALESCE(l.data->>'approvedBy', '') AS approved_by, COALESCE(l.data->>'reason', '') AS reason
+              ${LEAVE_FROM} ${whereSql(where)}`,
+        params, order: 'start_date DESC, name',
+        columns: [...EMP_COLS, C('type', 'Type', 'badge'), C('start_date', 'From', 'date'), C('end_date', 'To', 'date'), C('days', 'Days', 'number'), C('status', 'Status', 'badge'),
+          C('applied', 'Applied', 'date'), C('approved_by', 'Approved by'), C('reason', 'Reason')],
+        totals: ['days'],
+      };
+    },
+  },
+  {
+    id: 'leave-summary', group: 'leave', title: 'Leave taken per employee',
+    description: 'Approved leave days per employee and type for leave that starts in a period, with pending days.',
+    filters: ['dateRange', ...STD_FILTERS], defaults: { range: 'thisYear' },
+    run(f) {
+      requireRange(f, 7400);
+      const params = [f.from, f.to]; const inner = [`l.data->>'startDate' BETWEEN $1 AND $2`];
+      if (f.employeeId) { params.push(f.employeeId); inner.push(`l.employee_id = $${params.length}`); }
+      const outer = [];
+      employeeWhere({ ...f, employeeId: undefined }, params, outer);
+      const days = `${num(`l.data->>'totalDays'`)}`;
+      const by = type => `COALESCE(sum(${days}) FILTER (WHERE ${LEAVE_STATUS} = 'Approved' AND ${LEAVE_TYPE} = '${type}'), 0)`;
+      return {
+        sql: `SELECT ${EMPLOYEE_COLUMNS}, s.annual, s.casual, s.sick, s.other_paid, s.unpaid, s.total, s.pending
+              FROM (SELECT l.employee_id AS emp, ${by('Annual')} AS annual, ${by('Casual')} AS casual, ${by('Sick')} AS sick,
+                      COALESCE(sum(${days}) FILTER (WHERE ${LEAVE_STATUS} = 'Approved' AND ${LEAVE_TYPE} IN ('Maternity', 'Paternity', 'Hajj')), 0) AS other_paid, ${by('Unpaid')} AS unpaid,
+                      COALESCE(sum(${days}) FILTER (WHERE ${LEAVE_STATUS} = 'Approved'), 0) AS total, COALESCE(sum(${days}) FILTER (WHERE ${LEAVE_STATUS} = 'Pending'), 0) AS pending
+                    FROM leaves l WHERE ${inner.join(' AND ')} GROUP BY l.employee_id) s
+              JOIN employees e ON e.id = s.emp ${EMPLOYEE_JOINS} ${whereSql(outer)}`,
+        params, order: 'total DESC, name',
+        columns: [...EMP_COLS, C('annual', 'Annual', 'number'), C('casual', 'Casual', 'number'), C('sick', 'Sick', 'number'), C('other_paid', 'Maternity / paternity / Hajj', 'number'),
+          C('unpaid', 'Unpaid', 'number'), C('total', 'Total approved', 'number'), C('pending', 'Pending', 'number')],
+        totals: ['annual', 'casual', 'sick', 'other_paid', 'unpaid', 'total', 'pending'],
+      };
+    },
+  },
+  {
+    id: 'leave-balances', group: 'leave', title: 'Leave balances',
+    description: 'Entitled, taken and remaining annual, casual and sick leave per current employee for a calendar year (annual and casual pro-rata for joiners), as in the leave screen.',
+    filters: ['year', ...STD_FILTERS], defaults: { year: 'thisYear' },
+    async run(f, db, page) {
+      const year = Number(f.year) || Number(today().slice(0, 4));
+      const from = `${year}-01-01`; const to = `${year}-12-31`;
+      const params = [to]; const where = [`${EMP_STATUS} <> 'Terminated'`, `COALESCE(e.data->>'dateOfJoining', '') <= $1::text`];
+      employeeWhere(f, params, where);
+      const base = `FROM employees e ${EMPLOYEE_JOINS} ${whereSql(where)}`;
+      const total = Number((await db.query(`SELECT count(*)::int AS n ${base}`, params)).rows[0].n);
+      const employees = (await db.query(`SELECT ${EMPLOYEE_COLUMNS}, e.data->>'dateOfJoining' AS joined ${base} ORDER BY 6, 3, 2 LIMIT ${Number(page.limit)} OFFSET ${Number(page.offset)}`, params)).rows;
+      const config = (await db.query(`SELECT data FROM stat_config ORDER BY updated_at DESC LIMIT 1`).catch(() => ({ rows: [] }))).rows[0]?.data || {};
+      const entitlement = type => {
+        const fixed = { Annual: 14, Casual: 10, Sick: 16 };
+        if (type === 'Annual') return Number(config.leaveEntitlements?.Annual ?? config.annualLeaveDaysPerYear ?? fixed.Annual);
+        return Number(config.leaveEntitlements?.[type] ?? fixed[type]);
+      };
+      const ids = employees.map(row => row.employee_id);
+      const leaves = ids.length ? (await db.query(`SELECT l.employee_id, ${LEAVE_TYPE} AS type, ${LEAVE_STATUS} AS status, l.data->>'startDate' AS s, l.data->>'endDate' AS e
+        FROM leaves l WHERE l.employee_id = ANY($1) AND l.data->>'startDate' <= $3 AND l.data->>'endDate' >= $2 AND ${LEAVE_STATUS} IN ('Approved', 'Pending')`, [ids, from, to])).rows : [];
+      const overlap = (s, e) => { const a = s > from ? s : from; const b = e < to ? e : to; return b < a ? 0 : Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000) + 1; };
+      const rows = employees.map(employee => {
+        const joined = employee.joined || '';
+        const share = joined > from && joined <= to ? (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${joined}T00:00:00Z`)) / (365 * 86_400_000) : joined > to ? 0 : 1;
+        const mine = leaves.filter(leave => leave.employee_id === employee.employee_id);
+        const row = { ...employee };
+        let pending = 0;
+        for (const type of ['Annual', 'Casual', 'Sick']) {
+          const entitled = type === 'Sick' ? (share > 0 ? entitlement(type) : 0) : Math.floor(entitlement(type) * share);
+          const taken = mine.filter(leave => leave.type === type && leave.status === 'Approved').reduce((sum, leave) => sum + overlap(leave.s, leave.e), 0);
+          const waiting = mine.filter(leave => leave.type === type && leave.status === 'Pending').reduce((sum, leave) => sum + overlap(leave.s, leave.e), 0);
+          pending += waiting;
+          const key = type.toLowerCase();
+          Object.assign(row, { [`${key}_entitled`]: entitled, [`${key}_taken`]: taken, [`${key}_left`]: Math.max(0, entitled - taken - waiting) });
+        }
+        row.pending = pending;
+        delete row.joined;
+        return row;
+      });
+      const columns = [...EMP_COLS];
+      for (const [key, label] of [['annual', 'Annual'], ['casual', 'Casual'], ['sick', 'Sick']]) columns.push(C(`${key}_entitled`, `${label} entitled`, 'number'), C(`${key}_taken`, `${label} taken`, 'number'), C(`${key}_left`, `${label} left`, 'number'));
+      columns.push(C('pending', 'Pending', 'number'));
+      return { rows, total, columns };
+    },
+  },
+
+  // Devices
+  {
+    id: 'kiosk-devices', group: 'devices', title: 'Kiosk terminals',
+    description: 'Registered kiosk terminals: account, registration, last contact, status and punches recorded in a period.',
+    filters: ['dateRange'], defaults: { range: 'thisMonth' },
+    run(f) {
+      requireRange(f, 400);
+      return {
+        sql: `SELECT k.name, COALESCE(u.data->>'email', u.email, k.user_id) AS account, to_char(k.created_at, 'YYYY-MM-DD') AS registered,
+                COALESCE(to_char(k.last_seen_at, 'YYYY-MM-DD HH24:MI'), '') AS last_seen, CASE WHEN k.revoked_at IS NULL THEN 'Active' ELSE 'Revoked' END AS status,
+                (SELECT count(*)::int FROM attendances a WHERE a.date BETWEEN $1::date AND $2::date AND a.data->>'kioskDeviceId' = k.id::text) AS punch_days
+              FROM kiosk_devices k LEFT JOIN users u ON u.id = k.user_id`,
+        params: [f.from, f.to], order: 'status, name',
+        columns: [C('name', 'Terminal'), C('account', 'Account'), C('registered', 'Registered', 'date'), C('last_seen', 'Last contact'), C('status', 'Status', 'badge'), C('punch_days', 'Attendance days recorded', 'number')],
+        totals: ['punch_days'],
+      };
+    },
+  },
+  {
+    id: 'punch-methods', group: 'devices', title: 'Punches by method and branch',
+    description: 'Attendance days per punch method (kiosk, fingerprint, camera, mobile, manual) and branch in a period, with the number of employees.',
+    filters: ['dateRange', ...PLACE_FILTERS], defaults: { range: 'thisMonth' },
+    run(f) {
+      requireRange(f, 7400);
+      // Count per (method, terminal branch, employee) on attendance alone first, then join names: over 16 years
+      // that is ~1 s instead of 7 s.
+      const params = [f.from, f.to];
+      const outer = [];
+      employeeWhere(f, params, outer);
+      return {
+        sql: `SELECT x.method, COALESCE(tb.data->>'name', b.data->>'name', '(no branch)') AS branch_name,
+                sum(x.days)::int AS days, count(DISTINCT x.emp)::int AS employees, sum(x.cross_branch)::int AS cross_branch
+              FROM (SELECT COALESCE(NULLIF(a.data->>'method', ''), '(not recorded)') AS method, a.data->>'terminalBranchId' AS terminal, a.employee_id AS emp,
+                      count(*) AS days, count(*) FILTER (WHERE ${flag('crossBranch')}) AS cross_branch
+                    FROM attendances a WHERE a.date BETWEEN $1::date AND $2::date AND COALESCE(a.data->>'punchIn', '') <> '' GROUP BY 1, 2, 3) x
+              JOIN employees e ON e.id = x.emp ${EMPLOYEE_JOINS} LEFT JOIN branches tb ON tb.id = x.terminal ${whereSql(outer)} GROUP BY 1, 2`,
+        params, order: 'days DESC',
+        columns: [C('method', 'Method', 'badge'), C('branch_name', 'Branch'), C('days', 'Attendance days', 'number'), C('employees', 'Employees', 'number'), C('cross_branch', 'At another branch', 'number')],
+        totals: ['days', 'cross_branch'],
+      };
+    },
+  },
+  {
+    id: 'biometric-enrolment', group: 'devices', title: 'Biometric enrolment',
+    description: 'Current employees with or without a fingerprint and a face enrolled, to plan enrolment before go-live.',
+    filters: ['enrolment', ...PLACE_FILTERS], defaults: { enrolment: 'missing' },
+    run(f) {
+      const params = []; const where = [`${EMP_STATUS} <> 'Terminated'`];
+      employeeWhere(f, params, where);
+      const fingerprints = `(SELECT count(*)::int FROM biometric_templates t WHERE t.employee_id = e.id AND COALESCE(t.status, 'Active') = 'Active')
+        + (CASE WHEN jsonb_typeof(e.data->'fingerprintTemplates') = 'array' THEN jsonb_array_length(e.data->'fingerprintTemplates') ELSE 0 END)`;
+      const face = `(jsonb_typeof(e.data->'faceDescriptors') = 'object' OR (jsonb_typeof(e.data->'faceDescriptors') = 'array' AND jsonb_array_length(e.data->'faceDescriptors') > 0))`;
+      const sql = `SELECT * FROM (SELECT ${EMPLOYEE_COLUMNS}, ${fingerprints} AS fingerprints, CASE WHEN ${face} THEN 'Yes' ELSE 'No' END AS face FROM employees e ${EMPLOYEE_JOINS} ${whereSql(where)}) x`
+        + (f.enrolment === 'all' ? '' : f.enrolment === 'complete' ? ` WHERE fingerprints > 0 AND face = 'Yes'` : ` WHERE fingerprints = 0 OR face = 'No'`);
+      return {
+        sql, params, order: 'fingerprints, face, name',
+        columns: [...EMP_COLS, C('fingerprints', 'Fingerprints', 'number'), C('face', 'Face', 'badge')],
+      };
+    },
+  },
+
+  // Audit
+  {
+    id: 'audit-log', group: 'audit', title: 'Audit log',
+    description: 'Who changed what and when: every recorded change, approval, export and data import, with the user, record and address.',
+    filters: ['dateRange', 'auditAction', 'auditUser'], defaults: { range: 'thisMonth' },
+    run(f) {
+      requireRange(f, 400);
+      const params = [f.from, f.to]; const where = [`h.created_at >= $1::date`, `h.created_at < ($2::date + 1)`];
+      if (f.auditAction) { params.push(f.auditAction); where.push(`h.action = $${params.length}`); }
+      if (f.auditUser) { params.push(`%${f.auditUser}%`); where.push(`(h.actor_uid ILIKE $${params.length} OR u.data->>'email' ILIKE $${params.length} OR u.data->>'name' ILIKE $${params.length})`); }
+      return {
+        sql: `SELECT to_char(h.created_at AT TIME ZONE 'Asia/Karachi', 'YYYY-MM-DD HH24:MI:SS') AS at, COALESCE(u.data->>'name', u.data->>'email', h.actor_uid) AS user_name,
+                COALESCE(h.actor_role_id, '') AS role, h.action, COALESCE(h.collection_name, '') AS record_type, COALESCE(h.document_id, '') AS record_id,
+                COALESCE(h.source_ip::text, '') AS address, left(COALESCE(h.new_data::text, ''), 160) AS details
+              FROM hr_audit_log h LEFT JOIN users u ON u.id = h.actor_uid ${whereSql(where)}`,
+        params, order: 'at DESC',
+        columns: [C('at', 'When'), C('user_name', 'User'), C('role', 'Role'), C('action', 'Action', 'badge'), C('record_type', 'Record type'), C('record_id', 'Record'), C('address', 'Address'), C('details', 'Details')],
+      };
+    },
+  },
+  {
+    id: 'sign-ins', group: 'audit', title: 'Sign-ins',
+    description: 'Sessions started in a period: user, role, sign-in time, last activity, how it ended and the address.',
+    filters: ['dateRange', 'auditUser'], defaults: { range: 'thisMonth' },
+    run(f) {
+      requireRange(f, 400);
+      const params = [f.from, f.to]; const where = [`s.created_at >= $1::date`, `s.created_at < ($2::date + 1)`];
+      if (f.auditUser) { params.push(`%${f.auditUser}%`); where.push(`(s.user_id ILIKE $${params.length} OR u.data->>'email' ILIKE $${params.length} OR u.data->>'name' ILIKE $${params.length})`); }
+      const k = `'Asia/Karachi'`;
+      return {
+        sql: `SELECT to_char(s.created_at AT TIME ZONE ${k}, 'YYYY-MM-DD HH24:MI') AS signed_in, COALESCE(u.data->>'name', u.data->>'email', s.user_id) AS user_name, COALESCE(u.role_id, '') AS role,
+                to_char(s.last_seen_at AT TIME ZONE ${k}, 'YYYY-MM-DD HH24:MI') AS last_activity,
+                CASE WHEN s.revoked_at IS NOT NULL THEN 'Signed out' WHEN s.idle_expires_at < now() OR s.absolute_expires_at < now() THEN 'Expired' ELSE 'Active' END AS ended,
+                COALESCE(s.ip_address, '') AS address
+              FROM auth_sessions s LEFT JOIN users u ON u.id = s.user_id ${whereSql(where)}`,
+        params, order: 'signed_in DESC',
+        columns: [C('signed_in', 'Signed in'), C('user_name', 'User'), C('role', 'Role'), C('last_activity', 'Last activity'), C('ended', 'Session', 'badge'), C('address', 'Address')],
+      };
+    },
+  },
+  {
+    id: 'import-runs', group: 'audit', title: 'Data import runs',
+    description: 'Every CyberAP analysis and import: when, by whom, options and the result counts.',
+    filters: [], defaults: {},
+    run() {
+      return {
+        sql: `SELECT to_char(r.started_at AT TIME ZONE 'Asia/Karachi', 'YYYY-MM-DD HH24:MI') AS started, COALESCE(to_char(r.finished_at AT TIME ZONE 'Asia/Karachi', 'HH24:MI'), '') AS finished,
+                r.status, COALESCE(r.actor, '') AS actor, CASE WHEN (r.options->>'wipe') = 'true' THEN 'Yes' ELSE 'No' END AS removed_data,
+                ${num(`r.report->'employees'->>'total'`)} AS employees, ${num(`r.report->'attendance'->>'imported'`)} AS attendance_days
+              FROM legacy_import_runs r`,
+        params: [], order: 'started DESC',
+        columns: [C('started', 'Started'), C('finished', 'Finished'), C('status', 'Status', 'badge'), C('actor', 'By'), C('removed_data', 'Removed current data', 'badge'),
+          C('employees', 'Employees', 'number'), C('attendance_days', 'Attendance days', 'number')],
+      };
+    },
+  },
+
+  // CyberAP archive (every row of the old system's small tables, kept as imported)
+  {
+    id: 'cyberap-archive', group: 'archive', title: 'CyberAP archive',
+    description: 'Browse the old system\'s records kept at import (salary sheets, loans, holidays, settings and more): choose a table, then filter by employee, date or text.',
+    filters: ['archiveKind', 'optionalRange', 'search', 'employee'], defaults: {},
+    async run(f, db, page) {
+      if (!f.archiveKind) throw bad('Choose the CyberAP table.');
+      const params = [f.archiveKind]; const where = [`r.kind = $1`];
+      if (f.from) { params.push(f.from); where.push(`r.record_date >= $${params.length}::date`); }
+      if (f.to) { params.push(f.to); where.push(`r.record_date <= $${params.length}::date`); }
+      if (f.employeeId) { params.push(f.employeeId); where.push(`r.employee_id = $${params.length}`); }
+      if (f.search) { params.push(`%${f.search}%`); where.push(`r.data::text ILIKE $${params.length}`); }
+      const base = `FROM legacy_records r LEFT JOIN employees e ON e.id = r.employee_id ${whereSql(where)}`;
+      const total = Number((await db.query(`SELECT count(*)::int AS n ${base}`, params)).rows[0].n);
+      const result = await db.query(`SELECT r.legacy_id, COALESCE(r.record_date::text, '') AS record_date, COALESCE(e.data->>'employeeCode', '') AS code, COALESCE(e.data->>'fullName', '') AS name, r.data
+        ${base} ORDER BY r.record_date DESC NULLS LAST, r.legacy_id LIMIT ${Number(page.limit)} OFFSET ${Number(page.offset)}`, params);
+      // Columns come from the old table itself; large binary-like values are left out.
+      const hidden = /password|connection|photo|picture|image|finger|template|signature/i;
+      const keys = [];
+      for (const row of result.rows) for (const [key, value] of Object.entries(row.data || {})) {
+        if (!keys.includes(key) && !hidden.test(key) && !(typeof value === 'string' && value.length > 300)) keys.push(key);
+      }
+      const shown = keys.slice(0, 40);
+      const rows = result.rows.map(row => {
+        const out = { record_date: row.record_date, code: row.code, name: row.name };
+        for (const key of shown) { const value = row.data?.[key]; out[`f_${key}`] = value === null || value === undefined ? '' : typeof value === 'object' ? JSON.stringify(value) : value; }
+        return out;
+      });
+      const columns = [C('record_date', 'Date', 'date'), C('code', 'Code'), C('name', 'Employee'), ...shown.map(key => C(`f_${key}`, key.replace(/_/g, ' ')))];
+      return { rows, total, columns, wide: shown.length > 8 };
+    },
+  },
 ];
 const BY_ID = new Map(REPORTS.map(report => [report.id, report]));
 
@@ -663,6 +919,17 @@ function readFilters(query) {
   pick('attendanceStatus', ['Present', 'Late', 'Half Day', 'Absent', 'On Leave', 'Holiday', 'No record']);
   pick('groupBy', ['branch', 'department', 'designation', 'zone', 'ucTown', 'supervisor', 'gender']);
   pick('payGroupBy', ['branch', 'department', 'designation']);
+  pick('leaveType', ['Casual', 'Sick', 'Annual', 'Maternity', 'Paternity', 'Hajj', 'Unpaid']);
+  pick('leaveStatus', ['Pending', 'Approved', 'Rejected']);
+  pick('enrolment', ['missing', 'complete', 'all']);
+  const year = String(query.year || '').trim();
+  if (year) { if (!/^\d{4}$/.test(year)) throw bad('year must be YYYY.'); f.year = year; }
+  const action = String(query.auditAction || '').trim();
+  if (action) { if (!/^[a-z][a-z_]{1,63}$/.test(action)) throw bad('Invalid action.'); f.auditAction = action; }
+  const kind = String(query.archiveKind || '').trim();
+  if (kind) { if (!/^[a-z0-9_]{1,80}$/i.test(kind)) throw bad('Invalid CyberAP table.'); f.archiveKind = kind; }
+  const user = String(query.auditUser || '').trim().slice(0, 80);
+  if (user) f.auditUser = user.replace(/[%_\\]/g, ch => `\\${ch}`);
   pick('runStatus', ['paid', 'approved', 'all']);
   pick('loanStatus', ['open', 'all', 'Pending', 'Approved', 'Active', 'Closed', 'Rejected']);
   return f;
@@ -722,6 +989,21 @@ router.get('/employees', async (req, res, next) => {
       FROM employees e ${where} ORDER BY (${EMP_STATUS} = 'Terminated'), e.data->>'fullName' LIMIT 20`, params)).rows;
     res.setHeader('Cache-Control', 'no-store');
     res.json({ employees: rows });
+  } catch (error) { next(error); }
+});
+
+// Choices for filters that depend on the data: CyberAP archive tables (with row counts) and audit action names.
+router.get('/options', async (req, res, next) => {
+  try {
+    const body = {};
+    if (groupAllowed(req.identity, 'archive')) {
+      body.archiveKinds = (await pool.query(`SELECT kind, count(*)::int AS rows FROM legacy_records WHERE kind NOT IN ('employee_photo') GROUP BY kind ORDER BY kind`).catch(() => ({ rows: [] }))).rows;
+    }
+    if (groupAllowed(req.identity, 'audit')) {
+      body.auditActions = (await pool.query(`SELECT DISTINCT action FROM hr_audit_log ORDER BY action`)).rows.map(row => row.action);
+    }
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(body);
   } catch (error) { next(error); }
 });
 

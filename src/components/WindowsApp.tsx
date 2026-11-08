@@ -4,6 +4,7 @@
  */
 
 import React, { useState } from 'react';
+import { SearchableSelect } from './SearchableSelect';
 import {
   Play, Cpu, Server, Search, Terminal,
   Layers, UserCheck
@@ -318,7 +319,7 @@ export function WindowsApp({
 
                   <div>
                     <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Employee selection to register fingerprint scan:</label>
-                    <select
+                    <SearchableSelect
                       aria-label="Employee to register fingerprint scan"
                       value={selectedEmpId}
                       onChange={(e) => setSelectedEmpId(e.target.value)}
@@ -327,7 +328,7 @@ export function WindowsApp({
                       {employees.map(e => (
                         <option key={e.id} value={e.id}>{e.fullName} ({e.employeeCode})</option>
                       ))}
-                    </select>
+                    </SearchableSelect>
                   </div>
                 </div>
 

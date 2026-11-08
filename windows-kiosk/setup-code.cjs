@@ -12,24 +12,57 @@ function setupCodeError(message) {
   return error;
 }
 
-// https:// only; http:// is accepted for localhost / 127.0.0.1 (any port) so a test server can be used.
+// True for addresses that can only be reached inside the client's own network: localhost, loopback, private IPv4
+// (10/8, 172.16/12, 192.168/16, 169.254/16), private/loopback IPv6, single-label names (HEADOFFICE) and
+// .local / .lan / .internal / .home.arpa names. Self-hosted servers (e.g. the Windows Server package) run there on
+// plain http://, so http is allowed for these and nowhere else.
+function isLocalNetworkHost(hostname) {
+  const host = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+  if (!host) return false;
+  if (host === 'localhost' || host.endsWith('.localhost')) return true;
+  const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (ipv4) {
+    const [a, b] = ipv4.slice(1, 3).map(Number);
+    return a === 127 || a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254);
+  }
+  if (host.includes(':')) return host === '::1' || /^f[cd][0-9a-f]{2}:/.test(host) || /^fe[89ab][0-9a-f]:/.test(host);
+  if (!host.includes('.')) return true;
+  return /\.(local|lan|internal|home\.arpa)$/.test(host);
+}
+
+// https:// everywhere; http:// only for local-network addresses (see isLocalNetworkHost).
 // Returns the address without a trailing slash, or throws a user-facing error.
-function normalizePortalUrl(value) {
+function normalizePortalUrl(value, invalidMessage = 'The setup code contains an invalid server address') {
   const text = String(value || '').trim();
   let url;
   try {
     url = new URL(text);
   } catch {
-    throw setupCodeError('The setup code contains an invalid server address');
+    throw setupCodeError(invalidMessage);
   }
-  const local = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
-  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && local)) {
-    throw setupCodeError('Server address must use https');
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && isLocalNetworkHost(url.hostname))) {
+    throw setupCodeError(url.protocol === 'http:'
+      ? 'Server address must use https (http is allowed only for local network addresses such as 192.168.x.x)'
+      : 'Server address must use https');
   }
   if (url.username || url.password || url.search || url.hash) {
-    throw setupCodeError('The setup code contains an invalid server address');
+    throw setupCodeError(invalidMessage);
   }
   return `${url.origin}${url.pathname}`.replace(/\/+$/, '');
+}
+
+// A server address typed by the operator in Settings, e.g. "192.168.86.83:8080", "http://localhost:8080" or
+// "hr.company.com". Without a scheme, local-network addresses get http:// and everything else https://.
+function normalizeServerAddress(value) {
+  const text = String(value || '').trim();
+  if (!text) throw setupCodeError('Enter the server address');
+  let withScheme = text;
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) {
+    let host = '';
+    try { host = new URL(`http://${text}`).hostname; } catch { throw setupCodeError('The server address is not valid'); }
+    withScheme = `${isLocalNetworkHost(host) ? 'http' : 'https'}://${text}`;
+  }
+  return normalizePortalUrl(withScheme, 'The server address is not valid');
 }
 
 // Returns { clientName, urls, token } or throws an Error whose message can be shown to the operator as is.
@@ -109,6 +142,8 @@ module.exports = {
   parseSetupCode,
   buildSetupCode,
   normalizePortalUrl,
+  normalizeServerAddress,
+  isLocalNetworkHost,
   orderedPortalUrls,
   isNetworkFailure,
   tryPortalUrls,

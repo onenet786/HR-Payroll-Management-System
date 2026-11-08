@@ -6,6 +6,7 @@ const { publicUserData, prepareUserWrite } = require('./user-secrets.cjs');
 const { loadEdition } = require('./edition.cjs');
 const { loadDataLimits, windowStart } = require('./data-limits.cjs');
 const { assertStaffLimit } = require('./installation.cjs');
+const { withPhotoLinks, keepStoredPhoto } = require('./employee-photos.cjs');
 
 const router = express.Router();
 const safeName = value => typeof value === 'string' && /^[A-Za-z][A-Za-z0-9_]{0,79}$/.test(value);
@@ -600,16 +601,24 @@ router.get('/:collection', async (req, res, next) => {
       // Employees cannot read payroll runs, so the server releases their payslips only once salary is paid.
       if (table === 'payroll_payslips' && !canReadAll && !managedRead) sql += ` AND payroll_run_id IN (SELECT id FROM payroll_runs WHERE status='Disbursed')`;
     }
-    let order = ' ORDER BY id LIMIT 10000';
+    let limit = 10000;
+    let orderBy = ' ORDER BY id';
+    const addWhere = condition => { sql += `${/\sWHERE\s/.test(sql) ? ' AND' : ' WHERE'} ${condition}`; };
+    if (table === 'notifications') {
+      // Notices of the last 90 days; older ones are history, not daily work.
+      params.push(new Date(Date.now() - 90 * 86_400_000).toISOString());
+      addWhere(`COALESCE(data->>'createdAt', '') >= $${params.length}`);
+    }
     if (table === 'attendances') {
       // Newest first, so a capped read returns the current days rather than the lowest ids. After a large legacy
       // import the manager-wide read is also limited to recent months (server/data-limits.cjs).
       const limits = await loadDataLimits(pool);
       if (!employeeFilter && limits.attendanceReadMonths > 0) {
         params.push(windowStart(limits.attendanceReadMonths));
-        sql += ` WHERE date >= $${params.length}::date`;
+        addWhere(`date >= $${params.length}::date`);
       }
-      order = ` ORDER BY date DESC NULLS LAST, id LIMIT ${limits.attendanceReadLimit}`;
+      orderBy = ' ORDER BY date DESC NULLS LAST, id';
+      limit = limits.attendanceReadLimit;
     }
     if (table === 'employees' && !employeeFilter) {
       // Browsers keep the working set: current staff, plus former staff who still matter for daily work (left within
@@ -619,26 +628,42 @@ router.get('/:collection', async (req, res, next) => {
       if (!limits.employeesIncludeFormer && limits.attendanceReadMonths > 0) {
         params.push(windowStart(limits.attendanceReadMonths));
         const since = `$${params.length}`;
-        sql += ` WHERE (COALESCE(data->>'status', 'Active') <> 'Terminated'
+        addWhere(`(COALESCE(data->>'status', 'Active') <> 'Terminated'
           OR COALESCE(data->>'separationDate', '') >= ${since}
           OR updated_at >= ${since}::date
           OR EXISTS (SELECT 1 FROM gratuity_settlements gs WHERE gs.employee_id = employees.id AND COALESCE(gs.status, gs.data->>'status', '') <> 'Paid')
           OR EXISTS (SELECT 1 FROM loan_advances la WHERE la.employee_id = employees.id AND COALESCE(la.status, la.data->>'status', '') IN ('Pending', 'Approved', 'Active'))
-          OR EXISTS (SELECT 1 FROM lifecycle_requests lr WHERE lr.employee_id = employees.id AND lr.status = 'Pending'))`;
+          OR EXISTS (SELECT 1 FROM lifecycle_requests lr WHERE lr.employee_id = employees.id AND lr.status = 'Pending'))`);
       }
     }
     // Browsers poll every collection every few seconds. A cheap fingerprint of the rows this read covers (count,
     // newest change, sum of versions) answers "nothing changed" with 304 before any document is loaded or sent;
     // after a legacy import that saves reading and sending tens of megabytes per poll.
+    const order = `${orderBy} LIMIT ${limit}`;
     const where = sql.slice(sql.indexOf(` FROM ${table}`));
     const fp = (await pool.query(`SELECT count(*)::bigint AS n, max(updated_at) AS m, coalesce(sum(version), 0)::bigint AS v ${where}`, params)).rows[0];
     const etag = `W/"${crypto.createHash('sha1').update(`${where}|${JSON.stringify(params)}|${order}|${req.identity.uid}|${fp.n}|${fp.m ? new Date(fp.m).getTime() : 0}|${fp.v}`).digest('base64url').slice(0, 27)}"`;
     res.setHeader('ETag', etag);
     res.setHeader('Cache-Control', 'private, no-cache');
+    res.setHeader('Access-Control-Expose-Headers', 'ETag, X-Collection-Count, X-Delta');
+    // Rows this read covers in total: the browser compares it with what it holds after merging a delta, and reloads
+    // in full when they differ (a deleted row, or one that left the window).
+    res.setHeader('X-Collection-Count', String(Math.min(Number(fp.n), limit)));
     if (String(req.headers['if-none-match'] || '') === etag) return res.status(304).end();
+    // ?since=<time>: only rows changed after that time (5 s overlap for transactions that committed late), merged by
+    // the browser into what it already holds. A kiosk punch then costs one row instead of the whole month.
+    const sinceMs = typeof req.query.since === 'string' ? Date.parse(req.query.since) : NaN;
+    if (Number.isFinite(sinceMs)) {
+      params.push(new Date(sinceMs - 5000).toISOString());
+      addWhere(`updated_at > $${params.length}::timestamptz`);
+      res.setHeader('X-Delta', '1');
+    }
     sql += order;
     const result = await pool.query(sql, params);
-    res.json({ documents: table === 'users' ? result.rows.map(row => ({ ...row, data: publicUserData(row.data) })) : result.rows });
+    let rows = result.rows;
+    if (table === 'users') rows = rows.map(row => ({ ...row, data: publicUserData(row.data) }));
+    if (table === 'employees') rows = withPhotoLinks(rows);
+    res.json({ documents: rows });
   } catch (error) { next(error); }
 });
 
@@ -677,6 +702,7 @@ router.put('/:collection/:id', async (req, res, next) => {
         const forbidden = new Error('Insufficient permission.'); forbidden.status = 403; throw forbidden;
       }
       if (table === 'employees') {
+        keepStoredPhoto(req.body, existing?.data);
         // The licence may cap active employees (hosted plans); see server/installation.cjs.
         await assertStaffLimit(client, id, typeof req.body.status === 'string' ? req.body.status : 'Active', existing ? (existing.data.status || 'Active') : null);
       }

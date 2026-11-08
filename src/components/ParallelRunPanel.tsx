@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { SearchableSelect } from './SearchableSelect';
 import { Download, Upload } from 'lucide-react';
 import type { ParallelRunRecord, PayrollRun, Payslip } from '../types';
 import { compareParallelRun, parallelRunCsv, parseLegacyPayrollCsv, type ParallelRunResult } from '../data/parallelRun';
@@ -46,9 +47,9 @@ export function ParallelRunPanel({ payrollRuns, payrollPayslips, onRecord }: Pro
         <p className="mt-1 text-slate-500">Export the same month from your existing payroll as CSV (employee code or CNIC, and any of gross, tax, EOBI, PF, loan, deductions, net). Every employee is compared within PKR 1.</p>
       </div>
       {candidates.length === 0 ? <p className="text-slate-500">Approve a regular payroll run first.</p> : <div className="flex flex-wrap items-center gap-2">
-        <select aria-label="Payroll run to compare" value={runId} onChange={event => { setRunId(event.target.value); setResult(null); }} className="rounded border border-slate-300 bg-white p-1.5">
+        <SearchableSelect aria-label="Payroll run to compare" value={runId} onChange={event => { setRunId(event.target.value); setResult(null); }} className="rounded border border-slate-300 bg-white p-1.5">
           {candidates.map(item => <option key={item.id} value={item.id}>{item.title}{item.parallelRun ? ' (compared)' : ''}</option>)}
-        </select>
+        </SearchableSelect>
         <label className="flex cursor-pointer items-center gap-1 rounded border border-slate-300 px-3 py-1.5 font-semibold text-slate-700 hover:bg-slate-50"><Upload size={13} />Legacy payroll CSV
           <input type="file" accept=".csv,text/csv" className="hidden" onChange={event => { void load(event.target.files?.[0]); event.target.value = ''; }} />
         </label>

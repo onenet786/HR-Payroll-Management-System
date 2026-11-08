@@ -44,7 +44,8 @@ const BADGE: Record<string, string> = {
   'On Leave': 'bg-sky-50 text-sky-700', Holiday: 'bg-violet-50 text-violet-700', 'No record': 'bg-slate-100 text-slate-500', Active: 'bg-emerald-50 text-emerald-700',
   Terminated: 'bg-slate-100 text-slate-500', Disbursed: 'bg-emerald-50 text-emerald-700', Approved: 'bg-sky-50 text-sky-700', Draft: 'bg-slate-100 text-slate-600',
   Pending: 'bg-amber-50 text-amber-700', Closed: 'bg-slate-100 text-slate-500', Paid: 'bg-emerald-50 text-emerald-700', Processed: 'bg-sky-50 text-sky-700', Bank: 'bg-emerald-50 text-emerald-700',
-  'Cash / cheque': 'bg-amber-50 text-amber-700', Loan: 'bg-indigo-50 text-indigo-700', Advance: 'bg-violet-50 text-violet-700', Suspended: 'bg-rose-50 text-rose-700', Joined: 'bg-emerald-50 text-emerald-700', Left: 'bg-slate-100 text-slate-600',
+  'Cash / cheque': 'bg-amber-50 text-amber-700', Rejected: 'bg-rose-50 text-rose-700', Revoked: 'bg-slate-100 text-slate-500', Yes: 'bg-emerald-50 text-emerald-700', No: 'bg-rose-50 text-rose-700',
+  'Signed out': 'bg-slate-100 text-slate-600', Expired: 'bg-slate-100 text-slate-500', Annual: 'bg-sky-50 text-sky-700', Casual: 'bg-indigo-50 text-indigo-700', Sick: 'bg-amber-50 text-amber-700', Unpaid: 'bg-rose-50 text-rose-700', Loan: 'bg-indigo-50 text-indigo-700', Advance: 'bg-violet-50 text-violet-700', Suspended: 'bg-rose-50 text-rose-700', Joined: 'bg-emerald-50 text-emerald-700', Left: 'bg-slate-100 text-slate-600',
   CyberAP: 'bg-indigo-50 text-indigo-700', inside: 'bg-emerald-50 text-emerald-700', 'needs-review': 'bg-amber-50 text-amber-700', 'authorized-offsite': 'bg-sky-50 text-sky-700',
 };
 const MARK: Record<string, string> = { P: 'text-emerald-700', L: 'text-amber-600 font-bold', HD: 'text-orange-600', A: 'text-rose-600 font-bold', LV: 'text-sky-600', H: 'text-violet-600' };
@@ -79,11 +80,16 @@ export function ReportsPanel({ group, companyName, branches, departments, design
   const [result, setResult] = useState<Result | null>(null);
   const [loading, setLoading] = useState('');
   const [error, setError] = useState('');
+  const [options, setOptions] = useState<{ archiveKinds?: Array<{ kind: string; rows: number }>; auditActions?: string[] }>({});
 
   useEffect(() => {
     api('/api/reports/catalog').then(body => { setGroups(body.groups || []); if (body.today) setToday(body.today); })
       .catch(catalogError => setError(catalogError instanceof Error ? catalogError.message : 'Reports could not be loaded.'));
   }, []);
+  useEffect(() => {
+    if (group !== 'audit' && group !== 'archive') return;
+    api('/api/reports/options').then(setOptions).catch(() => setOptions({}));
+  }, [group]);
   const current = groups?.find(item => item.id === group) || groups?.[0] || null;
   const report = current?.reports.find(item => item.id === reportId) || null;
 
@@ -92,7 +98,7 @@ export function ReportsPanel({ group, companyName, branches, departments, design
     const initial: Record<string, string> = {};
     for (const [key, value] of Object.entries(next.defaults || {})) {
       if (key === 'range') continue;
-      initial[key] = value === 'today' ? today : value === 'thisMonth' ? today.slice(0, 7) : value;
+      initial[key] = value === 'today' ? today : value === 'thisMonth' ? today.slice(0, 7) : value === 'thisYear' && key === 'year' ? today.slice(0, 4) : value;
     }
     setValues(initial);
     setRange(next.defaults?.range || 'thisMonth');
@@ -122,7 +128,7 @@ export function ReportsPanel({ group, companyName, branches, departments, design
   }, [report, query]);
   // Run as soon as a report is opened, with its default filters.
   const lastAuto = useRef('');
-  useEffect(() => { if (report && lastAuto.current !== report.id) { lastAuto.current = report.id; void run(1); } }, [report, run]);
+  useEffect(() => { if (report && lastAuto.current !== report.id) { lastAuto.current = report.id; if (!report.filters.includes('archiveKind')) void run(1); } }, [report, run]);
 
   const downloadCsv = async () => {
     if (!report) return;
@@ -239,6 +245,63 @@ export function ReportsPanel({ group, companyName, branches, departments, design
                     </>
                   )}
                 </>
+              )}
+              {report.filters.includes('optionalRange') && (
+                <>
+                  <label className="flex flex-col text-[11px] font-semibold text-slate-500">From (optional)<input type="date" value={values.from || ''} onChange={event => set('from', event.target.value)} className={`${field} mt-0.5`} /></label>
+                  <label className="flex flex-col text-[11px] font-semibold text-slate-500">To (optional)<input type="date" value={values.to || ''} onChange={event => set('to', event.target.value)} className={`${field} mt-0.5`} /></label>
+                </>
+              )}
+              {report.filters.includes('archiveKind') && (
+                <label className="flex flex-col text-[11px] font-semibold text-slate-500">CyberAP table
+                  <select value={values.archiveKind || ''} onChange={event => set('archiveKind', event.target.value)} className={`${field} mt-0.5 min-w-[220px]`}>
+                    <option value="">Choose…</option>
+                    {(options.archiveKinds || []).map(item => <option key={item.kind} value={item.kind}>{item.kind.replace(/_/g, ' ')} ({item.rows.toLocaleString()})</option>)}
+                  </select>
+                </label>
+              )}
+              {report.filters.includes('year') && (
+                <label className="flex flex-col text-[11px] font-semibold text-slate-500">Year
+                  <select value={values.year || today.slice(0, 4)} onChange={event => set('year', event.target.value)} className={`${field} mt-0.5`}>
+                    {Array.from({ length: 12 }, (_, index) => String(Number(today.slice(0, 4)) + 1 - index)).map(year => <option key={year} value={year}>{year}</option>)}
+                  </select>
+                </label>
+              )}
+              {report.filters.includes('leaveType') && (
+                <label className="flex flex-col text-[11px] font-semibold text-slate-500">Leave type
+                  <select value={values.leaveType || ''} onChange={event => set('leaveType', event.target.value)} className={`${field} mt-0.5`}>
+                    <option value="">All</option>
+                    {['Annual', 'Casual', 'Sick', 'Maternity', 'Paternity', 'Hajj', 'Unpaid'].map(type => <option key={type} value={type}>{type}</option>)}
+                  </select>
+                </label>
+              )}
+              {report.filters.includes('leaveStatus') && (
+                <label className="flex flex-col text-[11px] font-semibold text-slate-500">Status
+                  <select value={values.leaveStatus || ''} onChange={event => set('leaveStatus', event.target.value)} className={`${field} mt-0.5`}>
+                    <option value="">All</option>
+                    {['Pending', 'Approved', 'Rejected'].map(status => <option key={status} value={status}>{status}</option>)}
+                  </select>
+                </label>
+              )}
+              {report.filters.includes('enrolment') && (
+                <label className="flex flex-col text-[11px] font-semibold text-slate-500">Show
+                  <select value={values.enrolment || 'missing'} onChange={event => set('enrolment', event.target.value)} className={`${field} mt-0.5`}>
+                    {[['missing', 'Missing fingerprint or face'], ['complete', 'Fully enrolled'], ['all', 'Everyone']].map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+                  </select>
+                </label>
+              )}
+              {report.filters.includes('auditAction') && (
+                <label className="flex flex-col text-[11px] font-semibold text-slate-500">Action
+                  <select value={values.auditAction || ''} onChange={event => set('auditAction', event.target.value)} className={`${field} mt-0.5 min-w-[180px]`}>
+                    <option value="">All</option>
+                    {(options.auditActions || []).map(action => <option key={action} value={action}>{action.replace(/_/g, ' ')}</option>)}
+                  </select>
+                </label>
+              )}
+              {report.filters.includes('auditUser') && (
+                <label className="flex flex-col text-[11px] font-semibold text-slate-500">User
+                  <input value={values.auditUser || ''} onChange={event => set('auditUser', event.target.value)} onKeyDown={event => { if (event.key === 'Enter') void run(1); }} placeholder="Name or email" className={`${field} mt-0.5 w-44`} />
+                </label>
               )}
               {report.filters.includes('date') && <label className="flex flex-col text-[11px] font-semibold text-slate-500">Day<input type="date" value={values.date || ''} onChange={event => set('date', event.target.value)} className={`${field} mt-0.5`} /></label>}
               {report.filters.includes('month') && <label className="flex flex-col text-[11px] font-semibold text-slate-500">Month<input type="month" value={values.month || ''} onChange={event => set('month', event.target.value)} className={`${field} mt-0.5`} /></label>}

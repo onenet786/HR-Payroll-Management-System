@@ -4,6 +4,7 @@
  */
 
 import React, { useState } from 'react';
+import { SearchableSelect } from './SearchableSelect';
 import { DateField } from './DateField';
 import { RequiredMark, RequiredNote } from './RequiredMark';
 import { Plus, TrendingUp, ArrowUpRight } from 'lucide-react';
@@ -166,12 +167,12 @@ export function SalaryRevisionModule({ salaryRevisions, employees, currentUserAc
       {/* Filter */}
       <div className="flex gap-3 flex-wrap items-center">
         <ListSearch value={search} onChange={setSearch} placeholder="Search employee, code, type, reason…" total={salaryRevisions.length} shown={filtered.length} />
-        <select value={filterEmpId} onChange={e => setFilterEmpId(e.target.value)}
+        <SearchableSelect value={filterEmpId} onChange={e => setFilterEmpId(e.target.value)}
           aria-label="Filter salary revisions by employee"
           className="bg-white border border-slate-200 text-slate-900 text-xs rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500">
           <option value="All">All Employees</option>
           {employees.map(e => <option key={e.id} value={e.id}>{e.fullName}</option>)}
-        </select>
+        </SearchableSelect>
       </div>
 
       {/* Revision History */}
@@ -247,14 +248,14 @@ export function SalaryRevisionModule({ salaryRevisions, employees, currentUserAc
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Employee<RequiredMark /></label>
-                    <select value={form.employeeId}
+                    <SearchableSelect value={form.employeeId}
                       aria-label="Employee" aria-required="true"
                       onChange={e => setForm(p => ({ ...p, employeeId: e.target.value, newSalary: 0 }))}
                       className="w-full bg-white border border-slate-200 text-slate-900 text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500">
                       {employees.filter(e => e.status === 'Active').map(e => (
                         <option key={e.id} value={e.id}>{e.fullName}</option>
                       ))}
-                    </select>
+                    </SearchableSelect>
                   </div>
                   <div>
                     <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Revision Type</label>

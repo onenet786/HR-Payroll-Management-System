@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http: https:; font-src 'self' data:; connect-src 'self' https: wss: https://mcs.binishaqsoft.com wss://mcs.binishaqsoft.com http://localhost:* http://127.0.0.1:* ws://127.0.0.1:* ws://localhost:*; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'" />
 
-  <title>HR Attendance Kiosk</title>
+  <title>AlJannatMall Attendance Kiosk</title>
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
@@ -16,9 +16,9 @@
     <!-- ═══ TOP BAR ═══════════════════════════════════════════════════════ -->
     <header class="topbar">
       <div class="brand">
-        <div class="brand-logo">HR</div>
+        <div class="brand-logo">AJ</div>
         <div class="brand-text">
-          <div class="brand-name">HR Attendance Kiosk</div>
+          <div class="brand-name">AlJannatMall Attendance Kiosk</div>
           <div class="brand-sub"><span id="terminalLine">Attendance Terminal · Initializing…</span> <span class="app-version" id="appVersion"></span></div>
         </div>
       </div>
@@ -454,6 +454,11 @@
               <small class="form-help full">Generate the setup code in the web portal (Kiosk Terminals) and paste it here. It tells this kiosk which server to use and can be used only once; this PC receives its own device key, which an administrator can revoke.</small>
             </div>
             <div class="form-grid hidden" id="stRegAccountFields">
+              <label class="form-field full">
+                <span class="form-label">Server address<span class="req" aria-hidden="true">*</span></span>
+                <input id="stRegServerUrl" class="form-input" autocomplete="off" spellcheck="false" required aria-required="true" placeholder="192.168.1.10:8080 or hr.company.com" />
+                <small class="form-help">The client's HR server. A local network address (for example <b>192.168.86.83:8080</b>, or <b>localhost:8080</b> on the server itself) uses http; any other address must use https.</small>
+              </label>
               <label class="form-field">
                 <span class="form-label">Kiosk account email or username<span class="req" aria-hidden="true">*</span></span>
                 <input id="stRegEmail" class="form-input" autocomplete="off" required aria-required="true" placeholder="kiosk.gate1@company.com" />

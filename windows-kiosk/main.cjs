@@ -21,7 +21,12 @@ const {
   biometricMatchEvidence, evaluateAttendanceTimes, policyShift, halfTimeCutoffFor, personalOutAllowanceFor, personalOutMinutes,
 } = require('./attendance-rules.cjs');
 const { FACE_IDENTIFY_THRESHOLD, FACE_VERIFY_THRESHOLD, FACE_STRONG_DISTANCE, normalizeFaceDescriptor, identifyFace } = require('./face-match.cjs');
-const { parseSetupCode, orderedPortalUrls, tryPortalUrls } = require('./setup-code.cjs');
+const { parseSetupCode, normalizeServerAddress, orderedPortalUrls, tryPortalUrls } = require('./setup-code.cjs');
+
+// The data folder (%APPDATA%\<name>: store, device key, queued punches, evidence) keeps its original name so a
+// renamed kiosk (productName) upgrades in place without losing data or pairing. Must run before any getPath('userData').
+const LEGACY_PRODUCT_NAME = 'Bin Ishaq Attendance Kiosk';
+if (app.isPackaged) app.setPath('userData', path.join(app.getPath('appData'), LEGACY_PRODUCT_NAME));
 
 dotenv.config({ quiet: true });
 
@@ -162,7 +167,7 @@ function createSplashWindow() {
       sandbox: true,
     },
   });
-  splashWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(splashHtml('Attendance Kiosk', 'Starting terminal, devices, and sync...'))}`);
+  splashWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(splashHtml('AlJannatMall Attendance Kiosk', 'Starting terminal, devices, and sync...'))}`);
   splashWindow.once('ready-to-show', () => {
     if (splashWindow && !splashWindow.isDestroyed()) splashWindow.show();
   });
@@ -268,12 +273,19 @@ function readStore() {
       store.employees = (store.employees || []).map(kioskStoredEmployee);
       // Legacy event details could contain names, identifiers, paths, or raw errors.
       store.events = [];
-      return store;
+      return withInstallId(store);
     }
   } catch (error) {
     console.warn('Could not read kiosk store. Starting with an empty local store.');
   }
-  return defaultStore();
+  return withInstallId(defaultStore());
+}
+
+// Identifies this installation on the punches it makes (see kioskInstallIds in savePunch). Created once; the startup
+// writeStore(readStore()) saves it before anything else reads the store.
+function withInstallId(store) {
+  if (!store.terminal.installId) store.terminal.installId = require('crypto').randomUUID();
+  return store;
 }
 
 function writeStore(store) {
@@ -394,7 +406,7 @@ function createWindow() {
     kiosk: !!store.terminal.autoFullscreen,
     fullscreen: !!store.terminal.autoFullscreen,
     autoHideMenuBar: true,
-    title: 'HR Attendance Kiosk',
+    title: 'AlJannatMall Attendance Kiosk',
     icon: getAppIconPath(),
     backgroundColor: '#020c17',
     show: false,
@@ -467,6 +479,7 @@ function readDeviceRegistration() {
       portalUrl: saved.portalUrl || '',
       portalUrls: Array.isArray(saved.portalUrls) ? saved.portalUrls.filter(url => typeof url === 'string' && url) : [],
       clientName: saved.clientName || '',
+      deviceId: saved.deviceId || '',
     };
   } catch {
     return null;
@@ -836,34 +849,34 @@ async function loadCrossBranchAttendanceContext(store, employeeId) {
 function todayDate() { return new Date().toISOString().slice(0, 10); }
 function nowTime() { return new Date().toTimeString().slice(0, 8); }
 
-function getDepartmentName(employee) {
-  const store = readStore();
+// Callers pass the store they already loaded. Reading it here instead (as earlier builds did) re-parsed the whole
+// store file three times per employee: with ~770 employees and an 8.8 MB store the kiosk:get-state call at startup
+// blocked the main process for about 90 seconds, and for several minutes on slower terminals.
+function getDepartmentName(employee, store = readStore()) {
   const dept = (store.departments || []).find(item => item.id === employee.departmentId);
   return dept?.name || dept?.departmentName || employee.departmentId || '';
 }
 
-function getDesignationName(employee) {
-  const store = readStore();
+function getDesignationName(employee, store = readStore()) {
   const desig = (store.designations || []).find(item => item.id === employee.designationId);
   return desig?.name || desig?.designationName || employee.designationId || '';
 }
 
-function getBranchName(employee) {
-  const store = readStore();
+function getBranchName(employee, store = readStore()) {
   const branch = (store.branches || []).find(item => item.id === employee.branchId);
   return branch?.name || branch?.branchName || employee.branchId || '';
 }
 
-function kioskEmployee(employee) {
+function kioskEmployee(employee, store = readStore()) {
   if (!employee) return null;
   return {
     id: employee.id || employee.employeeCode || '',
     employeeCode: employee.employeeCode,
     fullName: employee.fullName,
     status: employee.status,
-    departmentName: getDepartmentName(employee),
-    designationName: getDesignationName(employee),
-    branchName: getBranchName(employee),
+    departmentName: getDepartmentName(employee, store),
+    designationName: getDesignationName(employee, store),
+    branchName: getBranchName(employee, store),
     branchId: employee.branchId || '',
     pictureUrl: employee.pictureUrl || employee.photoUrl || employee.profileImage || employee.imageUrl || '',
   };
@@ -1014,7 +1027,7 @@ function savePunch(store, employee, method, evidence, meta) {
       ok: false,
       alreadyRecorded: true,
       message: `Attendance is already completed today (${existing.punchIn} to ${existing.punchOut}). Contact HR if it needs correction.`,
-      employee: kioskEmployee(employee),
+      employee: kioskEmployee(employee, store),
       attendance: {
         date: existing.date,
         punchIn: existing.punchIn,
@@ -1035,7 +1048,7 @@ function savePunch(store, employee, method, evidence, meta) {
         alreadyRecorded: true,
         message: `Please wait ${remaining} second${remaining === 1 ? '' : 's'} before punching again. Minimum delay is 1 minute between punches.`,
         cooldownSeconds: remaining,
-        employee: kioskEmployee(employee),
+        employee: kioskEmployee(employee, store),
       };
     }
   }
@@ -1043,7 +1056,7 @@ function savePunch(store, employee, method, evidence, meta) {
   const presence = isReturningFromBreak ? 'away' : existing?.punchIn && !existing?.punchOut ? 'in' : 'none';
   const refusal = directionRefusal(meta?.direction, presence);
   if (refusal) {
-    return { ok: false, directionMismatch: true, message: refusal, employee: kioskEmployee(employee), action: meta?.direction === 'in' ? 'IN' : 'OUT' };
+    return { ok: false, directionMismatch: true, message: refusal, employee: kioskEmployee(employee, store), action: meta?.direction === 'in' ? 'IN' : 'OUT' };
   }
   const isPunchOut = existing?.punchIn && !existing?.punchOut;
   // An Out camera records the reason chosen in Settings, or asks when none is set.
@@ -1053,7 +1066,7 @@ function savePunch(store, employee, method, evidence, meta) {
       ok: false,
       needsOutReason: true,
       message: 'Select checkout reason before punching out.',
-      employee: kioskEmployee(employee),
+      employee: kioskEmployee(employee, store),
       action: 'OUT',
       reasons: activeCheckoutReasons(store),
     };
@@ -1083,6 +1096,9 @@ function savePunch(store, employee, method, evidence, meta) {
     employeeBranchId: employee.branchId || '',
     terminalBranchId: store.terminal.branchId || '',
     crossBranch: !!(store.terminal.branchId && employee.branchId && store.terminal.branchId !== employee.branchId),
+    // Every kiosk that punched on this record (IN at one, OUT at another). Terminal ids are often left at the default
+    // "KIOSK-WIN-01", so each installation's own random id decides what "attendance marked at this kiosk" means.
+    kioskInstallIds: [...new Set([...(Array.isArray(existing?.kioskInstallIds) ? existing.kioskInstallIds : []), store.terminal.installId].filter(Boolean))],
   };
   const next = existing
     ? store.attendances.map(item => item.id === existing.id ? log : item)
@@ -1109,7 +1125,7 @@ function savePunch(store, employee, method, evidence, meta) {
 
   return {
     ok: true,
-    employee: kioskEmployee(employee),
+    employee: kioskEmployee(employee, store),
     attendance: {
       date: log.date,
       punchIn: log.punchIn,
@@ -1130,6 +1146,15 @@ function savePunch(store, employee, method, evidence, meta) {
   };
 }
 
+// The kiosk downloads every employee and the company's recent attendance (so anyone can punch anywhere), but its
+// screen and counters show only attendance marked at this kiosk: records carrying this installation's id, or the
+// server's id for this registered device.
+function markedAtThisKiosk(store, deviceId = readDeviceRegistration()?.deviceId || '') {
+  const installId = store.terminal.installId;
+  return log => (Array.isArray(log.kioskInstallIds) && log.kioskInstallIds.includes(installId)) ||
+    (!!deviceId && log.kioskDeviceId === deviceId);
+}
+
 // ─── IPC Handlers ───────────────────────────────────────────────────────────
 
 ipcMain.handle('kiosk:get-state', async () => {
@@ -1140,16 +1165,22 @@ ipcMain.handle('kiosk:get-state', async () => {
     code: branch.code || '',
     city: branch.city || '',
   }));
+  // Attendance rows name their employee by id (older rows by code); one lookup table instead of a scan per row.
+  const employeeByKey = new Map();
+  for (const e of store.employees || []) if (e.id && !employeeByKey.has(e.id)) employeeByKey.set(e.id, e);
+  for (const e of store.employees || []) if (e.employeeCode && !employeeByKey.has(e.employeeCode)) employeeByKey.set(e.employeeCode, e);
+  const atThisKiosk = markedAtThisKiosk(store);
   return {
     terminal: publicTerminal(store.terminal),
     appVersion: app.getVersion(),
     lastSync: store.lastSync || null,
-    employees: (store.employees || []).map(kioskEmployee),
+    employees: (store.employees || []).map(employee => kioskEmployee(employee, store)),
     attendances: (store.attendances || []).map(log => {
-      const emp = (store.employees || []).find(e => (e.id && e.id === log.employeeId) || (e.employeeCode && e.employeeCode === log.employeeId));
+      const emp = employeeByKey.get(log.employeeId);
       return {
         id: log.id,
         employeeId: log.employeeId,
+        atThisKiosk: atThisKiosk(log),
         employeeName: log.employeeName || emp?.fullName || '',
         employeeCode: log.employeeCode || emp?.employeeCode || '',
         date: log.date,
@@ -1180,9 +1211,13 @@ ipcMain.handle('kiosk:get-state', async () => {
 
 ipcMain.handle('kiosk:get-stats', async () => {
   const store = readStore();
+  // Punch counts cover attendance marked at this kiosk only (see markedAtThisKiosk). "Active employees" is every
+  // active employee synced to this kiosk (all branches), i.e. everyone who can mark attendance here.
+  const atThisKiosk = markedAtThisKiosk(store);
+  const localLogs = (store.attendances || []).filter(atThisKiosk);
   const employees = mergeEmployeeBiometricTemplates(store.employees || [], store.biometricTemplates || []);
   const date = todayDate();
-  const todayLogs = (store.attendances || []).filter(log => log.date === date);
+  const todayLogs = localLogs.filter(log => log.date === date);
   const punchedIn = todayLogs.filter(log => log.punchIn && !log.punchOut);
   const punchedOut = todayLogs.filter(log => log.punchIn && log.punchOut);
   const activeEmployees = employees.filter(e => e.status === 'Active');
@@ -1216,7 +1251,7 @@ ipcMain.handle('kiosk:lookup-employee', async (_event, code) => {
 
   return {
     found: true,
-    employee: kioskEmployee(employee),
+    employee: kioskEmployee(employee, store),
     action: isPunchedIn ? 'OUT' : 'IN',
     todayLog: todayLog ? {
       punchIn: todayLog.punchIn || '',
@@ -1370,11 +1405,13 @@ ipcMain.handle('kiosk:parse-setup-code', async (_event, text) => {
 });
 
 // Two ways to register: a setup code from the client's server (recommended; it also tells the kiosk which server
-// address(es) to use), or a Kiosk Terminal account's email and password against the current server address.
+// address(es) to use), or a Kiosk Terminal account's email and password against the server address typed in
+// Settings (e.g. http://192.168.86.83:8080 for a self-hosted server), else the current server address.
 ipcMain.handle('kiosk:register-device', async (_event, payload) => {
   const setupCodeText = String(payload?.setupCode || '').trim();
   let setup = null;
   let body;
+  let typedUrl = null;
   if (setupCodeText) {
     try {
       setup = parseSetupCode(setupCodeText);
@@ -1386,11 +1423,18 @@ ipcMain.handle('kiosk:register-device', async (_event, payload) => {
     const password = String(payload?.password || '');
     if (!email || !password) return { ok: false, error: 'Enter the kiosk account email and password.' };
     body = { email, password };
+    if (String(payload?.serverUrl || '').trim()) {
+      try {
+        typedUrl = normalizeServerAddress(payload.serverUrl);
+      } catch (error) {
+        return { ok: false, error: error.message };
+      }
+    }
   }
   const store = readStore();
   const terminalName = [store.terminal.id, store.terminal.location].filter(Boolean).join(' — ');
   const previous = readDeviceRegistration();
-  const urls = setup ? setup.urls : portalUrls(previous);
+  const urls = setup ? setup.urls : typedUrl ? [typedUrl] : portalUrls(previous);
   try {
     // A setup code may point at a different client's server: never send it this PC's old device key.
     const { url, result } = await tryPortalUrls(urls, base => (setup
@@ -1404,6 +1448,8 @@ ipcMain.handle('kiosk:register-device', async (_event, payload) => {
       portalUrl: url,
       portalUrls: urls,
       clientName: setup ? setup.clientName : (previous?.clientName || ''),
+      // The server stamps this on every punch it accepts from this kiosk (kioskDeviceId).
+      deviceId: result.deviceId || '',
     });
     activePortalUrl = url;
     allPortalsFailedAt = 0;
@@ -1415,7 +1461,7 @@ ipcMain.handle('kiosk:register-device', async (_event, payload) => {
     if (error.statusCode === 429) return { ok: false, error: 'Too many sign-in attempts. Wait one minute, then try again.' };
     if (!error.statusCode) {
       const tried = (error.triedUrls || urls).join(' or ');
-      return { ok: false, error: `Cannot reach the server at ${tried} (${error.code || error.message}). Check the internet connection.` };
+      return { ok: false, error: `Cannot reach the server at ${tried} (${error.code || error.message}). Check the server address and the network connection.` };
     }
     return { ok: false, error: error.message || 'Registration failed.' };
   }
@@ -1878,6 +1924,10 @@ if (!gotLock) {
         path: process.execPath,
         args: app.isPackaged ? [] : [path.join(__dirname, 'main.cjs')],
       });
+      // Drop the auto-start entry written under the old product name (it points at the removed program).
+      if (app.isPackaged && app.getName() !== LEGACY_PRODUCT_NAME) {
+        try { app.setLoginItemSettings({ openAtLogin: false, name: `electron.app.${LEGACY_PRODUCT_NAME}` }); } catch { /* not present */ }
+      }
     }
 
     await ensureBiometricDriverHost();

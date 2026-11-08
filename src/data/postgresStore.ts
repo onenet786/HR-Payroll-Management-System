@@ -119,22 +119,37 @@ export async function deleteDoc(ref: DocumentRef) {
   await request(`/${encodeURIComponent(ref.collection)}/${encodeURIComponent(ref.id)}`, { method: 'DELETE' });
 }
 
-const FULL_REFRESH_MS = 120_000;
+const FULL_REFRESH_MS = 600_000;
+
+type CollectionRow = { document_id: string; data: Record<string, unknown>; updated_at?: string };
+interface CollectionRead { rows: CollectionRow[]; etag: string | null; delta: boolean; count: number | null }
+
+/** Employee lists carry photo links (server/employee-photos.cjs); make them absolute when the API is on another origin. */
+function absolutePhotoLinks(rows: CollectionRow[]): CollectionRow[] {
+  const base = apiBase();
+  if (!base) return rows;
+  return rows.map(row => {
+    const picture = row.data?.pictureUrl;
+    return typeof picture === 'string' && picture.startsWith('/api/employee-photos/') ? { ...row, data: { ...row.data, pictureUrl: `${base}${picture}` } } : row;
+  });
+}
 
 /**
- * Polls a collection with the fingerprint (ETag) of the last answer: the server replies 304 when nothing changed,
- * so no data is sent, parsed or handed to React. Returns null for "unchanged". Every FULL_REFRESH_MS the read is
- * unconditional, a safety net for a write path that does not touch updated_at.
+ * Reads a collection. With an ETag the server answers 304 (null here) when nothing changed; with `since` it sends
+ * only rows changed after that time (delta), plus the total row count so the caller can detect deletions.
  */
-async function readCollectionIfChanged(ref: CollectionRef | QueryRef, etag: string | null) {
+async function fetchCollection(ref: CollectionRef | QueryRef, options: { etag?: string | null; since?: string | null } = {}): Promise<CollectionRead | null> {
   const token = localAuthToken || (import.meta.env.DEV ? 'dev-token' : null);
   if (!token) throw new Error('Authentication required.');
   const collectionName = ref.kind === 'collection' ? ref.name : ref.collection;
   const employeeFilter = ref.kind === 'query' ? ref.filters.find(filter => filter.field === 'employeeId' && filter.op === '==') : undefined;
-  const suffix = employeeFilter ? `?employeeId=${encodeURIComponent(String(employeeFilter.value))}` : '';
-  const response = await fetch(`${apiBase()}/api/documents/${encodeURIComponent(collectionName)}${suffix}`, {
+  const params = new URLSearchParams();
+  if (employeeFilter) params.set('employeeId', String(employeeFilter.value));
+  if (options.since) params.set('since', options.since);
+  const query = params.toString();
+  const response = await fetch(`${apiBase()}/api/documents/${encodeURIComponent(collectionName)}${query ? `?${query}` : ''}`, {
     cache: 'no-store',
-    headers: { Authorization: `Bearer ${token}`, ...(etag ? { 'If-None-Match': etag } : {}) },
+    headers: { Authorization: `Bearer ${token}`, ...(options.etag ? { 'If-None-Match': options.etag } : {}) },
   });
   if (response.status === 304) return null;
   if (response.status === 401 && typeof window !== 'undefined') {
@@ -146,28 +161,59 @@ async function readCollectionIfChanged(ref: CollectionRef | QueryRef, etag: stri
     throw new Error(body.error || `API request failed (${response.status}).`);
   }
   const result = await response.json();
-  let documents = result.documents as Array<{ document_id: string; data: Record<string, unknown> }>;
-  if (ref.kind === 'query') documents = documents.filter(item => ref.filters.every(filter => item.data[filter.field] === filter.value));
-  return { snapshot: querySnapshot(documents), etag: response.headers.get('ETag') };
+  const countHeader = response.headers.get('X-Collection-Count');
+  return {
+    rows: absolutePhotoLinks(result.documents as CollectionRow[]),
+    etag: response.headers.get('ETag'),
+    delta: response.headers.get('X-Delta') === '1',
+    count: countHeader !== null && countHeader !== '' ? Number(countHeader) : null,
+  };
 }
 
+/**
+ * Live collection: the first read loads the working set; after that each poll asks "what changed since the newest
+ * row I hold?" (304 when nothing did) and merges the answer, so a kiosk punch costs one row instead of the whole
+ * month. When the server's row count differs from what is held after merging (a deletion, or a row that left the
+ * window) the collection is reloaded in full; FULL_REFRESH_MS is a further safety net.
+ */
 export function onSnapshot(ref: StoreRef, success: (snapshot: any) => void, failure?: (error: unknown) => void) {
   let active = true;
   let busy = false;
   let etag: string | null = null;
   let lastFull = 0;
+  let rows = new Map<string, CollectionRow>();
+  let newest: string | null = null;
+  const remember = (list: CollectionRow[]) => { for (const row of list) if (row.updated_at && (!newest || String(row.updated_at) > newest)) newest = String(row.updated_at); };
+  const emit = () => {
+    let documents = [...rows.values()];
+    if (ref.kind === 'query') documents = documents.filter(item => ref.filters.every(filter => item.data[filter.field] === filter.value));
+    success(querySnapshot(documents));
+  };
+  const loadFull = async () => {
+    const result = await fetchCollection(ref as CollectionRef | QueryRef);
+    if (!active || !result) return;
+    rows = new Map(result.rows.map(row => [row.document_id, row]));
+    newest = null; remember(result.rows);
+    etag = result.etag; lastFull = Date.now();
+    emit();
+  };
   const refresh = async () => {
     if (!active || busy) return;
     busy = true;
     try {
       if (ref.kind === 'document') { success(await read(ref)); return; }
-      const now = Date.now();
-      const conditional = etag && now - lastFull < FULL_REFRESH_MS ? etag : null;
-      const result = await readCollectionIfChanged(ref, conditional);
+      if (!etag || lastFull === 0 || Date.now() - lastFull >= FULL_REFRESH_MS) { await loadFull(); return; }
+      const result = await fetchCollection(ref, { etag, since: newest });
       if (!active || !result) return;
+      if (!result.delta) { rows = new Map(result.rows.map(row => [row.document_id, row])); newest = null; remember(result.rows); etag = result.etag; lastFull = Date.now(); emit(); return; }
+      // Merge: changed rows replace theirs; new rows go first (lists are newest-first, e.g. attendance).
+      const fresh = result.rows.filter(row => !rows.has(row.document_id));
+      for (const row of result.rows) if (rows.has(row.document_id)) rows.set(row.document_id, row);
+      if (fresh.length) rows = new Map([...fresh.map(row => [row.document_id, row] as [string, CollectionRow]), ...rows]);
+      remember(result.rows);
       etag = result.etag;
-      lastFull = now;
-      success(result.snapshot);
+      if (result.count !== null && result.count !== rows.size) { await loadFull(); return; }
+      if (result.rows.length) emit();
     } catch (error) { failure?.(error); }
     finally { busy = false; }
   };

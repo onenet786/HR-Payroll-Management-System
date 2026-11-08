@@ -4,6 +4,7 @@
  */
 
 import React, { useState } from 'react';
+import { SearchableSelect } from './SearchableSelect';
 import { Bell, BellOff, Plus, CheckCheck, Trash2, X } from 'lucide-react';
 import { AppNotification, Employee } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
@@ -402,7 +403,7 @@ export function NotificationCenter({
                   <label htmlFor="notif-target" className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
                     Target (leave blank for broadcast)
                   </label>
-                  <select
+                  <SearchableSelect
                     id="notif-target"
                     value={form.targetEmployeeId}
                     onChange={e => setForm(p => ({ ...p, targetEmployeeId: e.target.value }))}
@@ -416,7 +417,7 @@ export function NotificationCenter({
                           {e.fullName}
                         </option>
                       ))}
-                  </select>
+                  </SearchableSelect>
                 </div>
 
                 <div>

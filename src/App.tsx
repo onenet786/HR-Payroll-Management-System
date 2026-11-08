@@ -45,7 +45,9 @@ const privacyStorage = {
 const publicUser = ({ passwordHash: _passwordHash, ...profile }: UserAccount): UserAccount => profile;
 
 const TRUSTED_DEVICE_KEY = 'hr_mfa_trusted_devices';
-const retainedBrowserKeys = new Set(['hr_auth_token', 'hr_remembered_email', TRUSTED_DEVICE_KEY]);
+// hr_server_urls / hr_server_name: the phone app's chosen company server (apiBase.ts). Clearing them sent the app
+// back to the Connect screen on every start.
+const retainedBrowserKeys = new Set(['hr_auth_token', 'hr_remembered_email', TRUSTED_DEVICE_KEY, 'hr_server_urls', 'hr_server_name']);
 
 // Per-account MFA trust tokens survive sign-out on purpose: that is what lets this device skip the code.
 const readTrustedDevices = (): Record<string, string> => {

@@ -557,7 +557,7 @@ export function MobileApp({
                 {currentEmp.fullName.substring(0, 2).toUpperCase()}
               </div>
               <div>
-                <h3 className="font-bold text-white text-sm leading-tight">Sabaq Khair, {currentEmp.fullName.split(' ')[0]}!</h3>
+                <h3 className="font-bold text-white text-sm leading-tight">Assalam-o-Alaikum, {currentEmp.fullName.split(' ')[0]}!</h3>
                 <p className="text-[10px] text-emerald-400">{dateDisplay} • {currentEmp.employeeCode}</p>
               </div>
             </div>

@@ -4,6 +4,7 @@
  */
 
 import React, { useState } from 'react';
+import { SearchableSelect } from './SearchableSelect';
 import { Plus, CheckCircle, XCircle } from 'lucide-react';
 import { LoanAdvance, Employee } from '../types';
 import { empAvatarUrl } from '../utils/avatar';
@@ -121,12 +122,12 @@ export function LoansModule({
       {/* Filters */}
       <div className="flex gap-3 flex-wrap items-center">
         <ListSearch value={search} onChange={setSearch} placeholder="Search employee, code, type, reason…" total={loanAdvances.length} shown={filtered.length} />
-        <select value={filterEmpId} onChange={e => setFilterEmpId(e.target.value)}
+        <SearchableSelect value={filterEmpId} onChange={e => setFilterEmpId(e.target.value)}
           aria-label="Filter loans by employee"
           className="bg-white border border-slate-200 text-slate-900 text-xs rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500">
           <option value="All">All Employees</option>
           {employees.map(e => <option key={e.id} value={e.id}>{e.fullName}</option>)}
-        </select>
+        </SearchableSelect>
         <div className="flex gap-1">
           {['All', 'Pending', 'Active', 'Closed', 'Rejected'].map(s => (
             <button key={s} onClick={() => setFilterStatus(s)}
@@ -149,7 +150,7 @@ export function LoansModule({
               <div key={loan.id} className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
                 <div className="flex items-start justify-between">
                   <div className="flex items-center gap-3">
-                    <img src={empAvatarUrl(emp)} alt="" className="w-9 h-9 rounded-xl object-cover" />
+                    <img loading="lazy" decoding="async" src={empAvatarUrl(emp)} alt="" className="w-9 h-9 rounded-xl object-cover" />
                     <div>
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-bold text-slate-900">{getEmployeeName(loan.employeeId)}</span>
@@ -234,13 +235,13 @@ export function LoansModule({
               <div className="space-y-3">
                 <div>
                   <label htmlFor="loan-employee" className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Employee<RequiredMark /></label>
-                  <select id="loan-employee" aria-required="true" value={form.employeeId} onChange={e => setForm(p => ({ ...p, employeeId: e.target.value }))}
+                  <SearchableSelect id="loan-employee" aria-required="true" value={form.employeeId} onChange={e => setForm(p => ({ ...p, employeeId: e.target.value }))}
                     className="w-full bg-white border border-slate-200 text-slate-900 text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500">
                     <option value="">Select employee</option>
                     {employees.filter(e => e.status === 'Active').map(e => (
                       <option key={e.id} value={e.id}>{e.fullName} ({e.employeeCode})</option>
                     ))}
-                  </select>
+                  </SearchableSelect>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">

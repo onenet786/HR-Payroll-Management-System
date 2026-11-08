@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { parseSetupCode, buildSetupCode, orderedPortalUrls, isNetworkFailure, tryPortalUrls } = require('./setup-code.cjs');
+const { parseSetupCode, buildSetupCode, orderedPortalUrls, isNetworkFailure, tryPortalUrls, normalizeServerAddress, isLocalNetworkHost } = require('./setup-code.cjs');
 
 const encode = payload => `HRK1.${Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url')}`;
 
@@ -36,12 +36,37 @@ test('a damaged code is refused', () => {
   assert.throws(() => parseSetupCode(encode({ v: 1, n: 'Acme', u: ['https://a.com'] })), { message: 'The setup code is damaged' }, 'no token');
 });
 
-test('server addresses must use https, except localhost for testing', () => {
-  assert.throws(() => parseSetupCode(encode({ v: 1, n: 'Acme', u: ['http://acme.binishaqsoft.com'], t: 'tok' })), { message: 'Server address must use https' });
-  assert.throws(() => parseSetupCode(encode({ v: 1, n: 'Acme', u: ['https://acme.binishaqsoft.com', 'http://203.0.113.5'], t: 'tok' })), { message: 'Server address must use https' });
+test('server addresses must use https, except local-network addresses', () => {
+  const httpsOnly = /^Server address must use https/;
+  assert.throws(() => parseSetupCode(encode({ v: 1, n: 'Acme', u: ['http://acme.binishaqsoft.com'], t: 'tok' })), { message: httpsOnly });
+  assert.throws(() => parseSetupCode(encode({ v: 1, n: 'Acme', u: ['https://acme.binishaqsoft.com', 'http://203.0.113.5'], t: 'tok' })), { message: httpsOnly });
   assert.throws(() => parseSetupCode(encode({ v: 1, n: 'Acme', u: ['ftp://acme.binishaqsoft.com'], t: 'tok' })), { message: 'Server address must use https' });
+  assert.throws(() => parseSetupCode(encode({ v: 1, n: 'Acme', u: ['http://172.32.0.1:8080'], t: 'tok' })), { message: httpsOnly });
   assert.deepEqual(parseSetupCode(encode({ v: 1, n: 'Dev', u: ['http://localhost:3001'], t: 'tok' })).urls, ['http://localhost:3001']);
   assert.deepEqual(parseSetupCode(encode({ v: 1, n: 'Dev', u: ['http://127.0.0.1:8080/'], t: 'tok' })).urls, ['http://127.0.0.1:8080']);
+  assert.deepEqual(parseSetupCode(encode({ v: 1, n: 'HQ', u: ['http://192.168.86.83:8080'], t: 'tok' })).urls, ['http://192.168.86.83:8080']);
+  assert.deepEqual(parseSetupCode(encode({ v: 1, n: 'HQ', u: ['http://HEADOFFICE:8080', 'http://10.0.0.5'], t: 'tok' })).urls, ['http://headoffice:8080', 'http://10.0.0.5']);
+});
+
+test('local-network hosts are recognised', () => {
+  for (const host of ['localhost', '127.0.0.1', '10.1.2.3', '172.16.0.1', '172.31.255.255', '192.168.86.83', '169.254.1.1', '[::1]', 'fd12:3456::1', 'HEADOFFICE', 'hr.local', 'srv.lan', 'hr.corp.internal']) {
+    assert.equal(isLocalNetworkHost(host), true, host);
+  }
+  for (const host of ['8.8.8.8', '172.15.0.1', '172.32.0.1', '203.0.113.5', 'attendance.binishaqsoft.com', '2001:db8::1', '']) {
+    assert.equal(isLocalNetworkHost(host), false, host);
+  }
+});
+
+test('a server address typed in Settings gets the right scheme', () => {
+  assert.equal(normalizeServerAddress('192.168.86.83:8080'), 'http://192.168.86.83:8080');
+  assert.equal(normalizeServerAddress(' localhost:8080/ '), 'http://localhost:8080');
+  assert.equal(normalizeServerAddress('attendance.binishaqsoft.com'), 'https://attendance.binishaqsoft.com');
+  assert.equal(normalizeServerAddress('http://192.168.86.83:8080'), 'http://192.168.86.83:8080');
+  assert.equal(normalizeServerAddress('https://192.168.86.83'), 'https://192.168.86.83');
+  assert.throws(() => normalizeServerAddress('http://attendance.binishaqsoft.com'), { message: /^Server address must use https/ });
+  assert.throws(() => normalizeServerAddress(''), { message: 'Enter the server address' });
+  assert.throws(() => normalizeServerAddress('http://user:pw@192.168.1.1'), { message: 'The server address is not valid' });
+  assert.throws(() => normalizeServerAddress('bad host name'), { message: 'The server address is not valid' });
 });
 
 test('the address list comes from the setup code, then an old registration, then kiosk.env', () => {
