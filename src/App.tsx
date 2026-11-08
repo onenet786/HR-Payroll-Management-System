@@ -28,6 +28,8 @@ import { payrollPreflight } from './data/payrollPreflight';
 import { FULL_EDITION, editionEmployee, editionStatConfig, resolveEdition, type AppEdition } from './data/edition';
 import { DeviceEmulator } from './components/DeviceEmulator';
 import { EditionConsole } from './components/EditionConsole';
+import { apiBase, apiBase as getApiBase, needsServerConnection } from './data/apiBase';
+import { ConnectServerScreen } from './components/ConnectServerScreen';
 import {
   db, collection, deleteDoc, deleteField, doc, getDoc, setDoc, updateDoc, onSnapshot, writeBatch, query, where, setAuthToken, getAuthToken, authenticatedApiRequest
 } from './data/postgresStore';
@@ -75,7 +77,7 @@ export type FirestoreSyncStatus = {
   message: string;
 };
 
-export default function App() {
+function HrApp() {
   const cleanData = <T,>(obj: T): T => JSON.parse(JSON.stringify(obj));
 
   const normalizeFingerprintTemplate = (template: unknown): string => {
@@ -260,7 +262,7 @@ export default function App() {
 
   const handleLogin = async (email: string, password: string, mfaChallenge?: string, mfaCode?: string, mfaMethod: 'totp' | 'email' = 'totp', rememberMe = false): Promise<{ mfaChallenge?: string; mfaMethods?: Array<'totp' | 'email'> } | void> => {
     setAuthMessage('');
-    const apiBase = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+    const apiBase = getApiBase();
 
     try {
       const response = await fetch(`${apiBase}${mfaChallenge ? '/api/auth/mfa/verify-login' : '/api/auth/login'}`, {
@@ -427,7 +429,9 @@ export default function App() {
           });
 
           stateSetter(fetched);
-          privacyStorage.setItem(storageKey, JSON.stringify(fetched));
+          // (No copy into browser storage: privacyStorage keeps nothing, and serialising a whole collection on every
+          // change cost seconds after a legacy import. storageKey is kept for callers.)
+          void storageKey;
           onLoaded?.();
           markSnapshotLoaded(collectionName);
         }, (err) => {
@@ -2289,7 +2293,7 @@ export default function App() {
 
   const employeesWithFingerprints = mergeEmployeeFingerprintTemplates(employees, biometricTemplates);
 
-  const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+  const API_BASE = apiBase();
   const [hasUsersInDb, setHasUsersInDb] = useState<boolean | null>(null);
   // On an empty database the vendor can open the sign-in screen (for the edition console) before the customer runs setup.
   const [showLoginOnEmptyDb, setShowLoginOnEmptyDb] = useState(false);
@@ -2313,7 +2317,7 @@ export default function App() {
   });
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/auth/status`)
+    fetch(`${apiBase()}/api/auth/status`)
       .then(res => res.json())
       .then(data => {
         setHasUsersInDb(Boolean(data.hasUsers));
@@ -2365,7 +2369,7 @@ export default function App() {
           canCancel={false}
           onVendorConsole={() => setShowLoginOnEmptyDb(true)}
           onComplete={async (companyName, adminEmail, adminPassword, adminName) => {
-            const res = await fetch(`${API_BASE}/api/auth/setup`, {
+            const res = await fetch(`${apiBase()}/api/auth/setup`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ companyName, adminEmail, adminPassword, adminName }),
@@ -2560,7 +2564,7 @@ function LoginScreen({
   useEffect(() => {
     const controller = new AbortController();
     const timer = window.setTimeout(() => controller.abort(), 8000);
-    const apiBase = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+    const apiBase = getApiBase();
     fetch(`${apiBase}/api/health`, { signal: controller.signal })
       .then(response => setServerReachable(response.ok))
       .catch(() => setServerReachable(false))
@@ -2600,7 +2604,7 @@ function LoginScreen({
     try {
       setError('');
       setIsSubmitting(true);
-      const apiBase = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+      const apiBase = getApiBase();
       const response = await fetch(`${apiBase}/api/auth/mfa/send-email-login-code`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ challenge: mfaChallenge }) });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || 'Email verification code could not be sent.');
@@ -3046,4 +3050,9 @@ function SetupWizardScreen({
       </div>
     </div>
   );
+}
+
+/** The phone app first asks which company server to use (one app serves every client); see src/data/apiBase.ts. */
+export default function App() {
+  return needsServerConnection() ? <ConnectServerScreen /> : <HrApp />;
 }

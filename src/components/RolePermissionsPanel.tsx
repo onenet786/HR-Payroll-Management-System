@@ -11,6 +11,8 @@ const PERMISSIONS: Array<{ id: string; label: string }> = [
   { id: 'manage_settings', label: 'Settings' },
   { id: 'manage_access', label: 'Users & roles' },
   { id: 'use_kiosk', label: 'Use kiosk' },
+  { id: 'manage_data_import', label: 'Data import' },
+  { id: 'view_reports', label: 'View reports' },
 ];
 
 // Built-in roles whose permissions the apps depend on: Super Admin always has everything, Employee drives

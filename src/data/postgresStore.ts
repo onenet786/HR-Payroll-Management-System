@@ -1,10 +1,10 @@
+import { apiBase } from './apiBase';
 type CollectionRef = { kind: 'collection'; name: string };
 type DocumentRef = { kind: 'document'; collection: string; id: string };
 type QueryRef = { kind: 'query'; collection: string; filters: Array<{ field: string; op: '=='; value: unknown }> };
 type StoreRef = CollectionRef | DocumentRef | QueryRef;
 type DeleteSentinel = { readonly __deleteField: true };
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 const pollMs = Math.max(2000, Number(import.meta.env.VITE_API_POLL_MS || 5000));
 
 let localAuthToken: string | null = typeof window !== 'undefined' ? localStorage.getItem('hr_auth_token') : null;
@@ -25,7 +25,7 @@ export function getAuthToken(): string | null {
 export async function authenticatedApiRequest(path: string, init: RequestInit = {}) {
   const token = localAuthToken || (import.meta.env.DEV ? 'dev-token' : null);
   if (!token) throw new Error('Authentication required.');
-  const response = await fetch(`${API_BASE}${path}`, { ...init, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...(init.headers || {}) } });
+  const response = await fetch(`${apiBase()}${path}`, { ...init, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...(init.headers || {}) } });
   const body = await response.json().catch(() => ({}));
   if (response.status === 401 && typeof window !== 'undefined') {
     setAuthToken(null);
@@ -39,7 +39,7 @@ async function request(path: string, init: RequestInit = {}) {
   const token = localAuthToken || (import.meta.env.DEV ? 'dev-token' : null);
   if (!token) throw new Error('Authentication required.');
 
-  const response = await fetch(`${API_BASE}/api/documents${path}`, {
+  const response = await fetch(`${apiBase()}/api/documents${path}`, {
     ...init,
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...(init.headers || {}) },
   });
@@ -119,13 +119,56 @@ export async function deleteDoc(ref: DocumentRef) {
   await request(`/${encodeURIComponent(ref.collection)}/${encodeURIComponent(ref.id)}`, { method: 'DELETE' });
 }
 
+const FULL_REFRESH_MS = 120_000;
+
+/**
+ * Polls a collection with the fingerprint (ETag) of the last answer: the server replies 304 when nothing changed,
+ * so no data is sent, parsed or handed to React. Returns null for "unchanged". Every FULL_REFRESH_MS the read is
+ * unconditional, a safety net for a write path that does not touch updated_at.
+ */
+async function readCollectionIfChanged(ref: CollectionRef | QueryRef, etag: string | null) {
+  const token = localAuthToken || (import.meta.env.DEV ? 'dev-token' : null);
+  if (!token) throw new Error('Authentication required.');
+  const collectionName = ref.kind === 'collection' ? ref.name : ref.collection;
+  const employeeFilter = ref.kind === 'query' ? ref.filters.find(filter => filter.field === 'employeeId' && filter.op === '==') : undefined;
+  const suffix = employeeFilter ? `?employeeId=${encodeURIComponent(String(employeeFilter.value))}` : '';
+  const response = await fetch(`${apiBase()}/api/documents/${encodeURIComponent(collectionName)}${suffix}`, {
+    cache: 'no-store',
+    headers: { Authorization: `Bearer ${token}`, ...(etag ? { 'If-None-Match': etag } : {}) },
+  });
+  if (response.status === 304) return null;
+  if (response.status === 401 && typeof window !== 'undefined') {
+    setAuthToken(null);
+    window.dispatchEvent(new CustomEvent('hr:session-expired'));
+  }
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.error || `API request failed (${response.status}).`);
+  }
+  const result = await response.json();
+  let documents = result.documents as Array<{ document_id: string; data: Record<string, unknown> }>;
+  if (ref.kind === 'query') documents = documents.filter(item => ref.filters.every(filter => item.data[filter.field] === filter.value));
+  return { snapshot: querySnapshot(documents), etag: response.headers.get('ETag') };
+}
+
 export function onSnapshot(ref: StoreRef, success: (snapshot: any) => void, failure?: (error: unknown) => void) {
   let active = true;
   let busy = false;
+  let etag: string | null = null;
+  let lastFull = 0;
   const refresh = async () => {
     if (!active || busy) return;
     busy = true;
-    try { success(await read(ref)); } catch (error) { failure?.(error); }
+    try {
+      if (ref.kind === 'document') { success(await read(ref)); return; }
+      const now = Date.now();
+      const conditional = etag && now - lastFull < FULL_REFRESH_MS ? etag : null;
+      const result = await readCollectionIfChanged(ref, conditional);
+      if (!active || !result) return;
+      etag = result.etag;
+      lastFull = now;
+      success(result.snapshot);
+    } catch (error) { failure?.(error); }
     finally { busy = false; }
   };
   void refresh();

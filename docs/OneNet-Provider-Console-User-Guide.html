@@ -1,0 +1,104 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>OneNet Provider Console — User Guide</title><style>
+  @page { size: A4; margin: 16mm 15mm 18mm 15mm;
+    @bottom-left { content: "OneNet Provider Console · User guide"; font: 7.5pt system-ui, sans-serif; color: #94a3b8; }
+    @bottom-right { content: "Page " counter(page) " of " counter(pages); font: 7.5pt system-ui, sans-serif; color: #94a3b8; } }
+  @page :first { margin: 0; @bottom-left { content: none; } @bottom-right { content: none; } }
+  :root { --ink:#1e293b; --muted:#64748b; --line:#e2e8f0; --brand:#047857; --brand-dk:#064e3b; --soft:#ecfdf5; --warn:#b45309; --warnbg:#fffbeb; --bad:#b91c1c; --badbg:#fef2f2; --code:#0f172a; }
+  * { box-sizing: border-box; }
+  body { margin:0; font: 10pt/1.5 "Segoe UI", system-ui, -apple-system, sans-serif; color: var(--ink); -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  h1 { font-size: 19pt; margin: 0 0 4mm; color: var(--brand-dk); letter-spacing: -.01em; }
+  h2 { font-size: 13pt; margin: 7mm 0 2.5mm; color: var(--brand-dk); padding-bottom: 1.5mm; border-bottom: 1.5px solid var(--line); break-after: avoid; }
+  h3 { font-size: 10.5pt; margin: 5mm 0 1.5mm; break-after: avoid; }
+  p { margin: 0 0 2.5mm; } ul, ol { margin: 0 0 3mm; padding-left: 5.5mm; } li { margin-bottom: 1mm; }
+  code { font-family: "Cascadia Mono", Consolas, monospace; font-size: 8.8pt; background: #f1f5f9; padding: .2mm 1.2mm; border-radius: 1mm; }
+  pre { background: var(--code); color: #e2e8f0; padding: 3mm 4mm; border-radius: 2mm; font: 8.4pt/1.55 "Cascadia Mono", Consolas, monospace; white-space: pre-wrap; margin: 0 0 3.5mm; break-inside: avoid; }
+  pre .c { color: #6ee7b7; }
+  table { width: 100%; border-collapse: collapse; margin: 0 0 4mm; font-size: 9pt; }
+  th { text-align: left; background: #f8fafc; color: var(--muted); font-weight: 600; font-size: 8pt; text-transform: uppercase; letter-spacing: .04em; }
+  th, td { padding: 1.6mm 2.5mm; border-bottom: 1px solid var(--line); vertical-align: top; } tr { break-inside: avoid; }
+  .page { break-before: page; }
+  .note, .warn, .bad { border-left: 3px solid var(--brand); background: var(--soft); padding: 2.5mm 3.5mm; border-radius: 0 2mm 2mm 0; margin: 0 0 4mm; break-inside: avoid; }
+  .warn { border-color: var(--warn); background: var(--warnbg); } .bad { border-color: var(--bad); background: var(--badbg); }
+  .note b:first-child, .warn b:first-child, .bad b:first-child { display: block; margin-bottom: .8mm; }
+  .steps { counter-reset: s; list-style: none; padding: 0; }
+  .steps > li { counter-increment: s; position: relative; padding-left: 10mm; margin-bottom: 2.5mm; break-inside: avoid; }
+  .steps > li::before { content: counter(s); position: absolute; left: 0; top: .2mm; width: 6.5mm; height: 6.5mm; border-radius: 50%; background: var(--brand); color: #fff; font-weight: 700; font-size: 9pt; display: grid; place-items: center; }
+  .check { padding-left: 6mm; } .check li { list-style: none; position: relative; }
+  .check li::before { content: ""; position: absolute; left: -6mm; top: .9mm; width: 3.2mm; height: 3.2mm; border: 1.3px solid var(--muted); border-radius: .6mm; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 5mm; } .card { border: 1px solid var(--line); border-radius: 2mm; padding: 3mm 4mm; break-inside: avoid; } .card h3 { margin-top: 0; }
+  figure { margin: 2mm 0 5mm; break-inside: avoid; } figure img { width: 100%; border: 1px solid var(--line); border-radius: 2mm; box-shadow: 0 1mm 3mm rgba(15,23,42,.08); }
+  figcaption { font-size: 8.5pt; color: var(--muted); margin-top: 1.2mm; text-align: center; }
+  .toc { columns: 2; column-gap: 10mm; } .toc li { margin-bottom: 1.2mm; break-inside: avoid; }
+  .flow { display: flex; gap: 2mm; margin: 2mm 0 5mm; } .flow div { flex: 1; background: var(--soft); border: 1px solid #a7f3d0; border-radius: 2mm; padding: 2.5mm; font-size: 8.5pt; text-align: center; } .flow b { display: block; color: var(--brand-dk); font-size: 9.5pt; margin-bottom: .8mm; }
+  .cover { height: 297mm; padding: 26mm 22mm; color: #fff; background: linear-gradient(140deg, #064e3b 0%, #065f46 38%, #0f172a 100%); display: flex; flex-direction: column; }
+  .cover .tag { display: inline-block; align-self: flex-start; background: #10b981; color: #fff; font-weight: 700; font-size: 8.5pt; letter-spacing: .08em; text-transform: uppercase; padding: 1.2mm 3mm; border-radius: 1mm; }
+  .cover h1 { color: #fff; font-size: 32pt; line-height: 1.12; margin: 12mm 0 5mm; } .cover .sub { font-size: 12.5pt; color: #a7f3d0; max-width: 150mm; }
+  .cover .meta { margin-top: auto; display: grid; grid-template-columns: repeat(3, 1fr); gap: 4mm; border-top: 1px solid rgba(255,255,255,.18); padding-top: 6mm; font-size: 9pt; color: #cbd5e1; } .cover .meta b { display: block; color: #fff; font-size: 10.5pt; }
+  .cover .flow div { background: rgba(255,255,255,.07); border-color: rgba(255,255,255,.16); color: #e2e8f0; } .cover .flow b { color: #6ee7b7; }
+</style></head><body>
+<section class="cover">
+  <span class="tag">OneNet · User guide</span>
+  <h1>Provider Console<br>User Guide</h1>
+  <p class="sub">Daily work for OneNet staff: set up a new hosted client in minutes, connect any type of domain, manage licences, kiosks, the mobile app, backups and releases.</p>
+  <div class="flow" style="margin-top:16mm"><div><b>1 · Create</b>One form → a running installation</div><div><b>2 · Connect</b>Domains, kiosks, mobile app</div><div><b>3 · Manage</b>Licence, edition, switches</div><div><b>4 · Look after</b>Health, backups, releases</div></div>
+  <div class="meta"><div><b>Product</b>OneNet Provider Console</div><div><b>Server</b>Ubuntu 24.04 · aaPanel</div><div><b>Issued</b>07 November 2026</div></div>
+</section>
+<section class="page"><h1>Contents</h1><ol class="toc"><li>Signing in</li><li>The dashboard</li><li>Creating a new client</li><li>The client page</li><li>Domains — every type</li><li>Licence, edition and switches</li><li>Kiosks and the mobile app</li><li>Releases</li><li>Backups</li><li>Jobs, activity and the handover sheet</li><li>Quick reference</li></ol>
+
+<h2>Signing in</h2>
+<p>Open the console address (for example <code>https://admin.binishaqsoft.com</code>) and sign in with your email and password. Every account needs an authenticator app (Google Authenticator, Microsoft Authenticator or similar):</p>
+<ol class="steps"><li><b>First sign-in:</b> the console shows a QR code. Scan it with the authenticator app and type the 6-digit code.</li><li><b>Every sign-in after that:</b> email, password, then the current 6-digit code.</li><li>After 5 wrong passwords the account is locked for 15 minutes. A session lasts 12 hours; <b>Sign out</b> is at the bottom of the menu.</li></ol>
+<table><tr><th style="width:22%">Role</th><th>Can do</th></tr><tr><td><b>Owner</b></td><td>Everything, including provider users, the template database and archiving clients</td></tr><tr><td><b>Operator</b></td><td>Create clients, domains, licences, kiosk codes, backups, releases</td></tr><tr><td><b>Viewer</b></td><td>Look at everything, change nothing</td></tr></table>
+
+<h2>The dashboard</h2>
+<figure><img src="assets/provider/dashboard.png" alt="Dashboard: totals, items that need attention and every client with its health, licence, kiosks and last backup."><figcaption>Dashboard: totals, items that need attention and every client with its health, licence, kiosks and last backup.</figcaption></figure>
+<p>The tiles count active clients, installations that do not answer, active employees across all clients and open alerts. <b>Needs attention</b> lists what to do now, for example a job waiting for you, an expiring licence, a certificate or domain registration about to expire, a client that is down, or a missing nightly backup. Click a client row (or <b>Open</b>) to go to its page. <b>Check health now</b> refreshes every client immediately; it also runs automatically every 10 minutes.</p>
+
+<h2>Creating a new client</h2>
+<p>Menu → <b>New client</b>. One form is enough; the console does the rest.</p>
+<figure><img src="assets/provider/new-client.png" alt="New client: company, address name, first administrator, edition and licence."><figcaption>New client: company, address name, first administrator, edition and licence.</figcaption></figure>
+<table><tr><th style="width:26%">Field</th><th>What to enter</th></tr><tr><td>Company name</td><td>The client's name as it appears in the app and on payslips.</td></tr><tr><td>Address name</td><td>Filled in from the name; becomes <code>https://&lt;name&gt;.binishaqsoft.com</code>. Lowercase letters, digits and dashes. It cannot be changed later, so keep it short (e.g. <code>binishaq</code>).</td></tr><tr><td>First administrator</td><td>Name and email of the client's main user. A temporary password is created and shown once.</td></tr><tr><td>Edition</td><td><b>Full compliance</b> (FBR, EOBI, social security, PF, gratuity, bank payroll, approvals) or <b>Lite</b> (small shops, cash payroll, no FBR data).</td></tr><tr><td>Licence</td><td>Plan name, end date (empty = no end) and the active staff limit (empty = unlimited).</td></tr><tr><td>Data import</td><td>Tick when the client will move data from CyberAP themselves (see the Client Data Migration Guide).</td></tr><tr><td>Release</td><td>The application version to run; normally the newest.</td></tr></table>
+<p>Press <b>Create client</b>. The job page opens and shows each step live:</p>
+<figure><img src="assets/provider/job.png" alt="The setup job. Green = done; the hand = something to do in aaPanel; red = failed (press Retry)."><figcaption>The setup job. Green = done; the hand = something to do in aaPanel; red = failed (press Retry).</figcaption></figure>
+<table><tr><th style="width:34%">Step</th><th>What happens</th></tr><tr><td>Create the database</td><td>A copy of the template database (all tables, default roles, FBR tax slabs) with its own PostgreSQL login. Takes seconds.</td></tr><tr><td>Client folder and settings</td><td>The client's folder with its settings file, encryption keys, document and backup folders.</td></tr><tr><td>Bring the database up to the release</td><td>Any database changes newer than the template.</td></tr><tr><td>Company, administrator, edition and licence</td><td>The company record, the first administrator and the chosen settings.</td></tr><tr><td>aaPanel Node project and domain mapping</td><td>Creates the site in aaPanel. If the aaPanel API is not connected, the step shows exactly what to click and type.</td></tr><tr><td>HTTPS</td><td>Deploys the wildcard certificate to the new site.</td></tr><tr><td>Check that the installation answers</td><td>Calls the new installation and confirms it is live.</td></tr></table>
+<div class="warn"><b>When a step shows a hand (waiting for you)</b>Do what the box says in aaPanel (each value has a Copy button), then press <b>Mark done</b>. If it needs a moment (for example DNS), press <b>Retry</b> later. You can leave the page; the job waits.</div>
+<div class="note"><b>The temporary administrator password</b>When the job finishes, press <b>Show password</b>, give it to the client by phone or in person (not in the same email as the address), then press <b>I have handed it over: delete it</b>. The client must change it at first sign-in.</div>
+
+<h2>The client page</h2>
+<figure><img src="assets/provider/client-overview.png" alt="Client overview: open job, health, staff, attendance today, database size, addresses and technical details."><figcaption>Client overview: open job, health, staff, attendance today, database size, addresses and technical details.</figcaption></figure>
+<p>The header shows status, licence, the platform address, edition, release and port, with <b>Handover sheet</b> and <b>Restart</b>. The tabs are explained below. Every action you take here is recorded in the activity log.</p>
+
+<h2>Domains — every type</h2>
+<p>Every client always has its platform address <code>&lt;name&gt;.binishaqsoft.com</code>. It works from the first minute (wildcard DNS and certificate) and can never be removed, because <b>kiosks and the mobile app always use it</b>. If a client's own DNS breaks, attendance still works. A client's own domain is extra, for people opening the system in a browser.</p>
+<table><tr><th style="width:18%">Type</th><th style="width:20%">Example</th><th style="width:30%">What the client does</th><th>Advice</th></tr><tr><td><b>Their subdomain</b></td><td><code>hr.company.com</code></td><td>One CNAME record → <code>&lt;name&gt;.binishaqsoft.com</code></td><td><b>Recommended.</b> Set once; a server move needs nothing from the client; their website and email are untouched.</td></tr><tr><td><b>Root domain</b></td><td><code>company.com</code></td><td>An A record → the server IP (or ALIAS/flattened CNAME where the DNS provider supports it), plus <code>www</code></td><td>Only if nothing else is on the domain: it replaces their website. A server move needs the client to update the record.</td></tr><tr><td><b>Dedicated domain, nameservers to us</b></td><td><code>companyhr.com</code></td><td>Changes the domain's nameservers to ours, once</td><td>Best for a domain bought just for HR: we manage every record; the client cannot break it.</td></tr><tr><td><b>Platform only</b></td><td><code>name.binishaqsoft.com</code></td><td>Nothing</td><td>Default for small and Lite clients.</td></tr></table>
+<figure><img src="assets/provider/client-domains.png" alt="Domains tab: add a domain; the console detects its type and shows the records to create."><figcaption>Domains tab: add a domain; the console detects its type and shows the records to create.</figcaption></figure>
+<ol class="steps"><li>Domains tab → type the domain → choose, for a root domain, whether the client adds an A record or points the nameservers to us → <b>Add domain</b>. The console works out the type by itself and warns when a root domain would replace a website.</li><li>Click the document icon next to the domain: a printable <b>DNS instruction sheet</b> for the client's IT opens (Print → Save as PDF). Send it to them.</li><li>The connection job waits at "DNS points at this server". After the client has added the record, press <b>Retry</b> (DNS can take minutes to a few hours).</li><li>The console then maps the domain in aaPanel, issues a Let's Encrypt certificate, allows the address in the application (no restart) and checks HTTPS. Manual steps work as in client setup.</li><li>Status <b>active</b> = live. The star makes a domain the <b>primary</b> address (used in emails and on the handover sheet). The bin removes it.</li></ol>
+<p>Every night the console re-checks each domain: DNS still pointing here, certificate valid for at least 15 more days, and registration not expiring within 30 days. Problems appear on the dashboard.</p>
+
+<h2>Licence, edition and switches</h2>
+<figure><img src="assets/provider/client-licence.png" alt="Licence &amp; edition: plan, end date, staff limit, grace, automatic suspension, edition features."><figcaption>Licence & edition: plan, end date, staff limit, grace, automatic suspension, edition features.</figcaption></figure>
+<ul><li><b>Valid until / grace days:</b> users see a warning from 14 days before the end date. After the end date the grace period runs; when it ends the installation is suspended automatically (untick "Suspend automatically" to suspend only by hand).</li><li><b>Active staff limit:</b> the client cannot make more employees active than the limit; they get a clear message.</li><li><b>Suspend now / Resume:</b> takes effect within 15 seconds. Suspended: nobody can sign in and the message you entered is shown. <b>Kiosks keep recording attendance</b>, so no punches are lost.</li><li><b>Edition:</b> Full or Lite, and each feature can be switched individually.</li><li><b>Client data import:</b> lets the client's IT import their CyberAP data themselves. Switch it off after go-live.</li><li>Press <b>Save changes</b>; the client sees changes within 15 seconds.</li></ul>
+
+<h2>Kiosks and the mobile app</h2>
+<figure><img src="assets/provider/client-devices.png" alt="Kiosk setup codes and the mobile app connection code."><figcaption>Kiosk setup codes and the mobile app connection code.</figcaption></figure>
+<h3>Kiosk setup codes</h3>
+<ol class="steps"><li>Enter a label (e.g. "Main gate"), how many kiosks may use the code and how many hours it is valid → <b>Create setup code</b>.</li><li>The code and its QR are shown <b>once</b>: copy or print them.</li><li>On the kiosk PC: Settings → Server registration → <b>Setup code</b> → paste it (the kiosk shows the client name and server first) → Register.</li><li>Used, expired and revoked codes are listed; an unused code can be revoked.</li></ol>
+<p>No account password is typed at the branch. The code carries the platform address (and the client's domain as a fallback); the kiosk switches automatically if one address stops answering.</p>
+<h3>Mobile app connection code</h3>
+<p>Employees install the HR app and, on its first screen, scan or type the company connection code (or the company address). The code holds only addresses; employees still sign in with their own account. Print it for the client's notice board.</p>
+
+<h2>Releases</h2>
+<figure><img src="assets/provider/client-releases.png" alt="Releases: the version this client runs, and switching to another."><figcaption>Releases: the version this client runs, and switching to another.</figcaption></figure>
+<p>Choose a release → <b>Switch release</b>. The job takes a safety backup, switches, runs the database changes, restarts the client and checks it answers. Try a new release on one client first; if something is wrong, switch back the same way.</p>
+
+<h2>Backups</h2>
+<figure><img src="assets/provider/client-backups.png" alt="Backups: history and files. Back up now runs one immediately."><figcaption>Backups: history and files. Back up now runs one immediately.</figcaption></figure>
+<p>Each client is backed up every night (encrypted with the client's own key). <b>Back up now</b> runs one at once, for example before a big change. Restoring is an Admin task (see the Admin Guide).</p>
+
+<h2>Jobs, activity and the handover sheet</h2>
+<ul><li><b>Jobs:</b> every setup, domain connection and release switch with its steps; open one to continue or retry it.</li><li><b>Activity:</b> who did what for this client (all clients: menu → Activity log).</li><li><b>Handover sheet:</b> a printable welcome page for the client: addresses, first steps, licence. It contains no password.</li></ul>
+
+<h2>Quick reference</h2>
+<table><tr><th style="width:36%">I want to…</th><th>Where</th></tr><tr><td>Set up a new client</td><td>New client → fill in → Create client → finish manual steps → hand over the password</td></tr><tr><td>Give a client their own domain</td><td>Client → Domains → Add domain → send the DNS sheet → Retry after DNS is added</td></tr><tr><td>Register a kiosk</td><td>Client → Kiosks & app → Create setup code → paste it on the kiosk</td></tr><tr><td>Connect phones</td><td>Client → Kiosks & app → print the mobile connection code</td></tr><tr><td>Renew a licence</td><td>Client → Licence & edition → new end date → Save</td></tr><tr><td>Stop access (unpaid)</td><td>Client → Licence & edition → Suspend now</td></tr><tr><td>Let the client import CyberAP data</td><td>Client → Licence & edition → Client data import → Save</td></tr><tr><td>Upgrade a client</td><td>Client → Releases → choose → Switch release</td></tr><tr><td>Back up before a change</td><td>Client → Backups → Back up now</td></tr><tr><td>See what happened</td><td>Activity log (all) or client → Activity</td></tr></table>
+
+</body></html>

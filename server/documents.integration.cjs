@@ -380,3 +380,48 @@ test('employees see and mark their own and company-wide notifications only', asy
   assert.equal(await put('u-emp', 'notifications', 'n-other', { ...(await current('notifications', 'n-other')), readBy: ['e1'] }), 403, "not someone else's");
   assert.equal(await put('u-emp', 'notifications', 'n-mine', { ...mine, readBy: ['e1'], title: 'changed' }), 403, 'only readBy may change');
 });
+
+test('collection polls answer 304 while nothing changed, and fresh data after a change or delete', async () => {
+  const read = (etag, uid = 'u-hr') => fetch(`${base}/branches`, { headers: { 'x-test-user': uid, ...(etag ? { 'if-none-match': etag } : {}) } });
+  const first = await read();
+  assert.equal(first.status, 200);
+  const etag = first.headers.get('etag');
+  assert.ok(etag, 'a fingerprint is sent');
+  assert.equal((await read(etag)).status, 304, 'unchanged collection: no body');
+  assert.equal((await read(etag, 'u-emp')).status, 200, 'the fingerprint is per user');
+
+  await seed('branches', 'b-poll', { name: 'Poll test', province: 'Sindh' });
+  const afterInsert = await read(etag);
+  assert.equal(afterInsert.status, 200, 'a new row changes the fingerprint');
+  assert.ok((await afterInsert.json()).documents.some(item => item.document_id === 'b-poll'));
+  const etag2 = afterInsert.headers.get('etag');
+
+  await pool.query(`UPDATE branches SET data = data || '{"name":"Poll renamed"}'::jsonb, version = version + 1, updated_at = now() WHERE id='b-poll'`);
+  assert.equal((await read(etag2)).status, 200, 'an edit changes the fingerprint');
+  const etag3 = (await read()).headers.get('etag');
+
+  await pool.query(`DELETE FROM branches WHERE id='b-poll'`);
+  const afterDelete = await read(etag3);
+  assert.equal(afterDelete.status, 200, 'a delete changes the fingerprint');
+  assert.ok(!(await afterDelete.json()).documents.some(item => item.document_id === 'b-poll'));
+});
+
+test('browsers get current staff plus former staff who still matter; long-gone leavers stay in Reports', async () => {
+  const old = new Date(Date.now() - 400 * 86_400_000).toISOString();
+  await seed('employees', 'ws-current', { fullName: 'Current', status: 'Active' });
+  await seed('employees', 'ws-gone', { fullName: 'Gone', status: 'Terminated', separationDate: '2020-01-31' });
+  await seed('employees', 'ws-loan', { fullName: 'Owes loan', status: 'Terminated', separationDate: '2020-01-31' });
+  await seed('employees', 'ws-recent', { fullName: 'Left recently', status: 'Terminated', separationDate: new Date().toISOString().slice(0, 10) });
+  await pool.query(`UPDATE employees SET updated_at = $1 WHERE id IN ('ws-gone', 'ws-loan', 'ws-recent')`, [old]);
+  await pool.query(`INSERT INTO loan_advances(id, employee_id, status, data) VALUES('ws-loan-1', 'ws-loan', 'Active', '{"id":"ws-loan-1","employeeId":"ws-loan","status":"Active"}') ON CONFLICT (id) DO NOTHING`);
+  try {
+    const ids = (await (await fetch(`${base}/employees`, { headers: { 'x-test-user': 'u-hr' } })).json()).documents.map(item => item.document_id);
+    assert.ok(ids.includes('ws-current'), 'current staff');
+    assert.ok(ids.includes('ws-recent'), 'left within the window');
+    assert.ok(ids.includes('ws-loan'), 'former employee with an open loan');
+    assert.ok(!ids.includes('ws-gone'), 'long-gone leaver is not sent to browsers');
+  } finally {
+    await pool.query(`DELETE FROM loan_advances WHERE id='ws-loan-1'`);
+    await pool.query(`DELETE FROM employees WHERE id LIKE 'ws-%'`);
+  }
+});

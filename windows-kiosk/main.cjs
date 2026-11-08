@@ -21,6 +21,7 @@ const {
   biometricMatchEvidence, evaluateAttendanceTimes, policyShift, halfTimeCutoffFor, personalOutAllowanceFor, personalOutMinutes,
 } = require('./attendance-rules.cjs');
 const { FACE_IDENTIFY_THRESHOLD, FACE_VERIFY_THRESHOLD, FACE_STRONG_DISTANCE, normalizeFaceDescriptor, identifyFace } = require('./face-match.cjs');
+const { parseSetupCode, orderedPortalUrls, tryPortalUrls } = require('./setup-code.cjs');
 
 dotenv.config({ quiet: true });
 
@@ -174,6 +175,8 @@ function closeSplashWindow() {
   splashWindow = null;
 }
 
+// Default server address from kiosk.env. Only used until the kiosk is registered with a setup code, which carries the
+// client's own server address(es); see portalUrls() below.
 const kioskPortalUrl = (process.env.PORTAL_URL || process.env.VITE_API_BASE_URL || process.env.APP_URL || 'https://attendance.binishaqsoft.com').replace(/\/$/, '');
 
 // Offline-first: every server call gives up after this long, so a dead, slow or captive network can never stall
@@ -455,7 +458,16 @@ function readDeviceRegistration() {
   try {
     const saved = JSON.parse(fs.readFileSync(deviceKeyPath(), 'utf8'));
     const key = saved.encrypted ? safeStorage.decryptString(Buffer.from(saved.key, 'base64')) : saved.key;
-    return key ? { key, name: saved.name || '', registeredAt: saved.registeredAt || null, portalUrl: saved.portalUrl || '' } : null;
+    if (!key) return null;
+    // Files written before setup codes only have portalUrl; portalUrls / clientName are then empty.
+    return {
+      key,
+      name: saved.name || '',
+      registeredAt: saved.registeredAt || null,
+      portalUrl: saved.portalUrl || '',
+      portalUrls: Array.isArray(saved.portalUrls) ? saved.portalUrls.filter(url => typeof url === 'string' && url) : [],
+      clientName: saved.clientName || '',
+    };
   } catch {
     return null;
   }
@@ -471,11 +483,65 @@ function writeDeviceRegistration(registration) {
   fs.writeFileSync(deviceKeyPath(), JSON.stringify({ ...registration, key, encrypted }), { mode: 0o600 });
 }
 
+// ─── Server address (multi-client) ──────────────────────────────────────────
+// Each client runs its own server; a setup code gives the kiosk a primary and an optional fallback address. Every
+// server request goes through portalRequest(), which starts at the address that last answered and moves to the next
+// one only on a network-level failure (no HTTP status). HTTP 4xx/5xx come from a reachable server and are final.
+let activePortalUrl = null;
+// When every address failed at network level moments ago, the next requests try only the preferred one, so an
+// offline sync costs one timeout per request as before instead of one per address.
+let allPortalsFailedAt = 0;
+const PORTAL_ALL_FAILED_HOLD_MS = 60 * 1000;
+
+function portalUrls(registration = readDeviceRegistration()) {
+  return orderedPortalUrls(registration, kioskPortalUrl, activePortalUrl);
+}
+
+function currentPortalUrl(registration = readDeviceRegistration()) {
+  return portalUrls(registration)[0] || kioskPortalUrl;
+}
+
+function rememberPortalUrl(url, registration) {
+  if (!url) return;
+  const changed = activePortalUrl && activePortalUrl !== url;
+  activePortalUrl = url;
+  allPortalsFailedAt = 0;
+  if (changed) addEvent('sync', `Server address switched to ${url}`);
+  if (registration && registration.portalUrl !== url) {
+    try { writeDeviceRegistration({ ...registration, portalUrl: url }); } catch (error) { console.warn('[Kiosk] Could not save the working server address:', error.message); }
+  }
+}
+
+async function portalRequest(method, pathname, body) {
+  const registration = readDeviceRegistration();
+  const urls = portalUrls(registration);
+  const candidates = urls.length > 1 && Date.now() - allPortalsFailedAt < PORTAL_ALL_FAILED_HOLD_MS ? urls.slice(0, 1) : urls;
+  try {
+    const { url, result } = await tryPortalUrls(candidates, base => requestJson(method, `${base}${pathname}`, body));
+    rememberPortalUrl(url, registration);
+    return result;
+  } catch (error) {
+    if (error?.statusCode) rememberPortalUrl(error.portalUrl, registration);
+    else if (candidates.length === urls.length) allPortalsFailedAt = Date.now();
+    throw error;
+  }
+}
+
 function publicDeviceRegistration() {
   const registration = readDeviceRegistration();
+  const urls = portalUrls(registration);
+  const portalUrl = urls[0] || kioskPortalUrl;
+  // Primary = first address of the setup code (or the only address of an older registration).
+  const primaryUrl = registration?.portalUrls?.[0] || registration?.portalUrl || kioskPortalUrl;
+  const server = {
+    portalUrl,
+    portalUrls: urls,
+    primaryUrl,
+    usingFallback: urls.length > 1 && portalUrl !== primaryUrl,
+  };
   return registration
-    ? { registered: true, name: registration.name, registeredAt: registration.registeredAt, portalUrl: registration.portalUrl || kioskPortalUrl }
-    : { registered: false, portalUrl: kioskPortalUrl };
+    ? { registered: true, name: registration.name, registeredAt: registration.registeredAt, clientName: registration.clientName || '', ...server }
+    : { registered: false, clientName: '', ...server };
 }
 
 // IP camera credentials live only on the terminal: the password is encrypted with Windows DPAPI when available and is
@@ -494,14 +560,14 @@ function publicTerminal(terminal) {
   return { ...normalized, ipCameras: publicCameras(normalized.ipCameras) };
 }
 
-function requestJson(method, url, body) {
+function requestJson(method, url, body, { sendDeviceKey = true } = {}) {
   return new Promise((resolve, reject) => {
     const targetUrl = new URL(url);
     const transport = targetUrl.protocol === 'http:' ? http : https;
     const payload = body ? Buffer.from(JSON.stringify(body), 'utf8') : null;
     const headers = { 'Content-Type': 'application/json' };
     if (payload) headers['Content-Length'] = payload.length;
-    const deviceKey = readDeviceRegistration()?.key;
+    const deviceKey = sendDeviceKey ? readDeviceRegistration()?.key : null;
     if (deviceKey) headers['X-Kiosk-Token'] = deviceKey;
     const req = transport.request(targetUrl, { method, headers }, res => {
       lastServerContact = Date.now();
@@ -535,9 +601,8 @@ function requestJson(method, url, body) {
 }
 
 async function fetchFirestoreCollection(collectionName) {
-  const url = `${kioskPortalUrl}/api/kiosk/sync/${encodeURIComponent(collectionName)}`;
   try {
-    const result = await requestJson('GET', url, null);
+    const result = await portalRequest('GET', `/api/kiosk/sync/${encodeURIComponent(collectionName)}`, null);
     return (result?.documents || []).map(doc => ({ id: doc.id || doc.document_id, ...doc }));
   } catch (error) {
     console.warn(`[Kiosk Sync] PostgreSQL fetch failed for ${collectionName}:`, error.message);
@@ -557,8 +622,8 @@ async function fetchFirestoreCollectionByIds(collectionName, fieldName, values) 
 }
 
 async function putFirestoreDocument(collectionName, docId, data) {
-  const url = `${kioskPortalUrl}/api/kiosk/punch`;
-  return await requestJson('POST', url, { collection: collectionName, documentId: docId, data });
+  // documentId makes the punch idempotent on the server, so retrying it on the fallback address after a timeout is safe.
+  return await portalRequest('POST', '/api/kiosk/punch', { collection: collectionName, documentId: docId, data });
 }
 
 async function findEmployeeForCrossBranchCamera(code, _currentBranchId) {
@@ -1101,7 +1166,8 @@ ipcMain.handle('kiosk:get-state', async () => {
     assignedBranch: branches.find(branch => branch.id === store.terminal.branchId) || null,
     outReasons: activeCheckoutReasons(store),
     syncTarget: {
-      portalUrl: kioskPortalUrl,
+      portalUrl: currentPortalUrl(),
+      portalUrls: portalUrls(),
       backend: 'PostgreSQL',
       collections: ['employees', 'attendances', 'branches', 'departments', 'designations', 'biometricTemplates'],
     },
@@ -1293,28 +1359,72 @@ ipcMain.handle('kiosk:test-ip-camera', async (_event, payload) => {
 
 ipcMain.handle('kiosk:device-status', async () => publicDeviceRegistration());
 
+// Preview for the Settings dialog: who the code belongs to and which server it points at, before registering.
+ipcMain.handle('kiosk:parse-setup-code', async (_event, text) => {
+  try {
+    const { clientName, urls } = parseSetupCode(String(text || '').slice(0, 8192));
+    return { ok: true, clientName, urls };
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
+});
+
+// Two ways to register: a setup code from the client's server (recommended; it also tells the kiosk which server
+// address(es) to use), or a Kiosk Terminal account's email and password against the current server address.
 ipcMain.handle('kiosk:register-device', async (_event, payload) => {
-  const email = String(payload?.email || '').trim();
-  const password = String(payload?.password || '');
-  if (!email || !password) return { ok: false, error: 'Enter the kiosk account email and password.' };
+  const setupCodeText = String(payload?.setupCode || '').trim();
+  let setup = null;
+  let body;
+  if (setupCodeText) {
+    try {
+      setup = parseSetupCode(setupCodeText);
+    } catch (error) {
+      return { ok: false, error: error.message };
+    }
+  } else {
+    const email = String(payload?.email || '').trim();
+    const password = String(payload?.password || '');
+    if (!email || !password) return { ok: false, error: 'Enter the kiosk account email and password.' };
+    body = { email, password };
+  }
   const store = readStore();
   const terminalName = [store.terminal.id, store.terminal.location].filter(Boolean).join(' — ');
+  const previous = readDeviceRegistration();
+  const urls = setup ? setup.urls : portalUrls(previous);
   try {
-    const result = await requestJson('POST', `${kioskPortalUrl}/api/kiosk/register`, { email, password, terminalName });
+    // A setup code may point at a different client's server: never send it this PC's old device key.
+    const { url, result } = await tryPortalUrls(urls, base => (setup
+      ? requestJson('POST', `${base}/api/kiosk/register`, { setupToken: setup.token, terminalName }, { sendDeviceKey: false })
+      : requestJson('POST', `${base}/api/kiosk/register`, { ...body, terminalName })));
     if (!result?.deviceToken) return { ok: false, error: 'The server did not issue a device key.' };
-    writeDeviceRegistration({ key: result.deviceToken, name: result.name || terminalName, registeredAt: new Date().toISOString(), portalUrl: kioskPortalUrl });
-    addEvent('config', `Kiosk registered with the server as ${result.name || terminalName}`);
+    writeDeviceRegistration({
+      key: result.deviceToken,
+      name: result.name || terminalName,
+      registeredAt: new Date().toISOString(),
+      portalUrl: url,
+      portalUrls: urls,
+      clientName: setup ? setup.clientName : (previous?.clientName || ''),
+    });
+    activePortalUrl = url;
+    allPortalsFailedAt = 0;
+    const via = setup ? `setup code${setup.clientName ? ` for ${setup.clientName}` : ''}` : 'kiosk account';
+    addEvent('config', `Kiosk registered with ${url} as ${result.name || terminalName} (${via})`);
     return { ok: true, ...publicDeviceRegistration() };
   } catch (error) {
     addEvent('config', `Kiosk registration failed: ${error.statusCode ? `HTTP ${error.statusCode} ` : ''}${error.message || ''}`);
     if (error.statusCode === 429) return { ok: false, error: 'Too many sign-in attempts. Wait one minute, then try again.' };
-    if (!error.statusCode) return { ok: false, error: `Cannot reach the server at ${kioskPortalUrl} (${error.code || error.message}). Check the internet connection.` };
+    if (!error.statusCode) {
+      const tried = (error.triedUrls || urls).join(' or ');
+      return { ok: false, error: `Cannot reach the server at ${tried} (${error.code || error.message}). Check the internet connection.` };
+    }
     return { ok: false, error: error.message || 'Registration failed.' };
   }
 });
 
 ipcMain.handle('kiosk:unregister-device', async () => {
   writeDeviceRegistration(null);
+  activePortalUrl = null;
+  allPortalsFailedAt = 0;
   addEvent('config', 'Kiosk device key removed from this PC');
   return publicDeviceRegistration();
 });

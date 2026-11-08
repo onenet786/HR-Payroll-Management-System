@@ -1,0 +1,69 @@
+{
+  "source": "CyberAP head-office copy, SQL Server Express, 55 tables, 13.6 million rows",
+  "date": "7 November 2026",
+  "sourceSize": "4.6 GB",
+  "exportTime": "8 min (most of it resizing 3,952 photos)",
+  "packageSize": "199 MB",
+  "uploadTime": "about 3 min at 10 Mbit/s (8 MB pieces)",
+  "analysisTime": "about 1.5 min",
+  "importTime": "4 min",
+  "databaseSize": "1.6 GB (attendance 1.5 GB)",
+  "report": {
+    "archive": {
+      "rows": 19626
+    },
+    "company": {
+      "id": "co-ons",
+      "created": false
+    },
+    "masters": {
+      "branches": 9,
+      "holidays": 12,
+      "departments": 29,
+      "designations": 38
+    },
+    "warnings": [
+      "307 employees are active in CyberAP but have no working day since 2026-10-08. They are imported as Active; review the list and mark the ones who left as Terminated.",
+      "189 active employees have no valid CNIC in CyberAP; they are imported with the CNIC blank.",
+      "690 active employees have no real basic salary in CyberAP (1.0 placeholder); they are imported with salary 0 and must be updated before the first payroll.",
+      "3938 fingerprints are DigitalPersona One Touch templates. The kiosk reads U.are.U ANSI templates, so they are archived and staff must be enrolled again at the kiosk."
+    ],
+    "employees": {
+      "total": 4083,
+      "active": 767,
+      "inactive": 3316,
+      "withThumb": 3952,
+      "invalidCnic": 189,
+      "withFingerprint": 3938,
+      "withArchivePhoto": 3952,
+      "placeholderSalary": 690,
+      "existingCodeConflicts": 0,
+      "activeWithoutRecentAttendance": 307
+    },
+    "integrity": "ok",
+    "attendance": {
+      "last": "2026-11-07",
+      "first": "2010-08-16",
+      "byStatus": {
+        "Late": 307156,
+        "Absent": 446981,
+        "Holiday": 2360,
+        "Present": 777491,
+        "Half Day": 2331
+      },
+      "imported": 1536319,
+      "openBreaks": 11882,
+      "packageDays": 1698197,
+      "skippedEmpty": 96,
+      "correctedFromAbsent": 6197,
+      "skippedUnknownEmployee": 91,
+      "droppedTrailingAbsences": 161691,
+      "skippedExistingNewSystem": 0
+    },
+    "dataLimits": {
+      "attendanceTotal": 1536319,
+      "attendanceReadLimit": 100000,
+      "attendanceReadMonths": 1
+    }
+  }
+}

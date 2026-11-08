@@ -1,0 +1,133 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>OneNet Provider Console — Hosting Setup Guide</title><style>
+  @page { size: A4; margin: 16mm 15mm 18mm 15mm;
+    @bottom-left { content: "OneNet Provider Console · Hosting setup (aaPanel)"; font: 7.5pt system-ui, sans-serif; color: #94a3b8; }
+    @bottom-right { content: "Page " counter(page) " of " counter(pages); font: 7.5pt system-ui, sans-serif; color: #94a3b8; } }
+  @page :first { margin: 0; @bottom-left { content: none; } @bottom-right { content: none; } }
+  :root { --ink:#1e293b; --muted:#64748b; --line:#e2e8f0; --brand:#047857; --brand-dk:#064e3b; --soft:#ecfdf5; --warn:#b45309; --warnbg:#fffbeb; --bad:#b91c1c; --badbg:#fef2f2; --code:#0f172a; }
+  * { box-sizing: border-box; }
+  body { margin:0; font: 10pt/1.5 "Segoe UI", system-ui, -apple-system, sans-serif; color: var(--ink); -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  h1 { font-size: 19pt; margin: 0 0 4mm; color: var(--brand-dk); letter-spacing: -.01em; }
+  h2 { font-size: 13pt; margin: 7mm 0 2.5mm; color: var(--brand-dk); padding-bottom: 1.5mm; border-bottom: 1.5px solid var(--line); break-after: avoid; }
+  h3 { font-size: 10.5pt; margin: 5mm 0 1.5mm; break-after: avoid; }
+  p { margin: 0 0 2.5mm; } ul, ol { margin: 0 0 3mm; padding-left: 5.5mm; } li { margin-bottom: 1mm; }
+  code { font-family: "Cascadia Mono", Consolas, monospace; font-size: 8.8pt; background: #f1f5f9; padding: .2mm 1.2mm; border-radius: 1mm; }
+  pre { background: var(--code); color: #e2e8f0; padding: 3mm 4mm; border-radius: 2mm; font: 8.4pt/1.55 "Cascadia Mono", Consolas, monospace; white-space: pre-wrap; margin: 0 0 3.5mm; break-inside: avoid; }
+  pre .c { color: #6ee7b7; }
+  table { width: 100%; border-collapse: collapse; margin: 0 0 4mm; font-size: 9pt; }
+  th { text-align: left; background: #f8fafc; color: var(--muted); font-weight: 600; font-size: 8pt; text-transform: uppercase; letter-spacing: .04em; }
+  th, td { padding: 1.6mm 2.5mm; border-bottom: 1px solid var(--line); vertical-align: top; } tr { break-inside: avoid; }
+  .page { break-before: page; }
+  .note, .warn, .bad { border-left: 3px solid var(--brand); background: var(--soft); padding: 2.5mm 3.5mm; border-radius: 0 2mm 2mm 0; margin: 0 0 4mm; break-inside: avoid; }
+  .warn { border-color: var(--warn); background: var(--warnbg); } .bad { border-color: var(--bad); background: var(--badbg); }
+  .note b:first-child, .warn b:first-child, .bad b:first-child { display: block; margin-bottom: .8mm; }
+  .steps { counter-reset: s; list-style: none; padding: 0; }
+  .steps > li { counter-increment: s; position: relative; padding-left: 10mm; margin-bottom: 2.5mm; break-inside: avoid; }
+  .steps > li::before { content: counter(s); position: absolute; left: 0; top: .2mm; width: 6.5mm; height: 6.5mm; border-radius: 50%; background: var(--brand); color: #fff; font-weight: 700; font-size: 9pt; display: grid; place-items: center; }
+  .check { padding-left: 6mm; } .check li { list-style: none; position: relative; }
+  .check li::before { content: ""; position: absolute; left: -6mm; top: .9mm; width: 3.2mm; height: 3.2mm; border: 1.3px solid var(--muted); border-radius: .6mm; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 5mm; } .card { border: 1px solid var(--line); border-radius: 2mm; padding: 3mm 4mm; break-inside: avoid; } .card h3 { margin-top: 0; }
+  figure { margin: 2mm 0 5mm; break-inside: avoid; } figure img { width: 100%; border: 1px solid var(--line); border-radius: 2mm; box-shadow: 0 1mm 3mm rgba(15,23,42,.08); }
+  figcaption { font-size: 8.5pt; color: var(--muted); margin-top: 1.2mm; text-align: center; }
+  .toc { columns: 2; column-gap: 10mm; } .toc li { margin-bottom: 1.2mm; break-inside: avoid; }
+  .flow { display: flex; gap: 2mm; margin: 2mm 0 5mm; } .flow div { flex: 1; background: var(--soft); border: 1px solid #a7f3d0; border-radius: 2mm; padding: 2.5mm; font-size: 8.5pt; text-align: center; } .flow b { display: block; color: var(--brand-dk); font-size: 9.5pt; margin-bottom: .8mm; }
+  .cover { height: 297mm; padding: 26mm 22mm; color: #fff; background: linear-gradient(140deg, #064e3b 0%, #065f46 38%, #0f172a 100%); display: flex; flex-direction: column; }
+  .cover .tag { display: inline-block; align-self: flex-start; background: #10b981; color: #fff; font-weight: 700; font-size: 8.5pt; letter-spacing: .08em; text-transform: uppercase; padding: 1.2mm 3mm; border-radius: 1mm; }
+  .cover h1 { color: #fff; font-size: 32pt; line-height: 1.12; margin: 12mm 0 5mm; } .cover .sub { font-size: 12.5pt; color: #a7f3d0; max-width: 150mm; }
+  .cover .meta { margin-top: auto; display: grid; grid-template-columns: repeat(3, 1fr); gap: 4mm; border-top: 1px solid rgba(255,255,255,.18); padding-top: 6mm; font-size: 9pt; color: #cbd5e1; } .cover .meta b { display: block; color: #fff; font-size: 10.5pt; }
+  .cover .flow div { background: rgba(255,255,255,.07); border-color: rgba(255,255,255,.16); color: #e2e8f0; } .cover .flow b { color: #6ee7b7; }
+</style></head><body>
+<section class="cover">
+  <span class="tag">OneNet · Hosting setup</span>
+  <h1>Provider Console<br>Hosting Setup Guide</h1>
+  <p class="sub">Set up your Ubuntu 24.04 + aaPanel server once to host many HR & Payroll clients: wildcard domain and certificate, PostgreSQL, releases, the console, the aaPanel API, scheduled tasks and off-server backups.</p>
+  <div class="flow" style="margin-top:16mm"><div><b>1 · DNS + SSL</b>*.binishaqsoft.com, once</div><div><b>2 · Database</b>PostgreSQL in aaPanel</div><div><b>3 · Code</b>Release folder + console</div><div><b>4 · Automate</b>aaPanel API, Cron, backups</div></div>
+  <div class="meta"><div><b>Product</b>OneNet Provider Console</div><div><b>Server</b>Ubuntu 24.04 · aaPanel</div><div><b>Issued</b>07 November 2026</div></div>
+</section>
+<section class="page"><h1>Contents</h1><ol class="toc"><li>What you are building</li><li>Requirements and sizing</li><li>Step 1 — Wildcard DNS</li><li>Step 2 — Wildcard certificate</li><li>Step 3 — PostgreSQL</li><li>Step 4 — Folders</li><li>Step 5 — Install the first release</li><li>Step 6 — The console project</li><li>Step 7 — First owner and sign-in</li><li>Step 8 — aaPanel API</li><li>Step 9 — Template database</li><li>Step 10 — Scheduled tasks</li><li>Step 11 — Off-server backups</li><li>Step 12 — Firewall</li><li>Step 13 — First test client</li><li>Install a new release</li><li>Kiosk and mobile app builds</li><li>Troubleshooting</li></ol>
+
+<h2>What you are building</h2>
+<table><tr><th style="width:34%">Address</th><th style="width:30%">Served by</th><th>aaPanel</th></tr><tr><td><code>admin.binishaqsoft.com</code></td><td>Provider Console (port 8200)</td><td>Node project <code>provider</code>, directory /www/hr-provider</td></tr><tr><td><code>&lt;client&gt;.binishaqsoft.com</code></td><td>That client's installation (port 9101, 9102, …)</td><td>Node project <code>hr-&lt;client&gt;</code>, created by the console</td></tr><tr><td><code>hr.clientcompany.com</code> (optional)</td><td>Same client installation</td><td>Extra domain on its project, Let's Encrypt certificate</td></tr></table>
+<p>Everything is done in aaPanel: Node versions in its Node version manager, sites as aaPanel Node projects, domains through Mapping, HTTPS through its SSL, databases on its Databases page and scheduled tasks in its Cron. The existing <code>attendance.binishaqsoft.com</code> keeps running as it is.</p>
+
+<h2>Requirements and sizing</h2>
+<table><tr><th style="width:22%">Item</th><th>Needed</th></tr><tr><td>Server</td><td>Ubuntu 24.04 with aaPanel (as now). Public IP; ports 80 and 443 open.</td></tr><tr><td>Node.js</td><td>v20 LTS installed with aaPanel → App Store → Node.js version manager.</td></tr><tr><td>PostgreSQL</td><td>15 or 16 from aaPanel → App Store (PostgreSQL manager).</td></tr><tr><td>Git</td><td><code>git</code> (present on Ubuntu; else aaPanel Terminal: <code>apt install git</code>).</td></tr><tr><td>Memory</td><td>About 200–250 MB RAM per client process + 300 MB for PostgreSQL per few clients. 8 GB RAM ≈ 20–25 clients.</td></tr><tr><td>Disk</td><td>About 1.5 GB per 1 million attendance days, plus 14 backups per client and one release (~600 MB) per version.</td></tr></table>
+<div class="warn"><b>Large clients</b>A client with 500+ active staff makes manager browsers reload attendance often. Enable gzip for JSON in nginx (aaPanel → Website → site → Config: <code>gzip_types application/json</code>) and watch CPU and bandwidth on the dashboard.</div>
+
+<h2>Step 1 — Wildcard DNS</h2>
+<p>At the DNS provider of <code>binishaqsoft.com</code> create (once):</p>
+<table><tr><th>Type</th><th>Name</th><th>Value</th></tr><tr><td>A</td><td><code>*</code> (i.e. *.binishaqsoft.com)</td><td>your server IP</td></tr><tr><td>A</td><td><code>admin</code></td><td>your server IP (optional: the wildcard covers it)</td></tr></table>
+<p>Existing records such as <code>attendance</code> and <code>mcs</code> keep working: a specific record always wins over the wildcard.</p>
+
+<h2>Step 2 — Wildcard certificate</h2>
+<ol class="steps"><li>aaPanel → Website → add the console site first (Step 6) or any site on the domain, then → <b>SSL</b> → <b>Let's Encrypt</b>.</li><li>Choose <b>DNS verification</b> with your DNS provider's API (e.g. Cloudflare: API token), and request <code>*.binishaqsoft.com</code> and <code>binishaqsoft.com</code>.</li><li>aaPanel stores the files under <code>/www/server/panel/vhost/cert/&lt;site&gt;/</code> (<code>fullchain.pem</code>, <code>privkey.pem</code>) and renews them automatically. Note the exact paths for <code>WILDCARD_CERT_PATH</code> and <code>WILDCARD_KEY_PATH</code> (Step 6).</li></ol>
+<p>Client domains (their own) do not use this certificate; the console requests a Let's Encrypt certificate per domain.</p>
+
+<h2>Step 3 — PostgreSQL</h2>
+<ol class="steps"><li>aaPanel → Databases → <b>PgSQL</b> → Add database: name <code>hr_provider</code>, user <code>provider</code>, a strong password. This is the console's own database (no HR data).</li><li>Note the PostgreSQL administrator password (PgSQL → root password / postgres). The console uses it to create one role and one database per client: <code>PG_ADMIN_URL</code>.</li><li>Find the PostgreSQL tools folder: aaPanel → Terminal → <code>ls /www/server/pgsql/bin</code> (it must contain <code>pg_dump</code> and <code>pg_restore</code>): <code>PG_BIN_DIR</code>.</li></ol>
+
+<h2>Step 4 — Folders</h2>
+<pre>mkdir -p /www/hr-releases /www/hr-clients /www/hr-backups /www/hr-provider
+chown -R www:www /www/hr-releases /www/hr-clients /www/hr-backups /www/hr-provider
+chmod 750 /www/hr-clients /www/hr-provider && chmod 700 /www/hr-backups</pre>
+
+<h2>Step 5 — Install the first release</h2>
+<p>A release is one complete copy of the application. Name it by date, e.g. <code>2026.11.1</code>. In aaPanel → Terminal (use the npm of the aaPanel Node version, e.g. <code>/www/server/nodejs/v20.18.0/bin/npm</code>, if <code>npm</code> is not on the PATH):</p>
+<pre>cd /www/hr-releases
+git clone &lt;your repository&gt; 2026.11.1      <span class="c"># or upload a zip with aaPanel → Files and extract</span>
+cd 2026.11.1
+git checkout &lt;tag or branch&gt;
+npm ci
+npm run build                 <span class="c"># the HR web app (dist/)</span>
+npm run provider:build        <span class="c"># the console web app (provider/dist/)</span>
+ln -sfn /www/hr-releases/2026.11.1 /www/hr-releases/current
+chown -R www:www /www/hr-releases</pre>
+<div class="bad"><b>No server address in the build</b>Do not place a <code>.env.local</code> with <code>VITE_API_BASE_URL</code> in a release folder: hosted builds must use relative addresses so one build serves every client domain.</div>
+
+<h2>Step 6 — The console project</h2>
+<p>Create <code>/www/hr-provider/.env</code> from <code>provider/.env.example</code> of the release (aaPanel → Files), mode 600:</p>
+<table><tr><th style="width:38%">Setting</th><th>Value</th></tr><tr><td>PROVIDER_PUBLIC_URL</td><td><code>https://admin.binishaqsoft.com</code></td></tr><tr><td>PROVIDER_DATABASE_URL</td><td><code>postgresql://provider:&lt;password&gt;@127.0.0.1:5432/hr_provider</code></td></tr><tr><td>PG_ADMIN_URL</td><td><code>postgresql://postgres:&lt;admin password&gt;@127.0.0.1:5432/postgres</code></td></tr><tr><td>PG_BIN_DIR</td><td>from Step 3, e.g. <code>/www/server/pgsql/bin</code></td></tr><tr><td>MFA_ENCRYPTION_KEY</td><td>output of <code>openssl rand -base64 32</code> (keep a copy off the server)</td></tr><tr><td>BASE_DOMAIN / SERVER_IP</td><td><code>binishaqsoft.com</code> / your public IP</td></tr><tr><td>CLIENTS_ROOT / RELEASES_ROOT / BACKUP_ROOT</td><td><code>/www/hr-clients</code>, <code>/www/hr-releases</code>, <code>/www/hr-backups</code></td></tr><tr><td>WILDCARD_CERT_PATH / WILDCARD_KEY_PATH</td><td>from Step 2</td></tr><tr><td>AAPANEL_*</td><td>Step 8 (can stay empty at first)</td></tr><tr><td>SMTP_*</td><td>default mail settings copied into each new client</td></tr></table>
+<p>Create <code>/www/hr-provider/start.cjs</code>:</p>
+<pre>process.chdir(__dirname);
+require('/www/hr-releases/current/provider/server.cjs');</pre>
+<ol class="steps"><li>aaPanel → Website → <b>Node Project</b> → Add: name <code>provider</code>, directory <code>/www/hr-provider</code>, startup file <code>start.cjs</code>, port <code>8200</code>, Node v20, run user <code>www</code>, start with system.</li><li>Domain (Mapping): <code>admin.binishaqsoft.com</code> → Save → Start.</li><li>SSL: deploy the wildcard certificate (or Let's Encrypt for admin.binishaqsoft.com) and switch on <b>Force HTTPS</b>.</li><li>Recommended: restrict the site to OneNet IP addresses (site → Config / access restriction).</li></ol>
+
+<h2>Step 7 — First owner and sign-in</h2>
+<pre>cd /www/hr-provider
+node /www/hr-releases/current/provider/cli.cjs create-owner you@onenet.pk "Your Name"</pre>
+<p>It prints a temporary password. Open <code>https://admin.binishaqsoft.com</code>, sign in, scan the QR code with your authenticator app and confirm the code. Add a second owner under Provider users.</p>
+
+<h2>Step 8 — aaPanel API</h2>
+<ol class="steps"><li>aaPanel → Settings → <b>API interface</b> → enable.</li><li>IP whitelist: add <code>127.0.0.1</code> and the server's own IP.</li><li>Copy the API key into <code>AAPANEL_API_KEY</code>; set <code>AAPANEL_URL=https://127.0.0.1:&lt;aaPanel port&gt;</code> and <code>AAPANEL_INSECURE_TLS=true</code> (aaPanel's own certificate). Set <code>AAPANEL_NODE_VERSION</code> to the exact version name shown in the Node version manager.</li><li>Restart the <code>provider</code> project. Server &amp; releases must show <b>Connected</b>.</li></ol>
+<div class="warn"><b>Test it once with a throw-away client</b>aaPanel versions differ in their API. Create a test client: if a step (Node project, domain, certificate) does not work through the API, it turns into a checklist with exact values, so setup still completes. Tell OneNet development which step needed manual work.</div>
+
+<h2>Step 9 — Template database</h2>
+<p>Console → Server &amp; releases → <b>Create template</b> (or <code>cd /www/hr-provider &amp;&amp; node /www/hr-releases/current/provider/cli.cjs refresh-template</code>). It takes a few seconds.</p>
+
+<h2>Step 10 — Scheduled tasks</h2>
+<p>aaPanel → <b>Cron</b> → Add task → type <b>Shell script</b>, run as root or www:</p>
+<table><tr><th style="width:22%">Name</th><th style="width:16%">Schedule</th><th>Script</th></tr><tr><td>HR provider nightly</td><td>Daily 02:00</td><td><code>cd /www/hr-provider &amp;&amp; /www/server/nodejs/v20.18.0/bin/node /www/hr-releases/current/provider/cli.cjs nightly</code></td></tr><tr><td>HR provider health</td><td>Every 10 minutes</td><td><code>cd /www/hr-provider &amp;&amp; /www/server/nodejs/v20.18.0/bin/node /www/hr-releases/current/provider/cli.cjs health</code></td></tr></table>
+<p>Switch on aaPanel's notification for failed tasks.</p>
+
+<h2>Step 11 — Off-server backups</h2>
+<ol class="steps"><li>aaPanel → App Store: install a cloud storage plugin (S3-compatible, Google Drive, FTP…) and connect it.</li><li>aaPanel → Cron → <b>Backup directory</b>: <code>/www/hr-backups</code>, daily 03:00, to that storage, keep 14.</li><li>aaPanel → Cron → <b>Backup database</b>: <code>hr_provider</code>, daily.</li><li>Keep an encrypted copy of <code>/www/hr-provider/.env</code> and of every <code>/www/hr-clients/*/.env</code> off the server (they hold the keys that decrypt backups).</li></ol>
+
+<h2>Step 12 — Firewall</h2>
+<p>aaPanel → Security: allow only 22 (SSH, ideally restricted), 80, 443 and the aaPanel port (restricted to your IP). Never open 8200 or 9101+: the applications listen on 127.0.0.1 and are published by nginx.</p>
+
+<h2>Step 13 — First test client</h2>
+<ol class="steps"><li>Console → New client → name "OneNet Test", address <code>test1</code> (any free name), your own email, Lite edition.</li><li>Follow the job to the end (Mark done for any manual step).</li><li>Open <code>https://test1.binishaqsoft.com</code>, sign in with the temporary password, change it.</li><li>Create a kiosk setup code and register a kiosk; connect the mobile app with the connection code.</li><li>Back up now; check the dashboard shows the client as Up. Archive the test client when done.</li></ol>
+
+<h2>Install a new release</h2>
+<pre>cd /www/hr-releases
+git clone &lt;your repository&gt; 2026.12.1 &amp;&amp; cd 2026.12.1 &amp;&amp; git checkout &lt;tag&gt;
+npm ci &amp;&amp; npm run build &amp;&amp; npm run provider:build
+chown -R www:www /www/hr-releases/2026.12.1</pre>
+<p>Then in the console: Refresh template → switch one client → then the others (Admin Guide, "Rolling out a new release"). To upgrade the console itself: <code>ln -sfn /www/hr-releases/2026.12.1 /www/hr-releases/current</code> and restart the <code>provider</code> project. Old release folders can be deleted once no client uses them.</p>
+
+<h2>Kiosk and mobile app builds</h2>
+<ul><li><b>Kiosk:</b> build the Windows kiosk from the same release (<code>npm run kiosk:build</code>). A kiosk built from this release (or later) registers with setup codes and switches to the fallback address automatically; older kiosks still register with a Kiosk Terminal account. Leave PORTAL_URL empty or set to a default; the setup code decides the server.</li><li><b>Mobile app:</b> build once without <code>VITE_API_BASE_URL</code>. On first launch it asks for the company connection code, so one app in the Play Store serves every client.</li></ul>
+
+<h2>Troubleshooting</h2>
+<table><tr><th style="width:40%">Problem</th><th>Fix</th></tr><tr><td>Console page: "Provider Console web files are missing"</td><td><code>npm run provider:build</code> was not run in the release used by /www/hr-releases/current.</td></tr><tr><td>Console does not start: "configuration is missing"</td><td>/www/hr-provider/.env missing a value (PROVIDER_DATABASE_URL, PG_ADMIN_URL, MFA_ENCRYPTION_KEY), or start.cjs does not chdir to /www/hr-provider.</td></tr><tr><td>Template: "permission denied to create database"</td><td>PG_ADMIN_URL must be the PostgreSQL administrator, not the provider user.</td></tr><tr><td>New client site shows 502</td><td>Its Node project is stopped or crashed: aaPanel → Node Project → hr-&lt;client&gt; → log. Common: Node version mismatch with AAPANEL_NODE_VERSION.</td></tr><tr><td>https://&lt;client&gt;.binishaqsoft.com certificate error</td><td>The wildcard certificate was not deployed to the project (SSL step) or has not renewed: aaPanel → site → SSL.</td></tr><tr><td>Server &amp; releases: aaPanel "IP not in whitelist"</td><td>Add 127.0.0.1 and the server IP to the API whitelist.</td></tr><tr><td>Release shows "not ready"</td><td><code>npm ci</code> or <code>npm run build</code> did not finish in that folder.</td></tr></table>
+
+</body></html>

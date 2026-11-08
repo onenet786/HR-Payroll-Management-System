@@ -1,0 +1,104 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>OneNet Provider Console — Admin Guide</title><style>
+  @page { size: A4; margin: 16mm 15mm 18mm 15mm;
+    @bottom-left { content: "OneNet Provider Console · Admin guide"; font: 7.5pt system-ui, sans-serif; color: #94a3b8; }
+    @bottom-right { content: "Page " counter(page) " of " counter(pages); font: 7.5pt system-ui, sans-serif; color: #94a3b8; } }
+  @page :first { margin: 0; @bottom-left { content: none; } @bottom-right { content: none; } }
+  :root { --ink:#1e293b; --muted:#64748b; --line:#e2e8f0; --brand:#047857; --brand-dk:#064e3b; --soft:#ecfdf5; --warn:#b45309; --warnbg:#fffbeb; --bad:#b91c1c; --badbg:#fef2f2; --code:#0f172a; }
+  * { box-sizing: border-box; }
+  body { margin:0; font: 10pt/1.5 "Segoe UI", system-ui, -apple-system, sans-serif; color: var(--ink); -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  h1 { font-size: 19pt; margin: 0 0 4mm; color: var(--brand-dk); letter-spacing: -.01em; }
+  h2 { font-size: 13pt; margin: 7mm 0 2.5mm; color: var(--brand-dk); padding-bottom: 1.5mm; border-bottom: 1.5px solid var(--line); break-after: avoid; }
+  h3 { font-size: 10.5pt; margin: 5mm 0 1.5mm; break-after: avoid; }
+  p { margin: 0 0 2.5mm; } ul, ol { margin: 0 0 3mm; padding-left: 5.5mm; } li { margin-bottom: 1mm; }
+  code { font-family: "Cascadia Mono", Consolas, monospace; font-size: 8.8pt; background: #f1f5f9; padding: .2mm 1.2mm; border-radius: 1mm; }
+  pre { background: var(--code); color: #e2e8f0; padding: 3mm 4mm; border-radius: 2mm; font: 8.4pt/1.55 "Cascadia Mono", Consolas, monospace; white-space: pre-wrap; margin: 0 0 3.5mm; break-inside: avoid; }
+  pre .c { color: #6ee7b7; }
+  table { width: 100%; border-collapse: collapse; margin: 0 0 4mm; font-size: 9pt; }
+  th { text-align: left; background: #f8fafc; color: var(--muted); font-weight: 600; font-size: 8pt; text-transform: uppercase; letter-spacing: .04em; }
+  th, td { padding: 1.6mm 2.5mm; border-bottom: 1px solid var(--line); vertical-align: top; } tr { break-inside: avoid; }
+  .page { break-before: page; }
+  .note, .warn, .bad { border-left: 3px solid var(--brand); background: var(--soft); padding: 2.5mm 3.5mm; border-radius: 0 2mm 2mm 0; margin: 0 0 4mm; break-inside: avoid; }
+  .warn { border-color: var(--warn); background: var(--warnbg); } .bad { border-color: var(--bad); background: var(--badbg); }
+  .note b:first-child, .warn b:first-child, .bad b:first-child { display: block; margin-bottom: .8mm; }
+  .steps { counter-reset: s; list-style: none; padding: 0; }
+  .steps > li { counter-increment: s; position: relative; padding-left: 10mm; margin-bottom: 2.5mm; break-inside: avoid; }
+  .steps > li::before { content: counter(s); position: absolute; left: 0; top: .2mm; width: 6.5mm; height: 6.5mm; border-radius: 50%; background: var(--brand); color: #fff; font-weight: 700; font-size: 9pt; display: grid; place-items: center; }
+  .check { padding-left: 6mm; } .check li { list-style: none; position: relative; }
+  .check li::before { content: ""; position: absolute; left: -6mm; top: .9mm; width: 3.2mm; height: 3.2mm; border: 1.3px solid var(--muted); border-radius: .6mm; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 5mm; } .card { border: 1px solid var(--line); border-radius: 2mm; padding: 3mm 4mm; break-inside: avoid; } .card h3 { margin-top: 0; }
+  figure { margin: 2mm 0 5mm; break-inside: avoid; } figure img { width: 100%; border: 1px solid var(--line); border-radius: 2mm; box-shadow: 0 1mm 3mm rgba(15,23,42,.08); }
+  figcaption { font-size: 8.5pt; color: var(--muted); margin-top: 1.2mm; text-align: center; }
+  .toc { columns: 2; column-gap: 10mm; } .toc li { margin-bottom: 1.2mm; break-inside: avoid; }
+  .flow { display: flex; gap: 2mm; margin: 2mm 0 5mm; } .flow div { flex: 1; background: var(--soft); border: 1px solid #a7f3d0; border-radius: 2mm; padding: 2.5mm; font-size: 8.5pt; text-align: center; } .flow b { display: block; color: var(--brand-dk); font-size: 9.5pt; margin-bottom: .8mm; }
+  .cover { height: 297mm; padding: 26mm 22mm; color: #fff; background: linear-gradient(140deg, #064e3b 0%, #065f46 38%, #0f172a 100%); display: flex; flex-direction: column; }
+  .cover .tag { display: inline-block; align-self: flex-start; background: #10b981; color: #fff; font-weight: 700; font-size: 8.5pt; letter-spacing: .08em; text-transform: uppercase; padding: 1.2mm 3mm; border-radius: 1mm; }
+  .cover h1 { color: #fff; font-size: 32pt; line-height: 1.12; margin: 12mm 0 5mm; } .cover .sub { font-size: 12.5pt; color: #a7f3d0; max-width: 150mm; }
+  .cover .meta { margin-top: auto; display: grid; grid-template-columns: repeat(3, 1fr); gap: 4mm; border-top: 1px solid rgba(255,255,255,.18); padding-top: 6mm; font-size: 9pt; color: #cbd5e1; } .cover .meta b { display: block; color: #fff; font-size: 10.5pt; }
+  .cover .flow div { background: rgba(255,255,255,.07); border-color: rgba(255,255,255,.16); color: #e2e8f0; } .cover .flow b { color: #6ee7b7; }
+</style></head><body>
+<section class="cover">
+  <span class="tag">OneNet · Admin guide</span>
+  <h1>Provider Console<br>Admin Guide</h1>
+  <p class="sub">For the console owner: security model, provider users, template database, release roll-out, backup and restore, licensing policy, client lifecycle and troubleshooting.</p>
+  
+  <div class="meta"><div><b>Product</b>OneNet Provider Console</div><div><b>Server</b>Ubuntu 24.04 · aaPanel</div><div><b>Issued</b>07 November 2026</div></div>
+</section>
+<section class="page"><h1>Contents</h1><ol class="toc"><li>How the hosting works</li><li>Security model</li><li>Provider users</li><li>Server, template database and releases</li><li>Rolling out a new release</li><li>Backups and restoring a client</li><li>Licences and suspension</li><li>Client data import (self-service)</li><li>Client lifecycle: archive and delete</li><li>Monitoring and scheduled tasks</li><li>Self-hosted clients</li><li>Security checklist</li><li>Troubleshooting</li></ol>
+
+<h2>How the hosting works</h2>
+<table><tr><th style="width:26%">Part</th><th style="width:34%">Where</th><th>Notes</th></tr><tr><td>Application code (a "release")</td><td><code>/www/hr-releases/&lt;release&gt;/</code></td><td>One complete copy per version, shared by every client on it. No copying per client.</td></tr><tr><td>A client</td><td><code>/www/hr-clients/&lt;name&gt;/</code></td><td><code>.env</code> (settings and keys, mode 600), <code>start.cjs</code>, <code>release.json</code>, <code>documents/</code>, <code>imports/</code>.</td></tr><tr><td>Its database</td><td>PostgreSQL <code>hr_&lt;name&gt;</code></td><td>Own login role. Copied from the template database.</td></tr><tr><td>Its site</td><td>aaPanel Node project <code>hr-&lt;name&gt;</code></td><td>Port from 9101 up, bound to 127.0.0.1; nginx publishes it on 443.</td></tr><tr><td>Its backups</td><td><code>/www/hr-backups/&lt;name&gt;/</code></td><td>Encrypted with the client's own BACKUP_ENCRYPTION_KEY.</td></tr><tr><td>The console</td><td><code>/www/hr-provider/</code> + database <code>hr_provider</code></td><td>Its own aaPanel Node project (port 8200) at admin.binishaqsoft.com.</td></tr></table>
+<p>Every client has its own database: one client's data can never appear in another's. Backups, restores, moving a client to its own server and deleting a client's data at contract end each concern one database.</p>
+
+<h2>Security model</h2>
+<ul><li><b>Data boundary:</b> the console writes only installation settings into a client database (edition, licence, domains, the import switch, the company record, the first administrator and kiosk setup codes) and reads only counts for health. It never reads or changes employees, attendance or payroll.</li><li><b>Sign-in:</b> email + password + authenticator app (mandatory). 5 wrong passwords lock the account for 15 minutes. Sessions last 12 hours (PROVIDER_SESSION_HOURS) in an httpOnly, SameSite=Strict cookie; every change also needs the console's request header, which blocks cross-site requests.</li><li><b>Secrets:</b> authenticator secrets and one-time passwords are encrypted with MFA_ENCRYPTION_KEY. A client's temporary administrator password is stored encrypted only until the operator presses "I have handed it over". Database passwords live only in the client's .env.</li><li><b>Hosted installations</b> cannot be claimed from the web (the first-admin setup screen is switched off) and the vendor console with the daily password is disabled (VENDOR_CONSOLE_DISABLED=true).</li><li><b>Audit:</b> every action is written to the activity log with the person and their IP address; the client's own audit log also records kiosk codes, data imports and licence changes.</li></ul>
+
+<h2>Provider users</h2>
+<figure><img src="assets/provider/users.png" alt="Provider users: roles, authenticator status, reset and disable."><figcaption>Provider users: roles, authenticator status, reset and disable.</figcaption></figure>
+<ul><li>Add a user with a temporary password (12+ characters) and give it in person; they set up the authenticator at first sign-in.</li><li><b>Reset authenticator</b> when someone loses their phone: they enrol again at the next sign-in.</li><li><b>Disable</b> ends every session of that user at once. You cannot disable yourself or remove your own owner role; keep at least two owners.</li><li>The first owner is created on the server: <code>node …/provider/cli.cjs create-owner you@onenet.pk "Your Name"</code> (see the Hosting Setup Guide).</li></ul>
+
+<h2>Server, template database and releases</h2>
+<figure><img src="assets/provider/settings.png" alt="Server &amp; releases: hosting settings, aaPanel connection, template database, releases and scheduled tasks."><figcaption>Server & releases: hosting settings, aaPanel connection, template database, releases and scheduled tasks.</figcaption></figure>
+<p><b>aaPanel API:</b> when connected, creating projects, mapping domains and issuing certificates is automatic. When it is not (or an aaPanel version answers differently), those steps become checklists with exact values; nothing fails silently. Always try a new aaPanel version with a throw-away client first.</p>
+<p><b>Template database:</b> new client databases are copied from it. Refresh it (owner only) after installing a new release, so new clients start on the newest structure.</p>
+
+<h2>Rolling out a new release</h2>
+<ol class="steps"><li>Install the release folder on the server (Hosting Setup Guide, "Install a new release"). It appears under Releases as <b>ready</b> once <code>node_modules</code> and the built web files exist.</li><li>Server & releases → <b>Refresh template</b>.</li><li>Pick one client (ideally your own test client) → Releases → <b>Switch release</b>. The job backs up, switches, migrates, restarts and checks.</li><li>Check that client in the browser and on a kiosk. Then switch the other clients, a few at a time.</li><li>To go back: switch the client to the previous release. Database changes are designed to be backward compatible; if one is not, restore the backup taken by the switch job.</li><li>Upgrade the console itself: point <code>/www/hr-releases/current</code> at the new release and restart the <code>provider</code> project in aaPanel.</li></ol>
+
+<h2>Backups and restoring a client</h2>
+<p>Nightly backups run from aaPanel Cron (<code>cli.cjs nightly</code>); each is encrypted with the client's own key and the newest 14 are kept (BACKUP_RETENTION_COUNT in the client's .env). aaPanel's directory backup copies <code>/www/hr-backups</code> off the server.</p>
+<div class="warn"><b>Keep the keys off the server</b>A backup can only be restored with the BACKUP_ENCRYPTION_KEY from that client's .env. Keep an encrypted copy of every client's .env (or at least BACKUP_ENCRYPTION_KEY and MFA_ENCRYPTION_KEY) somewhere other than this server.</div>
+<h3>Restore a client backup</h3>
+<ol class="steps"><li>aaPanel → Website → Node Project → <code>hr-&lt;name&gt;</code> → <b>Stop</b>.</li><li>aaPanel → Terminal:</li></ol>
+<pre>cd /www/hr-clients/&lt;name&gt;
+CONFIRM_DATABASE_RESTORE=RESTORE_HR_PAYROLL_DATABASE \
+  node /www/hr-releases/$(node -p "require('./release.json').release")/scripts/postgres-restore.cjs \
+  /www/hr-backups/&lt;name&gt;/hr-payroll-&lt;date&gt;.dump.enc</pre>
+<ol class="steps"><li>Start the project again in aaPanel and check the client. Record the restore in the client's notes.</li></ol>
+<p>The restore replaces the whole client database with the backup. Anything entered after the backup is lost, so agree the time with the client.</p>
+
+<h2>Licences and suspension</h2>
+<table><tr><th style="width:16%">State</th><th style="width:34%">When</th><th>Effect</th></tr><tr><td>Active</td><td>Before the last 14 days</td><td>Normal.</td></tr><tr><td>Expiring</td><td>Last 14 days</td><td>Users see a yellow warning with the end date.</td></tr><tr><td>Grace</td><td>After the end date, for the grace days</td><td>Red warning with the days left; everything still works.</td></tr><tr><td>Suspended</td><td>Grace over (automatic) or "Suspend now"</td><td>Nobody can sign in; your message is shown. Kiosks keep recording punches. Resume restores access within 15 seconds.</td></tr></table>
+<p>The <b>staff limit</b> stops a client making more employees active than their plan allows; existing data is never removed. Renewing = new end date + Save.</p>
+
+<h2>Client data import (self-service)</h2>
+<p>When the switch is on, the client's Super Admin (or a user with the "Data import" permission) gets <b>Data Import</b> in their menu and moves their CyberAP data without OneNet. Safety rails in the application:</p>
+<ul><li>Analyse first (no changes). The import never overwrites attendance the new system already recorded.</li><li>"Remove all current data first" needs the typed confirmation <b>and</b> the user's password, and takes a full encrypted backup automatically before deleting anything; without working backups the wipe is refused.</li><li>Once the client is live (a payroll paid or an attendance month locked) the wipe is refused permanently; only "keep current data" imports are possible.</li></ul>
+<p>Switch it on during onboarding and off after go-live. The procedure for the client is in the <i>CyberAP Data Migration Guide</i>.</p>
+
+<h2>Client lifecycle: archive and delete</h2>
+<ul><li><b>Archive</b> (owner): stops the aaPanel project and hides the client from daily checks. Database, files and backups stay. <b>Restore from archive</b> starts it again.</li><li><b>Permanent deletion</b> is deliberately not a button. After the contract's retention period, and after giving the client an export if required: delete the aaPanel project; in PostgreSQL <code>DROP DATABASE hr_&lt;name&gt;; DROP ROLE hr_&lt;name&gt;;</code>; remove <code>/www/hr-clients/&lt;name&gt;</code> and, when no longer required, <code>/www/hr-backups/&lt;name&gt;</code>. Record it in the client notes first.</li></ul>
+
+<h2>Monitoring and scheduled tasks</h2>
+<table><tr><th style="width:30%">Task (aaPanel Cron)</th><th style="width:18%">Schedule</th><th>Does</th></tr><tr><td><code>cli.cjs nightly</code></td><td>Daily 02:00</td><td>Backs up every active client, re-checks every domain (DNS, certificate, registration) and health. Exit code 2 when something needs attention.</td></tr><tr><td><code>cli.cjs health</code></td><td>Every 10 minutes</td><td>Answers, response time, database size, active staff, attendance today, kiosks online.</td></tr></table>
+<p>Set aaPanel to notify you when a Cron task fails (aaPanel → Cron → notification), and look at the dashboard's "Needs attention" every morning.</p>
+
+<h2>Self-hosted clients</h2>
+<p>A client on their own server is not in the console. For them the vendor console still exists (login <code>onenet</code> with the daily password): <b>Edition</b> and <b>Installation &amp; licence</b> (client data import switch, licence, suspend). On hosted installations it is disabled.</p>
+
+<h2>Security checklist</h2>
+<ul class="check"><li>At least two owners, each with an authenticator; no shared accounts.</li><li>admin.binishaqsoft.com restricted in aaPanel to OneNet IP addresses where possible.</li><li>Client ports (9101+) and 8200 not opened in the firewall; only 80/443 public, aaPanel port restricted.</li><li>An off-server copy of every client's keys and of the console's .env.</li><li>Nightly Cron enabled with failure notifications; off-server copy of /www/hr-backups.</li><li>Temporary administrator passwords deleted after handover (the job page reminds you).</li><li>Data import switched off for clients that are live.</li><li>Disable provider users who leave OneNet the same day.</li></ul>
+
+<h2>Troubleshooting</h2>
+<table><tr><th style="width:36%">Problem</th><th>Cause and fix</th></tr><tr><td>A setup step shows the hand with "aaPanel API is not configured"</td><td>Do the step in aaPanel with the values shown, then Mark done; or connect the API (Hosting Setup Guide, step 8).</td></tr><tr><td>Health: "App: ECONNREFUSED"</td><td>The client's project is stopped or crashed. aaPanel → Node Project → hr-&lt;name&gt; → Start; open its log for the error (often a wrong value in its .env).</td></tr><tr><td>"Database: password authentication failed"</td><td>The client's role password differs from its .env. Re-run the setup job's database step (Retry) or set the password in PostgreSQL to the one in the .env.</td></tr><tr><td>Domain stays "pending dns"</td><td>The record is missing or wrong. Open the DNS sheet, compare with the client's DNS panel (common: the panel wants only "hr" as the name). Retry after fixing.</td></tr><tr><td>Domain: "HTTPS: certificate has expired / not trusted"</td><td>Let's Encrypt renewal failed in aaPanel (DNS changed, port 80 blocked). aaPanel → site → SSL → renew; then Retry the domain job.</td></tr><tr><td>Release switch: "does not answer after the switch"</td><td>Check the project log. Switch back to the previous release; restore the switch job's backup if a migration failed.</td></tr><tr><td>Backup failed: "could not start pg_dump"</td><td>PG_DUMP_PATH in the client's .env does not exist: set PG_BIN_DIR in the console's .env to the server's PostgreSQL bin folder and fix the client's .env.</td></tr><tr><td>Kiosk: "setup code invalid, expired or already used"</td><td>Create a new code (codes are single-use by default and expire).</td></tr><tr><td>Users of a client cannot sign in, message about suspension</td><td>Licence suspended (by hand or after the grace period). Renew or Resume.</td></tr><tr><td>Locked out of the console</td><td>Another owner resets your authenticator. If no owner can sign in: on the server, create a new owner with cli.cjs create-owner.</td></tr></table>
+
+</body></html>

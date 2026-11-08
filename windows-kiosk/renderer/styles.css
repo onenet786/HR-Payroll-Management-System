@@ -1359,6 +1359,27 @@ select.form-input option { background: #071426; color: var(--t1); }
 }
 .toggle-row:hover { border-color: rgba(51,102,178,0.4); }
 
+/* Server Registration: setup code vs kiosk account */
+.reg-methods { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.reg-method {
+  display: flex; align-items: center; gap: 8px; flex: 1 1 180px;
+  padding: 10px 12px;
+  border-radius: var(--r);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--t1); font-size: 13px; font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.18s;
+}
+.reg-method:hover { border-color: rgba(51,102,178,0.4); }
+.reg-method:has(input:checked) { border-color: var(--em); }
+.reg-method input { accent-color: var(--em); margin: 0; }
+.reg-method small { font-weight: 400; color: var(--t3); }
+.reg-code-input { resize: vertical; min-height: 64px; font-family: Consolas, 'Courier New', monospace; font-size: 12px; word-break: break-all; }
+.reg-code-preview-ok { color: var(--em); font-weight: 600; }
+.reg-code-preview-error { color: var(--red); }
+.reg-server { margin-top: 4px; }
+
 .toggle-input { display: none; }
 .toggle-switch {
   width: 40px; height: 22px; flex-shrink: 0;

@@ -22,7 +22,11 @@ contextBridge.exposeInMainWorld('kioskApi', {
   saveSettings: settings => ipcRenderer.invoke('kiosk:save-settings', settings),
   sync: () => ipcRenderer.invoke('kiosk:sync'),
   deviceStatus: () => ipcRenderer.invoke('kiosk:device-status'),
-  registerDevice: credentials => ipcRenderer.invoke('kiosk:register-device', { email: String(credentials?.email || '').slice(0, 254), password: String(credentials?.password || '').slice(0, 256) }),
+  // Either { setupCode } (recommended) or { email, password } (Kiosk Terminal account).
+  registerDevice: credentials => ipcRenderer.invoke('kiosk:register-device', credentials?.setupCode
+    ? { setupCode: String(credentials.setupCode).slice(0, 8192) }
+    : { email: String(credentials?.email || '').slice(0, 254), password: String(credentials?.password || '').slice(0, 256) }),
+  parseSetupCode: text => ipcRenderer.invoke('kiosk:parse-setup-code', String(text || '').slice(0, 8192)),
   unregisterDevice: () => ipcRenderer.invoke('kiosk:unregister-device'),
   punchByCode: payload => ipcRenderer.invoke('kiosk:punch-by-code', payload),
   punchCamera: invokeCameraPunch,

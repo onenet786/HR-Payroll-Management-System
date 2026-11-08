@@ -2,9 +2,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Download, FileText, Trash2, Upload, X } from 'lucide-react';
 import { authenticatedApiRequest, getAuthToken } from '../data/postgresStore';
 import type { Employee } from '../types';
+import { apiBase } from '../data/apiBase';
 
 type StoredDocument = { id: string; document_type: string; original_name: string; mime_type: string; byte_size: number; created_at: string };
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 const labels: Record<string, string> = { cnic: 'CNIC', contract: 'Contract', 'appointment-letter': 'Appointment letter', certificate: 'Certificate', resume: 'Resume', other: 'Other' };
 
 export function EmployeeDocumentVault({ employee, canManage, onClose }: { employee: Employee; canManage: boolean; onClose: () => void }) {
@@ -33,7 +33,7 @@ export function EmployeeDocumentVault({ employee, canManage, onClose }: { employ
   const download = async (record: StoredDocument) => {
     try {
       const token = getAuthToken(); if (!token) throw new Error('Authentication required.');
-      const response = await fetch(`${API_BASE}/api/employee-documents/${encodeURIComponent(record.id)}/download`, { headers: { Authorization: `Bearer ${token}` } });
+      const response = await fetch(`${apiBase()}/api/employee-documents/${encodeURIComponent(record.id)}/download`, { headers: { Authorization: `Bearer ${token}` } });
       if (!response.ok) throw new Error('Document download failed.');
       const url = URL.createObjectURL(await response.blob()); const link = window.document.createElement('a'); link.href = url; link.download = record.original_name; link.click(); URL.revokeObjectURL(url);
     } catch (error) { setMessage(error instanceof Error ? error.message : 'Download failed.'); }

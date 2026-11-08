@@ -941,6 +941,82 @@ const htmlContent = `<!DOCTYPE html>
     </ul>
   </div>
 
+  <!-- REPORTS -->
+  <div class="page-break"></div>
+  <div class="menu-card avoid-break">
+    <div class="menu-header">
+      <span class="menu-title">Reports: Employee, Attendance, Payroll &amp; Statutory</span>
+      <span class="menu-step-badge">History on demand</span>
+    </div>
+    <p><strong>Business Purpose:</strong> The daily screens keep only the working set so they stay fast, even with years of imported history: current staff (plus former staff who left in the last two months, or still have an unpaid settlement, an open loan or a pending lifecycle request) and the current and previous month of attendance. In Employee Directory, the "Terminated" filter therefore shows recent leavers only; use Reports &rarr; Employee directory with status "Left" or "Everyone" for all former staff. Everything older or larger is a report: the server reads it when you open the report, for any period, and you can download it as CSV (opens in Excel, Urdu names included) or print it / save it as PDF.</p>
+
+    <h4>How to run a report:</h4>
+    <ol class="step-list">
+      <li>Open <strong>Reports &rarr; Employee Reports</strong> or <strong>Reports &rarr; Attendance Reports</strong> in the menu and pick a report. It runs at once with sensible defaults (usually this month).</li>
+      <li>Set the filters: period (today, this month, last month, this year, last year or custom dates), branch, department, designation, zone, UC / town, and one employee (the employee search also finds former staff).</li>
+      <li>Press <strong>Show</strong>. Results come 100 rows per page; totals at the bottom cover all pages.</li>
+      <li><strong>CSV</strong> downloads every row; <strong>Print / PDF</strong> opens a printable page (up to 500 rows, landscape for wide reports). Every CSV download is recorded in the audit log.</li>
+    </ol>
+
+    <h4>Employee reports:</h4>
+    <table>
+      <thead><tr><th>Report</th><th>What it shows</th></tr></thead>
+      <tbody>
+        <tr><td>Employee directory</td><td>Every employee with job, place and contact details; filter by status (current staff, left, everyone) or name / code / CNIC.</td></tr>
+        <tr><td>Headcount by group</td><td>Employees per branch, department, designation, zone, UC / town, supervisor or gender, split into active, on leave, suspended and left.</td></tr>
+        <tr><td>Joiners and leavers</td><td>Who joined or left in a period, with separation type and reason.</td></tr>
+        <tr><td>Missing or invalid data</td><td>Current staff with an invalid CNIC, no bank account, no real salary, no date of birth, designation or contact number.</td></tr>
+        <tr><td>Upcoming expiries</td><td>CNIC expiry, contract end and unconfirmed probation end dates in a period (default: next 60 days).</td></tr>
+      </tbody>
+    </table>
+
+    <h4>Attendance reports:</h4>
+    <table>
+      <thead><tr><th>Report</th><th>What it shows</th></tr></thead>
+      <tbody>
+        <tr><td>Daily attendance</td><td>Every current employee on one day: present, late, absent, on leave, holiday or no record yet, with punch times and a count per status.</td></tr>
+        <tr><td>Monthly register (muster roll)</td><td>One line per employee, one column per day (P present, L late, HD half day, A absent, LV leave, H holiday) with monthly totals and overtime.</td></tr>
+        <tr><td>Attendance summary</td><td>Per employee for any period, up to the whole imported history: present, late, half days, absent, leave, holidays, days recorded, overtime hours.</td></tr>
+        <tr><td>Late arrivals / Absentees</td><td>Every late or absent day in a period (up to 400 days for all staff; any period for one employee).</td></tr>
+        <tr><td>Overtime</td><td>Overtime hours and days per employee in a period.</td></tr>
+        <tr><td>Missing punch-out</td><td>Past days with a punch-in but no punch-out, to correct before payroll.</td></tr>
+        <tr><td>Attendance log (detailed)</td><td>Every day with punches, method, terminal branch, overtime, review state and source (CyberAP for imported days). Up to 62 days for all staff; choose one employee for their full history.</td></tr>
+        <tr><td>Mobile duty and field visits</td><td>Days punched from the mobile app or with field visits: location check, distance from the branch and number of visits.</td></tr>
+      </tbody>
+    </table>
+
+    <h4>Payroll reports:</h4>
+    <table>
+      <thead><tr><th>Report</th><th>What it shows</th></tr></thead>
+      <tbody>
+        <tr><td>Payroll register</td><td>Every payslip of a month: paid days, basic, allowances, overtime, gross, income tax, EOBI, provident fund, loan, total deductions and net, with totals.</td></tr>
+        <tr><td>Payslip history</td><td>Payslips over any period, for one employee or everyone.</td></tr>
+        <tr><td>Bank transfer sheet</td><td>Net pay with bank, account number and IBAN; employees without a bank account are marked "Cash / cheque".</td></tr>
+        <tr><td>Salary cost by group</td><td>Per branch, department or designation: employees paid, gross, tax, employer EOBI, social security and provident fund, net and total employer cost.</td></tr>
+        <tr><td>Loans and advances</td><td>Amount, monthly installment, installments left, repaid and balance; open loans by default.</td></tr>
+        <tr><td>Salary revisions</td><td>Increments and promotions effective in a period, with old and new salary.</td></tr>
+        <tr><td>Gratuity and final settlements</td><td>Gratuity, leave encashment, notice pay, pending salary, total and payment status by separation date.</td></tr>
+      </tbody>
+    </table>
+    <p>Payslips keep the name, department and branch as they were in that month, so old payroll reports stay true after transfers. Choose which runs to include: <em>Paid (disbursed)</em>, <em>Approved and paid</em> (default) or <em>All except cancelled</em>.</p>
+
+    <h4>Statutory reports (paid runs by default):</h4>
+    <table>
+      <thead><tr><th>Report</th><th>What it shows</th></tr></thead>
+      <tbody>
+        <tr><td>Income tax withheld per employee</td><td>Salary paid and tax deducted per employee, with CNIC and NTN, for the tax year (July to June) by default: the basis for annual tax certificates.</td></tr>
+        <tr><td>Income tax withheld per month</td><td>Tax deducted per month across all staff, to reconcile with the monthly withholding deposit.</td></tr>
+        <tr><td>EOBI contributions</td><td>Employee and employer EOBI per employee with EOBI number and CNIC (last month by default), for the EOBI return.</td></tr>
+        <tr><td>Social security contributions</td><td>Provincial social security (PESSI / SESSI) per employee with social security number and province.</td></tr>
+      </tbody>
+    </table>
+
+    <div class="callout callout-statutory">
+      <strong>Who can see reports</strong>
+      Employee reports need the Employees or Payroll permission; attendance reports need the Attendance or Payroll permission; payroll and statutory reports need the Payroll permission. The <strong>View reports</strong> permission (User Management &rarr; Roles) opens employee and attendance reports for read-only managers, but never salaries. Super Admin sees all reports.
+    </div>
+  </div>
+
   <!-- SUPPORTING MODULES -->
   <div class="menu-card avoid-break">
     <div class="menu-header">

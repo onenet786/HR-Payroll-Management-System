@@ -4,6 +4,8 @@ const { transaction, pool } = require('./db.cjs');
 const { policyFor, allowed, getTableName } = require('./collections.cjs');
 const { publicUserData, prepareUserWrite } = require('./user-secrets.cjs');
 const { loadEdition } = require('./edition.cjs');
+const { loadDataLimits, windowStart } = require('./data-limits.cjs');
+const { assertStaffLimit } = require('./installation.cjs');
 
 const router = express.Router();
 const safeName = value => typeof value === 'string' && /^[A-Za-z][A-Za-z0-9_]{0,79}$/.test(value);
@@ -587,13 +589,54 @@ router.get('/:collection', async (req, res, next) => {
       // Notifications address their reader as targetEmployeeId; company-wide ones have none.
       params.push(employeeFilter);
       sql += ` WHERE (data->>'targetEmployeeId'=$1 OR COALESCE(data->>'targetEmployeeId','')='')`;
+    } else if (employeeFilter && table === 'attendances') {
+      // Every attendance write fills employee_id (migration 024 backfilled older rows), so the (employee_id, date)
+      // index serves this read; the JSON fallback below would scan the whole table (1.5M rows after a legacy import).
+      params.push(employeeFilter);
+      sql += ` WHERE employee_id=$1`;
     } else if (employeeFilter) {
       params.push(employeeFilter);
       sql += ` WHERE (employee_id=$1 OR data->>'employeeId'=$1)`;
       // Employees cannot read payroll runs, so the server releases their payslips only once salary is paid.
       if (table === 'payroll_payslips' && !canReadAll && !managedRead) sql += ` AND payroll_run_id IN (SELECT id FROM payroll_runs WHERE status='Disbursed')`;
     }
-    sql += ` ORDER BY id LIMIT 10000`;
+    let order = ' ORDER BY id LIMIT 10000';
+    if (table === 'attendances') {
+      // Newest first, so a capped read returns the current days rather than the lowest ids. After a large legacy
+      // import the manager-wide read is also limited to recent months (server/data-limits.cjs).
+      const limits = await loadDataLimits(pool);
+      if (!employeeFilter && limits.attendanceReadMonths > 0) {
+        params.push(windowStart(limits.attendanceReadMonths));
+        sql += ` WHERE date >= $${params.length}::date`;
+      }
+      order = ` ORDER BY date DESC NULLS LAST, id LIMIT ${limits.attendanceReadLimit}`;
+    }
+    if (table === 'employees' && !employeeFilter) {
+      // Browsers keep the working set: current staff, plus former staff who still matter for daily work (left within
+      // the attendance window, changed recently, or with an unpaid settlement, an open loan or a pending lifecycle
+      // request). Everyone else is in Reports (employee directory with "Left" / "Everyone").
+      const limits = await loadDataLimits(pool);
+      if (!limits.employeesIncludeFormer && limits.attendanceReadMonths > 0) {
+        params.push(windowStart(limits.attendanceReadMonths));
+        const since = `$${params.length}`;
+        sql += ` WHERE (COALESCE(data->>'status', 'Active') <> 'Terminated'
+          OR COALESCE(data->>'separationDate', '') >= ${since}
+          OR updated_at >= ${since}::date
+          OR EXISTS (SELECT 1 FROM gratuity_settlements gs WHERE gs.employee_id = employees.id AND COALESCE(gs.status, gs.data->>'status', '') <> 'Paid')
+          OR EXISTS (SELECT 1 FROM loan_advances la WHERE la.employee_id = employees.id AND COALESCE(la.status, la.data->>'status', '') IN ('Pending', 'Approved', 'Active'))
+          OR EXISTS (SELECT 1 FROM lifecycle_requests lr WHERE lr.employee_id = employees.id AND lr.status = 'Pending'))`;
+      }
+    }
+    // Browsers poll every collection every few seconds. A cheap fingerprint of the rows this read covers (count,
+    // newest change, sum of versions) answers "nothing changed" with 304 before any document is loaded or sent;
+    // after a legacy import that saves reading and sending tens of megabytes per poll.
+    const where = sql.slice(sql.indexOf(` FROM ${table}`));
+    const fp = (await pool.query(`SELECT count(*)::bigint AS n, max(updated_at) AS m, coalesce(sum(version), 0)::bigint AS v ${where}`, params)).rows[0];
+    const etag = `W/"${crypto.createHash('sha1').update(`${where}|${JSON.stringify(params)}|${order}|${req.identity.uid}|${fp.n}|${fp.m ? new Date(fp.m).getTime() : 0}|${fp.v}`).digest('base64url').slice(0, 27)}"`;
+    res.setHeader('ETag', etag);
+    res.setHeader('Cache-Control', 'private, no-cache');
+    if (String(req.headers['if-none-match'] || '') === etag) return res.status(304).end();
+    sql += order;
     const result = await pool.query(sql, params);
     res.json({ documents: table === 'users' ? result.rows.map(row => ({ ...row, data: publicUserData(row.data) })) : result.rows });
   } catch (error) { next(error); }
@@ -632,6 +675,10 @@ router.put('/:collection/:id', async (req, res, next) => {
       const employeeId = employeeIdOf(req.body) || (table === 'employees' || table === 'biometric_templates' ? id : null);
       if (!await authorizeWrite(client, name, table, id, req.identity, existing, req.body)) {
         const forbidden = new Error('Insufficient permission.'); forbidden.status = 403; throw forbidden;
+      }
+      if (table === 'employees') {
+        // The licence may cap active employees (hosted plans); see server/installation.cjs.
+        await assertStaffLimit(client, id, typeof req.body.status === 'string' ? req.body.status : 'Active', existing ? (existing.data.status || 'Active') : null);
       }
       const expected = req.get('if-match')?.replaceAll('"', '');
       if (expected && existing && Number(expected) !== Number(existing.version)) {

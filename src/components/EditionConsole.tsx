@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { CheckCircle2, Settings2, ShieldCheck, Store } from 'lucide-react';
+import { CheckCircle2, Database, Settings2, ShieldCheck, Store } from 'lucide-react';
+import { VendorInstallationPanel } from './VendorInstallationPanel';
 import {
   EDITION_FEATURE_INFO, EDITION_FEATURE_KEYS, EDITION_LABELS, EDITION_PRESETS, resolveEdition,
   type AppEdition, type EditionFeatureGroup, type EditionFeatureKey, type EditionFeatures, type EditionId,
@@ -21,8 +22,8 @@ const PRESET_SUMMARY: Record<EditionId, string> = {
 };
 
 /**
- * Vendor (OneNet) console: chooses the edition this installation runs in. Opened from the login screen with the
- * rotating console password; it can read and write only the edition, never customer data.
+ * Vendor (OneNet) console, opened from the login screen with the rotating console password. Two tabs: the edition this
+ * installation runs in (full / lite), and data migration from a legacy CyberAP database for a new installation.
  */
 export function EditionConsole({ apiBase, vendorToken, expiresAt, initialEdition, onSaved, onExit }: Props) {
   const [editionId, setEditionId] = useState<EditionId>(initialEdition.id);
@@ -31,6 +32,7 @@ export function EditionConsole({ apiBase, vendorToken, expiresAt, initialEdition
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState<AppEdition | null>(null);
+  const [tab, setTab] = useState<'edition' | 'migration'>('edition');
 
   const customized = useMemo(() => EDITION_FEATURE_KEYS.filter(key => features[key] !== EDITION_PRESETS[editionId][key]), [features, editionId]);
   const enabledCount = EDITION_FEATURE_KEYS.filter(key => features[key]).length;
@@ -86,7 +88,7 @@ export function EditionConsole({ apiBase, vendorToken, expiresAt, initialEdition
             <div className="rounded-xl bg-gradient-to-tr from-emerald-600 to-green-500 p-2.5 text-white shadow-lg"><ShieldCheck className="h-5 w-5" /></div>
             <div>
               <p className="text-[10px] font-bold uppercase tracking-[.18em] text-emerald-400">OneNet vendor console</p>
-              <h1 className="text-lg font-bold leading-tight text-white">Product edition for this installation</h1>
+              <h1 className="text-lg font-bold leading-tight text-white">{tab === 'edition' ? 'Product edition for this installation' : 'Installation & licence'}</h1>
             </div>
           </div>
           <div className="text-[11px] leading-snug text-slate-500 sm:text-right">
@@ -95,6 +97,16 @@ export function EditionConsole({ apiBase, vendorToken, expiresAt, initialEdition
           </div>
         </header>
 
+        <nav aria-label="Console sections" className="mt-3 flex gap-1 border-b border-slate-800">
+          {([['edition', 'Edition (Full / Lite)', <Settings2 key="e" className="h-3.5 w-3.5" />], ['migration', 'Installation & licence', <Database key="m" className="h-3.5 w-3.5" />]] as const).map(([id, label, icon]) => (
+            <button key={id} type="button" onClick={() => setTab(id)} aria-current={tab === id ? 'page' : undefined}
+              className={`-mb-px inline-flex items-center gap-1.5 border-b-2 px-3 py-2 text-xs font-semibold transition ${tab === id ? 'border-emerald-500 text-white' : 'border-transparent text-slate-400 hover:text-slate-200'}`}>
+              {icon}{label}
+            </button>
+          ))}
+        </nav>
+
+        {tab === 'migration' ? <VendorInstallationPanel apiBase={apiBase} vendorToken={vendorToken} /> : (<>
         <p className="mt-3 text-xs text-slate-400">Applies to every user, kiosk and phone at their next page load. No customer data is changed; switching the full edition back on restores every rule.</p>
 
         {error && <div role="alert" className="mt-3 rounded-lg border border-rose-900/60 bg-rose-950/40 px-3 py-2 text-xs text-rose-300">{error}</div>}
@@ -142,12 +154,14 @@ export function EditionConsole({ apiBase, vendorToken, expiresAt, initialEdition
             className="min-w-0 flex-1 rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-white outline-none placeholder:text-slate-600 focus:ring-2 focus:ring-emerald-500" />
         </label>
 
+        </>)}
+
         <footer className="sticky bottom-0 mt-auto -mx-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-800 bg-slate-950/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6">
           <button type="button" onClick={onExit} className="text-xs font-semibold text-slate-400 hover:text-white">Exit console and return to sign in</button>
-          <button type="button" onClick={save} disabled={saving || !dirty}
+          {tab === 'edition' && <button type="button" onClick={save} disabled={saving || !dirty}
             className="w-full rounded-lg bg-gradient-to-r from-emerald-600 to-green-500 px-5 py-2.5 text-sm font-bold text-white shadow-lg transition hover:from-emerald-500 hover:to-green-400 disabled:opacity-50 sm:w-auto">
             {saving ? 'Saving…' : `Apply ${EDITION_LABELS[editionId].toLowerCase()}`}
-          </button>
+          </button>}
         </footer>
       </div>
     </div>

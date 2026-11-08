@@ -5,6 +5,7 @@ const crypto = require('node:crypto');
 const express = require('express');
 const { pool } = require('./db.cjs');
 const { findLoginUser, verifyUserPassword } = require('./user-secrets.cjs');
+const installation = require('./installation.cjs');
 
 const router = express.Router();
 const sha256 = value => crypto.createHash('sha256').update(String(value)).digest('hex');
@@ -37,10 +38,26 @@ async function audit(req, action, documentId, data) {
     [req.kiosk?.userId || 'kiosk', 'role-kiosk', action, documentId, JSON.stringify(data || {}), req.correlationId, req.ip]).catch(() => undefined);
 }
 
-/** POST /api/kiosk/register {email, password, terminalName} → { deviceToken } */
+/**
+ * POST /api/kiosk/register → { deviceToken }
+ *   {setupToken, terminalName}        one-time kiosk setup code (Provider Console or Kiosk devices screen), or
+ *   {email, password, terminalName}   a Kiosk Terminal account.
+ */
 router.post('/register', async (req, res, next) => {
   try {
-    const { email, password, terminalName } = req.body || {};
+    const { email, password, terminalName, setupToken } = req.body || {};
+    if (typeof setupToken === 'string' && setupToken) {
+      const grant = await installation.consumeKioskSetupToken(pool, setupToken);
+      if (!grant) return res.status(401).json({ error: 'This kiosk setup code is invalid, expired or already used. Ask your administrator for a new code.' });
+      const token = crypto.randomBytes(32).toString('base64url');
+      const id = crypto.randomUUID();
+      const name = String(terminalName || grant.label || 'Kiosk terminal').slice(0, 120);
+      await pool.query(`INSERT INTO kiosk_devices(id,user_id,name,token_hash,created_ip) VALUES($1,$2,$3,$4,$5)`, [id, grant.userId, name, sha256(token), req.ip]);
+      req.kiosk = { userId: grant.userId };
+      await audit(req, 'kiosk_device_registered', id, { name, via: 'setup-code' });
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(201).json({ deviceToken: token, deviceId: id, name });
+    }
     if (typeof email !== 'string' || typeof password !== 'string' || !email.trim() || !password) return res.status(400).json({ error: 'Enter the kiosk account email and password.' });
     // Same lookup and password check as the web login, so an account that signs in there registers here.
     const found = await findLoginUser(pool, email);
@@ -144,6 +161,34 @@ adminRouter.post('/:id/revoke', async (req, res, next) => {
     await pool.query(`INSERT INTO hr_audit_log(actor_uid,actor_role_id,action,collection_name,document_id,correlation_id,source_ip) VALUES($1,$2,'kiosk_device_revoked','kioskDevices',$3,$4,$5)`,
       [req.identity.uid, req.identity.roleId, req.params.id, req.correlationId, req.ip]);
     res.json({ revoked: result.rowCount });
+  } catch (error) { next(error); }
+});
+
+// Kiosk setup codes: one-time codes that register a terminal without typing an account password at the branch.
+adminRouter.get('/setup-codes', async (req, res, next) => {
+  try {
+    if (!canManage(req.identity)) return res.status(403).json({ error: 'Access administrator permission required.' });
+    res.json({ codes: await installation.listKioskSetupTokens(pool) });
+  } catch (error) { next(error); }
+});
+adminRouter.post('/setup-codes', async (req, res, next) => {
+  try {
+    if (!canManage(req.identity)) return res.status(403).json({ error: 'Access administrator permission required.' });
+    const { label, expiresInHours, maxUses } = req.body || {};
+    const company = (await pool.query(`SELECT data->>'name' AS name FROM companies ORDER BY id LIMIT 1`)).rows[0]?.name || '';
+    const urls = await installation.deviceUrls(pool, process.env.APP_URL);
+    const created = await installation.createKioskSetupToken(pool, { label, expiresInHours, maxUses, createdBy: req.identity.uid, clientName: company, urls });
+    await pool.query(`INSERT INTO hr_audit_log(actor_uid,actor_role_id,action,collection_name,document_id,new_data,correlation_id,source_ip) VALUES($1,$2,'kiosk_setup_code_created','kioskDevices',$3,$4::jsonb,$5,$6)`,
+      [req.identity.uid, req.identity.roleId, created.id, JSON.stringify({ label, maxUses: created.maxUses, expiresAt: created.expiresAt }), req.correlationId, req.ip]);
+    res.setHeader('Cache-Control', 'no-store');
+    res.status(201).json({ ...created, urls });
+  } catch (error) { next(error); }
+});
+adminRouter.post('/setup-codes/:id/revoke', async (req, res, next) => {
+  try {
+    if (!canManage(req.identity)) return res.status(403).json({ error: 'Access administrator permission required.' });
+    await installation.revokeKioskSetupToken(pool, req.params.id);
+    res.json({ revoked: true });
   } catch (error) { next(error); }
 });
 

@@ -4,6 +4,10 @@
  */
 
 import { JURISDICTIONS } from '../data/provincialCompliance';
+import { ReportsPanel } from './ReportsPanel';
+import { DataImportPanel } from './DataImportPanel';
+import { LicenceBanner } from './LicenceBanner';
+import { apiBase } from '../data/apiBase';
 import { DateField } from './DateField';
 import { RequiredMark, RequiredNote } from './RequiredMark';
 import React, { useState, useEffect, useMemo } from 'react';
@@ -270,7 +274,7 @@ export interface WebPortalProps {
   edition: AppEdition;
 }
 
-type PortalTab = 'dashboard' | 'lifecycle' | 'employees' | 'attendance' | 'leaves' | 'payroll' | 'settings' | 'company-setup' | 'master-data' | 'access' | 'maintenance' | 'holidays' | 'loans' | 'revisions' | 'performance' | 'assets' | 'recruitment' | 'gratuity' | 'notifications' | 'biometric' | 'help';
+type PortalTab = 'dashboard' | 'lifecycle' | 'employees' | 'attendance' | 'leaves' | 'payroll' | 'settings' | 'company-setup' | 'master-data' | 'access' | 'maintenance' | 'holidays' | 'loans' | 'revisions' | 'performance' | 'assets' | 'recruitment' | 'gratuity' | 'notifications' | 'biometric' | 'help' | 'data-import' | 'reports';
 type NavGroupKey = 'people' | 'time' | 'payroll' | 'system';
 
 interface FlowStep {
@@ -316,6 +320,8 @@ const TAB_HEADINGS_UR: Record<PortalTab, string> = {
   maintenance: 'ڈیٹا بیک اپ اور بحالی۔',
   notifications: 'سسٹم کی سرگرمی، پے رول یاد دہانیاں اور اہم اطلاعات۔',
   help: 'تعمیل کی مکمل رہنمائی اور پورٹل گائیڈ۔',
+  'data-import': 'پرانے سسٹم (CyberAP) سے ڈیٹا منتقل کریں۔',
+  reports: 'ملازمین، حاضری، پے رول اور قانونی رپورٹس: کسی بھی مدت کے لیے، سرور سے۔',
 };
 
 const TAB_HELP_UR: Record<PortalTab, string> = {
@@ -340,6 +346,8 @@ const TAB_HELP_UR: Record<PortalTab, string> = {
   maintenance: 'سرور کی صحت اور ڈیٹا کی ہم آہنگی چیک کریں، اور بحالی کے لیے بیک اپ محفوظ کریں۔',
   notifications: 'خودکار اطلاعات، منظوری کی درخواستیں، آلات کی وارننگز اور قانونی آخری تاریخیں۔',
   help: 'انکم ٹیکس آرڈیننس 2001، ای او بی آئی ایکٹ 1976، صوبائی سوشل سیکیورٹی اور فیکٹریز ایکٹ کی رہنمائی۔',
+  'data-import': 'ایکسپورٹ فائل اپ لوڈ کریں، پہلے تجزیہ کریں، پھر امپورٹ کریں۔',
+  reports: 'رپورٹ منتخب کریں، فلٹر لگائیں، پھر CSV یا PDF میں محفوظ کریں۔',
 };
 
 const TAB_WORKFLOW_META: Record<PortalTab, {
@@ -473,6 +481,18 @@ const TAB_WORKFLOW_META: Record<PortalTab, {
     help: 'Reference guidelines for Income Tax Ordinance 2001, EOBI Act 1976, Provincial Social Security, and Factories Act.',
     guideTitle: 'Guide for User Guide & Documentation',
     guideContent: 'Comprehensive documentation and statutory reference materials for Pakistan HR and payroll operations.'
+  },
+  'data-import': {
+    heading: 'Move employees, attendance history and payroll history from the legacy CyberAP system.',
+    help: 'Upload the package made by Export-CyberAP.ps1, analyse it (no changes), then import. Switched on by your service provider.',
+    guideTitle: 'Guide for Data Import',
+    guideContent: 'Analyse first and review the warnings with HR. "Remove all current data" is only for a new setup: a safety backup is taken first, and it is locked once payroll has been paid.'
+  },
+  reports: {
+    heading: 'Employee, attendance, payroll and statutory reports for any period, read from the server when you open them.',
+    help: 'Pick a report, set the filters and press Show. Download CSV for Excel, or Print / PDF. History, including imported CyberAP data, lives here instead of in the daily screens.',
+    guideTitle: 'Guide for Reports',
+    guideContent: 'Daily screens keep only current staff and recent attendance so they stay fast. Use Reports for anything older or larger: monthly registers, summaries for a year, an employee\'s full history, joiners and leavers, missing data. Every CSV download is recorded in the audit log.'
   }
 };
 
@@ -496,6 +516,10 @@ const SEARCHABLE_PAGES: Array<{ tab: PortalTab; label: string; category: string 
   { tab: 'access', label: 'User Management', category: 'System' },
   { tab: 'master-data', label: 'Master Data Lists', category: 'System' },
   { tab: 'notifications', label: 'Notifications Center', category: 'System' },
+  { tab: 'reports', label: 'Employee Reports', category: 'Reports' },
+  { tab: 'reports', label: 'Attendance Reports', category: 'Reports' },
+  { tab: 'reports', label: 'Payroll Reports', category: 'Reports' },
+  { tab: 'reports', label: 'Statutory Reports (Tax, EOBI, Social Security)', category: 'Reports' },
   { tab: 'help', label: 'User Guide & Labor Laws', category: 'Help' },
 ];
 
@@ -607,6 +631,13 @@ export function WebPortal({
   edition
 }: WebPortalProps) {
   const [activeTab, setActiveTab] = useState<PortalTab>('dashboard');
+  const [reportsGroup, setReportsGroup] = useState<'employees' | 'attendance' | 'payroll' | 'statutory'>('attendance');
+  const [clientDataImport, setClientDataImport] = useState(false);
+  useEffect(() => {
+    let active = true;
+    fetch(`${apiBase()}/api/auth/status`).then(response => response.json()).then(body => { if (active) setClientDataImport(body?.clientDataImport === true); }).catch(() => undefined);
+    return () => { active = false; };
+  }, []);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [expandedNavGroup, setExpandedNavGroup] = useState<NavGroupKey | null>('system');
   const [showGuideModal, setShowGuideModal] = useState(false);
@@ -830,6 +861,8 @@ export function WebPortal({
     if (tab === 'lifecycle') return userPermissions.includes('manage_employees');
     if (tab === 'notifications') return true;
     if (tab === 'help') return true;
+    if (tab === 'reports') return isCanonicalSuperAdmin || ['manage_employees', 'manage_attendance', 'manage_payroll', 'view_reports'].some(permission => userPermissions.includes(permission));
+    if (tab === 'data-import') return clientDataImport && (isCanonicalSuperAdmin || userPermissions.includes('manage_data_import'));
     if (tab === 'biometric') return userPermissions.includes('manage_attendance') || userPermissions.includes('manage_employees');
     return false;
   };
@@ -1441,12 +1474,7 @@ export function WebPortal({
   const [leaveSubTab, setLeaveSubTab] = useState<'list' | 'reports'>('list');
 
   // Reports state
-  const [reportGrouping, setReportGrouping] = useState<'uc' | 'zone' | 'supervisor'>('uc');
-  const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
 
-  const [attPeriodType, setAttPeriodType] = useState<'daily' | 'weekly' | 'monthly' | 'yearly'>('daily');
-  const [selectedAttDate, setSelectedAttDate] = useState(() => new Date().toISOString().split('T')[0]);
-  const [selectedAttEmployeeId, setSelectedAttEmployeeId] = useState('all');
 
   const [leavePeriodType, setLeavePeriodType] = useState<'daily' | 'weekly' | 'monthly' | 'yearly'>('daily');
   const [selectedLeaveDate, setSelectedLeaveDate] = useState(() => new Date().toISOString().split('T')[0]);
@@ -2437,6 +2465,33 @@ export function WebPortal({
               </button>
             )}
 
+            {/* Section: REPORTS (read on the server, on demand) */}
+            {hasPermission('reports') && (
+              <>
+                <div className="sec"><span>{navLabel('REPORTS', 'رپورٹس')}</span></div>
+                {(isCanonicalSuperAdmin || ['manage_employees', 'manage_payroll', 'view_reports'].some(permission => userPermissions.includes(permission))) && (
+                  <button type="button" onClick={() => { setReportsGroup('employees'); navigateFromSidebar('reports'); }} className={`side-item ${activeTab === 'reports' && reportsGroup === 'employees' ? 'on' : ''}`}>
+                    <span>{navLabel('Employee Reports', 'ملازمین کی رپورٹس')}</span>
+                  </button>
+                )}
+                {(isCanonicalSuperAdmin || ['manage_attendance', 'manage_payroll', 'view_reports'].some(permission => userPermissions.includes(permission))) && (
+                  <button type="button" onClick={() => { setReportsGroup('attendance'); navigateFromSidebar('reports'); }} className={`side-item ${activeTab === 'reports' && reportsGroup === 'attendance' ? 'on' : ''}`}>
+                    <span>{navLabel('Attendance Reports', 'حاضری کی رپورٹس')}</span>
+                  </button>
+                )}
+                {(isCanonicalSuperAdmin || userPermissions.includes('manage_payroll')) && (
+                  <>
+                    <button type="button" onClick={() => { setReportsGroup('payroll'); navigateFromSidebar('reports'); }} className={`side-item ${activeTab === 'reports' && reportsGroup === 'payroll' ? 'on' : ''}`}>
+                      <span>{navLabel('Payroll Reports', 'پے رول رپورٹس')}</span>
+                    </button>
+                    <button type="button" onClick={() => { setReportsGroup('statutory'); navigateFromSidebar('reports'); }} className={`side-item ${activeTab === 'reports' && reportsGroup === 'statutory' ? 'on' : ''}`}>
+                      <span>{navLabel('Statutory Reports', 'قانونی رپورٹس')}</span>
+                    </button>
+                  </>
+                )}
+              </>
+            )}
+
             {/* Section: SYSTEM */}
             <div className="sec"><span>{navLabel('SYSTEM', 'سسٹم')}</span></div>
             {hasPermission('maintenance') && (
@@ -2464,6 +2519,15 @@ export function WebPortal({
                 className={`side-item ${activeTab === 'master-data' ? 'on' : ''}`}
               >
                 <span>{navLabel('Master Data', 'ماسٹر ڈیٹا')}</span>
+              </button>
+            )}
+            {hasPermission('data-import') && (
+              <button
+                type="button"
+                onClick={() => navigateFromSidebar('data-import')}
+                className={`side-item ${activeTab === 'data-import' ? 'on' : ''}`}
+              >
+                <span>{navLabel('Data Import', 'ڈیٹا امپورٹ')}</span>
               </button>
             )}
 
@@ -2609,6 +2673,7 @@ export function WebPortal({
               )}
 
               {/* TAB 1: DASHBOARD */}
+              <LicenceBanner />
               {activeTab === 'dashboard' && (
                 <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
                   
@@ -2726,10 +2791,12 @@ export function WebPortal({
                         Employee Records List
                       </button>
                       <button 
-                        onClick={() => setEmpSubTab('reports')}
+                        type="button"
+                        onClick={() => { setReportsGroup('employees'); setActiveTab('reports'); }}
+                        title="Headcount by UC, zone, supervisor and more: Reports → Employee Reports"
                         className={`pb-2 text-xs font-bold border-b-2 transition uppercase tracking-wider ${empSubTab === 'reports' ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-slate-500 hover:text-slate-900'}`}
                       >
-                        UC / Zone / Supervisor Analytics Reports
+                        UC / Zone / Supervisor Reports →
                       </button>
                     </div>
                   )}
@@ -2752,11 +2819,16 @@ export function WebPortal({
                         <option value="all">All departments</option>
                         {localDepartments.map(dept => <option key={dept.id} value={dept.id}>{dept.name}</option>)}
                       </select>
+                      {employeeStatusFilter === 'Terminated' && (
+                        <button type="button" onClick={() => { setReportsGroup('employees'); setActiveTab('reports'); }} className="text-xs font-semibold text-emerald-700 hover:underline" title="This list shows recent leavers and those with open settlements or loans">
+                          All former staff: Reports → Employee directory
+                        </button>
+                      )}
                       {filtersActive && <span className="text-xs text-slate-500" aria-live="polite">Showing {filteredEmployees.length} of {employees.length}</span>}
                       {filtersActive && <button type="button" onClick={clearFilters} className="text-xs font-bold text-emerald-700 hover:underline">Reset</button>}
                     </div>
                   </div>
-                  {empSubTab === 'list' || activeZones.length === 0 ? (
+                  {(<>
                     /* Grid or Table listing of employees */
                     <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                       <div className="overflow-x-auto">
@@ -2869,147 +2941,7 @@ export function WebPortal({
                         </table>
                       </div>
                     </div>
-                  ) : (
-                    /* Group Summary Reports view (master-detail) */
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                      
-                      {/* Left: Group list cards */}
-                      <div className="lg:col-span-1 space-y-4">
-                        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-3">
-                          <h3 className="font-bold text-slate-800 text-[10px] uppercase tracking-wider">Select Grouping Dimension</h3>
-                          <div className="flex space-x-2">
-                            <button
-                              onClick={() => { setReportGrouping('uc'); setSelectedGroup(null); }}
-                              className={`flex-1 text-center py-2 rounded text-[10px] uppercase tracking-wider font-semibold transition cursor-pointer ${reportGrouping === 'uc' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-650 hover:bg-slate-200'}`}
-                            >
-                              UC / Town
-                            </button>
-                            <button
-                              onClick={() => { setReportGrouping('zone'); setSelectedGroup(null); }}
-                              className={`flex-1 text-center py-2 rounded text-[10px] uppercase tracking-wider font-semibold transition cursor-pointer ${reportGrouping === 'zone' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-650 hover:bg-slate-200'}`}
-                            >
-                              Zone Wise
-                            </button>
-                            <button
-                              onClick={() => { setReportGrouping('supervisor'); setSelectedGroup(null); }}
-                              className={`flex-1 text-center py-2 rounded text-[10px] uppercase tracking-wider font-semibold transition cursor-pointer ${reportGrouping === 'supervisor' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-650 hover:bg-slate-200'}`}
-                            >
-                              Supervisor
-                            </button>
-                          </div>
-                        </div>
-
-                        <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
-                          {(() => {
-                            const uniqueGroups = Array.from(new Set(employees.map(e => {
-                              if (reportGrouping === 'uc') return resolveUcTownName(e, ucTowns) || 'Unassigned';
-                              if (reportGrouping === 'zone') return resolveZoneName(e, zones) || 'Unassigned';
-                              return e.zoneInChargeName || (e.isZoneInCharge ? 'Zone In Charge (Self)' : 'Unassigned');
-                            })));
-
-                            return uniqueGroups.map(groupName => {
-                              const matchingEmps = employees.filter(e => {
-                                if (reportGrouping === 'uc') return (resolveUcTownName(e, ucTowns) || 'Unassigned') === groupName;
-                                if (reportGrouping === 'zone') return (resolveZoneName(e, zones) || 'Unassigned') === groupName;
-                                const supervisor = e.zoneInChargeName || (e.isZoneInCharge ? 'Zone In Charge (Self)' : 'Unassigned');
-                                return supervisor === groupName;
-                              });
-
-                              const totalSalary = matchingEmps.reduce((sum, e) => {
-                                const wage = resolveWageBasis(e, wageTypes) === 'Daily' ? e.basicSalary * 26 : e.basicSalary;
-                                return sum + wage;
-                              }, 0);
-
-                              const isActive = selectedGroup === groupName || (selectedGroup === null && uniqueGroups[0] === groupName);
-                              if (selectedGroup === null && uniqueGroups[0] === groupName) {
-                                // Set initial selected group state safely outside layout lifecycle
-                                setTimeout(() => setSelectedGroup(groupName), 0);
-                              }
-
-                              return (
-                                <div 
-                                  key={groupName}
-                                  onClick={() => setSelectedGroup(groupName)}
-                                  className={`p-4 rounded-xl border transition cursor-pointer select-none ${isActive ? 'bg-slate-900 text-white border-slate-900 shadow-md' : 'bg-white text-slate-800 border-slate-200 hover:bg-slate-50'}`}
-                                >
-                                  <h4 className="font-bold text-sm truncate">{groupName}</h4>
-                                  <div className="flex justify-between items-center mt-2.5 text-xs">
-                                    <span className={isActive ? 'text-slate-300' : 'text-slate-500'}>Headcount:</span>
-                                    <span className="font-bold">{matchingEmps.length} Employees</span>
-                                  </div>
-                                  <div className="flex justify-between items-center mt-1 text-xs">
-                                    <span className={isActive ? 'text-slate-300' : 'text-slate-500'}>Est. Wage Liability:</span>
-                                    <span className="font-bold font-mono">PKR {totalSalary.toLocaleString()}</span>
-                                  </div>
-                                </div>
-                              );
-                            });
-                          })()}
-                        </div>
-                      </div>
-
-                      {/* Right: Selected Group Employees List */}
-                      <div className="lg:col-span-2 space-y-4">
-                        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4 min-h-[400px]">
-                          <div className="border-b border-slate-100 pb-3 flex justify-between items-center">
-                            <h3 className="font-bold text-slate-850 text-xs uppercase tracking-wider">
-                              Group Scope: <span className="text-emerald-600 font-extrabold font-mono text-sm ml-1">{selectedGroup || 'Unassigned'}</span>
-                            </h3>
-                            <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold px-2 py-0.5 rounded text-[10px] uppercase font-sans">
-                              {employees.filter(e => {
-                                if (reportGrouping === 'uc') return (resolveUcTownName(e, ucTowns) || 'Unassigned') === selectedGroup;
-                                if (reportGrouping === 'zone') return (resolveZoneName(e, zones) || 'Unassigned') === selectedGroup;
-                                const supervisor = e.zoneInChargeName || (e.isZoneInCharge ? 'Zone In Charge (Self)' : 'Unassigned');
-                                return supervisor === selectedGroup;
-                              }).length} Staff Members
-                            </span>
-                          </div>
-
-                          <div className="overflow-x-auto">
-                            <table className="min-w-full divide-y divide-slate-100 text-xs text-left">
-                              <thead className="bg-slate-50 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                                <tr>
-                                  <th className="px-3 py-2.5">Employee</th>
-                                  <th className="px-3 py-2.5">Code</th>
-                                  <th className="px-3 py-2.5">Designation</th>
-                                  <th className="px-3 py-2.5">Wage (PKR)</th>
-                                  <th className="px-3 py-2.5">Status</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-slate-200 text-slate-700">
-                                {filteredEmployees.filter(e => {
-                                  if (reportGrouping === 'uc') return (resolveUcTownName(e, ucTowns) || 'Unassigned') === selectedGroup;
-                                  if (reportGrouping === 'zone') return (resolveZoneName(e, zones) || 'Unassigned') === selectedGroup;
-                                  const supervisor = e.zoneInChargeName || (e.isZoneInCharge ? 'Zone In Charge (Self)' : 'Unassigned');
-                                  return supervisor === selectedGroup;
-                                }).map(emp => (
-                                  <tr key={emp.id} className="hover:bg-slate-50 transition">
-                                    <td className="px-3 py-2.5 font-sans font-medium text-slate-850 flex items-center space-x-2">
-                                      <img src={empAvatarUrl(emp)}alt="" className="w-6 h-6 rounded-full object-cover border" />
-                                      <span>{emp.fullName}</span>
-                                    </td>
-                                    <td className="px-3 py-2.5 font-mono">{emp.employeeCode}</td>
-                                    <td className="px-3 py-2.5 text-slate-500">
-                                      {localDesignations.find(ds => ds.id === emp.designationId)?.title || 'Specialist'}
-                                    </td>
-                                    <td className="px-3 py-2.5 font-bold font-mono text-slate-800">
-                                      {(emp.basicSalary || 0).toLocaleString()}
-                                    </td>
-                                    <td className="px-3 py-2.5">
-                                      <span className={`inline-flex px-1.5 py-0.5 rounded text-[9px] uppercase font-bold ${emp.status === 'Active' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-500'}`}>
-                                        {emp.status}
-                                      </span>
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-                      </div>
-
-                    </div>
-                  )}
+                  </>)}
                     </>);
                   })()}
 
@@ -3045,10 +2977,12 @@ export function WebPortal({
                       Attendance Ingestion Stream
                     </button>
                     <button 
-                      onClick={() => setAttSubTab('reports')}
+                      type="button"
+                      onClick={() => { setReportsGroup('attendance'); setActiveTab('reports'); }}
+                      title="Daily attendance, monthly register, summaries for any period: Reports → Attendance Reports"
                       className={`pb-2 text-xs font-bold border-b-2 transition uppercase tracking-wider ${attSubTab === 'reports' ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-slate-500 hover:text-slate-900'}`}
                     >
-                      Daily / Weekly / Monthly / Yearly Registers
+                      Daily / Monthly / Yearly Registers →
                     </button>
                   </div>
 
@@ -3058,7 +2992,7 @@ export function WebPortal({
                     placeholder={attSubTab === 'stream' ? 'Search employee, code, date, status, method…' : 'Search employee, code, department…'}
                   />
 
-                  {attSubTab === 'stream' ? (
+                  {(<>
                     <>
                       {(userPermissions.includes('manage_mobile_duty') || isCanonicalSuperAdmin) && (
                         <div className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-5 space-y-4">
@@ -3309,356 +3243,7 @@ export function WebPortal({
                         </div>
                       </div>
                     </>
-                  ) : (
-                    /* Attendance Register Reports view */
-                    <div className="space-y-6">
-                      
-                      {/* Period Type Selection header */}
-                      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                        <div className="flex space-x-2 select-none">
-                          {(['daily', 'weekly', 'monthly', 'yearly'] as const).map(p => (
-                            <button
-                              key={p}
-                              onClick={() => setAttPeriodType(p)}
-                              className={`px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wider transition cursor-pointer ${attPeriodType === p ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-                            >
-                              {p} register
-                            </button>
-                          ))}
-                        </div>
-
-                        {/* Parameter selections depending on period */}
-                        {attPeriodType === 'daily' && (
-                          <div className="grid w-full grid-cols-1 gap-3 text-xs sm:grid-cols-2 md:w-auto">
-                            <label className="flex flex-col gap-1.5 text-slate-500 font-medium">
-                              <span>Select Register Date</span>
-                              <DateField
-                                aria-label="Select Attendance Register Date"
-                                value={selectedAttDate}
-                                onChange={(e) => setSelectedAttDate(e.target.value)}
-                                className="min-h-9 rounded border border-slate-300 bg-white px-2 py-1.5 font-mono text-slate-800 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                              />
-                            </label>
-                            <label className="flex flex-col gap-1.5 text-slate-500 font-medium">
-                              <span className="flex items-center justify-between gap-4">
-                                <span>Audit Scope</span>
-                                <span className={`text-[9px] font-bold uppercase tracking-wider ${selectedAttEmployeeId === 'all' ? 'text-slate-400' : 'text-emerald-700'}`}>
-                                  {selectedAttEmployeeId === 'all' ? `${employees.length} employees` : 'Focused view'}
-                                </span>
-                              </span>
-                              <span className="relative block">
-                                <Users aria-hidden="true" className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-emerald-600" />
-                                <select
-                                  aria-label="Filter Daily Attendance Register by Employee"
-                                  value={selectedAttEmployeeId}
-                                  onChange={(e) => setSelectedAttEmployeeId(e.target.value)}
-                                  className="min-h-9 w-full min-w-64 rounded border border-slate-300 bg-white py-1.5 pl-8 pr-8 text-slate-800 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                                >
-                                  <option value="all">All Employees</option>
-                                  {selectedAttEmployeeId !== 'all' && !employees.some(emp => emp.id === selectedAttEmployeeId) && (
-                                    <option value={selectedAttEmployeeId}>Selected employee is no longer available</option>
-                                  )}
-                                  {[...employees]
-                                    .sort((a, b) => (a.fullName || '').localeCompare(b.fullName || '', undefined, { sensitivity: 'base' }))
-                                    .map(emp => (
-                                      <option key={emp.id} value={emp.id}>{emp.fullName} ({emp.employeeCode})</option>
-                                    ))}
-                                </select>
-                              </span>
-                            </label>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* DAILY REGISTER VIEW */}
-                      {attPeriodType === 'daily' && (
-                        <div className="space-y-4">
-                          {/* Metrics summary */}
-                          {(() => {
-                            const scopedEmployees = (selectedAttEmployeeId === 'all'
-                              ? employees
-                              : employees.filter(emp => emp.id === selectedAttEmployeeId)).filter(emp => employeeMatches(emp, attendanceSearch));
-                            const scopedEmployeeIds = new Set(scopedEmployees.map(emp => emp.id));
-                            const dayPunches = attendances.filter(a => a.date === selectedAttDate && scopedEmployeeIds.has(a.employeeId));
-                            const pCount = dayPunches.filter(a => a.status === 'Present').length;
-                            const lCount = dayPunches.filter(a => a.status === 'Late').length;
-                            const hdCount = dayPunches.filter(a => a.status === 'Half Day').length;
-                            const olCount = dayPunches.filter(a => a.status === 'On Leave').length;
-                            const aCount = scopedEmployees.length - pCount - lCount - hdCount - olCount;
-
-                            return (
-                              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5 lg:gap-4">
-                                <div className="bg-white p-4 rounded-xl border shadow-sm text-center">
-                                  <div className="text-2xl font-bold text-emerald-600">{pCount}</div>
-                                  <div className="text-[10px] uppercase font-bold tracking-wider text-slate-400 mt-1">Present</div>
-                                </div>
-                                <div className="bg-white p-4 rounded-xl border shadow-sm text-center">
-                                  <div className="text-2xl font-bold text-orange-500">{lCount}</div>
-                                  <div className="text-[10px] uppercase font-bold tracking-wider text-slate-400 mt-1">Late</div>
-                                </div>
-                                <div className="bg-white p-4 rounded-xl border shadow-sm text-center">
-                                  <div className="text-2xl font-bold text-amber-500">{hdCount}</div>
-                                  <div className="text-[10px] uppercase font-bold tracking-wider text-slate-400 mt-1">Half Day</div>
-                                </div>
-                                <div className="bg-white p-4 rounded-xl border shadow-sm text-center">
-                                  <div className="text-2xl font-bold text-indigo-500">{olCount}</div>
-                                  <div className="text-[10px] uppercase font-bold tracking-wider text-slate-400 mt-1">On Leave</div>
-                                </div>
-                                <div className="bg-white p-4 rounded-xl border shadow-sm text-center bg-rose-50/20 border-rose-100">
-                                  <div className="text-2xl font-bold text-rose-600">{Math.max(0, aCount)}</div>
-                                  <div className="text-[10px] uppercase font-bold tracking-wider text-slate-400 mt-1">Absent</div>
-                                </div>
-                              </div>
-                            );
-                          })()}
-
-                          {/* Detail table */}
-                          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-                            <div className="overflow-x-auto">
-                            <table className="min-w-[900px] w-full text-xs text-left">
-                              <thead className="bg-slate-50 font-bold text-slate-550 uppercase tracking-wider">
-                                <tr>
-                                  <th className="px-4 py-3">Employee</th>
-                                  <th className="px-4 py-3">In Punch</th>
-                                  <th className="px-4 py-3">Out Punch</th>
-                                  <th className="px-4 py-3">Out Reason</th>
-                                  <th className="px-4 py-3">Method</th>
-                                  <th className="px-4 py-3">Overtime</th>
-                                  <th className="px-4 py-3">Status</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-slate-200 text-slate-700">
-                                {attendanceSearch.trim() && !searchedEmployees(attendanceSearch).some(emp => selectedAttEmployeeId === 'all' || emp.id === selectedAttEmployeeId) && <NoSearchResults query={attendanceSearch} colSpan={7} onClear={() => setAttendanceSearch('')} />}
-                                {searchedEmployees(attendanceSearch)
-                                  .filter(emp => selectedAttEmployeeId === 'all' || emp.id === selectedAttEmployeeId)
-                                  .map(emp => {
-                                  const punch = attendances.find(a => a.employeeId === emp.id && a.date === selectedAttDate);
-                                  const status = punch ? punch.status : 'Absent';
-                                  
-                                  return (
-                                    <tr key={emp.id} className="hover:bg-slate-50">
-                                      <td className="px-4 py-3 font-medium flex items-center space-x-2">
-                                        <img src={empAvatarUrl(emp)} alt="" className="w-6 h-6 rounded-full object-cover border" />
-                                        <span>{emp.fullName} ({emp.employeeCode})</span>
-                                      </td>
-                                      <td className="px-4 py-3 font-mono text-emerald-700">{punch?.punchIn || '--:--'}</td>
-                                      <td className="px-4 py-3 font-mono text-indigo-700">{punch?.punchOut || '--:--'}</td>
-                                      <td className="px-4 py-3">
-                                        {(() => {
-                                          const completedBreaks = Array.isArray(punch?.breaks) ? punch.breaks : [];
-                                          const finalReason = punch?.punchOut && punch.outReason?.trim()
-                                            ? [{ reason: punch.outReason.trim(), outAt: punch.punchOut, returnAt: '' }]
-                                            : [];
-                                          const reasons = [...completedBreaks, ...finalReason];
-                                          if (reasons.length) {
-                                            return (
-                                              <div className="flex max-w-64 flex-wrap gap-1.5">
-                                                {reasons.map((entry, index) => {
-                                                  const timeRange = entry.returnAt
-                                                    ? `${entry.outAt.slice(0, 5)}–${entry.returnAt.slice(0, 5)}`
-                                                    : entry.outAt.slice(0, 5);
-                                                  return (
-                                                    <span
-                                                      key={`${entry.reason}-${entry.outAt}-${index}`}
-                                                      title={`${entry.reason} · ${timeRange}`}
-                                                      className={`inline-flex max-w-60 truncate rounded border px-2 py-0.5 text-[10px] font-semibold ${entry.returnAt ? 'border-sky-200 bg-sky-50 text-sky-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}
-                                                    >
-                                                      {entry.reason} · {timeRange}
-                                                    </span>
-                                                  );
-                                                })}
-                                              </div>
-                                            );
-                                          }
-                                          return punch?.punchOut ? (
-                                            <span className="inline-flex rounded border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
-                                              Not recorded
-                                            </span>
-                                          ) : (
-                                            <span className="text-slate-400" aria-label="No punch-out">&mdash;</span>
-                                          );
-                                        })()}
-                                      </td>
-                                      <td className="px-4 py-3 text-slate-500">{punch?.method || 'N/A'}</td>
-                                      <td className="px-4 py-3 font-mono">{punch?.overtimeMinutes ? `${punch.overtimeMinutes}m` : 'None'}</td>
-                                      <td className="px-4 py-3">
-                                        <span className={`inline-flex px-1.5 py-0.5 rounded text-[9px] uppercase font-bold ${
-                                          status === 'Present' ? 'bg-emerald-100 text-emerald-800' :
-                                          status === 'Late' ? 'bg-orange-100 text-orange-850' :
-                                          status === 'Half Day' ? 'bg-amber-100 text-amber-800' :
-                                          status === 'On Leave' ? 'bg-indigo-100 text-indigo-800' :
-                                          'bg-rose-100 text-rose-800'
-                                        }`}>
-                                          {status}
-                                        </span>
-                                      </td>
-                                    </tr>
-                                  );
-                                })}
-                                {employees.filter(emp => selectedAttEmployeeId === 'all' || emp.id === selectedAttEmployeeId).length === 0 && (
-                                  <tr>
-                                    <td colSpan={7} className="px-6 py-12 text-center">
-                                      <div className="mx-auto max-w-md">
-                                        <div className="font-semibold text-slate-700">No employee attendance to display</div>
-                                        <div className="mt-1 text-xs leading-5 text-slate-500">
-                                          The selected employee is no longer available, or there are no employees in this register. Choose All Employees to review the current workforce.
-                                        </div>
-                                      </div>
-                                    </td>
-                                  </tr>
-                                )}
-                              </tbody>
-                            </table>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* WEEKLY REGISTER VIEW */}
-                      {attPeriodType === 'weekly' && (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          {[
-                            { name: 'Week 1 (June 01 - June 07)', start: '2026-06-01', end: '2026-06-07' },
-                            { name: 'Week 2 (June 08 - June 14)', start: '2026-06-08', end: '2026-06-14' },
-                            { name: 'Week 3 (June 15 - June 21)', start: '2026-06-15', end: '2026-06-21' },
-                            { name: 'Week 4 (June 22 - June 28)', start: '2026-06-22', end: '2026-06-28' }
-                          ].map(wk => {
-                            const wkPunches = attendances.filter(a => a.date >= wk.start && a.date <= wk.end && employeeMatches(employees.find(e => e.id === a.employeeId), attendanceSearch));
-                            const presents = wkPunches.filter(a => a.status === 'Present' || a.status === 'Late').length;
-                            const halfDays = wkPunches.filter(a => a.status === 'Half Day').length;
-                            const totalExpected = employees.length * 5; // 5 working days expected per employee
-                            const attendanceRate = totalExpected > 0 ? Math.round((presents / totalExpected) * 100) : 0;
-                            const totalOT = wkPunches.reduce((sum, a) => sum + a.overtimeMinutes, 0);
-
-                            return (
-                              <div key={wk.name} className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
-                                <div className="flex justify-between border-b pb-2">
-                                  <h4 className="font-bold text-slate-800">{wk.name}</h4>
-                                  <span className="bg-emerald-50 text-emerald-700 font-bold text-[10px] px-1.5 py-0.5 rounded border border-emerald-100">
-                                    {attendanceRate}% rate
-                                  </span>
-                                </div>
-                                <div className="grid grid-cols-3 gap-2 text-center text-xs">
-                                  <div className="bg-slate-50 p-2 rounded">
-                                    <div className="font-bold text-slate-800">{presents}</div>
-                                    <div className="text-[9px] text-slate-400 uppercase mt-0.5">Presents</div>
-                                  </div>
-                                  <div className="bg-slate-50 p-2 rounded">
-                                    <div className="font-bold text-slate-800">{halfDays}</div>
-                                    <div className="text-[9px] text-slate-400 uppercase mt-0.5">Half Days</div>
-                                  </div>
-                                  <div className="bg-slate-50 p-2 rounded">
-                                    <div className="font-bold text-slate-800 font-mono">{Math.round(totalOT/60)}h</div>
-                                    <div className="text-[9px] text-slate-400 uppercase mt-0.5">Overtime</div>
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-
-                      {/* MONTHLY REGISTER VIEW */}
-                      {attPeriodType === 'monthly' && (
-                        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden p-5 space-y-4">
-                          <h3 className="font-bold text-slate-800 text-sm border-b pb-2">Monthly Aggregate Register: {new Date(`${selectedAttDate.slice(0, 7)}-01T00:00:00`).toLocaleString('en-PK', { month: 'long', year: 'numeric' })}</h3>
-                          <div className="overflow-x-auto">
-                            <table className="min-w-full text-xs text-left">
-                              <thead className="bg-slate-50 font-bold text-slate-500 uppercase tracking-wider">
-                                <tr>
-                                  <th className="px-3 py-2.5">Employee</th>
-                                  {companyOptions.registerShowsPosition && <><th className="px-3 py-2.5">Position</th><th className="px-3 py-2.5">Branch</th></>}
-                                  <th className="px-3 py-2.5 text-center">Present</th>
-                                  <th className="px-3 py-2.5 text-center">Late</th>
-                                  <th className="px-3 py-2.5 text-center">Half Day</th>
-                                  <th className="px-3 py-2.5 text-center">On Leave</th>
-                                  <th className="px-3 py-2.5 text-center">Absent</th>
-                                  <th className="px-3 py-2.5 text-right">Overtime</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-slate-200 text-slate-700">
-                                {searchedEmployees(attendanceSearch).map(emp => {
-                                  const monthPunches = attendances.filter(
-                                    a => a.employeeId === emp.id && a.date.startsWith(selectedAttDate.slice(0, 7))
-                                  );
-                                  const present = monthPunches.filter(a => a.status === 'Present').length;
-                                  const late = monthPunches.filter(a => a.status === 'Late').length;
-                                  const half = monthPunches.filter(a => a.status === 'Half Day').length;
-                                  const leave = monthPunches.filter(a => a.status === 'On Leave').length;
-                                  const absent = monthPunches.filter(a => a.status === 'Absent').length;
-                                  const otMinutes = monthPunches.reduce((sum, a) => sum + (a.overtimeMinutes || 0), 0);
-
-                                  return (
-                                    <tr key={emp.id} className="hover:bg-slate-50">
-                                      <td className="px-3 py-2.5 font-medium flex items-center space-x-2">
-                                        <img src={empAvatarUrl(emp)} alt="" className="w-5 h-5 rounded-full object-cover border" />
-                                        <span>{emp.fullName}</span>
-                                      </td>
-                                      {companyOptions.registerShowsPosition && <><td className="px-3 py-2.5 text-slate-600">{designations.find(item => item.id === emp.designationId)?.title || '—'}</td><td className="px-3 py-2.5 text-slate-600">{branches.find(item => item.id === emp.branchId)?.name || '—'}</td></>}
-                                      <td className="px-3 py-2.5 text-center font-bold text-emerald-600">{present}</td>
-                                      <td className="px-3 py-2.5 text-center text-orange-500">{late}</td>
-                                      <td className="px-3 py-2.5 text-center text-amber-500">{half}</td>
-                                      <td className="px-3 py-2.5 text-center text-indigo-500">{leave}</td>
-                                      <td className="px-3 py-2.5 text-center text-rose-500">{absent}</td>
-                                      <td className="px-3 py-2.5 text-right font-mono font-semibold">{(otMinutes/60).toFixed(1)} hrs</td>
-                                    </tr>
-                                  );
-                                })}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* YEARLY REGISTER VIEW */}
-                      {attPeriodType === 'yearly' && (
-                        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden p-5 space-y-4">
-                          <h3 className="font-bold text-slate-800 text-sm border-b pb-2">Annual Aggregate Register: Calendar Year {selectedAttDate.slice(0, 4)}</h3>
-                          <div className="overflow-x-auto">
-                            <table className="min-w-full text-xs text-left">
-                              <thead className="bg-slate-50 font-bold text-slate-500 uppercase tracking-wider">
-                                <tr>
-                                  <th className="px-3 py-2.5">Employee</th>
-                                  {companyOptions.registerShowsPosition && <><th className="px-3 py-2.5">Position</th><th className="px-3 py-2.5">Branch</th></>}
-                                  <th className="px-3 py-2.5 text-center">Present Days</th>
-                                  <th className="px-3 py-2.5 text-center">Late Days</th>
-                                  <th className="px-3 py-2.5 text-center">Half Days</th>
-                                  <th className="px-3 py-2.5 text-center">On Leave Days</th>
-                                  <th className="px-3 py-2.5 text-right">OT Logged</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-slate-200 text-slate-700">
-                                {searchedEmployees(attendanceSearch).map(emp => {
-                                  const yrPunches = attendances.filter(a => a.employeeId === emp.id && a.date.startsWith(selectedAttDate.slice(0, 4)));
-                                  const present = yrPunches.filter(a => a.status === 'Present').length;
-                                  const late = yrPunches.filter(a => a.status === 'Late').length;
-                                  const half = yrPunches.filter(a => a.status === 'Half Day').length;
-                                  const leave = yrPunches.filter(a => a.status === 'On Leave').length;
-                                  const ot = yrPunches.reduce((sum, a) => sum + (a.overtimeMinutes || 0), 0);
-
-                                  return (
-                                    <tr key={emp.id} className="hover:bg-slate-50">
-                                      <td className="px-3 py-2.5 font-medium flex items-center space-x-2">
-                                        <img src={empAvatarUrl(emp)} alt="" className="w-5 h-5 rounded-full object-cover border" />
-                                        <span>{emp.fullName}</span>
-                                      </td>
-                                      {companyOptions.registerShowsPosition && <><td className="px-3 py-2.5 text-slate-600">{designations.find(item => item.id === emp.designationId)?.title || '—'}</td><td className="px-3 py-2.5 text-slate-600">{branches.find(item => item.id === emp.branchId)?.name || '—'}</td></>}
-                                      <td className="px-3 py-2.5 text-center font-bold text-emerald-600">{present}</td>
-                                      <td className="px-3 py-2.5 text-center text-orange-500">{late}</td>
-                                      <td className="px-3 py-2.5 text-center text-amber-500">{half}</td>
-                                      <td className="px-3 py-2.5 text-center text-indigo-500">{leave}</td>
-                                      <td className="px-3 py-2.5 text-right font-mono font-semibold">{(ot/60).toFixed(1)} hrs</td>
-                                    </tr>
-                                  );
-                                })}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-                      )}
-
-                    </div>
-                  )}
+                  </>)}
 
                 </motion.div>
               )}
@@ -4863,6 +4448,7 @@ export function WebPortal({
                           if (form.elements.perm_payroll.checked) selectedPerms.push('manage_payroll');
                           if (form.elements.perm_settings.checked) selectedPerms.push('manage_settings');
                           if (form.elements.perm_access.checked) selectedPerms.push('manage_access');
+                          if (form.elements.perm_data_import?.checked) selectedPerms.push('manage_data_import');
 
                           if (!roleName) {
                             alert('Please enter a role name.');
@@ -4899,6 +4485,9 @@ export function WebPortal({
                               </label>
                               <label className="flex items-center space-x-2 text-[11px] text-slate-650">
                                 <input type="checkbox" name="perm_mobile_duty" /> <span>Assign Mobile Duty</span>
+                              </label>
+                              <label className="flex items-center space-x-2 text-[11px] text-slate-650">
+                                <input type="checkbox" name="perm_data_import" /> <span>Data import (legacy system)</span>
                               </label>
                               <label className="flex items-center space-x-2 text-[11px] text-slate-650">
                                 <input type="checkbox" name="perm_leave" /> <span>Manage Leaves</span>
@@ -5003,6 +4592,16 @@ export function WebPortal({
               {activeTab === 'maintenance' && (
                 <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="h-full">
                   <FirestoreMaintenanceModule />
+                </motion.div>
+              )}
+
+              {activeTab === 'reports' && hasPermission('reports') && (
+                <ReportsPanel group={reportsGroup} companyName={companyDisplayName} branches={branches} departments={departments} designations={designations} zones={zones} ucTowns={ucTowns} />
+              )}
+
+              {activeTab === 'data-import' && hasPermission('data-import') && (
+                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="h-full">
+                  <DataImportPanel />
                 </motion.div>
               )}
 

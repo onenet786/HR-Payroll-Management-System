@@ -173,6 +173,13 @@ const el = {
   settingsClose:  id('settingsClose'),
   stRegStatus:    id('stRegStatus'),
   stRegForm:      id('stRegForm'),
+  stRegServer:    id('stRegServer'),
+  stRegMethodCode:    id('stRegMethodCode'),
+  stRegMethodAccount: id('stRegMethodAccount'),
+  stRegCodeFields:    id('stRegCodeFields'),
+  stRegAccountFields: id('stRegAccountFields'),
+  stRegSetupCode:     id('stRegSetupCode'),
+  stRegCodePreview:   id('stRegCodePreview'),
   stRegEmail:     id('stRegEmail'),
   stRegPassword:  id('stRegPassword'),
   stRegister:     id('stRegister'),
@@ -2434,14 +2441,24 @@ function openSettings() {
   if (st) {
     el.stSyncInfo.textContent = [
       `Kiosk version: ${kioskState.appVersion || 'unknown'}`,
-      `Portal: ${st.portalUrl}`,
+      kioskState.deviceRegistration?.clientName ? `Client: ${kioskState.deviceRegistration.clientName}` : null,
+      `Portal: ${kioskState.deviceRegistration?.portalUrl || st.portalUrl}${kioskState.deviceRegistration?.usingFallback ? ' (fallback address)' : ''}`,
+      (st.portalUrls || []).length > 1 ? `Server addresses: ${st.portalUrls.join(', ')}` : null,
       `Collections: ${(st.collections || []).join(', ')}`,
       `Store: ${kioskState.storePath || '—'}`,
-    ].join('\n');
+    ].filter(Boolean).join('\n');
   }
 
   renderSettingsEvents();
   renderRegistration(kioskState.deviceRegistration);
+  // The server address in use can change after a fallback; show the current one.
+  api.deviceStatus().then(registration => {
+    if (!registration || !kioskState) return;
+    const changed = registration.registered !== kioskState.deviceRegistration?.registered
+      || registration.portalUrl !== kioskState.deviceRegistration?.portalUrl;
+    kioskState.deviceRegistration = registration;
+    if (changed) renderRegistration(registration);
+  }).catch(() => { /* keep what is shown */ });
   el.settingsOverlay.classList.remove('hidden');
 }
 
@@ -2449,24 +2466,90 @@ function updateRegistrationBanner() {
   el.regBanner?.classList.toggle('hidden', kioskState?.deviceRegistration?.registered !== false);
 }
 
+// "Server: <url> (primary|fallback)" line under the registration status.
+function serverInUseText(registration) {
+  if (!registration?.portalUrl) return '';
+  const urls = registration.portalUrls || [];
+  const role = urls.length > 1 ? (registration.usingFallback ? ' (fallback address)' : ' (primary address)') : '';
+  return `Server in use: ${registration.portalUrl}${role}`;
+}
+
 function renderRegistration(registration) {
   const registered = !!registration?.registered;
   updateRegistrationBanner();
+  const client = registration?.clientName ? ` for ${registration.clientName}` : '';
   el.stRegStatus.textContent = registered
-    ? `Registered as "${registration.name}" on ${new Date(registration.registeredAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })} with ${registration.portalUrl}.`
-    : `Not registered. This kiosk cannot download employees or upload punches until it is registered with ${registration?.portalUrl || 'the server'}.`;
+    ? `Registered${client} as "${registration.name}" on ${new Date(registration.registeredAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}.`
+    : `Not registered. This kiosk cannot download employees or upload punches until it is registered. Use the setup code from the web portal.`;
   el.stRegStatus.style.color = registered ? 'var(--em)' : 'var(--red)';
+  if (el.stRegServer) {
+    el.stRegServer.textContent = registered ? serverInUseText(registration) : '';
+    el.stRegServer.classList.toggle('hidden', !registered);
+  }
   el.stRegForm.classList.toggle('hidden', registered);
   el.stRegister.classList.toggle('hidden', registered);
   el.stUnregister.classList.toggle('hidden', !registered);
   el.stRegPassword.value = '';
+  if (registered && el.stRegSetupCode) el.stRegSetupCode.value = '';
+  updateRegistrationMethod();
+}
+
+function registrationMethod() {
+  return el.stRegMethodAccount?.checked ? 'account' : 'code';
+}
+
+function updateRegistrationMethod() {
+  const method = registrationMethod();
+  el.stRegCodeFields?.classList.toggle('hidden', method !== 'code');
+  el.stRegAccountFields?.classList.toggle('hidden', method !== 'account');
+  if (method === 'code') previewSetupCode();
+}
+
+// Shows who the pasted code belongs to before Register is pressed; parse errors appear inline.
+let setupCodePreviewSeq = 0;
+async function previewSetupCode() {
+  const preview = el.stRegCodePreview;
+  if (!preview || !el.stRegSetupCode) return null;
+  const text = el.stRegSetupCode.value.trim();
+  const seq = ++setupCodePreviewSeq;
+  if (!text) {
+    preview.textContent = '';
+    preview.className = 'form-help full';
+    return null;
+  }
+  const parsed = await api.parseSetupCode(text);
+  if (seq !== setupCodePreviewSeq) return parsed;
+  if (parsed.ok) {
+    const fallback = parsed.urls.length > 1 ? ` (fallback: ${parsed.urls[1]})` : '';
+    preview.textContent = `Client: ${parsed.clientName || '—'} · Server: ${parsed.urls[0]}${fallback}`;
+    preview.className = 'form-help full reg-code-preview-ok';
+  } else {
+    preview.textContent = parsed.error || 'This is not a kiosk setup code';
+    preview.className = 'form-help full reg-code-preview-error';
+  }
+  return parsed;
 }
 
 async function registerKiosk() {
+  const useCode = registrationMethod() === 'code';
+  if (useCode) {
+    const parsed = await previewSetupCode();
+    if (!parsed?.ok) {
+      if (!parsed) {
+        el.stRegCodePreview.textContent = 'Paste the setup code';
+        el.stRegCodePreview.className = 'form-help full reg-code-preview-error';
+      }
+      el.stRegSetupCode.focus();
+      return;
+    }
+  }
   el.stRegister.disabled = true;
   el.stRegStatus.textContent = 'Registering…';
+  el.stRegStatus.style.color = '';
   try {
-    const result = await api.registerDevice({ email: el.stRegEmail.value, password: el.stRegPassword.value });
+    const result = await api.registerDevice(useCode
+      ? { setupCode: el.stRegSetupCode.value }
+      : { email: el.stRegEmail.value, password: el.stRegPassword.value });
     el.stRegPassword.value = '';
     if (!result.ok) {
       el.stRegStatus.textContent = result.error || 'Registration failed.';
@@ -2766,7 +2849,7 @@ function bindEvents() {
   el.settingsBtn.addEventListener('click', openSettings);
   el.regBannerBtn?.addEventListener('click', () => {
     openSettings();
-    el.stRegEmail?.focus();
+    (registrationMethod() === 'code' ? el.stRegSetupCode : el.stRegEmail)?.focus();
   });
   el.settingsClose.addEventListener('click', closeSettings);
   el.stSave.addEventListener('click', saveSettings);
@@ -2833,6 +2916,9 @@ function bindEvents() {
   });
   el.stRegister.addEventListener('click', registerKiosk);
   el.stRegPassword.addEventListener('keydown', e => { if (e.key === 'Enter') registerKiosk(); });
+  el.stRegMethodCode?.addEventListener('change', updateRegistrationMethod);
+  el.stRegMethodAccount?.addEventListener('change', updateRegistrationMethod);
+  el.stRegSetupCode?.addEventListener('input', previewSetupCode);
   el.stUnregister.addEventListener('click', unregisterKiosk);
   el.stStartBridge.addEventListener('click', async () => {
     const result = await api.startBridge();

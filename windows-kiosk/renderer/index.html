@@ -433,16 +433,37 @@
         <div class="dialog-section">
           <h3 class="dialog-section-title">Server Registration</h3>
           <p class="form-help" id="stRegStatus">Checking registration…</p>
-          <div class="form-grid" id="stRegForm">
-            <label class="form-field">
-              <span class="form-label">Kiosk account email or username<span class="req" aria-hidden="true">*</span></span>
-              <input id="stRegEmail" class="form-input" autocomplete="off" required aria-required="true" placeholder="kiosk.gate1@company.com" />
-            </label>
-            <label class="form-field">
-              <span class="form-label">Password<span class="req" aria-hidden="true">*</span></span>
-              <input id="stRegPassword" class="form-input" type="password" autocomplete="off" required aria-required="true" />
-            </label>
-            <small class="form-help full">Use a user with the <b>Kiosk Terminal</b> role (User Management). The password is sent once and not stored; this PC receives its own device key, which an administrator can revoke.</small>
+          <p class="form-help reg-server hidden" id="stRegServer"></p>
+          <div id="stRegForm">
+            <div class="reg-methods" role="radiogroup" aria-label="Registration method">
+              <label class="reg-method">
+                <input type="radio" name="stRegMethod" id="stRegMethodCode" value="code" checked />
+                <span>Setup code <small>(recommended)</small></span>
+              </label>
+              <label class="reg-method">
+                <input type="radio" name="stRegMethod" id="stRegMethodAccount" value="account" />
+                <span>Kiosk account email &amp; password</span>
+              </label>
+            </div>
+            <div class="form-grid" id="stRegCodeFields">
+              <label class="form-field full">
+                <span class="form-label">Setup code<span class="req" aria-hidden="true">*</span></span>
+                <textarea id="stRegSetupCode" class="form-input reg-code-input" rows="3" spellcheck="false" autocomplete="off" required aria-required="true" placeholder="HRK1.…"></textarea>
+              </label>
+              <small class="form-help full" id="stRegCodePreview" aria-live="polite"></small>
+              <small class="form-help full">Generate the setup code in the web portal (Kiosk Terminals) and paste it here. It tells this kiosk which server to use and can be used only once; this PC receives its own device key, which an administrator can revoke.</small>
+            </div>
+            <div class="form-grid hidden" id="stRegAccountFields">
+              <label class="form-field">
+                <span class="form-label">Kiosk account email or username<span class="req" aria-hidden="true">*</span></span>
+                <input id="stRegEmail" class="form-input" autocomplete="off" required aria-required="true" placeholder="kiosk.gate1@company.com" />
+              </label>
+              <label class="form-field">
+                <span class="form-label">Password<span class="req" aria-hidden="true">*</span></span>
+                <input id="stRegPassword" class="form-input" type="password" autocomplete="off" required aria-required="true" />
+              </label>
+              <small class="form-help full">Use a user with the <b>Kiosk Terminal</b> role (User Management). The password is sent once and not stored; this PC receives its own device key, which an administrator can revoke.</small>
+            </div>
           </div>
           <div class="dialog-footer-left" style="margin-top:10px">
             <button class="btn btn-primary" id="stRegister" type="button">Register this kiosk</button>

@@ -25,6 +25,10 @@ if (isProduction && process.env.DEBUG === 'true') {
   throw new Error('Production startup refused: DEBUG must be false.');
 }
 
+// Extra addresses (platform subdomain, custom domains) added by the Provider Console are read from the database
+// every 30 seconds (server/installation.cjs), so a new domain works without editing .env or restarting.
+let originRegistry = null;
+
 function isOriginAllowed(origin) {
   if (!origin) return true;
   if (!isProduction) return true;
@@ -32,6 +36,7 @@ function isOriginAllowed(origin) {
   if (origin === 'file://' || origin === 'null' || origin.startsWith('app://') || origin.startsWith('vscode-webview://')) return true;
 
   const normalized = origin.trim().replace(/\/+$/, '').toLowerCase();
+  if (originRegistry?.has(normalized)) return true;
   for (const allowed of rawAllowedOrigins) {
     const cleanAllowed = allowed.toLowerCase();
     if (cleanAllowed === normalized) return true;
@@ -151,9 +156,21 @@ for (const origin of rawAllowedOrigins) {
   }
 }
 
+// A self-hosted installation on a LAN may run on plain http://server:8080 (no certificate yet). Then the browser
+// must not be told to upgrade every request to HTTPS (it would fetch https://server:8080 and fail) or to remember
+// HSTS. Hosted installations (https APP_URL, or a certificate configured here) keep both.
+const servesPlainHttp = !(process.env.HTTPS_PFX_PATH || process.env.HTTPS_CERT_PATH) && /^http:\/\//i.test(String(process.env.APP_URL || ''));
+
+// gzip API and page responses: collections are large JSON (thousands of employees and attendance days) and
+// compress 5-10x. Self-hosted installations have no nginx in front to do it.
+// Optional: a server updated by copying server.cjs without `npm install` keeps running, only uncompressed.
+try { app.use(require('compression')({ threshold: 2048 })); }
+catch { console.warn('Response compression is off: run "npm install" to add the compression package.'); }
+
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
+      upgradeInsecureRequests: servesPlainHttp ? null : [],
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'", "'unsafe-inline'", "'wasm-unsafe-eval'", "'unsafe-eval'", 'https://apis.google.com'],
       styleSrc: ["'self'", "'unsafe-inline'"],
@@ -170,7 +187,9 @@ app.use(helmet({
   },
 
   frameguard: false,
-  hsts: { maxAge: 31536000, includeSubDomains: true },
+  hsts: servesPlainHttp ? false : { maxAge: 31536000, includeSubDomains: true },
+  crossOriginOpenerPolicy: servesPlainHttp ? false : undefined, // ignored by browsers on plain HTTP anyway
+  originAgentCluster: !servesPlainHttp,
   noSniff: true,
   referrerPolicy: { policy: 'no-referrer' },
 }));
@@ -243,12 +262,20 @@ if (!process.env.DATA_BACKEND || (process.env.DATA_BACKEND || '').trim().toLower
   const { getTableName } = require('./server/collections.cjs');
   // Product edition (full / lite) chosen by the vendor; see server/edition.cjs.
   const edition = require('./server/edition.cjs');
+  // Licence, domains, client data import and kiosk setup codes managed by the provider; see server/installation.cjs.
+  const installation = require('./server/installation.cjs');
+  const getPool = () => require('./server/db.cjs').pool;
+  originRegistry = installation.createOriginRegistry(getPool);
+  const licenceGate = installation.licenceGate(getPool);
   app.use('/api/vendor', edition.router);
-  app.use('/api/documents', authenticate, documentRoutes);
-  app.use('/api/employee-documents', authenticate, employeeDocumentRoutes);
-  app.use('/api/payroll-delivery', authenticate, payrollDeliveryRoutes);
+  app.use('/api/documents', authenticate, licenceGate, documentRoutes);
+  app.use('/api/reports', authenticate, licenceGate, require('./server/reports.cjs').router);
+  app.use('/api/employee-documents', authenticate, licenceGate, employeeDocumentRoutes);
+  app.use('/api/payroll-delivery', authenticate, licenceGate, payrollDeliveryRoutes);
   app.use('/api/auth/mfa', mfaPublicRoutes);
-  app.use('/api/auth/mfa', authenticate, mfaRoutes);
+  app.use('/api/auth/mfa', authenticate, licenceGate, mfaRoutes);
+  // Legacy data import (CyberAP) run by the client's own administrator; see server/legacy-import/routes.cjs.
+  app.use('/api/data-import', authenticate, licenceGate, require('./server/legacy-import/routes.cjs').clientRouter);
 
   app.post('/api/auth/login', async (req, res, next) => {
     try {
@@ -264,6 +291,8 @@ if (!process.env.DATA_BACKEND || (process.env.DATA_BACKEND || '').trim().toLower
         return res.json({ vendorConsole: true, vendorToken: session.token, expiresAt: session.expiresAt, edition: await edition.loadEdition() });
       }
       const { pool } = require('./server/db.cjs');
+      const licence = installation.licenceState(await installation.loadLicence(pool));
+      if (licence.blocked) return res.status(403).json({ error: licence.message || installation.SUSPENDED_MESSAGE, licence });
       const userSecrets = require('./server/user-secrets.cjs');
       const found = await userSecrets.findLoginUser(pool, email);
       const userDoc = found && { document_id: found.id, data: found.data };
@@ -348,6 +377,8 @@ if (!process.env.DATA_BACKEND || (process.env.DATA_BACKEND || '').trim().toLower
       const userCount = Number(result.rows[0]?.count || 0);
       const branding = await getActiveBranding();
       const activeEdition = await edition.loadEdition().catch(() => edition.FULL_EDITION);
+      const licence = installation.licenceState(await installation.loadLicence(pool));
+      const clientDataImport = await installation.clientDataImportEnabled(pool).catch(() => false);
 
       return res.json({
         hasUsers: userCount > 0,
@@ -355,6 +386,9 @@ if (!process.env.DATA_BACKEND || (process.env.DATA_BACKEND || '').trim().toLower
         companyName: branding.name,
         companySubtitle: branding.subtitle,
         edition: activeEdition,
+        licence: { state: licence.state, daysLeft: licence.daysLeft, expiresAt: licence.expiresAt, graceDaysLeft: licence.graceDaysLeft, staffLimit: licence.staffLimit, message: licence.message },
+        clientDataImport,
+        managed: process.env.MANAGED_INSTALLATION === 'true',
       });
     } catch (err) {
       next(err);
@@ -369,6 +403,8 @@ if (!process.env.DATA_BACKEND || (process.env.DATA_BACKEND || '').trim().toLower
 
   app.post('/api/auth/setup', async (req, res, next) => {
     try {
+      // On a hosted installation the provider creates the first administrator; nobody can claim it from the web.
+      if (process.env.MANAGED_INSTALLATION === 'true') return res.status(403).json({ error: 'This installation is managed by your service provider, who creates the first administrator account.' });
       const { companyName, adminEmail, adminPassword, adminName } = req.body || {};
       if (!adminEmail || !adminPassword) {
         return res.status(400).json({ error: 'Admin email and password are required.' });
@@ -578,13 +614,56 @@ app.use((error, req, res, _next) => {
 
 const port = Number(process.env.PORT || 8080);
 const host = process.env.HOST || '0.0.0.0';
-app.listen(port, host, () => {
-  console.info(`Production server listening on http://${host}:${port}.`);
+
+// Optional HTTPS served by the app itself, for a self-hosted Windows Server without a reverse proxy:
+//   HTTPS_PFX_PATH (+ HTTPS_PFX_PASSPHRASE)  or  HTTPS_CERT_PATH + HTTPS_KEY_PATH  (PEM, e.g. from win-acme)
+//   HTTPS_PORT (default 443); PORT then becomes a plain-HTTP listener that redirects to HTTPS.
+// A renewed certificate file is picked up without a restart.
+function tlsOptions() {
+  const fs = require('node:fs');
+  if (process.env.HTTPS_PFX_PATH) return { pfx: fs.readFileSync(process.env.HTTPS_PFX_PATH), passphrase: process.env.HTTPS_PFX_PASSPHRASE || undefined };
+  if (process.env.HTTPS_CERT_PATH && process.env.HTTPS_KEY_PATH) return { cert: fs.readFileSync(process.env.HTTPS_CERT_PATH), key: fs.readFileSync(process.env.HTTPS_KEY_PATH) };
+  return null;
+}
+
+const initialTls = tlsOptions();
+const listening = () => {
   // Older builds stored User Management passwords in plain text; hash any that remain.
   if (process.env.DATABASE_URL) {
     const { pool } = require('./server/db.cjs');
+    require('./server/default-roles.cjs').ensureDefaultRoles(pool)
+      .then(count => { if (count) console.info(`Added ${count} standard role(s).`); })
+      .catch(error => console.warn('Standard roles check failed:', error.message));
     require('./server/user-secrets.cjs').hashLegacyPasswords(pool)
       .then(count => { if (count) console.info(`Secured ${count} legacy plain-text password(s).`); })
       .catch(() => undefined);
   }
-});
+};
+
+if (initialTls) {
+  const https = require('node:https');
+  const http = require('node:http');
+  const fs = require('node:fs');
+  const httpsPort = Number(process.env.HTTPS_PORT || 443);
+  const secure = https.createServer(initialTls, app);
+  secure.listen(httpsPort, host, () => { console.info(`Production server listening on https://${host}:${httpsPort}.`); listening(); });
+  // Certificates renewed on disk (win-acme every ~60 days) are reloaded without dropping connections.
+  let reloadTimer = null;
+  const reload = () => {
+    clearTimeout(reloadTimer);
+    reloadTimer = setTimeout(() => {
+      try { secure.setSecureContext(tlsOptions()); console.info('HTTPS certificate reloaded.'); }
+      catch (error) { console.error('HTTPS certificate reload failed (keeping the previous one):', error.message); }
+    }, 2000);
+  };
+  for (const file of [process.env.HTTPS_PFX_PATH, process.env.HTTPS_CERT_PATH, process.env.HTTPS_KEY_PATH].filter(Boolean)) fs.watchFile(file, { interval: 60_000 }, reload);
+  if (process.env.HTTP_REDIRECT !== 'false') {
+    http.createServer((req, res) => {
+      const hostHeader = String(req.headers.host || '').replace(/:\d+$/, '');
+      res.writeHead(301, { Location: `https://${hostHeader}${httpsPort === 443 ? '' : `:${httpsPort}`}${req.url || '/'}` });
+      res.end();
+    }).listen(port, host, () => console.info(`Redirecting http://${host}:${port} to HTTPS.`));
+  }
+} else {
+  app.listen(port, host, () => { console.info(`Production server listening on http://${host}:${port}.`); listening(); });
+}

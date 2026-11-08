@@ -81,10 +81,12 @@ const copy = (rel, dest = rel) => {
   fs.copyFileSync(path.join(root, rel), to);
 };
 for (const f of ['server.cjs', 'package.json', 'package-lock.json']) copy(f);
-for (const f of fs.readdirSync(path.join(root, 'server'))) {
-  if (f.endsWith('.cjs') && !/\.(test|integration)\.cjs$/.test(f)) copy(path.join('server', f));
+for (const dir of ['server', path.join('server', 'legacy-import')]) {
+  for (const f of fs.readdirSync(path.join(root, dir))) {
+    if (f.endsWith('.cjs') && !/\.(test|integration)\.cjs$/.test(f)) copy(path.join(dir, f));
+  }
 }
-for (const f of ['postgres-migrate.cjs', 'postgres-backup.cjs', 'postgres-backup-verify.cjs', 'postgres-restore.cjs', 'backup-crypto.cjs', 'seed-tax-slabs.cjs']) {
+for (const f of ['postgres-migrate.cjs', 'postgres-backup.cjs', 'postgres-backup-verify.cjs', 'postgres-restore.cjs', 'backup-crypto.cjs', 'seed-tax-slabs.cjs', 'cyberap-import.cjs']) {
   if (fs.existsSync(path.join(root, 'scripts', f))) copy(path.join('scripts', f));
 }
 for (const f of fs.readdirSync(path.join(root, 'postgres', 'migrations')).filter(n => n.endsWith('.sql'))) {

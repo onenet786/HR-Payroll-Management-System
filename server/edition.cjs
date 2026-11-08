@@ -144,7 +144,8 @@ function vendorAuth(req, res, next) {
   next();
 }
 
-// The console only reads and writes the edition; it never touches payroll, employee or user data.
+// The console reads and writes the edition, the licence and the client-data-import switch. It never reads or edits
+// payroll, employee or user records.
 const router = express.Router();
 
 router.post('/login', async (req, res, next) => {
@@ -174,6 +175,39 @@ router.put('/edition', vendorAuth, async (req, res, next) => {
     const edition = await saveEdition(null, body, `vendor:${vendorLogin()}`, req);
     res.setHeader('Cache-Control', 'no-store');
     res.json({ edition });
+  } catch (error) { next(error); }
+});
+
+// Installation controls for a self-hosted client (a hosted client is managed from the Provider Console instead):
+// whether the client's administrator may import legacy data, and the licence. Loaded lazily so this module (and its
+// unit test) works without a database connection.
+const installationModule = () => require('./installation.cjs');
+const dbPool = () => require('./db.cjs').pool;
+
+router.get('/installation', vendorAuth, async (_req, res, next) => {
+  try {
+    const installation = installationModule();
+    installation.resetInstallationCache();
+    const licence = await installation.loadLicence(dbPool());
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ clientDataImport: await installation.clientDataImportEnabled(dbPool()), licence, licenceState: installation.licenceState(licence) });
+  } catch (error) { next(error); }
+});
+
+router.put('/installation', vendorAuth, async (req, res, next) => {
+  try {
+    const installation = installationModule();
+    const actor = `vendor:${vendorLogin()}`;
+    const body = req.body || {};
+    if (typeof body.clientDataImport === 'boolean') await installation.setClientDataImport(dbPool(), body.clientDataImport, actor);
+    if (body.licence && typeof body.licence === 'object') await installation.saveLicence(dbPool(), body.licence, actor);
+    await dbPool().query(
+      `INSERT INTO hr_audit_log(actor_uid,actor_role_id,action,collection_name,document_id,new_data,correlation_id,source_ip) VALUES($1,'vendor','update','appSettings','installation',$2::jsonb,$3,$4)`,
+      [actor, JSON.stringify(body), req.correlationId || null, req.ip || null],
+    ).catch(() => undefined);
+    installation.resetInstallationCache();
+    const licence = await installation.loadLicence(dbPool());
+    res.json({ clientDataImport: await installation.clientDataImportEnabled(dbPool()), licence, licenceState: installation.licenceState(licence) });
   } catch (error) { next(error); }
 });
 
