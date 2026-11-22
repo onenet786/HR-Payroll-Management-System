@@ -1,0 +1,633 @@
+#!/usr/bin/env bash
+# =====================================================================================================
+#  HR & Payroll - server install and update script (Ubuntu 24.04 with aaPanel)
+#
+#  Copy only this file to the server (aaPanel -> Files, e.g. /root) and run it as root, for example in
+#  aaPanel -> Terminal. Every update is the same:  bash /root/hrpayroll-server.sh update  then Restart in aaPanel.
+#
+#  What it does
+#    setup   Creates a read-only "deploy key" (SSH key) so this server can download the PRIVATE GitHub
+#            repository, shows you the key to add on GitHub, downloads the code, installs the packages,
+#            builds the web app, writes .env with new random keys, prepares the database and the first admin.
+#            An existing install that was uploaded by hand is converted: its .env is kept.
+#    update  Backs up the database, downloads the latest code, installs packages, builds the web app and
+#            updates the database. Restart the app in aaPanel afterwards.
+#    check   Health check: code version, .env, database, the running app and the public address.
+#    key     Shows the public deploy key again.
+#    db      Asks the database name, user and password again and updates the database.
+#    admin   Creates the first administrator, or sets a new password for an administrator.
+#    backup  Encrypted database backup (for aaPanel -> Cron).
+#
+#  Usage (as root):
+#    bash hrpayroll-server.sh setup
+#    bash hrpayroll-server.sh update
+#    bash hrpayroll-server.sh check
+#    bash hrpayroll-server.sh key | db | admin | backup
+#
+#  Settings you can change by putting them in front of the command, for example
+#    APP_DIR=/www/wwwroot/hr BRANCH=main bash hrpayroll-server.sh setup
+#      APP_DIR   where the code lives            (default /www/wwwroot/hrpayroll)
+#      DATA_DIR  employee documents and backups  (default /www/hrpayroll-data, outside the web root)
+#      BRANCH    Git branch to deploy            (setup asks; update keeps the branch the server is on)
+#      RUN_USER  owner of the files              (default www, aaPanel's web user)
+#      KEY_FILE  deploy key                      (default /root/.ssh/hrpayroll_deploy_ed25519)
+#
+#  Done in aaPanel, not by this script (on purpose):
+#    - Node.js itself: aaPanel -> Website -> Node project -> Node version manager (install Node 22).
+#    - The PostgreSQL database and its user: aaPanel -> Databases -> PgSQL -> Add database.
+#    - Running the app, the domain, HTTPS, the firewall and the scheduled backup: aaPanel Node project,
+#      Mapping, SSL, Security and Cron. The script prints the exact values at the end of setup.
+# =====================================================================================================
+set -euo pipefail
+
+REPO_DEFAULT="git@github.com:onenet786/HR-Payroll-Management-System.git"
+APP_DIR="${APP_DIR:-/www/wwwroot/hrpayroll}"
+DATA_DIR="${DATA_DIR:-/www/hrpayroll-data}"
+BRANCH="${BRANCH:-}"
+RUN_USER="${RUN_USER:-www}"
+KEY_FILE="${KEY_FILE:-/root/.ssh/hrpayroll_deploy_ed25519}"
+ENV_FILE="$APP_DIR/.env"
+
+# ---------- helpers ----------
+bold()  { printf '\033[1m%s\033[0m\n' "$*"; }
+info()  { printf '\033[36m==>\033[0m %s\n' "$*"; }
+ok()    { printf '\033[32m OK\033[0m %s\n' "$*"; }
+warn()  { printf '\033[33m !!\033[0m %s\n' "$*"; }
+die()   { printf '\033[31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
+interactive() { [ -t 0 ]; }
+ask() {   # ask "Question" "default"  -> prints the answer (or the default when not interactive)
+  local q="$1" def="${2:-}" ans=""
+  if interactive; then read -r -p "$q${def:+ [$def]}: " ans || true; fi
+  printf '%s' "${ans:-$def}"
+}
+ask_yn() {   # ask_yn "Question" "y|n" -> 0 for yes, 1 for no
+  local q="$1" def="${2:-y}" ans
+  interactive || { [ "$def" = "y" ]; return; }
+  while true; do
+    read -r -p "$q (y/n) [$def]: " ans || ans="$def"
+    case "${ans:-$def}" in
+      y|Y|yes|YES|Yes) return 0 ;;
+      n|N|no|NO|No)    return 1 ;;
+      *) echo "  Please type y or n." ;;
+    esac
+  done
+}
+ask_secret() {
+  local q="$1" ans=""
+  if interactive; then read -r -s -p "$q: " ans || true; echo >&2; fi
+  printf '%s' "$ans"
+}
+
+need_root() { [ "$(id -u)" -eq 0 ] || die "Run this script as root (aaPanel -> Terminal, or: sudo bash $0 ${1:-})."; }
+
+need_git() {
+  command -v git >/dev/null 2>&1 || die "git is not installed. Install it once with: apt-get install -y git   (then run this script again)."
+  command -v ssh-keygen >/dev/null 2>&1 || die "ssh-keygen is missing. Install it with: apt-get install -y openssh-client"
+}
+
+need_installed() { [ -d "$APP_DIR/.git" ] || die "$APP_DIR is not installed yet. Run: bash $0 setup"; }
+
+# Node.js installed by aaPanel's Node version manager (newest version 20 or later).
+find_node() {
+  local best="" v d
+  for d in /www/server/nodejs/v*/bin; do
+    [ -x "$d/node" ] || continue
+    v="$(basename "$(dirname "$d")")"
+    if [ "${v#v}" != "$v" ] && [ "$(printf '%s' "${v#v}" | cut -d. -f1)" -ge 20 ] 2>/dev/null; then
+      if [ -z "$best" ] || [ "$(printf '%s\n%s\n' "$best" "$d" | sort -V | tail -1)" = "$d" ]; then best="$d"; fi
+    fi
+  done
+  [ -n "$best" ] || die "Node.js 20 or newer was not found in /www/server/nodejs.
+   Install it in aaPanel -> Website -> Node project -> Node version manager (choose Node 22), then run this again."
+  NODE_BIN="$best"
+  export PATH="$NODE_BIN:$PATH"
+  ok "Node.js $("$NODE_BIN/node" -v) from aaPanel ($NODE_BIN)"
+}
+
+# pg_dump / pg_restore of aaPanel's PostgreSQL (for backups).
+find_pg_bin() {
+  local d
+  for d in /www/server/pgsql/bin /usr/lib/postgresql/*/bin; do
+    [ -x "$d/pg_dump" ] && { printf '%s' "$d"; return; }
+  done
+  command -v pg_dump >/dev/null 2>&1 && dirname "$(command -v pg_dump)"
+}
+
+parse_repo() {
+  local url="$1"
+  case "$url" in
+    git@*:*)      REPO_HOST="${url#git@}"; REPO_HOST="${REPO_HOST%%:*}"; REPO_PATH="${url#*:}" ;;
+    ssh://git@*)  REPO_HOST="${url#ssh://git@}"; REPO_HOST="${REPO_HOST%%/*}"; REPO_PATH="${url#ssh://git@*/}" ;;
+    https://*)    REPO_HOST="${url#https://}"; REPO_HOST="${REPO_HOST%%/*}"; REPO_PATH="${url#https://*/}" ;;
+    *) die "Unrecognised repository address: $url" ;;
+  esac
+  REPO_PATH="${REPO_PATH%.git}.git"
+  REPO_HOST_ALIAS="hrpayroll-${REPO_HOST}"
+  REPO_SSH_URL="git@${REPO_HOST_ALIAS}:${REPO_PATH}"
+}
+
+# ---------- deploy key ----------
+make_key() {
+  mkdir -p /root/.ssh && chmod 700 /root/.ssh
+  if [ -f "$KEY_FILE" ]; then
+    ok "Deploy key already exists: $KEY_FILE"
+  else
+    info "Creating a deploy key (ed25519, no passphrase, used only for this repository)"
+    ssh-keygen -t ed25519 -N "" -C "hrpayroll-deploy@$(hostname)" -f "$KEY_FILE" >/dev/null
+    chmod 600 "$KEY_FILE"
+    ok "Created $KEY_FILE"
+  fi
+  # A host alias makes git use this key only for this repository, without touching other keys on the server.
+  local cfg=/root/.ssh/config
+  touch "$cfg" && chmod 600 "$cfg"
+  if ! grep -q "^Host ${REPO_HOST_ALIAS}\$" "$cfg"; then
+    cat >> "$cfg" <<EOF
+
+# HR & Payroll deploy key (added by hrpayroll-server.sh)
+Host ${REPO_HOST_ALIAS}
+    HostName ${REPO_HOST}
+    User git
+    IdentityFile ${KEY_FILE}
+    IdentitiesOnly yes
+EOF
+    ok "Added host alias ${REPO_HOST_ALIAS} to $cfg"
+  fi
+  if ! ssh-keygen -F "$REPO_HOST" -f /root/.ssh/known_hosts >/dev/null 2>&1; then
+    ssh-keyscan -t ed25519,rsa "$REPO_HOST" >> /root/.ssh/known_hosts 2>/dev/null || warn "Could not read the host key of $REPO_HOST"
+    chmod 600 /root/.ssh/known_hosts
+  fi
+}
+
+show_key() {
+  [ -f "$KEY_FILE.pub" ] || die "No deploy key yet. Run: bash $0 setup"
+  echo
+  bold "---------------- Public deploy key (copy the whole line) ----------------"
+  cat "$KEY_FILE.pub"
+  bold "------------------------------------------------------------------------"
+  echo
+  echo "Add it to the private repository as a READ-ONLY deploy key:"
+  echo "  GitHub: github.com/onenet786/HR-Payroll-Management-System -> Settings -> Deploy keys -> Add deploy key"
+  echo "          Title: HR server ($(hostname))   Key: the line above   [ ] Allow write access (leave OFF)"
+  echo
+}
+
+test_access() {
+  info "Checking access to ${REPO_HOST}:${REPO_PATH}"
+  local tries=0
+  until git ls-remote "$REPO_SSH_URL" HEAD >/dev/null 2>&1; do
+    tries=$((tries + 1))
+    if ! interactive || [ "$tries" -ge 5 ]; then
+      die "The server cannot read the repository yet. Add the deploy key shown above, then run this script again."
+    fi
+    warn "Not allowed yet. Add the deploy key shown above, then press Enter to try again (Ctrl+C to stop)."
+    read -r _ || true
+  done
+  ok "The server can read the repository"
+}
+
+# ---------- .env ----------
+set_env() {   # set_env FILE KEY VALUE   (replaces "KEY=..." or "# KEY=..." or appends)
+  local file="$1" key="$2" value="$3" tmp
+  tmp="$(mktemp)"
+  KEY="$key" VALUE="$value" awk '
+    BEGIN { done = 0 }
+    $0 ~ "^#? *" ENVIRON["KEY"] "=" && !done { print ENVIRON["KEY"] "=" ENVIRON["VALUE"]; done = 1; next }
+    { print }
+    END { if (!done) print ENVIRON["KEY"] "=" ENVIRON["VALUE"] }
+  ' "$file" > "$tmp" && cat "$tmp" > "$file" && rm -f "$tmp"
+}
+get_env() { grep -E "^$2=" "$1" 2>/dev/null | tail -1 | cut -d= -f2- || true; }
+urlencode() { node -e 'process.stdout.write(encodeURIComponent(process.argv[1]))' "$1"; }
+random_key() { node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("base64"))'; }
+
+free_port() {   # first free TCP port from 8080
+  local p=8080
+  while ss -ltn 2>/dev/null | awk '{print $4}' | grep -qE "[:.]$p\$"; do p=$((p + 1)); done
+  printf '%s' "$p"
+}
+
+make_env() {
+  if [ -f "$ENV_FILE" ]; then
+    ok ".env already exists (not changed)"
+    return
+  fi
+  info "Creating .env"
+  cp "$APP_DIR/.env.example" "$ENV_FILE"
+  chmod 600 "$ENV_FILE"
+  local domain email company port pgbin
+  echo
+  bold "Server settings (press Enter to keep the value in brackets; you can change them later in $ENV_FILE)"
+  domain="$(ask "HR web address (domain), e.g. hr.yourcompany.com" "")"
+  domain="${domain#https://}"; domain="${domain#http://}"; domain="${domain%/}"
+  email="$(ask "Administrator / SSL contact e-mail" "")"
+  company="$(ask "Company name" "")"
+  port="$(ask "Internal port for the app" "$(free_port)")"
+  pgbin="$(find_pg_bin || true)"
+
+  set_env "$ENV_FILE" DATA_BACKEND postgres
+  set_env "$ENV_FILE" PG_POOL_MAX 10
+  set_env "$ENV_FILE" PG_SSL false
+  set_env "$ENV_FILE" PG_SSL_REJECT_UNAUTHORIZED false
+  set_env "$ENV_FILE" PORT "$port"
+  set_env "$ENV_FILE" HOST 127.0.0.1
+  set_env "$ENV_FILE" NODE_ENV production
+  set_env "$ENV_FILE" DEBUG false
+  set_env "$ENV_FILE" VITE_API_BASE_URL ""
+  set_env "$ENV_FILE" VITE_API_POLL_MS 5000
+  if [ -n "$domain" ]; then
+    set_env "$ENV_FILE" APP_URL "https://$domain"
+    set_env "$ENV_FILE" PORTAL_URL "https://$domain"
+    set_env "$ENV_FILE" ALLOWED_ORIGIN "https://$domain"
+  else
+    warn "No domain given: set APP_URL, PORTAL_URL and ALLOWED_ORIGIN in $ENV_FILE later."
+  fi
+  set_env "$ENV_FILE" BACKUP_ENCRYPTION_KEY "$(random_key)"
+  set_env "$ENV_FILE" MFA_ENCRYPTION_KEY "$(random_key)"
+  [ -n "$company" ] && set_env "$ENV_FILE" MFA_ISSUER "$company HR"
+  set_env "$ENV_FILE" BACKUP_DIR "$DATA_DIR/backups"
+  set_env "$ENV_FILE" BACKUP_RETENTION_COUNT 14
+  set_env "$ENV_FILE" DOCUMENT_STORAGE_PATH "$DATA_DIR/documents"
+  set_env "$ENV_FILE" MFA_ENFORCE_PRIVILEGED false
+  if [ -n "$pgbin" ]; then
+    set_env "$ENV_FILE" PG_DUMP_PATH "$pgbin/pg_dump"
+    set_env "$ENV_FILE" PG_RESTORE_PATH "$pgbin/pg_restore"
+  fi
+  # Remembered for the first administrator (setup) and the summary box; not secret.
+  SETUP_DOMAIN="$domain"; SETUP_EMAIL="$email"; SETUP_COMPANY="$company"
+  ask_database
+  ok "Created .env with new random BACKUP_ENCRYPTION_KEY and MFA_ENCRYPTION_KEY"
+  warn "Keep a copy of $ENV_FILE OFF this server: without BACKUP_ENCRYPTION_KEY the backups cannot be restored."
+}
+
+ask_database() {
+  local dbname dbuser dbpass
+  echo "Database: it must already exist in aaPanel -> Databases -> PgSQL -> Add database"
+  echo "          (aaPanel creates a database user with the same name and the password you choose there)."
+  dbname="$(ask "  Database name" "hrpayroll")"
+  dbuser="$(ask "  Database user" "$dbname")"
+  dbpass="$(ask_secret "  Database password (from aaPanel; leave empty to fill in later)")"
+  if [ -n "$dbpass" ]; then
+    set_env "$ENV_FILE" DATABASE_URL "postgresql://$(urlencode "$dbuser"):$(urlencode "$dbpass")@127.0.0.1:5432/$(urlencode "$dbname")"
+    ok "Database settings saved"
+  else
+    warn "No database password given. When the database exists, run: bash $0 db"
+  fi
+}
+
+database_ready() {
+  local url; url="$(get_env "$ENV_FILE" DATABASE_URL)"
+  [ -n "$url" ] && [ "${url#*CHANGE_ME}" = "$url" ] && [ "${url#*://}" != "$url" ]
+}
+
+# ---------- install / update steps ----------
+install_packages() {
+  local lock="$APP_DIR/package-lock.json"
+  # aaPanel (or a manual "npm install") sometimes deletes or rewrites the lock file: take it back from Git.
+  if git -C "$APP_DIR" ls-files --error-unmatch package-lock.json >/dev/null 2>&1; then
+    if [ ! -f "$lock" ] || ! git -C "$APP_DIR" diff --quiet -- package-lock.json; then
+      git -C "$APP_DIR" checkout -- package-lock.json && ok "Restored package-lock.json from Git"
+    fi
+  fi
+  # The web app is built here, so the build tools (devDependencies) are needed too. The Electron and
+  # Capacitor tools in the same package are never run on the server: skip their large downloads.
+  export ELECTRON_SKIP_BINARY_DOWNLOAD=1 PUPPETEER_SKIP_DOWNLOAD=1
+  if [ -f "$lock" ]; then
+    info "Installing Node packages (npm ci; a few minutes the first time)"
+    (cd "$APP_DIR" && npm ci --include=dev --no-audit --no-fund --loglevel=error)
+  else
+    warn "package-lock.json is missing: using npm install instead of npm ci"
+    (cd "$APP_DIR" && npm install --include=dev --no-audit --no-fund --loglevel=error)
+  fi
+  ok "Packages installed"
+}
+
+build_web() {
+  info "Building the web app (vite build)"
+  # Same-origin API: the browser calls the address it opened, so the bundle works on any domain.
+  (cd "$APP_DIR" && VITE_API_BASE_URL="" NODE_ENV=production NODE_OPTIONS="--max-old-space-size=3072" npx vite build --logLevel error) \
+    || die "The web build failed (see above). The running app is not affected until you restart it."
+  [ -f "$APP_DIR/dist/index.html" ] || die "The web build produced no dist/index.html."
+  ok "Web app built (dist/)"
+}
+
+migrate_db() {
+  if ! database_ready; then
+    warn "Skipped the database update: DATABASE_URL in .env is not filled in yet. Run: bash $0 db"
+    return 1
+  fi
+  info "Updating the database (postgres-migrate)"
+  local out
+  if out="$(cd "$APP_DIR" && timeout 300 node scripts/postgres-migrate.cjs 2>&1)"; then
+    printf '%s\n' "$out" | grep -E '^Applied' | sed 's/^/     /' || true
+    ok "Database is up to date"
+  else
+    warn "The database update FAILED:"
+    printf '%s\n' "$out" | grep -m1 -iE 'error|ECONNREFUSED|does not exist|password' | sed 's/^/     /' || true
+    case "$out" in
+      *"role"*"does not exist"*|*"database"*"does not exist"*)
+        echo "     The database or its user does not exist yet. In aaPanel -> Databases -> PgSQL -> Add database,"
+        echo "     create it (name and user as entered here), then run: bash $0 db" ;;
+      *"password authentication failed"*)
+        echo "     Wrong database password. Check it in aaPanel -> Databases -> PgSQL, then run: bash $0 db" ;;
+      *ECONNREFUSED*|*"timeout"*|*"Connection terminated"*|"")
+        echo "     PostgreSQL is not running. Start it in aaPanel -> App Store -> PostgreSQL, then run: bash $0 db" ;;
+      *) echo "     Fix the problem, then run: bash $0 db" ;;
+    esac
+    return 1
+  fi
+}
+
+prepare_dirs() {
+  mkdir -p "$DATA_DIR/documents" "$DATA_DIR/backups"
+  chmod 700 "$DATA_DIR" "$DATA_DIR/documents" "$DATA_DIR/backups"
+}
+
+fix_owner() {
+  if id "$RUN_USER" >/dev/null 2>&1; then
+    chown -R "$RUN_USER:$RUN_USER" "$APP_DIR" "$DATA_DIR" 2>/dev/null || true
+    chmod 600 "$ENV_FILE" 2>/dev/null || true
+    ok "Files owned by $RUN_USER"
+  fi
+}
+
+run_backup() {   # quiet=1 for cron
+  database_ready || { warn "No DATABASE_URL in .env: backup skipped."; return 1; }
+  [ -n "$(get_env "$ENV_FILE" BACKUP_ENCRYPTION_KEY)" ] || { warn "No BACKUP_ENCRYPTION_KEY in .env: backup skipped."; return 1; }
+  # pg_dump from .env when set there; otherwise aaPanel's PostgreSQL (dotenv never overrides a set variable).
+  local dump; dump="$(get_env "$ENV_FILE" PG_DUMP_PATH)"
+  if [ -z "$dump" ]; then local pgbin; pgbin="$(find_pg_bin || true)"; [ -n "$pgbin" ] && dump="$pgbin/pg_dump"; fi
+  info "Database backup (encrypted)"
+  if (cd "$APP_DIR" && PG_DUMP_PATH="${dump:-pg_dump}" node scripts/postgres-backup.cjs); then
+    ok "Backup written to $(get_env "$ENV_FILE" BACKUP_DIR || echo "$APP_DIR/backups")"
+  else
+    warn "The backup FAILED (see above)."
+    return 1
+  fi
+}
+
+current_branch() { git -C "$APP_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo main; }
+
+offer_admin() {
+  interactive || return 0
+  ask_yn "Create the first administrator now?" "y" || { echo "  Later: bash $0 admin"; return 0; }
+  make_admin
+}
+
+make_admin() {
+  local name email pass pass2 company edition input
+  echo "  First administrator (an existing account with the same e-mail is kept as it is)."
+  company="$(ask "  Company name" "${SETUP_COMPANY:-Company}")"
+  name="$(ask "  Administrator name" "Administrator")"
+  email="$(ask "  Administrator e-mail (used to sign in)" "${SETUP_EMAIL:-}")"
+  edition="$(ask "  Edition: full (Pakistan compliance) or lite (small shop)" "full")"
+  while true; do
+    pass="$(ask_secret "  Password (at least 12 characters)")"
+    pass2="$(ask_secret "  Password again")"
+    [ "${#pass}" -ge 12 ] && [ "$pass" = "$pass2" ] && break
+    warn "The passwords differ or are shorter than 12 characters. Try again."
+  done
+  local url; url="$(get_env "$ENV_FILE" APP_URL)"
+  input="$(mktemp)"; chmod 600 "$input"
+  C="$company" N="$name" E="$email" P="$pass" ED="$edition" U="$url" node -e '
+    const e = process.env;
+    process.stdout.write(JSON.stringify({ companyName: e.C, adminName: e.N, adminEmail: e.E, adminPassword: e.P,
+      edition: e.ED === "lite" ? "lite" : "full", urls: e.U ? [e.U] : [], publicUrl: e.U || null, clientDataImport: false }));' > "$input"
+  if (cd "$APP_DIR" && SETUP_INPUT_FILE="$input" node scripts/setup-installation.cjs); then
+    ok "Administrator $email is ready (if the account already existed, its password was NOT changed: use 'bash $0 admin' -> reset)"
+  else
+    warn "Creating the administrator failed. Try again with: bash $0 admin"
+  fi
+  rm -f "$input"
+}
+
+reset_admin() {
+  local email pass pass2
+  email="$(ask "  Administrator e-mail (empty = the built-in administrator)" "")"
+  while true; do
+    pass="$(ask_secret "  New password (at least 12 characters; empty = generate one)")"
+    [ -z "$pass" ] && break
+    pass2="$(ask_secret "  New password again")"
+    [ "${#pass}" -ge 12 ] && [ "$pass" = "$pass2" ] && break
+    warn "The passwords differ or are shorter than 12 characters. Try again."
+  done
+  (cd "$APP_DIR" && RESET_EMAIL="$email" RESET_PASSWORD="$pass" node scripts/reset-admin-password.cjs) \
+    && ok "Password set (a generated password is shown above once)" || warn "Resetting the password failed."
+}
+
+server_ip() { curl -s -m 5 https://api.ipify.org 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}'; }
+
+next_steps() {
+  local port domain ip node
+  port="$(get_env "$ENV_FILE" PORT)"; domain="$(get_env "$ENV_FILE" APP_URL)"; domain="${domain#https://}"
+  ip="$(server_ip)"; node="$NODE_BIN/node"
+  echo
+  bold "========================  Next steps in aaPanel  ========================"
+  cat <<EOF
+1. Node project  (Website -> Node project -> Add Node project)
+     Project directory : $APP_DIR
+     Start command     : node server.cjs          (or "Run script: start")
+     Node version      : $(basename "$(dirname "$NODE_BIN")")
+     Port              : ${port:-8080}
+     Run as user       : $RUN_USER
+2. Mapping:   in the Node project, Mapping -> add ${domain:-your domain}.
+3. SSL:       in the Node project, SSL -> Let's Encrypt -> apply, then turn on "Force HTTPS".
+4. Firewall:  aaPanel -> Security: ports 80 and 443 open; do NOT open port ${port:-8080} (the app listens on 127.0.0.1 only).
+5. Cron:      aaPanel -> Cron -> Add task -> Shell script, daily 02:30:
+                bash $(readlink -f "$0") backup
+6. DNS:       at your domain provider, an A record:  ${domain:-hr.yourcompany.com}  ->  ${ip:-<this server's IP>}
+7. Open https://${domain:-your-domain}, sign in as the administrator.
+
+Every update from now on:
+     bash $(readlink -f "$0") update      then aaPanel -> Node project -> Restart
+EOF
+  bold "=========================================================================="
+}
+
+# Turns an install that was uploaded by hand (no .git) into a Git checkout, keeping .env and local data.
+adopt_existing() {
+  local backup="${APP_DIR}.before-git-$(date +%Y%m%d-%H%M%S)"
+  warn "$APP_DIR exists but was not installed from Git (files uploaded by hand)."
+  echo "     The script can convert it: the folder is renamed to $backup,"
+  echo "     the code is downloaded fresh, and .env (and .env.local) are copied back. Nothing in the database changes."
+  ask_yn "Convert $APP_DIR now?" "y" || die "Stopped. Move $APP_DIR away (or set APP_DIR=...) and run again."
+  mv "$APP_DIR" "$backup"
+  ADOPTED_FROM="$backup"
+  ok "Old files kept in $backup"
+}
+
+restore_adopted_env() {
+  [ -n "${ADOPTED_FROM:-}" ] || return 0
+  local f
+  for f in .env .env.local; do
+    [ -f "$ADOPTED_FROM/$f" ] && cp -p "$ADOPTED_FROM/$f" "$APP_DIR/$f" && ok "Kept $f from the old install"
+  done
+  local docs; docs="$(get_env "$ENV_FILE" DOCUMENT_STORAGE_PATH)"
+  case "$docs" in
+    ""|./*|[!/]*) [ -d "$ADOPTED_FROM/${docs:-documents}" ] && warn "Employee documents were inside the old folder ($ADOPTED_FROM/${docs:-documents}). Set DOCUMENT_STORAGE_PATH=$DATA_DIR/documents in .env and copy them there." ;;
+    "$ADOPTED_FROM"*|"$APP_DIR"*) warn "DOCUMENT_STORAGE_PATH points inside the app folder. Move the files to $DATA_DIR/documents and update .env." ;;
+  esac
+}
+
+# ---------- commands ----------
+cmd_setup() {
+  need_root setup
+  need_git
+  local repo="${1:-}"
+  [ -n "$repo" ] || repo="$(ask "Repository address" "$REPO_DEFAULT")"
+  parse_repo "$repo"
+  find_node
+  make_key
+  show_key
+  if interactive; then read -r -p "Press Enter after you have added the deploy key... " _ || true; fi
+  test_access
+
+  if [ -d "$APP_DIR/.git" ]; then
+    BRANCH="${BRANCH:-$(current_branch)}"
+    ok "Code already in $APP_DIR (updating it on branch $BRANCH)"
+    git -C "$APP_DIR" remote set-url origin "$REPO_SSH_URL"
+    git -C "$APP_DIR" fetch --quiet origin "$BRANCH"
+    git -C "$APP_DIR" checkout --quiet "$BRANCH"
+    git -C "$APP_DIR" merge --ff-only --quiet "origin/$BRANCH"
+  else
+    if [ -d "$APP_DIR" ] && [ -n "$(ls -A "$APP_DIR" 2>/dev/null)" ]; then adopt_existing; fi
+    BRANCH="${BRANCH:-$(ask "Branch to deploy" "main")}"
+    info "Downloading the code into $APP_DIR (branch $BRANCH)"
+    mkdir -p "$(dirname "$APP_DIR")"
+    git clone --quiet --branch "$BRANCH" "$REPO_SSH_URL" "$APP_DIR"
+  fi
+  git config --global --add safe.directory "$APP_DIR" 2>/dev/null || true
+  ok "Code is at commit $(git -C "$APP_DIR" log -1 --format='%h %s')"
+
+  restore_adopted_env
+  prepare_dirs
+  install_packages
+  build_web
+  make_env
+  if migrate_db; then offer_admin; fi
+  fix_owner
+  next_steps
+}
+
+cmd_update() {
+  need_root update
+  need_git
+  need_installed
+  find_node
+  git config --global --add safe.directory "$APP_DIR" 2>/dev/null || true
+  local branch="${BRANCH:-$(current_branch)}" before after
+  before="$(git -C "$APP_DIR" rev-parse --short HEAD)"
+
+  if [ "${SKIP_BACKUP:-0}" != 1 ]; then
+    run_backup || { ask_yn "The safety backup failed. Update anyway?" "n" || die "Update stopped; nothing was changed."; }
+  fi
+
+  info "Downloading the latest code (branch $branch)"
+  git -C "$APP_DIR" fetch --quiet origin "$branch" || die "Cannot download branch $branch. Check the deploy key: bash $0 key"
+  if [ "$branch" != "$(current_branch)" ]; then
+    git -C "$APP_DIR" checkout --quiet "$branch" 2>/dev/null || git -C "$APP_DIR" checkout --quiet -b "$branch" "origin/$branch"
+    ok "Switched to branch $branch"
+  fi
+  # A lock file rewritten by an earlier npm run would block the merge: it is restored from Git anyway.
+  git -C "$APP_DIR" checkout -- package-lock.json 2>/dev/null || true
+  if ! git -C "$APP_DIR" merge --ff-only --quiet "origin/$branch"; then
+    die "The server copy has local changes that conflict with the update. Check: git -C $APP_DIR status"
+  fi
+  after="$(git -C "$APP_DIR" rev-parse --short HEAD)"
+  if [ "$before" = "$after" ]; then ok "Already up to date ($after)"; else ok "Updated $before -> $after"; git -C "$APP_DIR" log --oneline "$before..$after" | head -15 | sed 's/^/     /'; fi
+
+  prepare_dirs
+  install_packages
+  build_web
+  migrate_db || true
+  fix_owner
+  echo
+  bold "Now restart the app: aaPanel -> Website -> Node project -> HR & Payroll -> Restart."
+  echo "Then check it with:  bash $0 check"
+}
+
+cmd_check() {
+  need_installed
+  find_node
+  local problems=0 port url code
+  ok "Code: branch $(current_branch), commit $(git -C "$APP_DIR" log -1 --format='%h %ci %s')"
+  if git -C "$APP_DIR" fetch --quiet origin "$(current_branch)" 2>/dev/null; then
+    local behind; behind="$(git -C "$APP_DIR" rev-list --count HEAD.."origin/$(current_branch)")"
+    [ "$behind" = 0 ] && ok "No newer code on GitHub" || warn "$behind newer commit(s) on GitHub: run  bash $0 update"
+  else
+    warn "Cannot reach GitHub with the deploy key (bash $0 key)"
+  fi
+  [ -f "$ENV_FILE" ] && ok ".env present" || { warn ".env is missing"; problems=$((problems + 1)); }
+  [ -f "$APP_DIR/dist/index.html" ] && ok "Web app built ($(stat -c %y "$APP_DIR/dist/index.html" | cut -d. -f1))" || { warn "dist/ is missing: run  bash $0 update"; problems=$((problems + 1)); }
+  if database_ready && (cd "$APP_DIR" && timeout 30 node -e '
+      require("dotenv").config({ path: [".env.local", ".env"], quiet: true });
+      const { Pool } = require("pg"); const p = new Pool({ connectionString: process.env.DATABASE_URL });
+      p.query("SELECT count(*)::int n FROM schema_migrations").then(r => { console.log("     migrations applied: " + r.rows[0].n); return p.end(); })
+       .catch(e => { console.error("     " + e.message); process.exit(1); });'); then
+    ok "Database reachable"
+  else
+    warn "Database not reachable (bash $0 db)"; problems=$((problems + 1))
+  fi
+  port="$(get_env "$ENV_FILE" PORT)"; port="${port:-8080}"
+  code="$(curl -s -o /dev/null -w '%{http_code}' -m 10 "http://127.0.0.1:$port/api/health" || true)"
+  [ "$code" = 200 ] && ok "App answers on port $port" || { warn "App does not answer on port $port (HTTP ${code:-none}): start or restart it in aaPanel -> Node project"; problems=$((problems + 1)); }
+  url="$(get_env "$ENV_FILE" APP_URL)"
+  if [ -n "$url" ]; then
+    code="$(curl -s -o /dev/null -w '%{http_code}' -m 15 "$url/api/health" || true)"
+    [ "$code" = 200 ] && ok "Public address works: $url" || { warn "$url/api/health answers HTTP ${code:-none} (check Mapping, SSL and DNS)"; problems=$((problems + 1)); }
+  fi
+  local bdir newest; bdir="$(get_env "$ENV_FILE" BACKUP_DIR)"; bdir="${bdir:-$APP_DIR/backups}"
+  newest="$(ls -1t "$bdir"/*.enc 2>/dev/null | head -1 || true)"
+  [ -n "$newest" ] && ok "Newest backup: $(basename "$newest") ($(stat -c %y "$newest" | cut -d. -f1))" || warn "No backup yet in $bdir (add the Cron task: bash $0 backup)"
+  echo
+  [ "$problems" = 0 ] && bold "All checks passed." || bold "$problems problem(s) found (see above)."
+  [ "$problems" = 0 ]
+}
+
+cmd_db() {
+  need_root db
+  [ -f "$ENV_FILE" ] || die "$APP_DIR is not installed yet. Run: bash $0 setup"
+  find_node
+  info "Database settings"
+  ask_database
+  if migrate_db; then offer_admin; fi
+  fix_owner
+  echo
+  bold "If the app is already added in aaPanel, restart it: Website -> Node project -> Restart."
+}
+
+cmd_admin() {
+  need_root admin
+  [ -f "$ENV_FILE" ] || die "$APP_DIR is not installed yet. Run: bash $0 setup"
+  find_node
+  database_ready || die "DATABASE_URL is not set yet. Run first: bash $0 db"
+  if ask_yn "Create a NEW first administrator? (n = set a new password for an existing administrator)" "n"; then
+    make_admin
+  else
+    reset_admin
+  fi
+}
+
+cmd_backup() {
+  need_installed
+  find_node
+  run_backup
+}
+
+cmd_key() {
+  parse_repo "${1:-$REPO_DEFAULT}"
+  show_key
+}
+
+case "${1:-}" in
+  setup)  shift; cmd_setup "$@" ;;
+  update) shift; cmd_update "$@" ;;
+  check)  shift; cmd_check "$@" ;;
+  key)    shift; cmd_key "$@" ;;
+  db)     shift; cmd_db "$@" ;;
+  admin)  shift; cmd_admin "$@" ;;
+  backup) shift; cmd_backup "$@" ;;
+  *)
+    awk 'NR>1 && /^set -euo/{exit} NR>1' "$0" | sed 's/^# \{0,1\}//'
+    exit 1
+    ;;
+esac
