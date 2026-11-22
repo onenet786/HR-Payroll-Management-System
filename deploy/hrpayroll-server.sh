@@ -10,13 +10,14 @@
 #            repository, shows you the key to add on GitHub, downloads the code, installs the packages,
 #            builds the web app, writes .env with new random keys, prepares the database and the first admin.
 #            An existing install that was uploaded by hand is converted: its .env is kept.
-#    update  Backs up the database, downloads the latest code, installs packages, builds the web app and
-#            updates the database. Restart the app in aaPanel afterwards.
+#    update  Backs up the database and prepares the new version in a separate folder (code, packages, web
+#            build, database changes) while the site keeps running; then swaps it in. Restart in aaPanel.
 #    check   Health check: code version, .env, database, the running app and the public address.
 #    key     Shows the public deploy key again.
 #    db      Asks the database name, user and password again and updates the database.
 #    admin   Creates the first administrator, or sets a new password for an administrator.
 #    backup  Encrypted database backup (for aaPanel -> Cron).
+#    rollback Switches back to the version before the last update (then Restart in aaPanel).
 #
 #  Usage (as root; when you log in as another user such as onenetsol, put sudo in front):
 #    sudo bash hrpayroll-server.sh setup
@@ -548,35 +549,86 @@ cmd_update() {
   need_installed
   find_node
   git config --global --add safe.directory "$APP_DIR" 2>/dev/null || true
-  local branch="${BRANCH:-$(current_branch)}" before after
-  before="$(git -C "$APP_DIR" rev-parse --short HEAD)"
+  # The live folder is never changed while the new version is prepared: the code is checked out, installed and
+  # built in APP_DIR.new, and only when everything succeeded are the folders swapped (a second). The running app
+  # keeps serving the old version until you press Restart. APP_DIR.previous keeps the old version for rollback.
+  local live="$APP_DIR" stage="${APP_DIR}.new" prev="${APP_DIR}.previous"
+  local branch="${BRANCH:-$(current_branch)}" before sha after changed
+  before="$(git -C "$live" rev-parse --short HEAD)"
+
+  info "Checking GitHub for new code (branch $branch; the live files are not touched)"
+  git -C "$live" fetch --quiet origin "$branch" || die "Cannot download branch $branch. Check the deploy key: sudo bash $0 key"
+  sha="$(git -C "$live" rev-parse "origin/$branch")"; after="$(git -C "$live" rev-parse --short "$sha")"
+  if [ "$before" = "$after" ] && [ "${FORCE:-0}" != 1 ] && [ -f "$live/dist/index.html" ]; then
+    ok "Already up to date ($after). Nothing to do. (FORCE=1 rebuilds anyway.)"
+    return 0
+  fi
+  ok "New version: $before -> $after"
+  git -C "$live" log --oneline "$before..$sha" 2>/dev/null | head -15 | sed 's/^/     /' || true
+
+  # Files someone edited by hand on the server would be lost in the new copy: show them first.
+  changed="$(git -C "$live" status --porcelain --untracked-files=no | grep -v ' package-lock.json$' || true)"
+  if [ -n "$changed" ]; then
+    warn "These files were changed by hand on the server and the new version will NOT contain those changes:"
+    printf '%s\n' "$changed" | sed 's/^/     /'
+    ask_yn "Continue anyway? (the changed files stay in $prev after the update)" "n" || die "Update stopped; nothing was changed."
+  fi
 
   if [ "${SKIP_BACKUP:-0}" != 1 ]; then
+    APP_DIR="$live"; ENV_FILE="$live/.env"
     run_backup || { ask_yn "The safety backup failed. Update anyway?" "n" || die "Update stopped; nothing was changed."; }
   fi
 
-  info "Downloading the latest code (branch $branch)"
-  git -C "$APP_DIR" fetch --quiet origin "$branch" || die "Cannot download branch $branch. Check the deploy key: bash $0 key"
-  if [ "$branch" != "$(current_branch)" ]; then
-    git -C "$APP_DIR" checkout --quiet "$branch" 2>/dev/null || git -C "$APP_DIR" checkout --quiet -b "$branch" "origin/$branch"
-    ok "Switched to branch $branch"
-  fi
-  # A lock file rewritten by an earlier npm run would block the merge: it is restored from Git anyway.
-  git -C "$APP_DIR" checkout -- package-lock.json 2>/dev/null || true
-  if ! git -C "$APP_DIR" merge --ff-only --quiet "origin/$branch"; then
-    die "The server copy has local changes that conflict with the update. Check: git -C $APP_DIR status"
-  fi
-  after="$(git -C "$APP_DIR" rev-parse --short HEAD)"
-  if [ "$before" = "$after" ]; then ok "Already up to date ($after)"; else ok "Updated $before -> $after"; git -C "$APP_DIR" log --oneline "$before..$after" | head -15 | sed 's/^/     /'; fi
+  info "Preparing the new version in $stage (the site keeps running)"
+  rm -rf "$stage"
+  git clone --quiet --no-checkout "$live" "$stage"
+  git -C "$stage" fetch --quiet "$live" "$sha"
+  git -C "$stage" checkout --quiet -B "$branch" "$sha"
+  git -C "$stage" remote set-url origin "$(git -C "$live" remote get-url origin)"
+  git config --global --add safe.directory "$stage" 2>/dev/null || true
+  local f
+  for f in .env .env.local; do
+    if [ -f "$live/$f" ]; then cp -p "$live/$f" "$stage/$f"; fi
+  done
 
+  APP_DIR="$stage"; ENV_FILE="$stage/.env"
   prepare_dirs
-  install_packages
+  install_packages || die "Installing packages failed. The live site was NOT changed (half-done copy: $stage)."
   build_web
-  migrate_db || true
+  # Database changes only add tables and columns, so the old version keeps working with them until the restart.
+  migrate_db || die "The database update failed (see above). The live site was NOT changed; fix it and run update again."
   fix_owner
+
+  info "Switching to the new version"
+  rm -rf "$prev"
+  mv "$live" "$prev"
+  mv "$stage" "$live"
+  # Backups written into the app folder (when BACKUP_DIR is not set) move along with it.
+  if [ -d "$prev/backups" ] && [ ! -e "$live/backups" ]; then mv "$prev/backups" "$live/backups"; fi
+  APP_DIR="$live"; ENV_FILE="$live/.env"
+  git config --global --add safe.directory "$live" 2>/dev/null || true
+  fix_owner
+  ok "Version $after is in place; the previous version is kept in $prev"
   echo
   bold "Now restart the app: aaPanel -> Website -> Node project -> HR & Payroll -> Restart."
-  echo "Then check it with:  sudo bash $0 check"
+  echo "Then check it with:      sudo bash $0 check"
+  echo "If something is wrong:   sudo bash $0 rollback   (then Restart again)"
+}
+
+cmd_rollback() {
+  need_root rollback
+  local live="$APP_DIR" prev="${APP_DIR}.previous" tmp="${APP_DIR}.rollback-$$"
+  [ -d "$prev/.git" ] || die "There is no previous version in $prev."
+  echo "Current : $(git -C "$live" log -1 --format='%h %ci %s' 2>/dev/null)"
+  echo "Previous: $(git -C "$prev" log -1 --format='%h %ci %s' 2>/dev/null)"
+  warn "Database changes made by the update are NOT undone (they only add, so the previous version works with them)."
+  ask_yn "Switch back to the previous version?" "y" || die "Nothing was changed."
+  mv "$live" "$tmp"
+  mv "$prev" "$live"
+  mv "$tmp" "$prev"
+  if [ -d "$prev/backups" ] && [ ! -e "$live/backups" ]; then mv "$prev/backups" "$live/backups"; fi
+  ok "Switched back. (Running rollback again returns to the newer version.)"
+  bold "Now restart the app: aaPanel -> Website -> Node project -> HR & Payroll -> Restart."
 }
 
 cmd_check() {
@@ -660,6 +712,7 @@ case "${1:-}" in
   db)     shift; cmd_db "$@" ;;
   admin)  shift; cmd_admin "$@" ;;
   backup) shift; cmd_backup "$@" ;;
+  rollback) shift; cmd_rollback "$@" ;;
   *)
     awk 'NR>1 && /^set -euo/{exit} NR>1' "$0" | sed 's/^# \{0,1\}//'
     exit 1

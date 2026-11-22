@@ -401,12 +401,13 @@ SMTP_PASS=app-password-here</pre>
 <pre><span class="p">$</span> sudo bash /root/hrpayroll-server.sh update
 <span class="c"># then aaPanel → Website → Node project → HR &amp; Payroll → Restart</span>
 <span class="p">$</span> sudo bash /root/hrpayroll-server.sh check</pre>
-  <p><code>update</code> takes an encrypted database backup, downloads the new code from GitHub, installs packages, builds the web app and applies database changes. The running app keeps working until you press Restart. <code>BRANCH=&lt;name&gt; bash … update</code> switches to another branch.</p>
+  <p><code>update</code> takes an encrypted database backup and prepares the new version in a <b>separate folder</b> (<code>hr-payroll.new</code>): new code from GitHub, packages, web build, database changes. The live site is not touched while this runs. Only when everything succeeded are the folders swapped (one second); the old version is kept in <code>hr-payroll.previous</code>. Press Restart straight away. If anything fails, the update stops and the site is unchanged. If the new version misbehaves: <code>sudo bash /root/hrpayroll-server.sh rollback</code>, then Restart. <code>BRANCH=&lt;name&gt; bash … update</code> switches to another branch.</p>
   <h3>All commands</h3>
   <table>
     <tr><th style="width:22%">Command</th><th>What it does</th></tr>
     <tr><td><code>setup</code></td><td>First install, or convert a hand-uploaded install to Git.</td></tr>
-    <tr><td><code>update</code></td><td>Backup → new code → packages → web build → database changes. Then Restart in aaPanel.</td></tr>
+    <tr><td><code>update</code></td><td>Backup, then the new version is prepared beside the live one and swapped in. Then Restart in aaPanel.</td></tr>
+    <tr><td><code>rollback</code></td><td>Back to the version before the last update (database changes stay; they only add). Then Restart.</td></tr>
     <tr><td><code>check</code></td><td>Code version and newer commits on GitHub, .env, web build, database, app on its port, public address, newest backup.</td></tr>
     <tr><td><code>backup</code></td><td>Encrypted database backup to <code>/www/hrpayroll-data/backups</code> (14 kept). Add it to aaPanel → Cron, daily.</td></tr>
     <tr><td><code>admin</code></td><td>Create the first administrator, or set a new password for an administrator.</td></tr>
