@@ -388,19 +388,19 @@ SMTP_PASS=app-password-here</pre>
     <li><b>Copy the script:</b> Files → <code>/root</code> → upload <code>deploy/hrpayroll-server.sh</code> from the repository.</li>
   </ol>
   <h3>Install</h3>
-<pre><span class="p">#</span> bash /root/hrpayroll-server.sh setup</pre>
+<pre><span class="p">$</span> sudo bash /root/hrpayroll-server.sh setup</pre><p class="muted">You sign in as <code>onenetsol</code>, so every command starts with <code>sudo</code>. Type each command on its own line.</p>
   <ol class="steps">
     <li>It creates a <b>deploy key</b> and shows it. Add it on GitHub (see <i>Pulling the code from GitHub</i>), then press Enter.</li>
-    <li>It asks for the branch (normally <code>main</code>), downloads the code to <code>/www/wwwroot/hrpayroll</code>, installs the packages and builds the web app (5–10 minutes the first time).</li>
+    <li>It lists the branches on GitHub and suggests the <b>newest</b> one (e.g. <code>B12</code>; <code>main</code> is old), downloads the code to <code>/www/wwwroot/hr-payroll</code>, installs the packages and builds the web app (5–10 minutes the first time).</li>
     <li>It asks for the domain, contact e-mail, company name, internal port and the database name, user and password, then writes <code>.env</code> with new random backup and MFA keys. An existing <code>.env</code> is never overwritten.</li>
     <li>It creates the database tables and offers the first administrator (e-mail and a password of at least 12 characters).</li>
     <li>It ends with a <b>Next steps in aaPanel</b> box with the exact values for the Node project, Mapping, SSL, firewall, Cron and DNS.</li>
   </ol>
-  <div class="warn"><b>Already running an install that was uploaded by hand?</b>Run <code>setup</code> anyway. It renames the old folder to <code>hrpayroll.before-git-&lt;date&gt;</code>, downloads the code fresh and copies your <code>.env</code> back. The database is not touched. Then point the aaPanel Node project at <code>/www/wwwroot/hrpayroll</code> (if it was elsewhere) and restart it.</div>
+  <div class="warn"><b>Already running an install that was uploaded by hand?</b>Run <code>setup</code> anyway (your live install <code>/www/wwwroot/hr-payroll</code> is like this). It builds a fresh copy in <code>hr-payroll.new</code> while the site keeps running, copies your <code>.env</code> into it, then swaps the folders and keeps the old one as <code>hr-payroll.before-git-&lt;date&gt;</code>. The database is not touched. Press <b>Restart</b> in aaPanel straight after.</div>
   <h3>Every update (always the same)</h3>
-<pre><span class="p">#</span> bash /root/hrpayroll-server.sh update
+<pre><span class="p">$</span> sudo bash /root/hrpayroll-server.sh update
 <span class="c"># then aaPanel → Website → Node project → HR &amp; Payroll → Restart</span>
-<span class="p">#</span> bash /root/hrpayroll-server.sh check</pre>
+<span class="p">$</span> sudo bash /root/hrpayroll-server.sh check</pre>
   <p><code>update</code> takes an encrypted database backup, downloads the new code from GitHub, installs packages, builds the web app and applies database changes. The running app keeps working until you press Restart. <code>BRANCH=&lt;name&gt; bash … update</code> switches to another branch.</p>
   <h3>All commands</h3>
   <table>
@@ -453,8 +453,8 @@ SMTP_PASS=app-password-here</pre>
     <li>On GitHub: the repository → <b>Settings → Deploy keys → Add deploy key</b>. Title: <i>HR server (&lt;server name&gt;)</i>. Paste the line. Leave <b>Allow write access</b> OFF. Add key.</li>
     <li>Back in the terminal press Enter; the script checks access and continues.</li>
   </ol>
-  <p><b>How a change reaches the server:</b> the developer commits and pushes to GitHub → you run <code>bash /root/hrpayroll-server.sh update</code> → Restart in aaPanel. The server deploys the branch it is on (<code>bash … check</code> shows it). Push changes to that branch, or merge them into it, before updating.</p>
-  <p><b>If the update says "local changes conflict":</b> someone edited files on the server. See them with <code>git -C /www/wwwroot/hrpayroll status</code>; put the change in the repository instead, then <code>git -C /www/wwwroot/hrpayroll checkout -- .</code> and update again. <code>.env</code> is not in Git and is never touched.</p>
+  <p><b>How a change reaches the server:</b> the developer commits and pushes to GitHub → you run <code>sudo bash /root/hrpayroll-server.sh update</code> → Restart in aaPanel. The server deploys the branch it is on (<code>bash … check</code> shows it). Push changes to that branch, or merge them into it, before updating.</p>
+  <p><b>If the update says "local changes conflict":</b> someone edited files on the server. See them with <code>git -C /www/wwwroot/hr-payroll status</code>; put the change in the repository instead, then <code>sudo git -C /www/wwwroot/hr-payroll checkout -- .</code> and update again. <code>.env</code> is not in Git and is never touched.</p>
   <p><b>Removing access:</b> delete the deploy key on GitHub. The server can then no longer download updates.</p>
   </div>
 </section>

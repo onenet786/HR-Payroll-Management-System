@@ -18,17 +18,18 @@
 #    admin   Creates the first administrator, or sets a new password for an administrator.
 #    backup  Encrypted database backup (for aaPanel -> Cron).
 #
-#  Usage (as root):
-#    bash hrpayroll-server.sh setup
-#    bash hrpayroll-server.sh update
-#    bash hrpayroll-server.sh check
-#    bash hrpayroll-server.sh key | db | admin | backup
+#  Usage (as root; when you log in as another user such as onenetsol, put sudo in front):
+#    sudo bash hrpayroll-server.sh setup
+#    sudo bash hrpayroll-server.sh update
+#    sudo bash hrpayroll-server.sh check
+#    sudo bash hrpayroll-server.sh key | db | admin | backup
 #
 #  Settings you can change by putting them in front of the command, for example
 #    APP_DIR=/www/wwwroot/hr BRANCH=main bash hrpayroll-server.sh setup
-#      APP_DIR   where the code lives            (default /www/wwwroot/hrpayroll)
-#      DATA_DIR  employee documents and backups  (default /www/hrpayroll-data, outside the web root)
-#      BRANCH    Git branch to deploy            (setup asks; update keeps the branch the server is on)
+#      APP_DIR   where the code lives            (default /www/wwwroot/hr-payroll, the live install)
+#      DATA_DIR  documents and backups, new installs only (default /www/hrpayroll-data, outside the web root)
+#      BRANCH    Git branch to deploy            (setup suggests the newest branch on GitHub;
+#                                                 update keeps the branch the server is on)
 #      RUN_USER  owner of the files              (default www, aaPanel's web user)
 #      KEY_FILE  deploy key                      (default /root/.ssh/hrpayroll_deploy_ed25519)
 #
@@ -41,7 +42,7 @@
 set -euo pipefail
 
 REPO_DEFAULT="git@github.com:onenet786/HR-Payroll-Management-System.git"
-APP_DIR="${APP_DIR:-/www/wwwroot/hrpayroll}"
+APP_DIR="${APP_DIR:-/www/wwwroot/hr-payroll}"
 DATA_DIR="${DATA_DIR:-/www/hrpayroll-data}"
 BRANCH="${BRANCH:-}"
 RUN_USER="${RUN_USER:-www}"
@@ -78,7 +79,7 @@ ask_secret() {
   printf '%s' "$ans"
 }
 
-need_root() { [ "$(id -u)" -eq 0 ] || die "Run this script as root (aaPanel -> Terminal, or: sudo bash $0 ${1:-})."; }
+need_root() { [ "$(id -u)" -eq 0 ] || die "Run it as root: sudo bash $0 ${1:-}   (files and npm fail with 'permission denied' otherwise)."; }
 
 need_git() {
   command -v git >/dev/null 2>&1 || die "git is not installed. Install it once with: apt-get install -y git   (then run this script again)."
@@ -104,13 +105,23 @@ find_node() {
   ok "Node.js $("$NODE_BIN/node" -v) from aaPanel ($NODE_BIN)"
 }
 
-# pg_dump / pg_restore of aaPanel's PostgreSQL (for backups).
+# pg_dump refuses a database newer than itself, so the newest client wins (the live database is PostgreSQL 18;
+# aaPanel's /www/server/pgsql may be older). PG_DUMP_PATH in .env, when set, is always used instead.
 find_pg_bin() {
-  local d
-  for d in /www/server/pgsql/bin /usr/lib/postgresql/*/bin; do
-    [ -x "$d/pg_dump" ] && { printf '%s' "$d"; return; }
+  local d best="" bestv=0 v
+  for d in /usr/lib/postgresql/*/bin /www/server/pgsql/bin; do
+    [ -x "$d/pg_dump" ] || continue
+    v="$("$d/pg_dump" --version 2>/dev/null | grep -oE '[0-9]+' | head -1)"
+    if [ -n "$v" ] && [ "$v" -gt "$bestv" ]; then best="$d"; bestv="$v"; fi
   done
+  if [ -n "$best" ]; then printf '%s' "$best"; return; fi
   command -v pg_dump >/dev/null 2>&1 && dirname "$(command -v pg_dump)"
+}
+
+# The branch with the newest commit on GitHub (work happens on branches such as B12; main can be far behind).
+newest_branch() {   # newest_branch GIT_DIR
+  git -C "$1" for-each-ref --sort=-committerdate --format='%(refname:lstrip=3)' refs/remotes/origin 2>/dev/null \
+    | grep -v '^HEAD$' | head -1 || true
 }
 
 parse_repo() {
@@ -433,39 +444,56 @@ next_steps() {
 3. SSL:       in the Node project, SSL -> Let's Encrypt -> apply, then turn on "Force HTTPS".
 4. Firewall:  aaPanel -> Security: ports 80 and 443 open; do NOT open port ${port:-8080} (the app listens on 127.0.0.1 only).
 5. Cron:      aaPanel -> Cron -> Add task -> Shell script, daily 02:30:
-                bash $(readlink -f "$0") backup
+                bash $(readlink -f "$0") backup      (aaPanel Cron runs as root: no sudo here)
 6. DNS:       at your domain provider, an A record:  ${domain:-hr.yourcompany.com}  ->  ${ip:-<this server's IP>}
 7. Open https://${domain:-your-domain}, sign in as the administrator.
 
 Every update from now on:
-     bash $(readlink -f "$0") update      then aaPanel -> Node project -> Restart
+     sudo bash $(readlink -f "$0") update      then aaPanel -> Node project -> Restart
 EOF
   bold "=========================================================================="
 }
 
-# Turns an install that was uploaded by hand (no .git) into a Git checkout, keeping .env and local data.
+# An install that was uploaded by hand (no .git) is converted without downtime: the new copy is downloaded and
+# built in APP_DIR.new while the live app keeps running from APP_DIR, .env is copied over, and only at the end
+# are the folders swapped (the old one is kept as APP_DIR.before-git-<date>). The database is not touched.
+LIVE_DIR="$APP_DIR"
+ADOPTED_FROM=""
 adopt_existing() {
-  local backup="${APP_DIR}.before-git-$(date +%Y%m%d-%H%M%S)"
-  warn "$APP_DIR exists but was not installed from Git (files uploaded by hand)."
-  echo "     The script can convert it: the folder is renamed to $backup,"
-  echo "     the code is downloaded fresh, and .env (and .env.local) are copied back. Nothing in the database changes."
-  ask_yn "Convert $APP_DIR now?" "y" || die "Stopped. Move $APP_DIR away (or set APP_DIR=...) and run again."
-  mv "$APP_DIR" "$backup"
-  ADOPTED_FROM="$backup"
-  ok "Old files kept in $backup"
+  warn "$LIVE_DIR exists but was not installed from Git (files uploaded by hand)."
+  echo "     The script builds a fresh copy from GitHub in ${LIVE_DIR}.new while the live app keeps running,"
+  echo "     copies your .env into it, then swaps the folders. The old folder is kept. The database is not touched."
+  ask_yn "Convert $LIVE_DIR now?" "y" || die "Stopped. Nothing was changed."
+  [ -f "$LIVE_DIR/.env" ] || warn "$LIVE_DIR has no .env: you will be asked for the settings."
+  rm -rf "${LIVE_DIR}.new"
+  ADOPTED_FROM="$LIVE_DIR"
+  APP_DIR="${LIVE_DIR}.new"; ENV_FILE="$APP_DIR/.env"
 }
 
 restore_adopted_env() {
-  [ -n "${ADOPTED_FROM:-}" ] || return 0
-  local f
+  [ -n "$ADOPTED_FROM" ] || return 0
+  local f docs
   for f in .env .env.local; do
-    [ -f "$ADOPTED_FROM/$f" ] && cp -p "$ADOPTED_FROM/$f" "$APP_DIR/$f" && ok "Kept $f from the old install"
+    if [ -f "$ADOPTED_FROM/$f" ]; then cp -p "$ADOPTED_FROM/$f" "$APP_DIR/$f" && ok "Kept $f from the live install"; fi
   done
-  local docs; docs="$(get_env "$ENV_FILE" DOCUMENT_STORAGE_PATH)"
+  if [ -d "$ADOPTED_FROM/backups" ] && [ ! -e "$APP_DIR/backups" ]; then cp -a "$ADOPTED_FROM/backups" "$APP_DIR/backups" && ok "Kept backups/ from the live install"; fi
+  docs="$(get_env "$ENV_FILE" DOCUMENT_STORAGE_PATH)"
   case "$docs" in
-    ""|./*|[!/]*) [ -d "$ADOPTED_FROM/${docs:-documents}" ] && warn "Employee documents were inside the old folder ($ADOPTED_FROM/${docs:-documents}). Set DOCUMENT_STORAGE_PATH=$DATA_DIR/documents in .env and copy them there." ;;
-    "$ADOPTED_FROM"*|"$APP_DIR"*) warn "DOCUMENT_STORAGE_PATH points inside the app folder. Move the files to $DATA_DIR/documents and update .env." ;;
+    "$ADOPTED_FROM"/*) warn "DOCUMENT_STORAGE_PATH ($docs) is inside the app folder; after the swap it stays in the kept old folder. Move it outside and update .env." ;;
+    ""|[!/]*) if [ -d "$ADOPTED_FROM/${docs:-documents}" ]; then warn "Employee documents are in $ADOPTED_FROM/${docs:-documents}. Move them outside the app folder and set DOCUMENT_STORAGE_PATH in .env."; fi ;;
   esac
+}
+
+swap_adopted() {
+  [ -n "$ADOPTED_FROM" ] || return 0
+  local old; old="${LIVE_DIR}.before-git-$(date +%Y%m%d-%H%M%S)"
+  info "Swapping folders: $LIVE_DIR -> $old, new copy -> $LIVE_DIR"
+  mv "$LIVE_DIR" "$old"
+  mv "$APP_DIR" "$LIVE_DIR"
+  APP_DIR="$LIVE_DIR"; ENV_FILE="$APP_DIR/.env"
+  git config --global --add safe.directory "$APP_DIR" 2>/dev/null || true
+  ok "The live folder is now the GitHub copy; the old files are kept in $old"
+  warn "Restart the app NOW: aaPanel -> Website -> Node project -> Restart (it still runs the old code from memory)."
 }
 
 # ---------- commands ----------
@@ -490,10 +518,15 @@ cmd_setup() {
     git -C "$APP_DIR" merge --ff-only --quiet "origin/$BRANCH"
   else
     if [ -d "$APP_DIR" ] && [ -n "$(ls -A "$APP_DIR" 2>/dev/null)" ]; then adopt_existing; fi
-    BRANCH="${BRANCH:-$(ask "Branch to deploy" "main")}"
-    info "Downloading the code into $APP_DIR (branch $BRANCH)"
+    info "Downloading the code into $APP_DIR"
     mkdir -p "$(dirname "$APP_DIR")"
-    git clone --quiet --branch "$BRANCH" "$REPO_SSH_URL" "$APP_DIR"
+    git clone --quiet --no-checkout "$REPO_SSH_URL" "$APP_DIR"
+    local newest; newest="$(newest_branch "$APP_DIR")"
+    echo "     Branches on GitHub, newest first:"
+    git -C "$APP_DIR" for-each-ref --sort=-committerdate --count=6 \
+      --format='       %(refname:lstrip=3)  (%(committerdate:short))  %(subject)' refs/remotes/origin | grep -v '^       HEAD ' | cut -c1-110 || true
+    BRANCH="${BRANCH:-$(ask "Branch to deploy" "${newest:-main}")}"
+    git -C "$APP_DIR" checkout --quiet -B "$BRANCH" "origin/$BRANCH" || die "Branch $BRANCH does not exist on GitHub."
   fi
   git config --global --add safe.directory "$APP_DIR" 2>/dev/null || true
   ok "Code is at commit $(git -C "$APP_DIR" log -1 --format='%h %s')"
@@ -505,6 +538,7 @@ cmd_setup() {
   make_env
   if migrate_db; then offer_admin; fi
   fix_owner
+  swap_adopted
   next_steps
 }
 
@@ -542,7 +576,7 @@ cmd_update() {
   fix_owner
   echo
   bold "Now restart the app: aaPanel -> Website -> Node project -> HR & Payroll -> Restart."
-  echo "Then check it with:  bash $0 check"
+  echo "Then check it with:  sudo bash $0 check"
 }
 
 cmd_check() {
