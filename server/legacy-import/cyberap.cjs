@@ -99,6 +99,9 @@ function normalizeCnic(value) {
   return `${digits.slice(0, 5)}-${digits.slice(5, 12)}-${digits.slice(12)}`;
 }
 
+// salary_sub_head ids that hold a rate per day worked: 23 FOOD ALLOWANCE, 24 DAILY ALLOWANCE.
+const DAILY_RATE_HEADS = new Set([23, 24]);
+
 const pad2 = n => String(n).padStart(2, '0');
 const shiftTime = (hour, minute) => `${pad2(num(hour) % 24)}:${pad2(num(minute))}`;
 
@@ -193,6 +196,11 @@ function mapEmployee(ctx, item) {
   const basicRow = salaries.find(s => s.salary_sub_head_id === 1);
   const basic = num(basicRow?.amount);
   const salaryHeads = Object.fromEntries(salaries.filter(s => num(s.amount) !== 0).map(s => [ctx.headName.get(s.salary_sub_head_id) || `head ${s.salary_sub_head_id}`, num(s.amount)]));
+  // Food (23) and daily (24) allowance are rates per day worked in CyberAP (e.g. 50), not monthly amounts: payslips
+  // there show 50 x days. This system has no per-day allowance, so they are kept for reference and never paid as-is.
+  const allowanceRatesPerDay = Object.fromEntries(salaries.filter(s => DAILY_RATE_HEADS.has(s.salary_sub_head_id) && num(s.amount) > 1).map(s => [ctx.headName.get(s.salary_sub_head_id) || `head ${s.salary_sub_head_id}`, num(s.amount)]));
+  const branchRow = lookup(ctx, 'branch', 'branch_id', row.branch_id);
+  const paymentMode = text(lookup(ctx, 'salary_payment_mode', 'salary_payment_mode_id', branchRow?.salary_payment_mode_id)?.salary_payment_mode_name);
   const genderName = text(lookup(ctx, 'gender', 'gender_id', row.gender_id)?.gender_name);
   const maritalName = text(lookup(ctx, 'marital_status', 'marital_status_id', row.marital_status_id)?.marital_status_name);
   const cnic = normalizeCnic(row.employee_cnic_number);
@@ -224,24 +232,28 @@ function mapEmployee(ctx, item) {
     bankName: '', bankBranchName: '', bankAccountNumber: '', iban: '',
     pictureUrl: active && item.thumb ? item.thumb : '',
     maritalStatus: maritalName === 'Married' ? 'Married' : maritalName === 'Single' ? 'Single' : undefined,
+    fatherName: text(row.employee_father_name) || undefined,
+    presentAddress: text(row.employee_present_address) || undefined,
+    permanentAddress: text(row.employee_permanent_address) || undefined,
+    bloodGroup: text(row.employee_blood_group) || undefined,
+    religion: text(lookup(ctx, 'religion', 'religion_id', row.religion_id)?.religion_name) || undefined,
     fingerprintTemplates: [],
     importSource: SOURCE,
     legacy: compact({
       employeeId: legacyId,
-      fatherName: text(row.employee_father_name),
       barCode: text(row.employee_bar_code),
-      presentAddress: text(row.employee_present_address),
-      permanentAddress: text(row.employee_permanent_address),
       telephone: text(row.employee_telephone_number),
       cnicAsEntered: cnic ? undefined : text(row.employee_cnic_number),
-      bloodGroup: text(row.employee_blood_group),
-      religion: text(lookup(ctx, 'religion', 'religion_id', row.religion_id)?.religion_name),
       subGroup: text(subGroup?.employee_sub_group_name),
       employmentStatus: text(row.employment_status),
       leavingDate: ymd(row.employee_leaving_date),
       notes: text(row.employee_notes),
       salaryHeads,
+      allowanceRatesPerDay: Object.keys(allowanceRatesPerDay).length ? allowanceRatesPerDay : undefined,
       salaryPlaceholder: basic <= 1 ? true : undefined,
+      salaryWithheld: num(row.salary_status_id) === 2 ? true : undefined, // salary_status 2 = WITHHELD
+      dailyAllowanceGiven: num(row.is_daily_allowance_given) === 1 || row.is_daily_allowance_given === true ? true : undefined,
+      salaryPaymentMode: paymentMode || undefined,
       fingerprintArchived: item.fp ? true : undefined,
       photoArchived: item.photo ? true : undefined,
     }),
@@ -388,7 +400,7 @@ function createTrailingAbsentFilter() {
 function emptyReport() {
   return {
     header: null, endCounts: null, integrity: 'unchecked', warnings: [],
-    employees: { total: 0, active: 0, inactive: 0, withThumb: 0, withArchivePhoto: 0, withFingerprint: 0, invalidCnic: 0, placeholderSalary: 0, existingCodeConflicts: 0 },
+    employees: { total: 0, active: 0, inactive: 0, withThumb: 0, withArchivePhoto: 0, withFingerprint: 0, invalidCnic: 0, placeholderSalary: 0, existingCodeConflicts: 0, salaryWithheld: 0, dailyAllowanceRates: 0, refreshed: 0 },
     masters: { branches: 0, departments: 0, designations: 0, holidays: 0 },
     attendance: { packageDays: 0, imported: 0, skippedUnknownEmployee: 0, skippedEmpty: 0, droppedTrailingAbsences: 0, skippedExistingNewSystem: 0, first: null, last: null, byStatus: {}, openBreaks: 0 },
     archive: { rows: 0, byTable: {} },
@@ -451,6 +463,8 @@ function checkIntegrity(report, seen) {
 function addEmployeeWarnings(report) {
   if (report.employees.invalidCnic) report.warnings.push(`${report.employees.invalidCnic} active employees have no valid CNIC in CyberAP; they are imported with the CNIC blank.`);
   if (report.employees.placeholderSalary) report.warnings.push(`${report.employees.placeholderSalary} active employees have no real basic salary in CyberAP (1.0 placeholder); they are imported with salary 0 and must be updated before the first payroll.`);
+  if (report.employees.salaryWithheld) report.warnings.push(`${report.employees.salaryWithheld} active employees have their salary marked WITHHELD in CyberAP. This system has no salary hold: the flag is shown on each employee's form; check them before paying.`);
+  if (report.employees.dailyAllowanceRates) report.warnings.push(`${report.employees.dailyAllowanceRates} active employees have a food or daily allowance in CyberAP. These are rates per day worked (e.g. PKR 50), so they are not added to the monthly allowances; they are shown on each employee's form for HR to set the monthly figure.`);
   if (report.employees.withFingerprint) report.warnings.push(`${report.employees.withFingerprint} fingerprints are DigitalPersona One Touch templates. The kiosk reads U.are.U ANSI templates, so they are archived and staff must be enrolled again at the kiosk.`);
   if (report.employees.existingCodeConflicts) report.warnings.push(`${report.employees.existingCodeConflicts} employee codes already exist in this system. Without "remove current data", those legacy employees are linked to the existing records instead of being created again.`);
 }
@@ -518,6 +532,32 @@ async function insertAttendances(db, logs) {
       WHERE NOT EXISTS (SELECT 1 FROM attendances a WHERE a.employee_id = x.employee_id AND a.date = x.date::date AND a.id <> x.id)
      ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, status = EXCLUDED.status, date = EXCLUDED.date, updated_at = now()
       WHERE attendances.version = 1 AND attendances.data->>'importSource' = '${SOURCE}'`,
+    [JSON.stringify(rows)],
+  );
+  return result.rowCount;
+}
+
+// Fields a re-import may fill in on employees an earlier CyberAP import created. Only fields that are missing are
+// added (HR edits win); the read-only legacy block is merged so newly exported facts appear. Salary, status, branch
+// and the rest are never touched.
+const REFRESH_FIELDS = Object.freeze(['fatherName', 'presentAddress', 'permanentAddress', 'bloodGroup', 'religion', 'maritalStatus', 'pictureUrl']);
+
+/** Fills in missing fields of employees already imported from CyberAP. Returns how many changed. */
+async function refreshImportedEmployees(db, employees) {
+  if (!employees.length) return 0;
+  const rows = employees.map(employee => ({
+    id: employee.id,
+    fill: Object.fromEntries(REFRESH_FIELDS.filter(key => employee[key]).map(key => [key, employee[key]])),
+    legacy: employee.legacy || {},
+  }));
+  const result = await db.query(
+    `WITH x AS (SELECT * FROM jsonb_to_recordset($1::jsonb) AS x(id text, fill jsonb, legacy jsonb)),
+     next AS (
+       SELECT e.id, (x.fill || e.data) || jsonb_build_object('legacy', COALESCE(e.data->'legacy', '{}'::jsonb) || x.legacy) AS data
+         FROM employees e JOIN x ON x.id = e.id
+        WHERE e.data->>'importSource' = '${SOURCE}')
+     UPDATE employees e SET data = next.data, version = e.version + 1, updated_at = now()
+       FROM next WHERE next.id = e.id AND next.data IS DISTINCT FROM e.data`,
     [JSON.stringify(rows)],
   );
   return result.rowCount;
@@ -612,6 +652,8 @@ async function analyzePackage(filePath, { db = null, onProgress = () => {}, sign
       if (item.fp) e.withFingerprint += 1;
       if (employee.status === 'Active' && !employee.cnic) e.invalidCnic += 1;
       if (employee.status === 'Active' && !employee.basicSalary) e.placeholderSalary += 1;
+        if (employee.status === 'Active' && employee.legacy?.salaryWithheld) e.salaryWithheld += 1;
+        if (employee.status === 'Active' && employee.legacy?.allowanceRatesPerDay) e.dailyAllowanceRates += 1;
       if (existingCodes.has(employee.employeeCode.toLowerCase())) e.existingCodeConflicts += 1;
       continue;
     }
@@ -669,7 +711,12 @@ async function importPackage(pool, filePath, { wipe = false, companyName = '', a
     let bytesRead = 0;
 
     const flushArchive = async () => { if (archiveBatch.length) { await insertLegacyRecords(pool, archiveBatch); archiveBatch = []; } };
-    const flushEmployees = async () => { if (employeeBatch.length) { await insertDocuments(pool, 'employees', employeeBatch, { employeeIdOf: e => e.id }); employeeBatch = []; } };
+    const flushEmployees = async () => {
+      if (!employeeBatch.length) return;
+      await insertDocuments(pool, 'employees', employeeBatch, { employeeIdOf: e => e.id });
+      report.employees.refreshed += await refreshImportedEmployees(pool, employeeBatch);
+      employeeBatch = [];
+    };
     const flushDays = async () => {
       if (!dayBatch.length) return;
       const written = await insertAttendances(pool, dayBatch);
@@ -717,6 +764,8 @@ async function importPackage(pool, filePath, { wipe = false, companyName = '', a
         if (item.photo) e.withArchivePhoto += 1;
         if (employee.status === 'Active' && !employee.cnic) e.invalidCnic += 1;
         if (employee.status === 'Active' && !employee.basicSalary) e.placeholderSalary += 1;
+        if (employee.status === 'Active' && employee.legacy?.salaryWithheld) e.salaryWithheld += 1;
+        if (employee.status === 'Active' && employee.legacy?.allowanceRatesPerDay) e.dailyAllowanceRates += 1;
         const existing = existingByCode.get(employee.employeeCode.toLowerCase());
         if (existing) {
           e.existingCodeConflicts += 1;
@@ -789,5 +838,5 @@ module.exports = {
   SOURCE, WIPE_TABLES, LEGACY_TABLES_SQL,
   readPackage, analyzePackage, importPackage, wipeBusinessData, currentDataCounts, ensureLegacyTables,
   // exported for tests
-  normalizeCnic, dayStatus, mapDay, mapEmployee, mapMasters, createContext, addRow, createTrailingAbsentFilter, ids,
+  normalizeCnic, dayStatus, mapDay, mapEmployee, refreshImportedEmployees, mapMasters, createContext, addRow, createTrailingAbsentFilter, ids,
 };

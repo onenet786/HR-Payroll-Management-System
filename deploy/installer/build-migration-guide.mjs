@@ -267,12 +267,15 @@ SELECT kind, count(*) FROM legacy_records GROUP BY kind ORDER BY 2 DESC;
 SELECT id, status, started_at, finished_at FROM legacy_import_runs ORDER BY started_at DESC;</pre>
 
   <h2>Step 7 — HR clean-up before the first payroll</h2>
+  <p><b>Importing again is safe.</b> A second import of a newer package adds new employees and attendance days, and fills in details missing on employees an earlier import created (father's name, addresses, the CyberAP box). It never changes salary, status, branch or anything HR has typed. Use it for a catch-up of attendance after the first import: export with <code>-FromDate</code> set to the last imported day.</p>
   <table>
     <tr><th style="width:34%">Item</th><th>What to do</th></tr>
-    <tr><td>Basic salary</td><td>CyberAP holds 1.0 for most staff. Enter each active employee's real salary (Employees → edit, or Salary Revisions). Payroll refuses or underpays a 0 salary.</td></tr>
+    <tr><td>Basic salary</td><td>CyberAP holds 1.0 for most staff (688 of 767 active in the trial; its last payroll ran in April 2018), so their salary is imported as 0. Load the real salaries in one go: <b>Salary Revisions → Upload salary sheet</b> → download the template (staff without a salary first) → fill <i>Basic Salary</i> in Excel → save as CSV → upload. Each row becomes a draft revision; another authorised user presses <b>Approve all drafts</b>. Single changes: Employees → edit, or Process Increment.</td></tr>
+    <tr><td>Salary withheld</td><td>Staff whose salary was WITHHELD in CyberAP show an amber note on their employee form. This system has no salary hold: decide before paying them.</td></tr>
+    <tr><td>Food / daily allowance</td><td>CyberAP stores these as a rate per day worked (e.g. PKR 50), not a monthly amount, so they are not added to payroll. The rate is shown on the employee form; enter the monthly figure under Other Allowances where it should be paid.</td></tr>
     <tr><td>Active staff with no recent attendance</td><td>The report lists employees who are active in CyberAP but have not worked for 30+ days. Mark those who left as Terminated with their separation date.</td></tr>
     <tr><td>CNIC</td><td>Placeholders such as "................." are imported as blank; the original text is kept in the legacy details. Enter real CNICs (Full edition: required for EOBI/FBR).</td></tr>
-    <tr><td>Fingerprints</td><td>Enrol each active employee again at the kiosk (U.are.U reader). Face recognition can be enrolled at the same time.</td></tr>
+    <tr><td>Fingerprints</td><td>CyberAP's templates are DigitalPersona One Touch; the kiosk's U.are.U SDK refuses them (tested: every conversion returns "invalid parameter"). They are archived only. Enrol each active employee again at the kiosk. CyberAP has no face data, so enrol faces at the same time.</td></tr>
     <tr><td>Bank, EOBI, NTN, email</td><td>Not in CyberAP. Full edition: complete them before the first payroll. Lite edition: optional.</td></tr>
     <tr><td>Branches</td><td>Set city, province, address and geofence for each branch.</td></tr>
     <tr><td>Attendance policy</td><td>CyberAP used: shift 11:00–23:30, 15 minutes grace, date change at 06:00, minimum overtime 10 minutes, "Duty Off" allowance 90 minutes, holiday sandwich rule on. Set the matching options in the attendance policy.</td></tr>
@@ -347,7 +350,9 @@ SELECT id, status, started_at, finished_at FROM legacy_import_runs ORDER BY star
     <tr><td>mobile, else telephone</td><td>Contact number</td></tr>
     <tr><td>branch, sub-group → group, designation, shift</td><td>Branch, department, designation, shift</td></tr>
     <tr><td>employee_image</td><td>160 px profile photo (active staff); 480 px copy archived for everyone</td></tr>
-    <tr><td>father name, bar code, addresses, blood group, religion, notes, salary heads</td><td>Legacy details on the employee record</td></tr>
+    <tr><td>father name, present / permanent address, blood group, religion</td><td>Father's name, addresses, blood group, religion (editable on the employee form)</td></tr>
+    <tr><td>salary_status = WITHHELD, is_daily_allowance_given, branch salary payment mode</td><td>"Imported from CyberAP" box on the employee form</td></tr>
+    <tr><td>bar code, telephone, sub-group, notes, salary heads, per-day allowance rates</td><td>"Imported from CyberAP" box on the employee form (read-only)</td></tr>
   </table>
 </section>
 ${trialSection}

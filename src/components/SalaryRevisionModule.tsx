@@ -7,7 +7,8 @@ import React, { useState } from 'react';
 import { SearchableSelect } from './SearchableSelect';
 import { DateField } from './DateField';
 import { RequiredMark, RequiredNote } from './RequiredMark';
-import { Plus, TrendingUp, ArrowUpRight } from 'lucide-react';
+import { Plus, TrendingUp, ArrowUpRight, Upload, Download, CheckCheck } from 'lucide-react';
+import { planSalarySheet, salarySheetTemplate, type SalarySheetPlan } from '../data/salarySheet';
 import { SalaryRevision, Employee } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 import ListSearch from './ListSearch';
@@ -17,7 +18,10 @@ interface SalaryRevisionModuleProps {
   salaryRevisions: SalaryRevision[];
   employees: Employee[];
   currentUserAccount: { id: string; username: string };
-  onAddSalaryRevision: (revision: SalaryRevision) => void;
+  /** Resolves false when the revision was not saved (the handler has already told the user why). */
+  onAddSalaryRevision: (revision: SalaryRevision) => void | Promise<boolean | void>;
+  /** Branch names for the salary sheet template. */
+  branches?: Array<{ id: string; name: string }>;
   /** False in the lite edition: the preparer may approve their own revision. */
   makerChecker?: boolean;
 }
@@ -29,8 +33,76 @@ const revisionTypeColors: Record<string, string> = {
   'Market Correction': 'bg-indigo-50 text-indigo-700 border-indigo-200'
 };
 
-export function SalaryRevisionModule({ salaryRevisions, employees, currentUserAccount, onAddSalaryRevision, makerChecker = true }: SalaryRevisionModuleProps) {
+export function SalaryRevisionModule({ salaryRevisions, employees, currentUserAccount, onAddSalaryRevision, makerChecker = true, branches = [] }: SalaryRevisionModuleProps) {
   const [showForm, setShowForm] = useState(false);
+  const [showSheet, setShowSheet] = useState(false);
+  const [sheetText, setSheetText] = useState('');
+  const [sheetName, setSheetName] = useState('');
+  const [sheetDefaults, setSheetDefaults] = useState({ effectiveDate: new Date().toISOString().split('T')[0], reason: '' });
+  const [bulk, setBulk] = useState<{ label: string; done: number; total: number; failed: number } | null>(null);
+  const sheetPlan: SalarySheetPlan | null = sheetText
+    ? planSalarySheet(sheetText, employees, { effectiveDate: sheetDefaults.effectiveDate, reason: sheetDefaults.reason.trim() || `Salary sheet ${sheetName}`.trim() })
+    : null;
+
+  const downloadTemplate = () => {
+    const csv = salarySheetTemplate(employees, id => branches.find(b => b.id === id)?.name || '');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const a = document.createElement('a'); a.href = url; a.download = 'salary-sheet.csv'; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const readSheet = (file: File | undefined) => {
+    if (!file) return;
+    if (!/\.(csv|txt)$/i.test(file.name)) { alert('Save the sheet from Excel as "CSV (Comma delimited)" and upload that file.'); return; }
+    const reader = new FileReader();
+    reader.onload = () => { setSheetText(String(reader.result || '')); setSheetName(file.name); };
+    reader.readAsText(file);
+  };
+
+  /** Saves one revision at a time, in order; stops at the first one the handler refuses. */
+  const runBulk = async (label: string, revisions: SalaryRevision[]) => {
+    setBulk({ label, done: 0, total: revisions.length, failed: 0 });
+    let done = 0;
+    for (const revision of revisions) {
+      const ok = await onAddSalaryRevision(revision);
+      if (ok === false) {
+        setBulk({ label, done, total: revisions.length, failed: 1 });
+        alert(`${label}: stopped after ${done} of ${revisions.length}. The rest were not saved.`);
+        return false;
+      }
+      done += 1;
+      setBulk({ label, done, total: revisions.length, failed: 0 });
+    }
+    setBulk(null);
+    return true;
+  };
+
+  const createSheetDrafts = async () => {
+    if (!sheetPlan?.usable.length) return;
+    const stamp = Date.now();
+    const revisions: SalaryRevision[] = sheetPlan.usable.map((row, index) => {
+      const previous = row.employee!.basicSalary || 0;
+      const increment = row.newSalary - previous;
+      return {
+        id: `rev-sheet-${stamp}-${index}`, employeeId: row.employee!.id, previousSalary: previous, newSalary: row.newSalary,
+        incrementAmount: increment, incrementPercentage: previous > 1 ? parseFloat(((increment / previous) * 100).toFixed(2)) : 0,
+        effectiveDate: row.effectiveDate, reason: row.reason.slice(0, 500), approvedBy: '', approvedOn: '', type: 'Adjustment', status: 'Draft',
+        createdById: currentUserAccount.id, createdBy: currentUserAccount.username,
+      };
+    });
+    if (await runBulk('Creating draft revisions', revisions)) {
+      alert(`${revisions.length} draft salary revisions created. ${makerChecker ? 'Another authorized user approves them with "Approve all drafts".' : 'Approve them with "Approve all drafts".'}`);
+      setShowSheet(false); setSheetText(''); setSheetName('');
+    }
+  };
+
+  const approvableDrafts = salaryRevisions.filter(r => r.status === 'Draft' && !r.sourcePerformanceReviewId && !(makerChecker && r.createdById === currentUserAccount.id));
+  const approveAllDrafts = async () => {
+    if (!approvableDrafts.length) return;
+    if (!confirm(`Approve ${approvableDrafts.length} draft salary revisions? Each employee's basic salary changes to the new amount.`)) return;
+    const today = new Date().toISOString().split('T')[0];
+    await runBulk('Approving revisions', approvableDrafts.map(r => ({ ...r, status: 'Approved' as const, approvedBy: currentUserAccount.username, approvedOn: today })));
+  };
   const [filterEmpId, setFilterEmpId] = useState<string>('All');
   const [search, setSearch] = useState('');
 
@@ -92,11 +164,31 @@ export function SalaryRevisionModule({ salaryRevisions, employees, currentUserAc
           <h2 className="text-lg font-bold text-slate-900">Salary Revisions & Increments</h2>
           <p className="text-xs text-slate-500 mt-0.5">Track salary changes, promotions, and increment history for all employees</p>
         </div>
-        <button onClick={() => setShowForm(true)}
-          className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-4 py-2 rounded-xl transition">
-          <Plus size={14} /> Process Increment
-        </button>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {approvableDrafts.length > 1 && (
+            <button onClick={approveAllDrafts} disabled={!!bulk}
+              className="flex items-center gap-2 border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-bold px-4 py-2 rounded-xl transition disabled:opacity-40">
+              <CheckCheck size={14} /> Approve all drafts ({approvableDrafts.length})
+            </button>
+          )}
+          <button onClick={() => setShowSheet(true)} disabled={!!bulk}
+            className="flex items-center gap-2 border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-xs font-bold px-4 py-2 rounded-xl transition disabled:opacity-40">
+            <Upload size={14} /> Upload salary sheet
+          </button>
+          <button onClick={() => setShowForm(true)}
+            className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-4 py-2 rounded-xl transition">
+            <Plus size={14} /> Process Increment
+          </button>
+        </div>
       </div>
+
+      {bulk && (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800" role="status">
+          <div className="font-bold">{bulk.label}: {bulk.done} of {bulk.total}{bulk.failed ? ' (stopped)' : ''}</div>
+          <div className="mt-2 h-2 overflow-hidden rounded-full bg-emerald-100"><div className="h-full bg-emerald-600 transition-all" style={{ width: `${bulk.total ? Math.round((bulk.done / bulk.total) * 100) : 0}%` }} /></div>
+          {!bulk.failed && <div className="mt-1 text-emerald-700">Keep this page open until it finishes.</div>}
+        </div>
+      )}
 
       {/* Summary Cards */}
       <div className="grid grid-cols-3 gap-3">
@@ -229,6 +321,70 @@ export function SalaryRevisionModule({ salaryRevisions, employees, currentUserAc
           ))
         )}
       </div>
+
+      {showSheet && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6 space-y-4" role="dialog" aria-label="Upload salary sheet">
+            <div>
+              <h3 className="text-base font-bold text-slate-900">Upload salary sheet</h3>
+              <p className="mt-1 text-xs text-slate-500">Set many basic salaries at once. Each row becomes a draft revision that must be approved before payroll uses it.</p>
+            </div>
+            <ol className="list-decimal space-y-1 pl-5 text-xs text-slate-700">
+              <li><button type="button" onClick={downloadTemplate} className="inline-flex items-center gap-1 font-bold text-emerald-700 hover:underline"><Download size={12} /> Download the template</button> (current staff; those without a real salary are listed first).</li>
+              <li>Open it in Excel and fill the <b>Basic Salary</b> column (monthly, PKR). Leave rows you don&apos;t want to change blank. Effective Date and Reason are optional per row.</li>
+              <li>Save as <b>CSV (Comma delimited)</b> and choose the file below.</li>
+            </ol>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <label className="text-xs text-slate-600">CSV file
+                <input type="file" accept=".csv,.txt,text/csv" onChange={e => readSheet(e.target.files?.[0])} className="mt-1 block w-full text-xs" />
+              </label>
+              <label className="text-xs text-slate-600">Effective date (when a row has none)
+                <DateField value={sheetDefaults.effectiveDate} aria-label="Default effective date" onChange={e => setSheetDefaults(p => ({ ...p, effectiveDate: e.target.value }))}
+                  className="mt-1 w-full bg-white border border-slate-200 text-slate-900 text-sm rounded-xl px-3 py-2" />
+              </label>
+              <label className="text-xs text-slate-600">Reason (when a row has none)
+                <input value={sheetDefaults.reason} maxLength={200} onChange={e => setSheetDefaults(p => ({ ...p, reason: e.target.value }))} placeholder="e.g. Salaries from CyberAP migration"
+                  className="mt-1 w-full bg-white border border-slate-200 text-slate-900 text-sm rounded-xl px-3 py-2" />
+              </label>
+            </div>
+            {sheetPlan && sheetPlan.errors.length > 0 && (
+              <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">{sheetPlan.errors.join(' ')}</div>
+            )}
+            {sheetPlan && sheetPlan.rows.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex flex-wrap gap-2 text-xs">
+                  <span className="rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 font-bold text-emerald-700">{sheetPlan.usable.length} will become draft revisions</span>
+                  <span className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-slate-600">{sheetPlan.rows.length - sheetPlan.usable.length} skipped</span>
+                </div>
+                <div className="max-h-72 overflow-auto rounded-xl border border-slate-200">
+                  <table className="w-full text-xs">
+                    <thead className="sticky top-0 bg-slate-50 text-left text-slate-500"><tr><th className="p-2">Row</th><th className="p-2">Code</th><th className="p-2">Employee</th><th className="p-2 text-right">Current</th><th className="p-2 text-right">New</th><th className="p-2">Effective</th><th className="p-2">Result</th></tr></thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {[...sheetPlan.rows].sort((a, b) => Number(a.problem === 'Salary left blank') - Number(b.problem === 'Salary left blank')).slice(0, 500).map(row => (
+                        <tr key={row.line} className={row.problem ? 'text-slate-500' : ''}>
+                          <td className="p-2">{row.line}</td><td className="p-2">{row.code}</td><td className="p-2">{row.employee?.fullName || '—'}</td>
+                          <td className="p-2 text-right">{row.employee ? (row.employee.basicSalary || 0).toLocaleString() : ''}</td>
+                          <td className="p-2 text-right font-semibold">{row.newSalary ? row.newSalary.toLocaleString() : ''}</td>
+                          <td className="p-2">{row.problem ? '' : row.effectiveDate}</td>
+                          <td className={`p-2 ${row.problem ? 'text-amber-700' : 'text-emerald-700 font-semibold'}`}>{row.problem || 'Draft revision'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+            <div className="flex gap-3 pt-2">
+              <button onClick={() => { setShowSheet(false); setSheetText(''); setSheetName(''); }} disabled={!!bulk}
+                className="flex-1 bg-white border border-slate-200 hover:bg-slate-100 text-slate-900 text-sm font-bold py-2.5 rounded-xl transition disabled:opacity-40">Cancel</button>
+              <button onClick={createSheetDrafts} disabled={!sheetPlan?.usable.length || !!bulk}
+                className="flex-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-sm font-bold py-2.5 rounded-xl transition">
+                {bulk ? `${bulk.done} / ${bulk.total}…` : `Create ${sheetPlan?.usable.length || 0} draft revisions`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Add Revision Modal */}
       <AnimatePresence>

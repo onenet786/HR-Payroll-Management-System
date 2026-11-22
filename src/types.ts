@@ -213,6 +213,15 @@ export interface Employee {
   priorEmployerTaxableIncome?: number;
   priorEmployerTaxDeducted?: number;
   maritalStatus?: 'Single' | 'Married' | 'Divorced' | 'Widowed';
+  fatherName?: string;
+  presentAddress?: string;
+  permanentAddress?: string;
+  bloodGroup?: string;
+  religion?: string;
+  /** Set on records brought in by a legacy import (e.g. 'cyberap'). */
+  importSource?: string;
+  /** What the legacy system held that has no field of its own here (read-only reference). */
+  legacy?: Record<string, unknown>;
   emergencyContactName?: string;
   emergencyContactNumber?: string;
   reportingManagerId?: string;

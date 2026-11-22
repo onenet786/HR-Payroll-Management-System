@@ -124,3 +124,31 @@ test('absences after the last working day of a former employee are dropped', () 
   written.push(...filter.push(log('2019-01-01', 'Absent'), true, 9)); // next employee, active: kept
   assert.deepEqual(written.map(item => item.date), ['2019-01-01', '2019-01-02', '2019-01-03', '2019-01-01']);
 });
+
+test('profile fields are real employee fields; withheld, per-day allowances and payment mode are kept for HR', () => {
+  const ctx = context();
+  addRow(ctx, 'religion', { religion_id: 1, religion_name: 'Islam' });
+  addRow(ctx, 'salary_payment_mode', { salary_payment_mode_id: 2, salary_payment_mode_name: 'VIA BRANCH' });
+  addRow(ctx, 'branch', { branch_id: 39, branch_name: 'G9', shift_id: 68, salary_payment_mode_id: 2 });
+  addRow(ctx, 'salary_sub_head', { salary_sub_head_id: 23, salary_sub_head_name: 'FOOD ALLOWANCE' });
+  addRow(ctx, 'salary', { employee_id: 9, salary_sub_head_id: 1, amount: 1.0 });
+  addRow(ctx, 'salary', { employee_id: 9, salary_sub_head_id: 23, amount: 50 });
+  const employee = mapEmployee(ctx, { r: employeeRow({ employee_id: 9, branch_id: 39, employee_father_name: ' Muhammad  Aslam ', employee_present_address: 'Street 4, G9', employee_permanent_address: 'Village X', employee_blood_group: 'B+', religion_id: 1, salary_status_id: 2, is_daily_allowance_given: true }) });
+  assert.equal(employee.fatherName, 'Muhammad Aslam');
+  assert.equal(employee.presentAddress, 'Street 4, G9');
+  assert.equal(employee.permanentAddress, 'Village X');
+  assert.equal(employee.bloodGroup, 'B+');
+  assert.equal(employee.religion, 'Islam');
+  assert.equal(employee.legacy.fatherName, undefined, 'not duplicated under legacy');
+  assert.equal(employee.basicSalary, 0);
+  assert.equal(employee.otherAllowances, undefined, 'a per-day rate is never paid as a monthly allowance');
+  assert.deepEqual(employee.legacy.allowanceRatesPerDay, { 'FOOD ALLOWANCE': 50 });
+  assert.equal(employee.legacy.salaryWithheld, true);
+  assert.equal(employee.legacy.dailyAllowanceGiven, true);
+  assert.equal(employee.legacy.salaryPaymentMode, 'VIA BRANCH');
+
+  const plain = mapEmployee(ctx, { r: employeeRow({ salary_status_id: 1, is_daily_allowance_given: false }) });
+  assert.equal(plain.legacy.salaryWithheld, undefined);
+  assert.equal(plain.legacy.dailyAllowanceGiven, undefined);
+  assert.equal(plain.fatherName, undefined);
+});

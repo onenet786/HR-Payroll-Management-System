@@ -719,6 +719,7 @@ const htmlContent = `<!DOCTYPE html>
       <li><strong>Banking Advice:</strong> Select Pakistani Bank (HBL, MCB, UBL, Alfalah, Meezan, etc.), Bank Account Number, and 24-character Pakistani IBAN (<span class="code-snippet">PK...</span>).</li>
       <li>Save the record. The employee is now active and immediately eligible for attendance and payroll inclusion.</li>
     </ol>
+    <p><strong>Editing an employee:</strong> the form also holds Father's Name, Blood Group, Religion and Present / Permanent Address. Employees imported from CyberAP show an <em>Imported from CyberAP</em> box: their CyberAP ID, notes, salary heads, per-day allowance rates, and amber warnings when the salary was WITHHELD in CyberAP or CyberAP had no real basic salary (load salaries with Salary Revisions &rarr; Upload salary sheet).</p>
   </div>
 
   <!-- MENU 5: HOLIDAY CALENDAR -->
@@ -861,6 +862,8 @@ const htmlContent = `<!DOCTYPE html>
     <ul>
       <li>Records Old Basic Salary, New Basic Salary, Effective Date, and Appraisal Reference.</li>
       <li>The payroll engine checks effective dates and applies revised salary structures automatically.</li>
+      <li><strong>Upload salary sheet</strong> (many employees at once, e.g. after a CyberAP migration): download the template (current staff, those without a salary first), fill the <em>Basic Salary</em> column in Excel, save as CSV and upload. The preview shows each row as <em>Draft revision</em> or the reason it is skipped (unknown code, blank, same salary, employee has left). Each usable row becomes a draft revision.</li>
+      <li><strong>Approve all drafts</strong> approves every draft another user prepared, one by one, and updates each basic salary. With maker-checker on, the person who uploaded the sheet cannot approve it.</li>
     </ul>
   </div>
 

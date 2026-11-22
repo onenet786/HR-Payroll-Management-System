@@ -88,7 +88,7 @@ interface DeviceEmulatorProps {
   onApproveLoan: (id: string) => void;
   onRejectLoan: (id: string) => void;
   salaryRevisions: SalaryRevision[];
-  onAddSalaryRevision: (revision: SalaryRevision) => void;
+  onAddSalaryRevision: (revision: SalaryRevision) => void | Promise<boolean | void>;
   performanceReviews: PerformanceReview[];
   onAddPerformanceReview: (review: PerformanceReview) => void;
   onUpdatePerformanceReview: (review: PerformanceReview) => void;

@@ -2041,14 +2041,14 @@ function HrApp() {
   const handleRejectLoan = (id: string) => decideLoan(id, 'Rejected');
 
   // ─── Salary Revision Handlers ─────────────────────────────────────────────
-  const handleAddSalaryRevision = async (revision: SalaryRevision) => {
+  const handleAddSalaryRevision = async (revision: SalaryRevision): Promise<boolean> => {
     // Draft recommendations never change payroll. Salary changes occur only
     // after a different authorized user explicitly approves the revision.
     const employee = employees.find(e => e.id === revision.employeeId);
     const previous = salaryRevisions.find(item => item.id === revision.id);
     if (revision.status !== 'Draft') {
       const approvalError = salaryRevisionApprovalError(previous || { ...revision, status: 'Draft' }, currentUserAccount.id, dualControl);
-      if (approvalError) { alert(`Maker-checker control: ${approvalError}`); return; }
+      if (approvalError) { alert(`Maker-checker control: ${approvalError}`); return false; }
       revision = { ...revision, approvedById: currentUserAccount.id, approvedBy: currentUserAccount.username, approvedOn: todayStr() };
       // Back-dated revisions owe the difference for payroll months already processed at the old salary.
       const arrears = salaryRevisionArrears(revision, effectivePayslips, payrollRuns, employee ? resolveWageBasis(employee, wageTypes) : 'Monthly');
@@ -2064,7 +2064,7 @@ function HrApp() {
           await setDoc(doc(db, 'payrollAdjustments', adjustment.id), cleanData(adjustment));
         } catch (err) {
           alert(`Not approved: this back-dated revision owes PKR ${arrears.amount.toLocaleString()} arrears for ${arrears.months.join(', ')}, which only a payroll user can raise. Ask a payroll user to approve it.`);
-          return;
+          return false;
         }
         setPayrollAdjustments(previous => [...previous, adjustment]);
         revision = { ...revision, arrearsAdjustmentId: adjustment.id, arrearsAmount: arrears.amount };
@@ -2078,7 +2078,7 @@ function HrApp() {
       await setDoc(doc(db, 'salaryRevisions', revision.id), cleanData(revision));
     } catch (err) {
       alert(revision.status === 'Approved' ? 'The salary revision could not be approved. Nothing was changed.' : 'The salary revision could not be saved.');
-      return;
+      return false;
     }
     setSalaryRevisions(prev => {
       const updated = prev.some(item => item.id === revision.id)
@@ -2094,6 +2094,7 @@ function HrApp() {
         return updated;
       });
     }
+    return true;
   };
 
   // ─── Performance Review Handlers ──────────────────────────────────────────

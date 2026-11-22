@@ -22,7 +22,7 @@ const CNIC_ALIASES = ['cnic', 'cnic no', 'nic', 'cnic number'];
 export interface LegacyRow { code: string; cnic: string; values: Partial<Record<FieldKey, number>> }
 export interface ParsedLegacyPayroll { rows: LegacyRow[]; matchedFields: FieldKey[]; errors: string[] }
 
-function parseCsvLine(line: string, delimiter: string): string[] {
+export function parseCsvLine(line: string, delimiter: string): string[] {
   const cells: string[] = [];
   let cell = '';
   let quoted = false;

@@ -248,6 +248,8 @@ export function DataImportPanel() {
                 ['Total', n(report.employees?.total)], ['Active', n(report.employees?.active)], ['Left / inactive', n(report.employees?.inactive)],
                 ['Active, no attendance in 30 days', n(report.employees?.activeWithoutRecentAttendance)], ['Active without valid CNIC', n(report.employees?.invalidCnic)],
                 ['Active without real salary', n(report.employees?.placeholderSalary)], ['Photos', n(report.employees?.withThumb)], ['Fingerprints (archived)', n(report.employees?.withFingerprint)],
+                ['Active, salary withheld in CyberAP', n(report.employees?.salaryWithheld)], ['Active with per-day allowance', n(report.employees?.dailyAllowanceRates)],
+                ...(job.kind === 'import' ? [['Already imported, details filled in', n(report.employees?.refreshed)] as [string, string]] : []),
               ]} />
               <Stat title="Attendance" lines={[
                 ['Days in package', n(report.attendance?.packageDays)], [job.kind === 'analyze' ? 'Days to import' : 'Days imported', n(report.attendance?.imported)],

@@ -10,6 +10,7 @@ import { DatabaseMaintenancePanel } from './DatabaseMaintenancePanel';
 import { MegaNavList, MegaNavPanel, visibleModules, type MegaBadge, type MegaItem, type MegaModule } from './MegaNav';
 import { BarChart3, Building2, CalendarCheck, ClipboardList, Clock, Coins, Landmark, Receipt, Scale, Settings2, SlidersHorizontal, UserCheck, Wallet } from 'lucide-react';
 import { DataImportPanel } from './DataImportPanel';
+import { LegacyRecordNote, legacyText } from './LegacyRecordNote';
 import { LicenceBanner } from './LicenceBanner';
 import { apiBase } from '../data/apiBase';
 import { DateField } from './DateField';
@@ -250,7 +251,7 @@ export interface WebPortalProps {
   onApproveLoan: (id: string) => void;
   onRejectLoan: (id: string) => void;
   salaryRevisions: SalaryRevision[];
-  onAddSalaryRevision: (revision: SalaryRevision) => void;
+  onAddSalaryRevision: (revision: SalaryRevision) => void | Promise<boolean | void>;
   loggedInUser: UserAccount;
   performanceReviews: PerformanceReview[];
   onAddPerformanceReview: (review: PerformanceReview) => void;
@@ -1008,7 +1009,8 @@ export function WebPortal({
     priorEmployerTaxableIncome: 0,
     priorEmployerTaxDeducted: 0,
     employeeCode: '',
-    maritalStatus: 'Single'
+    maritalStatus: 'Single',
+    fatherName: '', presentAddress: '', permanentAddress: '', bloodGroup: '', religion: ''
   });
 
   const [newEmpTakeHome, setNewEmpTakeHome] = useState(false);
@@ -1920,7 +1922,12 @@ export function WebPortal({
       fbrEnabled: editEmpForm.fbrEnabled,
       priorEmployerTaxableIncome: Number(editEmpForm.priorEmployerTaxableIncome) || 0,
       priorEmployerTaxDeducted: Number(editEmpForm.priorEmployerTaxDeducted) || 0,
-      maritalStatus: editEmpForm.maritalStatus as 'Single' | 'Married' | 'Divorced' | 'Widowed'
+      maritalStatus: editEmpForm.maritalStatus as 'Single' | 'Married' | 'Divorced' | 'Widowed',
+      fatherName: editEmpForm.fatherName.trim() || undefined,
+      presentAddress: editEmpForm.presentAddress.trim() || undefined,
+      permanentAddress: editEmpForm.permanentAddress.trim() || undefined,
+      bloodGroup: editEmpForm.bloodGroup.trim() || undefined,
+      religion: editEmpForm.religion.trim() || undefined,
     };
 
     onUpdateEmployee(updatedEmp);
@@ -2018,7 +2025,11 @@ export function WebPortal({
       priorEmployerTaxableIncome: emp.priorEmployerTaxableIncome || 0,
       priorEmployerTaxDeducted: emp.priorEmployerTaxDeducted || 0,
       employeeCode: emp.employeeCode,
-      maritalStatus: emp.maritalStatus || 'Single'
+      maritalStatus: emp.maritalStatus || 'Single',
+      // Records imported before these fields existed keep the values under legacy; saving moves them up.
+      fatherName: emp.fatherName || legacyText(emp, 'fatherName'), presentAddress: emp.presentAddress || legacyText(emp, 'presentAddress'),
+      permanentAddress: emp.permanentAddress || legacyText(emp, 'permanentAddress'),
+      bloodGroup: emp.bloodGroup || legacyText(emp, 'bloodGroup'), religion: emp.religion || legacyText(emp, 'religion')
     });
     setEditEmpTakeHome(false);
     setEditDepartmentMoveNotice('');
@@ -4654,6 +4665,7 @@ export function WebPortal({
                     currentUserAccount={currentUserAccount}
                     onAddSalaryRevision={onAddSalaryRevision}
                     makerChecker={dualControl}
+                    branches={localBranches}
                   />
                 </motion.div>
               )}
@@ -5809,6 +5821,41 @@ export function WebPortal({
                         className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg text-xs text-slate-900 bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all focus:outline-none"
                       />
                     </div>
+
+                  <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4 items-start">
+                    <div>
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem]">Father's Name:</label>
+                      <input type="text" aria-label="Father's Name" value={editEmpForm.fatherName} maxLength={300}
+                        onChange={(e) => setEditEmpForm({ ...editEmpForm, fatherName: e.target.value })}
+                        className="w-full h-9 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
+                    </div>
+                    <div>
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem]">Blood Group:</label>
+                      <input type="text" aria-label="Blood Group" value={editEmpForm.bloodGroup} maxLength={300}
+                        onChange={(e) => setEditEmpForm({ ...editEmpForm, bloodGroup: e.target.value })}
+                        className="w-full h-9 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
+                    </div>
+                    <div>
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem]">Religion:</label>
+                      <input type="text" aria-label="Religion" value={editEmpForm.religion} maxLength={300}
+                        onChange={(e) => setEditEmpForm({ ...editEmpForm, religion: e.target.value })}
+                        className="w-full h-9 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
+                    </div>
+                    <div className="hidden lg:block" />
+                    <div className="sm:col-span-2">
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem]">Present Address:</label>
+                      <input type="text" aria-label="Present Address" value={editEmpForm.presentAddress} maxLength={300}
+                        onChange={(e) => setEditEmpForm({ ...editEmpForm, presentAddress: e.target.value })}
+                        className="w-full h-9 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem]">Permanent Address:</label>
+                      <input type="text" aria-label="Permanent Address" value={editEmpForm.permanentAddress} maxLength={300}
+                        onChange={(e) => setEditEmpForm({ ...editEmpForm, permanentAddress: e.target.value })}
+                        className="w-full h-9 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
+                    </div>
+                  </div>
+                  {editingEmployee && <LegacyRecordNote employee={editingEmployee} />}
                   </div>
 
                   <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4 items-start">
