@@ -141,7 +141,7 @@ for (const file of fs.readdirSync(setupSrc)) {
   if (bad >= 0) throw new Error(`deploy/windows/setup/${file} line ${bad + 1} has a non-ASCII character; Windows PowerShell 5.1 would misread it.`);
 }
 for (const file of fs.readdirSync(setupSrc)) {
-  const target = file === 'Setup.cmd' ? path.join(stage, 'Setup.cmd') : path.join(stage, 'setup', file);
+  const target = file === 'Setup.cmd' || file === 'Update.cmd' ? path.join(stage, file) : path.join(stage, 'setup', file);
   copy(path.join(setupSrc, file), target);
 }
 const guide = path.join(root, 'docs', 'HR-Payroll-Windows-Server-Guide.pdf');
@@ -161,7 +161,9 @@ fs.writeFileSync(path.join(stage, 'README.txt'), [
   '3. Open the address shown at the end and sign in.',
   '',
   'Guide: docs\\HR-Payroll-Windows-Server-Guide.pdf',
-  'Update: extract the new package, run setup\\Update-HRPayroll.ps1 as administrator.',
+  'Update (always the same): extract the NEW package, right-click Update.cmd -> Run as administrator.',
+  'It backs up, installs the new version beside the old one, updates the database, restarts and checks;',
+  'if the new version does not answer it switches back automatically.',
   '',
 ].join('\r\n'));
 const manifest = { version, builtAt: new Date().toISOString(), node: NODE_VERSION, nodeSha256: expectedNode, postgresql: pgOrigin, winsw: `${WINSW_VERSION} sha256 ${sha256(winsw)}`, runtimeDependencies: deps };

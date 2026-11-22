@@ -182,8 +182,8 @@ ${pre(`powershell -ExecutionPolicy Bypass -File C:\\HRPayroll\\tools\\hrpayroll-
 
 <h2>Updating</h2>
 ${steps([
-  'Extract the new package (same as for installing).',
-  'As Administrator: <code>powershell -ExecutionPolicy Bypass -File C:\\Setup\\HRPayroll-new\\setup\\Update-HRPayroll.ps1</code>',
+  'Every update is done the same way. Copy the new <code>HRPayroll-Windows-Setup-&lt;version&gt;.zip</code> to the server and extract it (same as for installing).',
+  'Right-click <b>Update.cmd</b> (at the top of the extracted package) → <b>Run as administrator</b>. Nothing to type. (It runs <code>setup\\Update-HRPayroll.ps1</code>.)',
   'The update takes a safety backup, copies the new version beside the old one, applies the database changes, switches over, restarts and checks. If the new version does not answer, it <b>switches back automatically</b>.',
   'Old version folders in <code>C:\\HRPayroll\\app</code> can be deleted after a few weeks.',
 ])}

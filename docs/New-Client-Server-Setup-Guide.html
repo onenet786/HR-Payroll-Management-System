@@ -67,7 +67,7 @@
   <div class="meta">
     <div><b>Bundle</b>2026.10.19-71f717a-dirty</div>
     <div><b>Editions</b>Full · Lite</div>
-    <div><b>Issued</b>19 October 2026</div>
+    <div><b>Issued</b>23 November 2026</div>
   </div>
 </section>
 
@@ -88,8 +88,11 @@
     <li>aaPanel notes</li>
     <li>Troubleshooting</li>
     <li>Security notes</li>
+    <li>Quick setup with hrpayroll-server.sh (aaPanel, recommended)</li>
     <li>Appendix — Client intake form</li>
+    <li>Pulling the code from GitHub</li>
   </ol>
+  <div class="note"><b>Which method?</b>On <b>your own aaPanel server</b> use <b>hrpayroll-server.sh</b> (chapter 15): the app runs as an aaPanel Node project and every update is one command. The setup bundle (chapters 4–12) is for a client's own Linux server without aaPanel management; it runs the app as a systemd service.</div>
 
   <h2>1 · What the installer does</h2>
   <p>You build <b>one file</b> per release, <code>hrpayroll-setup-2026.10.19-71f717a-dirty.run</code>. Run it as root on a fresh or existing Ubuntu server. A guided, menu-driven wizard asks a few questions, then the installer does everything else without further input.</p>
@@ -334,6 +337,45 @@ SMTP_PASS=app-password-here</pre>
 </section>
 
 <section class="page">
+  <h2>15 · Quick setup with hrpayroll-server.sh</h2>
+  <p>One file does the whole install and every update on an Ubuntu 24.04 server with aaPanel. It never installs Node.js or PostgreSQL itself: those come from aaPanel.</p>
+  <h3>Once, in aaPanel</h3>
+  <ol class="steps">
+    <li><b>Node.js:</b> Website → Node project → Node version manager → install <b>Node 22</b>.</li>
+    <li><b>Database:</b> Databases → PgSQL → Add database, e.g. name and user <code>hrpayroll</code> with a strong password. Write the password down.</li>
+    <li><b>git</b> (only if missing): Terminal → <code>apt-get install -y git</code>.</li>
+    <li><b>Copy the script:</b> Files → <code>/root</code> → upload <code>deploy/hrpayroll-server.sh</code> from the repository.</li>
+  </ol>
+  <h3>Install</h3>
+<pre><span class="p">#</span> bash /root/hrpayroll-server.sh setup</pre>
+  <ol class="steps">
+    <li>It creates a <b>deploy key</b> and shows it. Add it on GitHub (see <i>Pulling the code from GitHub</i>), then press Enter.</li>
+    <li>It asks for the branch (normally <code>main</code>), downloads the code to <code>/www/wwwroot/hrpayroll</code>, installs the packages and builds the web app (5–10 minutes the first time).</li>
+    <li>It asks for the domain, contact e-mail, company name, internal port and the database name, user and password, then writes <code>.env</code> with new random backup and MFA keys. An existing <code>.env</code> is never overwritten.</li>
+    <li>It creates the database tables and offers the first administrator (e-mail and a password of at least 12 characters).</li>
+    <li>It ends with a <b>Next steps in aaPanel</b> box with the exact values for the Node project, Mapping, SSL, firewall, Cron and DNS.</li>
+  </ol>
+  <div class="warn"><b>Already running an install that was uploaded by hand?</b>Run <code>setup</code> anyway. It renames the old folder to <code>hrpayroll.before-git-&lt;date&gt;</code>, downloads the code fresh and copies your <code>.env</code> back. The database is not touched. Then point the aaPanel Node project at <code>/www/wwwroot/hrpayroll</code> (if it was elsewhere) and restart it.</div>
+  <h3>Every update (always the same)</h3>
+<pre><span class="p">#</span> bash /root/hrpayroll-server.sh update
+<span class="c"># then aaPanel → Website → Node project → HR &amp; Payroll → Restart</span>
+<span class="p">#</span> bash /root/hrpayroll-server.sh check</pre>
+  <p><code>update</code> takes an encrypted database backup, downloads the new code from GitHub, installs packages, builds the web app and applies database changes. The running app keeps working until you press Restart. <code>BRANCH=&lt;name&gt; bash … update</code> switches to another branch.</p>
+  <h3>All commands</h3>
+  <table>
+    <tr><th style="width:22%">Command</th><th>What it does</th></tr>
+    <tr><td><code>setup</code></td><td>First install, or convert a hand-uploaded install to Git.</td></tr>
+    <tr><td><code>update</code></td><td>Backup → new code → packages → web build → database changes. Then Restart in aaPanel.</td></tr>
+    <tr><td><code>check</code></td><td>Code version and newer commits on GitHub, .env, web build, database, app on its port, public address, newest backup.</td></tr>
+    <tr><td><code>backup</code></td><td>Encrypted database backup to <code>/www/hrpayroll-data/backups</code> (14 kept). Add it to aaPanel → Cron, daily.</td></tr>
+    <tr><td><code>admin</code></td><td>Create the first administrator, or set a new password for an administrator.</td></tr>
+    <tr><td><code>db</code></td><td>Enter the database name, user and password again (e.g. after changing the password in aaPanel).</td></tr>
+    <tr><td><code>key</code></td><td>Show the deploy key again.</td></tr>
+  </table>
+  <p class="muted">Settings can be put in front of any command: <code>APP_DIR=/www/wwwroot/hr DATA_DIR=/www/hr-data BRANCH=main RUN_USER=www bash hrpayroll-server.sh setup</code>.</p>
+</section>
+
+<section class="page">
   <h2>Appendix — Client intake form</h2>
   <p class="muted">Fill one in per client before installing. Keep it with the client's file; don't write passwords on it.</p>
   <table class="form">
@@ -360,5 +402,19 @@ SMTP_PASS=app-password-here</pre>
     <tr><td>MFA enrolled · enforcement on</td><td></td></tr>
     <tr><td>Handed over to client (date / signature)</td><td></td></tr>
   </table>
+</section>
+<section class="page">
+  <div class="note" style="border-left-width:5px;padding:4mm 5mm">
+  <h2 style="margin-top:0;border:0">Pulling the code from GitHub</h2>
+  <p>The server downloads the code from the <b>private</b> repository <code>github.com/onenet786/HR-Payroll-Management-System</code> with a read-only <b>deploy key</b> that only this server has. Nothing is uploaded by hand.</p>
+  <ol class="steps">
+    <li><code>bash hrpayroll-server.sh setup</code> (or <code>key</code>) prints a line starting with <code>ssh-ed25519</code>. Copy the whole line.</li>
+    <li>On GitHub: the repository → <b>Settings → Deploy keys → Add deploy key</b>. Title: <i>HR server (&lt;server name&gt;)</i>. Paste the line. Leave <b>Allow write access</b> OFF. Add key.</li>
+    <li>Back in the terminal press Enter; the script checks access and continues.</li>
+  </ol>
+  <p><b>How a change reaches the server:</b> the developer commits and pushes to GitHub → you run <code>bash /root/hrpayroll-server.sh update</code> → Restart in aaPanel. The server deploys the branch it is on (<code>bash … check</code> shows it). Push changes to that branch, or merge them into it, before updating.</p>
+  <p><b>If the update says "local changes conflict":</b> someone edited files on the server. See them with <code>git -C /www/wwwroot/hrpayroll status</code>; put the change in the repository instead, then <code>git -C /www/wwwroot/hrpayroll checkout -- .</code> and update again. <code>.env</code> is not in Git and is never touched.</p>
+  <p><b>Removing access:</b> delete the deploy key on GitHub. The server can then no longer download updates.</p>
+  </div>
 </section>
 </body></html>

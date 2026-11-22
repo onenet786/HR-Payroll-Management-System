@@ -41,7 +41,7 @@
   <h1>HR &amp; Payroll<br>on Windows Server</h1>
   <p class="sub">For your IT administrator: install HR &amp; Payroll on your own Windows Server 2019/2022 with its built-in database, make it reachable securely, back it up, update it and keep it healthy, next to your existing SQL Server.</p>
   <div class="flow" style="margin-top:16mm"><div><b>1 · Prepare</b>Server, address, HTTPS</div><div><b>2 · Install</b>Setup.cmd, about 5 minutes</div><div><b>3 · Secure</b>HTTPS, firewall, backups</div><div><b>4 · Run</b>Status, updates, restore</div></div>
-  <div class="meta"><div><b>Platform</b>Windows Server 2019 / 2022</div><div><b>Database</b>Built-in PostgreSQL 16</div><div><b>Issued</b>08 November 2026</div></div>
+  <div class="meta"><div><b>Platform</b>Windows Server 2019 / 2022</div><div><b>Database</b>Built-in PostgreSQL 16</div><div><b>Issued</b>23 November 2026</div></div>
 </section>
 <section class="page"><h1>Contents</h1><ol class="toc"><li>What gets installed</li><li>Requirements</li><li>Decisions before installing</li><li>Installing</li><li>Unattended installation</li><li>First sign-in and next steps</li><li>HTTPS</li><li>Network and access from outside</li><li>Running next to SQL Server and CyberAP</li><li>Daily administration</li><li>Backups</li><li>Restoring a backup</li><li>Updating</li><li>Licence and edition</li><li>Security checklist</li><li>Uninstalling</li><li>Troubleshooting</li><li>Appendix — folders and settings</li></ol>
 
@@ -123,7 +123,7 @@ ALTER ROLE db_datareader ADD MEMBER [NT AUTHORITY\NETWORK SERVICE];</pre>
 <p>It asks you to type <b>RESTORE</b>, takes a safety backup of the current database, stops the application, replaces the database with the backup, brings an older backup up to the installed version and starts the application again. Everything entered after the backup is lost.</p>
 
 <h2>Updating</h2>
-<ol class="steps"><li>Extract the new package (same as for installing).</li><li>As Administrator: <code>powershell -ExecutionPolicy Bypass -File C:\Setup\HRPayroll-new\setup\Update-HRPayroll.ps1</code></li><li>The update takes a safety backup, copies the new version beside the old one, applies the database changes, switches over, restarts and checks. If the new version does not answer, it <b>switches back automatically</b>.</li><li>Old version folders in <code>C:\HRPayroll\app</code> can be deleted after a few weeks.</li></ol>
+<ol class="steps"><li>Every update is done the same way. Copy the new <code>HRPayroll-Windows-Setup-&lt;version&gt;.zip</code> to the server and extract it (same as for installing).</li><li>Right-click <b>Update.cmd</b> (at the top of the extracted package) → <b>Run as administrator</b>. Nothing to type. (It runs <code>setup\Update-HRPayroll.ps1</code>.)</li><li>The update takes a safety backup, copies the new version beside the old one, applies the database changes, switches over, restarts and checks. If the new version does not answer, it <b>switches back automatically</b>.</li><li>Old version folders in <code>C:\HRPayroll\app</code> can be deleted after a few weeks.</li></ol>
 
 <h2>Licence and edition</h2>
 <p>The edition (Full or Lite) and the licence are managed by OneNet through the vendor console on the sign-in screen. OneNet can also switch the Data Import screen on or off there. No customer data is visible in the vendor console.</p>
