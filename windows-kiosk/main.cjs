@@ -23,6 +23,18 @@ const {
 const { FACE_IDENTIFY_THRESHOLD, FACE_VERIFY_THRESHOLD, FACE_STRONG_DISTANCE, normalizeFaceDescriptor, identifyFace } = require('./face-match.cjs');
 const { parseSetupCode, normalizeServerAddress, orderedPortalUrls, tryPortalUrls } = require('./setup-code.cjs');
 
+// Server requests use Node's https, which by default trusts only its built-in list of public authorities. Also trust
+// the certificates installed in Windows, so a self-hosted server whose certificate comes from the client's own CA
+// (deploy/windows/setup/Enable-Https.ps1 + Install-HRPayroll-CA.cmd, or a domain CA) is accepted.
+try {
+  const tls = require('node:tls');
+  if (typeof tls.setDefaultCACertificates === 'function' && typeof tls.getCACertificates === 'function') {
+    tls.setDefaultCACertificates([...new Set([...tls.getCACertificates('default'), ...tls.getCACertificates('system')])]);
+  }
+} catch (error) {
+  console.warn('[Kiosk] Could not load the Windows certificate store; only public certificates are trusted:', error.message);
+}
+
 // The data folder (%APPDATA%\<name>: store, device key, queued punches, evidence) keeps its original name so a
 // renamed kiosk (productName) upgrades in place without losing data or pairing. Must run before any getPath('userData').
 const LEGACY_PRODUCT_NAME = 'Bin Ishaq Attendance Kiosk';

@@ -216,7 +216,7 @@ foreach ($d in @($appDir, $configDir, $toolsDir, $serviceDir, (Join-Path $Instal
 & robocopy (Join-Path $payload 'app') $appDir /E /NFL /NDL /NJH /NJS /NP | Out-Null
 & robocopy (Join-Path $payload 'runtime') (Join-Path $InstallDir 'runtime') /E /NFL /NDL /NJH /NJS /NP | Out-Null
 Copy-Item (Join-Path $payload 'runtime\winsw\WinSW-x64.exe') (Join-Path $serviceDir 'HRPayrollApp.exe') -Force
-foreach ($tool in @('hrpayroll-common.ps1', 'Update-HRPayroll.ps1', 'Uninstall-HRPayroll.ps1', 'hrpayroll-backup.ps1', 'hrpayroll-restore.ps1', 'hrpayroll-status.ps1', 'Reset-AdminPassword.ps1')) { Copy-Item (Join-Path $here $tool) $toolsDir -Force }
+foreach ($tool in @('hrpayroll-common.ps1', 'Update-HRPayroll.ps1', 'Uninstall-HRPayroll.ps1', 'hrpayroll-backup.ps1', 'hrpayroll-restore.ps1', 'hrpayroll-status.ps1', 'Reset-AdminPassword.ps1', 'Enable-Port80.ps1', 'Enable-Https.ps1')) { Copy-Item (Join-Path $here $tool) $toolsDir -Force }
 Info "Application $version, Node.js $(& $nodeExe -v), PostgreSQL $((& (Join-Path $pgBin 'postgres.exe') --version) -replace 'postgres \(PostgreSQL\) ','')"
 
 # -- Embedded database --------------------------------------------------------
