@@ -86,13 +86,17 @@ export function salaryRevisionApprovalError(revision: SalaryRevision, actorId: s
 export function salaryRevisionArrears(revision: SalaryRevision, payslips: Payslip[], runs: PayrollRun[], wageBasis: 'Monthly' | 'Daily' = 'Monthly'): { amount: number; months: string[] } {
   const difference = revision.newSalary - revision.previousSalary;
   if (difference <= 0) return { amount: 0, months: [] };
-  const activeRunIds = new Set(runs.filter(run => run.status === 'Approved' || run.status === 'Disbursed').map(run => run.id));
+  // Only the regular salary run paid the monthly salary: supplementary, final-settlement and other off-cycle
+  // payslips for the same month carry no salary, and each employee-month is counted once.
+  const activeRunIds = new Set(runs.filter(run => (run.status === 'Approved' || run.status === 'Disbursed') && (run.runType || 'Regular') === 'Regular').map(run => run.id));
   const effective = revision.effectiveDate;
   let amount = 0;
   const months: string[] = [];
   for (const sheet of payslips) {
     if (sheet.employeeId !== revision.employeeId || !activeRunIds.has(sheet.payrollRunId) || !sheet.periodMonth || !sheet.periodYear) continue;
+    if ((sheet.runType || 'Regular') !== 'Regular') continue;
     const prefix = `${sheet.periodYear}-${String(sheet.periodMonth).padStart(2, '0')}`;
+    if (months.includes(prefix)) continue;
     const lastDay = new Date(sheet.periodYear, sheet.periodMonth, 0).getDate();
     const periodEnd = `${prefix}-${String(lastDay).padStart(2, '0')}`;
     if (periodEnd < effective) continue;

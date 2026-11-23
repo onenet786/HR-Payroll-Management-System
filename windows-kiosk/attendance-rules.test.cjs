@@ -41,3 +41,37 @@ test('company policy: opening time, office-work exits and duty-off cutoff are ap
   assert.equal(early.policyLeave, true);
   assert.equal(evaluateAttendanceTimes('11:00:00', '17:30:00', shift, [], { leaveIfOutBefore: halfTimeCutoffFor(branch, policy) }).status, 'Present');
 });
+
+test('Friday and Ramadan timings apply to the work date', () => {
+  const { effectiveShiftForDate } = require('./attendance-rules.cjs');
+  const shift = { startTime: '09:00', endTime: '17:00', graceMinutes: 10, halfDayMinutes: 120, fridayStartTime: '08:00', fridayEndTime: '12:30',
+    ramadanStartDate: '2027-02-08', ramadanEndDate: '2027-03-09', ramadanStartTime: '10:00', ramadanEndTime: '15:00' };
+  // 2026-10-16 is a Friday: 08:20 is late against the Friday start, on time against the normal one.
+  assert.equal(evaluateAttendanceTimes('08:20:00', undefined, shift, [], { workDate: '2026-10-16' }).status, 'Late');
+  assert.equal(evaluateAttendanceTimes('08:20:00', undefined, shift, [], { workDate: '2026-10-15' }).status, 'Present');
+  assert.equal(evaluateAttendanceTimes('08:20:00', undefined, shift).status, 'Present', 'no date keeps the plain shift');
+  assert.equal(effectiveShiftForDate(shift, '2027-02-10').startTime, '10:00');
+  assert.equal(evaluateAttendanceTimes('10:05:00', undefined, shift, [], { workDate: '2027-02-10' }).status, 'Present');
+  assert.equal(effectiveShiftForDate(shift, '2027-02-12').startTime, '08:00', 'Friday timings win in Ramadan as in the web app');
+});
+
+test('kiosk dates are local and a night-shift punch-out after midnight closes yesterday\'s record', () => {
+  const { localDateString, previousDateString, findAttendanceLogForPunch } = require('./attendance-rules.cjs');
+  assert.equal(localDateString(new Date(2026, 9, 16, 1, 30)), '2026-10-16');
+  assert.equal(previousDateString('2026-03-01'), '2026-02-28');
+  const night = { startTime: '20:00', endTime: '04:00' };
+  const day = { startTime: '09:00', endTime: '17:00' };
+  const open = { id: 'y', employeeId: 'e', date: '2026-10-15', punchIn: '20:02:00' };
+  assert.equal(findAttendanceLogForPunch([open], 'e', '2026-10-16', '04:10:00', night), open);
+  assert.equal(findAttendanceLogForPunch([open], 'e', '2026-10-16', '20:05:00', night), undefined, 'after today\'s start a new shift begins');
+  assert.equal(findAttendanceLogForPunch([open], 'e', '2026-10-16', '04:10:00', day), undefined, 'day shifts never reach back');
+  assert.equal(findAttendanceLogForPunch([open], 'other', '2026-10-16', '04:10:00', night), undefined);
+  const closed = { ...open, punchOut: '04:05:00', outReason: 'Duty Off' };
+  assert.equal(findAttendanceLogForPunch([closed], 'e', '2026-10-16', '04:06:00', night), closed, 'a repeat scan sees the completed record');
+  const away = { ...open, punchOut: '23:00:00', outReason: 'Personal Out' };
+  assert.equal(findAttendanceLogForPunch([away], 'e', '2026-10-16', '00:30:00', night, log => log.outReason === 'Personal Out'), away);
+  const today = { id: 't', employeeId: 'e', date: '2026-10-16', punchIn: '01:00:00' };
+  assert.equal(findAttendanceLogForPunch([open, today], 'e', '2026-10-16', '04:10:00', night), today);
+  const result = evaluateAttendanceTimes('20:02:00', '04:10:00', night, [], { workDate: open.date });
+  assert.equal(result.workedMinutes, 488);
+});

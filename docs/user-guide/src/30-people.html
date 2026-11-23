@@ -33,7 +33,7 @@
 <tr><td>Prior Employer Taxable Income / Tax Deducted</td><td>For staff who joined during the tax year: income and tax from their previous job this year (from their previous employer's tax certificate).</td></tr>
 <tr><td>Mobile Contact</td><td>Required. Type the number in any usual way — <b>+92 321 4444444</b>, <b>0321-4444444</b> or <b>3214444444</b>. When you leave the box it is tidied to <b>+923XXXXXXXXX</b> (for example +923214444444). Needed for SMS alerts.</td></tr>
 <tr><td>Gender, Marital Status, Date of Birth</td><td>Date of birth is required.</td></tr>
-<tr><td>Picture URL / Upload</td><td>Click <span class="ui">Browse...</span> to add a photo (JPEG, PNG or WebP, up to 512 KB).</td></tr>
+<tr><td>Picture URL / Upload</td><td>Click <span class="ui">Browse...</span> to add a photo (JPEG, PNG or WebP, up to 512 KB). Other kinds of file are refused.</td></tr>
 </table>
 <h4>Wage and bank details</h4>
 <figure><img src="shots/30d-onboard-wage.png"><figcaption><b>Wage &amp; Custom Allowance Configuration</b> and <b>Statutory &amp; Trust Compliance.</b></figcaption></figure>
@@ -43,7 +43,7 @@
   <li>Tick <span class="ui">Take Home (FBR Auto)</span> if you know the agreed <b>take-home</b> amount instead; the system works out the gross for you.</li>
   <li><span class="ui">Disbursal Bank</span>, <span class="ui">Account Number</span> and <span class="ui">PKR IBAN Number</span> are required. Click <span class="ui">+</span> to add a bank that is not listed.</li>
 </ul>
-<div class="box important"><span class="t">Important — always check the IBAN</span><p>When you pick a bank and type the account number, the system builds a <i>suggested</i> IBAN. It may not be correct. Copy the real 24-character IBAN (it starts with PK) from the employee's bank letter or cheque book.</p></div>
+<div class="box important"><span class="t">Important — always check the IBAN</span><p>When you pick a bank and type the account number, the system builds a <i>suggested</i> IBAN. It may not be correct. Copy the real 24-character IBAN (it starts with PK) from the employee's bank letter or cheque book.</p><p>You may type it with spaces or in small letters (for example <i>pk36 scbl 0000 …</i>); it is saved in capitals without spaces. The system also checks the IBAN's built-in check digits, so a single mistyped character is caught: you see <span class="msg">This IBAN is not valid: its check digits do not match…</span> — compare it with the bank letter again.</p></div>
 <h4>Statutory &amp; Trust Compliance</h4>
 <ul>
   <li><span class="ui">Enable EOBI</span> — type the EOBI number. If the employee is exempt, untick it and type the reason.</li>
@@ -65,7 +65,12 @@
   <li>Find the person in the list (or press <span class="kbd">Ctrl</span>+<span class="kbd">K</span> and type their name).</li>
   <li>Click <span class="ui">Edit Record</span>, change what you need and click <span class="ui">Save Changes</span>. The edit form also has the <span class="ui">Date of Joining</span>, so a wrong joining date can be corrected here.</li>
 </ol>
-<div class="box note"><span class="t">Good to know</span><p>Salary increases, promotions and transfers should <b>not</b> be typed here — use 9. Salary Revisions and 12. Employee Lifecycle, so a second person approves them and arrears are calculated. The list has no search box of its own; use <span class="kbd">Ctrl</span>+<span class="kbd">K</span>. There is no bulk import from Excel; employees are added one by one.</p></div>
+<ul>
+  <li><b>Salary cannot be changed here</b> (full edition). The salary box is read-only with the note <span class="msg">Change salary through Salary Revisions (needs a second approver).</span> Use 9. Salary Revisions (section E3). A <b>new</b> employee still gets their salary on the Onboard Employee form. In the Lite edition the salary can still be edited here.</li>
+  <li>The edit form checks the CNIC as well: if another employee already has it you see <span class="msg">CNIC … already belongs to …</span> and nothing is saved.</li>
+  <li>If the save is refused or the connection fails, the message is shown and the form stays open with your changes.</li>
+</ul>
+<div class="box note"><span class="t">Good to know</span><p>Salary increases, promotions and transfers are <b>not</b> typed here — use 9. Salary Revisions and 12. Employee Lifecycle, so a second person approves them and arrears are calculated. The list has no search box of its own; use <span class="kbd">Ctrl</span>+<span class="kbd">K</span>. There is no bulk import from Excel; employees are added one by one.</p></div>
 
 <h3>Employee documents</h3>
 <figure><img src="shots/30f-document-vault.png"><figcaption><b>Employee Document Vault</b> — private storage for each employee's papers.</figcaption></figure>

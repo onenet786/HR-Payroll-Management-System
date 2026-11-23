@@ -74,6 +74,29 @@ function Start-HRApp($install) {
   } else { Start-Service HRPayrollApp }
 }
 
+# Folder permissions of a server installation (not portable). Both folders stop inheriting from the drive root
+# (C:\ lets Authenticated Users change files on client Windows, and Users create files on Windows Server), because
+# SYSTEM runs tools\hrpayroll-backup.ps1 and runtime\node\node.exe from here every night:
+#   program folder: Administrators and SYSTEM full control, Users read and run. config\ keeps its own stricter
+#                   permissions (Administrators, SYSTEM, NETWORK SERVICE read only).
+#   data folder:    Administrators and SYSTEM full control, NETWORK SERVICE (the account of both services) read on
+#                   the folder and modify on pgdata, documents, imports, backups and logs. Nobody else.
+# Safe to run again (update): explicit permissions on sub folders are kept; inherited ones follow the new parent.
+function Set-HRFolderPermissions([string]$installRoot, [string]$dataDir) {
+  $admins = '*S-1-5-32-544'; $system = '*S-1-5-18'; $users = '*S-1-5-32-545'; $netsvc = '*S-1-5-20'
+  & icacls $installRoot /inheritance:r /grant:r "${admins}:(OI)(CI)F" "${system}:(OI)(CI)F" "${users}:(OI)(CI)RX" /Q | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw "Could not set the permissions of $installRoot (icacls exit $LASTEXITCODE)." }
+  & icacls $dataDir /inheritance:r /grant:r "${admins}:(OI)(CI)F" "${system}:(OI)(CI)F" "${netsvc}:(OI)(CI)RX" /Q | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw "Could not set the permissions of $dataDir (icacls exit $LASTEXITCODE)." }
+  foreach ($sub in @('pgdata', 'documents', 'imports', 'backups', 'logs')) {
+    $path = Join-Path $dataDir $sub
+    if (Test-Path $path) {
+      & icacls $path /grant "${netsvc}:(OI)(CI)M" /Q | Out-Null
+      if ($LASTEXITCODE -ne 0) { throw "Could not set the permissions of $path (icacls exit $LASTEXITCODE)." }
+    }
+  }
+}
+
 # Memory for the embedded database, sized to this server. SQL Server (CyberAP) often runs on the same machine,
 # so the share is smaller when an MSSQL service exists. Returns the settings as name -> value.
 function Get-HRMemoryPlan {

@@ -1,5 +1,6 @@
 import type { Branch, Department, Designation, Employee, GratuitySettlement, LoanAdvance, PayrollAdjustment, Payslip, StatutoryConfig, TaxSlab, WageType } from '../types';
-import { annualTaxLiability, pakistanTaxYearForPeriod } from './defaults';
+import { annualTaxLiability, fixedMonthlyPackage, pakistanTaxYearForPeriod } from './defaults';
+import { allocateLoanRecovery, loanOutstanding } from './loanRecovery';
 import { resolveWageBasis } from './masterData';
 
 interface Directory { departments: Department[]; designations: Designation[]; branches: Branch[] }
@@ -56,7 +57,7 @@ export function computeSupplementaryPayslip(
 
 export function outstandingLoanBalance(employeeId: string, loans: LoanAdvance[]): number {
   return loans.filter(loan => loan.employeeId === employeeId && loan.status === 'Active' && loan.remainingInstallments > 0)
-    .reduce((sum, loan) => sum + (loan.approvedAmount > 0 ? Math.max(0, loan.approvedAmount - loan.totalRepaid) : loan.monthlyInstallment * loan.remainingInstallments), 0);
+    .reduce((sum, loan) => sum + loanOutstanding(loan), 0);
 }
 
 /**
@@ -95,6 +96,7 @@ export function computeFinalSettlementPayslip(
   sheet.surchargeAnnual = Math.round(liability.surcharge);
   sheet.taxableIncomeThisPeriod = taxable;
   sheet.loanRepaymentDeduction = Math.min(outstandingLoanBalance(employee.id, loans), Math.max(0, sheet.grossSalary - sheet.incomeTaxDeduction));
+  (sheet as Payslip & { loanDeductions?: ReturnType<typeof allocateLoanRecovery> }).loanDeductions = allocateLoanRecovery(employee.id, loans, sheet.loanRepaymentDeduction);
   sheet.totalDeductions = sheet.incomeTaxDeduction + sheet.loanRepaymentDeduction;
   sheet.netSalary = Math.max(0, sheet.grossSalary - sheet.totalDeductions);
   sheet.runType = 'Final Settlement';
@@ -112,7 +114,8 @@ export function retroAttendanceAdjustment(original: Payslip, employee: Employee,
   const isDaily = resolveWageBasis(employee, wageTypes) === 'Daily';
   const basis = statConfig.absenceDeductionBasis || 'Calendar Days';
   const divisor = basis === 'Scheduled Working Days' ? Math.max(1, original.scheduledWorkingDays || 26) : basis === 'Fixed 30 Days' ? 30 : (original.totalDaysInMonth || 30);
-  const dayRate = isDaily ? employee.basicSalary : employee.basicSalary / divisor;
+  // Same per-day value as the payslip's absence deduction: the whole fixed monthly package.
+  const dayRate = isDaily ? employee.basicSalary : fixedMonthlyPackage(employee) / divisor;
   const amount = Math.round(Math.abs(daysDelta) * dayRate);
   const period = `${original.periodYear}-${String(original.periodMonth).padStart(2, '0')}`;
   return {
@@ -123,7 +126,11 @@ export function retroAttendanceAdjustment(original: Payslip, employee: Employee,
   };
 }
 
-const basePay = (sheet: Payslip) => sheet.grossSalary - (sheet.bonusEarnings || 0) - (sheet.commissionEarnings || 0) - (sheet.arrearsEarnings || 0);
+// Base pay is gross without anything the period's approved adjustments or attendance rewards added: those are not
+// recomputed (the recalculation passes no adjustments), so leaving them in would claw back itemised earnings.
+const basePay = (sheet: Payslip) => sheet.grossSalary - (sheet.bonusEarnings || 0) - (sheet.commissionEarnings || 0) - (sheet.arrearsEarnings || 0)
+  - (sheet.adjustmentLines || []).filter(line => line.kind === 'earning').reduce((sum, line) => sum + line.amount, 0)
+  - (sheet.earlyComingReward || 0);
 
 /**
  * Full recalculation of a paid month: the original payslip is recomputed against its locked register with

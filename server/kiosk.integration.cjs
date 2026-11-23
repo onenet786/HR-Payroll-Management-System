@@ -155,6 +155,106 @@ test('punch rules: attendance only, active staff, date window, locked months, no
   assert.ok(audits.rows[0].n >= 2, 'punches are audited');
 });
 
+// Kiosk-style punch times for "now" (UTC offset 0, so the test does not depend on the machine's time zone).
+const utcClock = (offsetMs = 0) => {
+  const at = new Date(Date.now() + offsetMs);
+  return { date: at.toISOString().slice(0, 10), time: at.toISOString().slice(11, 19), iso: at.toISOString() };
+};
+const punchWithClock = (token, documentId, data, extra = {}) =>
+  call('POST', '/api/kiosk/punch', { collection: 'attendances', documentId, data, ...extra }, { 'x-kiosk-token': token });
+const savedPunch = async id => (await pool.query(`SELECT data, version, status FROM attendances WHERE id=$1`, [id])).rows[0];
+// The punch-rules test above locks this month; these tests need it open.
+const unlockMonth = () => pool.query(`DELETE FROM attendance_periods WHERE id=$1`, [`attendance-period-${today.slice(0, 7)}`]);
+
+test('the server stamps its receive time and flags punches whose time it cannot trust', async () => {
+  await unlockMonth();
+  const token = (await call('POST', '/api/kiosk/register', { email: 'u-kiosk', password: 'Kiosk-Pass-2026' })).body.deviceToken;
+  const now = utcClock();
+  const live = { employeeId: 'e-kt-1', date: now.date, method: 'Camera', punchIn: now.time, lastPunchAt: now.time, status: 'Present', deviceUtcOffsetMinutes: 0 };
+
+  assert.equal((await punchWithClock(token, 'att-kt-clock-ok', live, { deviceSentAt: now.iso })).status, 200);
+  const ok = (await savedPunch('att-kt-clock-ok')).data;
+  assert.ok(Math.abs(Date.parse(ok.serverReceivedAt) - Date.now()) < 60_000, 'server receive time recorded');
+  assert.equal(ok.regularizationRequested, undefined, 'an on-time live punch is not flagged');
+  assert.equal(typeof ok.deviceClockSkewSeconds, 'number');
+
+  // Kiosk clock 30 minutes ahead (Windows clock changed): flagged for HR, not refused.
+  const skewed = utcClock(30 * 60_000);
+  const ahead = await punchWithClock(token, 'att-kt-clock-skew', { ...live, punchIn: skewed.time, lastPunchAt: skewed.time }, { deviceSentAt: skewed.iso });
+  assert.equal(ahead.status, 200);
+  const flagged = (await savedPunch('att-kt-clock-skew')).data;
+  assert.equal(flagged.regularizationRequested, true);
+  assert.match(flagged.regularizationReason, /clock was 30 min ahead/);
+  assert.ok(flagged.kioskTimeFlags.length >= 1);
+  assert.equal(flagged.requestedById, 'u-kiosk');
+
+  // Sent "live" but stamped two hours ago (backdated punch).
+  const earlier = utcClock(-2 * 3_600_000);
+  if (earlier.date === now.date) {
+    await punchWithClock(token, 'att-kt-clock-back', { ...live, punchIn: earlier.time, lastPunchAt: earlier.time }, { deviceSentAt: now.iso });
+    assert.match((await savedPunch('att-kt-clock-back')).data.regularizationReason, /sent live but its time is 120 min before/);
+    // The same two-hour-old punch from the offline queue is normal.
+    await punchWithClock(token, 'att-kt-queue-ok', { ...live, punchIn: earlier.time, lastPunchAt: earlier.time }, { deviceSentAt: now.iso, queued: true });
+    assert.equal((await savedPunch('att-kt-queue-ok')).data.regularizationRequested, undefined, 'queued within the window');
+  }
+  // From the offline queue a day and a half late.
+  const old = utcClock(-36 * 3_600_000);
+  await punchWithClock(token, 'att-kt-queue-late', { ...live, date: old.date, punchIn: old.time, lastPunchAt: old.time }, { deviceSentAt: now.iso, queued: true });
+  assert.match((await savedPunch('att-kt-queue-late')).data.regularizationReason, /reached the server 36 h after it was made/);
+
+  // A kiosk cannot clear a review the server raised, nor overwrite the server's own fields.
+  await punchWithClock(token, 'att-kt-clock-skew', { ...live, punchIn: skewed.time, lastPunchAt: now.time, punchOut: now.time, regularizationRequested: false, kioskTimeFlags: [], serverReceivedAt: '2000-01-01T00:00:00Z', kioskVersion: 99 }, { deviceSentAt: now.iso });
+  const kept = (await savedPunch('att-kt-clock-skew'));
+  assert.equal(kept.data.regularizationRequested, true, 'review stays raised');
+  assert.match(kept.data.regularizationReason, /clock was 30 min ahead/);
+  assert.notEqual(kept.data.serverReceivedAt, '2000-01-01T00:00:00Z');
+  assert.equal(kept.data.kioskVersion, Number(kept.version));
+});
+
+test('status stays within kiosk values and overtime within the punch span', async () => {
+  await unlockMonth();
+  const token = (await call('POST', '/api/kiosk/register', { email: 'u-kiosk', password: 'Kiosk-Pass-2026' })).body.deviceToken;
+  const base = { employeeId: 'e-kt-1', date: today, method: 'Biometric', punchIn: '09:00:00', punchOut: '10:00:00', lastPunchAt: '10:00:00' };
+  assert.equal((await punch(token, 'att-kt-ot', { ...base, status: 'Holiday', overtimeMinutes: 600 })).status, 200);
+  const saved = await savedPunch('att-kt-ot');
+  assert.equal(saved.data.overtimeMinutes, 60, 'overtime clamped to the 1 h between the punches');
+  assert.equal(saved.data.status, 'Present');
+  assert.equal(saved.status, 'Present', 'status column too');
+  assert.equal((await punch(token, 'att-kt-ot2', { ...base, punchOut: undefined, status: 'Late', overtimeMinutes: 30 })).status, 200);
+  assert.equal((await savedPunch('att-kt-ot2')).data.overtimeMinutes, 0, 'no overtime before a punch-out');
+  // Night shift: 22:00 to 06:30 is 8.5 h.
+  await punch(token, 'att-kt-ot3', { ...base, punchIn: '22:00:00', punchOut: '06:30:00', lastPunchAt: '06:30:00', status: 'Present', overtimeMinutes: 9999 });
+  assert.equal((await savedPunch('att-kt-ot3')).data.overtimeMinutes, 510);
+});
+
+test('a kiosk cannot overwrite what HR entered, reviewed or edited', async () => {
+  await unlockMonth();
+  const token = (await call('POST', '/api/kiosk/register', { email: 'u-kiosk', password: 'Kiosk-Pass-2026' })).body.deviceToken;
+  const base = { employeeId: 'e-kt-1', date: today, method: 'Camera', punchIn: '09:00:00', lastPunchAt: '09:00:00', status: 'Present' };
+  assert.equal((await punch(token, 'att-kt-hr', base)).status, 200);
+  assert.equal((await punch(token, 'att-kt-hr', { ...base, punchIn: '08:00:00' })).status, 409, 'punch-in is fixed once recorded');
+
+  // HR corrects the status in the portal (any save bumps the version).
+  await pool.query(`UPDATE attendances SET data = data || '{"status":"Late","hrNote":"corrected"}'::jsonb, status='Late', version=version+1 WHERE id='att-kt-hr'`);
+  const out = await punch(token, 'att-kt-hr', { ...base, punchOut: '17:00:00', lastPunchAt: '17:00:00', outReason: 'Duty Off', status: 'Present', overtimeMinutes: 0, hrNote: 'kiosk' });
+  assert.equal(out.status, 200, JSON.stringify(out.body));
+  const merged = (await savedPunch('att-kt-hr')).data;
+  assert.equal(merged.punchOut, '17:00:00', 'the punch-out is still recorded');
+  assert.equal(merged.status, 'Late', 'HR status kept');
+  assert.equal(merged.hrNote, 'corrected', 'other HR fields kept');
+
+  // HR reviews and moves the punch-out; the kiosk cannot replace it.
+  await pool.query(`UPDATE attendances SET data = data || '{"punchOut":"16:30:00","reviewedById":"u-kiosk-hr","regularizationApproved":true}'::jsonb, version=version+1 WHERE id='att-kt-hr'`);
+  assert.equal((await punch(token, 'att-kt-hr', { ...base, punchOut: '18:00:00', lastPunchAt: '18:00:00' })).status, 409);
+  assert.equal((await savedPunch('att-kt-hr')).data.punchOut, '16:30:00');
+
+  // A record HR entered by hand is not a kiosk record at all.
+  await pool.query(`INSERT INTO attendances(id, employee_id, date, status, data, version) VALUES('att-kt-manual','e-kt-1',$1,'On Leave',$2::jsonb,1)`,
+    [today, JSON.stringify({ id: 'att-kt-manual', employeeId: 'e-kt-1', date: today, method: 'Manual', status: 'On Leave' })]);
+  assert.equal((await punch(token, 'att-kt-manual', base)).status, 409);
+  assert.equal((await savedPunch('att-kt-manual')).data.method, 'Manual');
+});
+
 test('revoking a device or disabling the account cuts it off', async () => {
   const registered = (await call('POST', '/api/kiosk/register', { email: 'u-kiosk', password: 'Kiosk-Pass-2026' })).body;
   const auth = { 'x-kiosk-token': registered.deviceToken };

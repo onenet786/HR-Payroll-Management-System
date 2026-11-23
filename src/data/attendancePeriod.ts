@@ -69,7 +69,20 @@ export function employedDuring(employee: Pick<Employee, 'status' | 'dateOfJoinin
 export interface RegisterOptions {
   /** What a rostered working day without any record becomes (policy: leave first, HR marks absences by hand). */
   noPunchDayStatus?: 'Absent' | 'Unpaid Leave';
+  /**
+   * Weekly offs win over an approved leave that spans them (holidays always do). Set it when absences are deducted on
+   * scheduled working days; with calendar-day deduction a leave keeps covering the weekly off inside it.
+   */
+  offDaysBeforeLeave?: boolean;
 }
+
+/** A locked period also records the register options it was built with, so re-validation rebuilds the same register. */
+export type AttendancePeriodWithOptions = AttendancePeriod & { registerOptions?: RegisterOptions };
+
+const storedRegisterOptions = (options: RegisterOptions): RegisterOptions => ({
+  ...(options.noPunchDayStatus && { noPunchDayStatus: options.noPunchDayStatus }),
+  ...(options.offDaysBeforeLeave && { offDaysBeforeLeave: true }),
+});
 
 export function buildAttendanceRegister(attendances: AttendanceLog[], employees: Employee[], leaves: LeaveRequest[], holidays: Holiday[], month: number, year: number, options: RegisterOptions = {}): AttendanceRegisterRow[] {
   const attendanceByEmployeeDay = new Map(attendances.filter(item => item.date.startsWith(`${year}-${String(month).padStart(2, '0')}`)).map(item => [`${item.employeeId}|${item.date}`, item]));
@@ -93,6 +106,7 @@ export function buildAttendanceRegister(attendances: AttendanceLog[], employees:
       return { employeeId: employee.id, date, status, attendanceId: attendance.id, source: attendance.method };
     }
     if (holidayDates.has(date)) return { employeeId: employee.id, date, status: 'Holiday', source: 'Holiday' };
+    if (options.offDaysBeforeLeave && !workingDays.includes(weekday)) return { employeeId: employee.id, date, status: 'Weekly Off', source: 'Roster' };
     if (leave) return { employeeId: employee.id, date, status: leave.leaveType === 'Unpaid' ? 'Unpaid Leave' : 'Paid Leave', source: 'Leave' };
     if (!workingDays.includes(weekday)) return { employeeId: employee.id, date, status: 'Weekly Off', source: 'Roster' };
     return { employeeId: employee.id, date, status: options.noPunchDayStatus || 'Absent', source: 'Roster' };
@@ -102,7 +116,7 @@ export function buildAttendanceRegister(attendances: AttendanceLog[], employees:
 export function createAttendancePeriod(
   attendances: AttendanceLog[], employees: Employee[], leaves: LeaveRequest[], holidays: Holiday[], month: number, year: number, actor: string, now = new Date().toISOString(),
   previous?: AttendancePeriod, options: RegisterOptions = {}
-): AttendancePeriod {
+): AttendancePeriodWithOptions {
   if (previous && previous.status !== 'Reopened') throw new Error('This attendance register is already locked. Reopen it with a documented reason before locking a new version.');
   const issues = findAttendanceLockIssues(attendances, month, year);
   if (issues.length) throw new Error(`Attendance period cannot be locked: ${issues.length} exception(s) require review.`);
@@ -123,6 +137,7 @@ export function createAttendancePeriod(
     employeeCount: new Set(registerRows.map(row => row.employeeId)).size,
     integrityHash: attendanceIntegrityHash(attendances, month, year), exceptionCount: 0,
     registerVersion: (previous?.registerVersion || 0) + 1, registerRows, registerHash: hashRows(registerRows),
+    registerOptions: storedRegisterOptions(options),
     history: [...(previous?.history || []), { action: 'Locked', at: now, by: actor, registerVersion: (previous?.registerVersion || 0) + 1, registerHash: hashRows(registerRows) }],
   };
 }
@@ -170,6 +185,8 @@ export type RegisterInputs = { employees: Employee[]; leaves: LeaveRequest[]; ho
 export function isAttendancePeriodValid(period: AttendancePeriod | undefined, attendances: AttendanceLog[], inputs?: RegisterInputs): boolean {
   if (!period || period.status !== 'Locked' || period.integrityHash !== attendanceIntegrityHash(attendances, period.periodMonth, period.periodYear)) return false;
   if (!inputs || !period.registerHash) return true;
-  const rebuilt = buildAttendanceRegister(attendances, inputs.employees, inputs.leaves, inputs.holidays, period.periodMonth, period.periodYear);
+  // Rebuild with the options used at lock time; periods locked before they were stored used the defaults.
+  const options = (period as AttendancePeriodWithOptions).registerOptions || {};
+  const rebuilt = buildAttendanceRegister(attendances, inputs.employees, inputs.leaves, inputs.holidays, period.periodMonth, period.periodYear, options);
   return hashRows(rebuilt) === period.registerHash;
 }

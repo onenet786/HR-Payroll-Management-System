@@ -36,7 +36,7 @@
 <p>Each kiosk PC or tablet signs in with its own <b>Kiosk Terminal</b> account. This account can only record attendance — it cannot open any other data.</p>
 <p>There are two ways to register a new kiosk PC:</p>
 <ul>
-  <li><b>With a setup code (easiest):</b> under <span class="ui">Kiosk terminals</span> on this page, type a name for the kiosk (for example "Gate 1 entrance") and click <span class="ui">Create setup code</span>. Copy the code straight away — it is shown only once. On the kiosk PC open <b>Settings → Server Registration → Setup code</b>, paste it and click <b>Register this kiosk</b>. Nobody has to type a password on the kiosk. Cancelling a code later does not disconnect kiosks already registered with it.</li>
+  <li><b>With a setup code (easiest):</b> under <span class="ui">Kiosk terminals</span> on this page, type a name for the kiosk (for example "Gate 1 entrance") and click <span class="ui">Create setup code</span>. Copy the code straight away — it is shown only once. On the kiosk PC open <b>Settings → Server Registration → Setup code</b>, paste it and click <b>Register this kiosk</b>. Nobody has to type a password on the kiosk. Cancelling a code later does not disconnect kiosks already registered with it. On a Windows server running on plain http, the code already contains the server's IP address. The kiosk asks for its admin PIN before registering (section G3).</li>
   <li><b>With a Kiosk Terminal login</b>, as in the steps below. Android tablets always use this way.</li>
 </ul>
 <ol class="steps">
@@ -45,6 +45,12 @@
   <li>The kiosk now appears under <span class="ui">KIOSK TERMINALS</span> with its account name and last sync time. (Kiosks registered with a setup code show the name of the code's kiosk account; older versions wrongly showed "deleted account".)</li>
   <li>If a kiosk is lost, stolen or replaced, click <span class="ui">Disconnect</span> next to it. It stops syncing immediately and must be registered again. Switching the kiosk account to Inactive disconnects every kiosk using it.</li>
 </ol>
+<h3>Security notes for administrators</h3>
+<ul>
+  <li><b>Link employees to their logins.</b> A login that is not linked to an employee record sees only what its role allows — it has no "own records" (no own payslips, leave or attendance).</li>
+  <li><b>Two-step verification uses the method that was set up.</b> A person who enrolled an authenticator app cannot switch to an email code at sign-in. If they lose the phone, use an MFA reset (below).</li>
+  <li><b>Employee photos</b> must be JPEG, PNG, WebP or GIF pictures; other files (for example SVG drawings) are not shown.</li>
+</ul>
 <div class="box important"><span class="t">Important</span><p>Never sign in to a kiosk with an administrator or HR account — the system refuses, because kiosks are shared machines.</p></div>
 
 <h3>Two-step verification (MFA) resets</h3>

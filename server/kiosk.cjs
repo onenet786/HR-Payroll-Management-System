@@ -26,6 +26,65 @@ const SYNC = {
 };
 const PUNCH_METHODS = new Set(['Biometric', 'Camera', 'RFID', 'Mobile Kiosk']);
 const REVIEW_FIELDS = ['regularizationApproved', 'reviewedAt', 'reviewedBy', 'reviewedById', 'reviewComment'];
+// Set by the server on every kiosk write; whatever a kiosk sends for these is ignored.
+const SERVER_FIELDS = ['kioskDeviceId', 'kioskVersion', 'serverReceivedAt', 'deviceClockSkewSeconds', 'kioskTimeFlags', 'deviceClockUnverified'];
+// Status values a kiosk can produce (windows-kiosk/attendance-rules.cjs). 'Holiday' and the rest are HR decisions.
+const KIOSK_STATUSES = new Set(['Present', 'Late', 'Half Day', 'On Leave', 'Absent']);
+// A punch sent live whose time differs from the server's clock by more than this is flagged for review, as is any
+// request from a kiosk whose clock is that far off.
+const CLOCK_TOLERANCE_MS = 10 * 60_000;
+// A punch that reaches the server from the offline queue more than this many hours after it was made is flagged.
+const LATE_UPLOAD_HOURS = (() => { const value = Number(process.env.KIOSK_LATE_PUNCH_HOURS); return Number.isFinite(value) && value > 0 ? value : 12; })();
+// Kiosks older than this server do not send their UTC offset; the product runs in Pakistan (UTC+5) by default.
+const DEFAULT_UTC_OFFSET_MINUTES = (() => { const value = Number(process.env.KIOSK_DEFAULT_UTC_OFFSET_MINUTES); return Number.isInteger(value) && Math.abs(value) <= 840 ? value : 300; })();
+// What a kiosk may still change on a record HR reviewed or edited: the day's progress after the existing punch-in,
+// never the punch-in itself, the status HR set, completed exits or the review.
+const PROGRESS_FIELDS = ['punchOut', 'outReason', 'breaks', 'lastPunchAt', 'overtimeMinutes', 'personalOutMinutes', 'personalOutExceeded',
+  'terminalId', 'terminalLocation', 'evidenceId', 'kioskInstallIds', 'terminalBranchId', 'crossBranch', 'deviceUtcOffsetMinutes'];
+
+// Seconds since midnight for 'HH:MM[:SS]' or an ISO date-time, else null.
+function secondsOfDay(value) {
+  const match = /(?:^|T)(\d{2}):(\d{2})(?::(\d{2}))?/.exec(String(value || ''));
+  if (!match) return null;
+  const [h, m, s] = match.slice(1).map(part => Number(part || 0));
+  return h < 24 && m < 60 && s < 60 ? h * 3600 + m * 60 + s : null;
+}
+
+// Minutes between punch-in and punch-out; a punch-out earlier in the day than the punch-in crossed midnight.
+function punchSpanMinutes(record) {
+  const start = secondsOfDay(record.punchIn);
+  const end = secondsOfDay(record.punchOut);
+  if (start === null || end === null) return 0;
+  return Math.floor(((end - start + 86_400) % 86_400) / 60);
+}
+
+// Instant of the record's latest event (lastPunchAt, else punch-out / punch-in) from its date and the kiosk's UTC offset.
+function latestEventInstant(record) {
+  const at = secondsOfDay(record.lastPunchAt) ?? secondsOfDay(record.punchOut) ?? secondsOfDay(record.punchIn);
+  if (at === null) return null;
+  const offset = Number.isInteger(record.deviceUtcOffsetMinutes) && Math.abs(record.deviceUtcOffsetMinutes) <= 840 ? record.deviceUtcOffsetMinutes : DEFAULT_UTC_OFFSET_MINUTES;
+  const start = secondsOfDay(record.punchIn);
+  const nextDay = start !== null && at < start ? 86_400_000 : 0;
+  return Date.parse(`${record.date}T00:00:00Z`) + at * 1000 + nextDay - offset * 60_000;
+}
+
+const minutesText = ms => `${Math.round(Math.abs(ms) / 60_000)} min`;
+
+// Reasons to put a kiosk punch in front of HR because its time cannot be trusted as sent. sentAt is the kiosk's clock
+// when it sent the request; queued is true for punches sent from the offline queue.
+function timeFlags(record, { now, sentAt, queued }) {
+  const flags = [];
+  if (Number.isFinite(sentAt) && Math.abs(sentAt - now) > CLOCK_TOLERANCE_MS) {
+    flags.push(`Kiosk clock was ${minutesText(sentAt - now)} ${sentAt > now ? 'ahead of' : 'behind'} the server when this punch was sent`);
+  }
+  const instant = latestEventInstant(record);
+  if (instant !== null) {
+    if (instant - now > CLOCK_TOLERANCE_MS) flags.push(`Punch time is ${minutesText(instant - now)} later than the server's receive time`);
+    else if (!queued && now - instant > CLOCK_TOLERANCE_MS) flags.push(`Punch sent live but its time is ${minutesText(now - instant)} before the server's receive time`);
+    else if (queued && now - instant > LATE_UPLOAD_HOURS * 3_600_000) flags.push(`Punch reached the server ${Math.round((now - instant) / 3_600_000)} h after it was made (offline queue)`);
+  }
+  return flags;
+}
 
 async function permissionsOf(user) {
   if (user?.roleId === 'role-admin') return new Set(['use_kiosk']);
@@ -113,7 +172,7 @@ router.get('/sync/:collection', requireKiosk, async (req, res, next) => {
 
 router.post('/punch', requireKiosk, async (req, res, next) => {
   try {
-    const { collection, documentId, data } = req.body || {};
+    const { collection, documentId, data, deviceSentAt, queued } = req.body || {};
     if (collection !== 'attendances') return res.status(403).json({ error: 'Kiosks can only record attendance.' });
     if (!safeId(documentId) || !data || typeof data !== 'object' || Array.isArray(data)) return res.status(400).json({ error: 'Invalid punch.' });
     if (!safeId(data.employeeId) || !isoDate(data.date) || !PUNCH_METHODS.has(data.method)) return res.status(400).json({ error: 'Punch is missing employee, date or a valid method.' });
@@ -124,22 +183,88 @@ router.post('/punch', requireKiosk, async (req, res, next) => {
     if (employee.separationDate && data.date > employee.separationDate) return res.status(403).json({ error: `Employee's last working day was ${employee.separationDate}.` });
     const locked = await pool.query(`SELECT 1 FROM attendance_periods WHERE id=$1 AND status='Locked'`, [`attendance-period-${data.date.slice(0, 7)}`]);
     if (locked.rowCount) return res.status(409).json({ error: 'That month is locked for payroll.' });
-    const existing = (await pool.query(`SELECT data FROM attendances WHERE id=$1`, [documentId])).rows[0]?.data;
+    const row = (await pool.query(`SELECT data, version FROM attendances WHERE id=$1`, [documentId])).rows[0];
+    const existing = row?.data;
     if (existing && (existing.employeeId !== data.employeeId || existing.date !== data.date)) {
       return res.status(409).json({ error: 'This attendance record cannot be changed from a kiosk.' });
     }
-    // Kiosks may raise a review (low-confidence match) but never decide one; an HR decision already on the record is kept.
-    const record = { ...Object.fromEntries(Object.entries(data).filter(([key]) => !REVIEW_FIELDS.includes(key))), id: documentId, kioskDeviceId: req.kiosk.deviceId };
-    for (const field of REVIEW_FIELDS) if (existing?.[field] !== undefined) record[field] = existing[field];
+    // A kiosk adds to a day (punch-out, exits, returns); it never moves the punch-in or rewrites completed exits.
+    const breaksOf = record => (Array.isArray(record?.breaks) ? record.breaks : []);
+    if (existing?.punchIn && data.punchIn !== existing.punchIn) {
+      return res.status(409).json({ error: 'The punch-in of this attendance record cannot be changed from a kiosk.' });
+    }
+    if (existing && breaksOf(existing).some((item, index) => JSON.stringify(item) !== JSON.stringify(breaksOf(data)[index]))) {
+      return res.status(409).json({ error: 'Recorded exits on this attendance record cannot be changed from a kiosk.' });
+    }
+    // A record HR entered by hand (Manual, leave day, web punch) is never touched by a kiosk.
+    if (existing && !PUNCH_METHODS.has(existing.method)) {
+      return res.status(409).json({ error: 'This attendance record was entered by HR and cannot be changed from a kiosk.' });
+    }
+    // HR reviewed or edited the record (a decision, a reviewer, or any save since the kiosk's last write): the kiosk
+    // may add only the day's progress; HR's status, times and decision stay as they are.
+    const hrTouched = !!existing && (existing.regularizationApproved !== undefined || !!existing.reviewedById
+      || (existing.kioskVersion !== undefined && Number(existing.kioskVersion) !== Number(row.version)));
+    // A punch-out HR set or corrected is replaced only by a return from that exit (which records it as a break).
+    if (hrTouched && existing.punchOut && data.punchOut !== existing.punchOut && breaksOf(data).length === breaksOf(existing).length) {
+      return res.status(409).json({ error: 'HR has already reviewed this attendance record; contact HR to correct it.' });
+    }
+    const incoming = Object.fromEntries(Object.entries(data).filter(([key]) => !REVIEW_FIELDS.includes(key) && !SERVER_FIELDS.includes(key)));
+    const record = hrTouched
+      ? { ...existing, ...Object.fromEntries(PROGRESS_FIELDS.filter(field => incoming[field] !== undefined).map(field => [field, incoming[field]])) }
+      : { ...incoming };
+    const now = Date.now();
+    Object.assign(record, { id: documentId, kioskDeviceId: req.kiosk.deviceId, serverReceivedAt: new Date(now).toISOString() });
+    const sentAt = Date.parse(typeof deviceSentAt === 'string' ? deviceSentAt : '');
+    if (Number.isFinite(sentAt)) {
+      record.deviceClockSkewSeconds = Math.round((sentAt - now) / 1000);
+      delete record.deviceClockUnverified;
+    } else {
+      // A kiosk older than this server: its clock cannot be compared, only the punch time against the receive time.
+      record.deviceClockUnverified = true;
+    }
+    // The server cannot re-run the kiosk's shift rules (shift, branch timings, policy and night-shift matching live on
+    // the kiosk), so it keeps the status to the values a kiosk can produce and overtime within the punch span.
+    if (!hrTouched && !KIOSK_STATUSES.has(record.status)) record.status = 'Present';
+    const overtime = Math.floor(Number(record.overtimeMinutes));
+    record.overtimeMinutes = record.punchOut && Number.isFinite(overtime) ? Math.min(Math.max(overtime, 0), punchSpanMinutes(record)) : 0;
+    // Kiosks may raise a review (low-confidence match, multi-face punch) but never decide one; HR's decision is kept.
+    for (const field of REVIEW_FIELDS) {
+      if (existing?.[field] !== undefined) record[field] = existing[field];
+      else delete record[field];
+    }
+    const decided = existing?.regularizationApproved !== undefined;
+    const reasons = [];
+    // A review raised earlier (by a kiosk or by this server) stays raised until HR decides it.
+    if (!decided && existing?.regularizationRequested === true) {
+      record.regularizationRequested = true;
+      if (existing.regularizationReason) reasons.push(existing.regularizationReason);
+    }
+    if (!decided && record.regularizationRequested === true && typeof incoming.regularizationReason === 'string') reasons.push(incoming.regularizationReason.slice(0, 500));
+    const flags = decided ? [] : timeFlags(record, { now, sentAt, queued: queued === true });
+    if (flags.length) {
+      record.regularizationRequested = true;
+      record.requestedAt = record.requestedAt || new Date(now).toISOString();
+      reasons.push(...flags);
+    }
+    const allFlags = [...new Set([...(Array.isArray(existing?.kioskTimeFlags) ? existing.kioskTimeFlags : []), ...flags])].slice(-10);
+    if (allFlags.length) record.kioskTimeFlags = allFlags;
+    if (reasons.length) record.regularizationReason = [...new Set(reasons)].join('; ').slice(0, 1000);
+    if (record.regularizationRequested !== true) delete record.regularizationRequested;
     record.requestedById = existing?.requestedById || (record.regularizationRequested ? req.kiosk.userId : undefined);
     if (record.requestedById === undefined) delete record.requestedById;
-    await pool.query(
-      `INSERT INTO attendances (id, employee_id, date, status, data, version, updated_at) VALUES ($1,$2,$3,$4,$5::jsonb,1,now())
-       ON CONFLICT (id) DO UPDATE SET data=EXCLUDED.data, status=EXCLUDED.status, version=attendances.version+1, updated_at=now()`,
-      [documentId, data.employeeId, data.date, typeof data.status === 'string' ? data.status : null, JSON.stringify(record)],
+    const version = row ? Number(row.version) + 1 : 1;
+    record.kioskVersion = version;
+    // Optimistic lock: an HR save between the read above and this write must not be overwritten.
+    const written = await pool.query(
+      `INSERT INTO attendances (id, employee_id, date, status, data, version, updated_at) VALUES ($1,$2,$3,$4,$5::jsonb,$6,now())
+       ON CONFLICT (id) DO UPDATE SET data=EXCLUDED.data, status=EXCLUDED.status, version=EXCLUDED.version, updated_at=now()
+       WHERE attendances.version = $7`,
+      [documentId, data.employeeId, data.date, typeof record.status === 'string' ? record.status : null, JSON.stringify(record), version, row ? Number(row.version) : 0],
     );
-    await audit(req, 'kiosk_punch', documentId, { employeeId: data.employeeId, date: data.date, method: data.method });
-    res.json({ ok: true, id: documentId });
+    // 503 (not 409): the kiosk keeps the punch queued and sends it again against the new record.
+    if (!written.rowCount) return res.status(503).json({ error: 'The attendance record changed while this punch was saved; it will be sent again.' });
+    await audit(req, 'kiosk_punch', documentId, { employeeId: data.employeeId, date: data.date, method: data.method, ...(flags.length && { timeFlags: flags }), ...(hrTouched && { progressOnly: true }) });
+    res.json({ ok: true, id: documentId, ...(record.regularizationRequested && { regularizationRequested: true }) });
   } catch (error) { next(error); }
 });
 
@@ -199,4 +324,4 @@ adminRouter.post('/setup-codes/:id/revoke', async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
-module.exports = { router, adminRouter, requireKiosk, SYNC };
+module.exports = { router, adminRouter, requireKiosk, SYNC, timeFlags, punchSpanMinutes, latestEventInstant };

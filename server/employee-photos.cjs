@@ -47,9 +47,12 @@ router.get('/:id', async (req, res, next) => {
     const expected = signatureOf(id, version);
     if (!version || signature.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return res.status(403).end();
     const picture = (await pool.query(`SELECT data->>'pictureUrl' AS picture FROM employees WHERE id=$1`, [id])).rows[0]?.picture;
-    const match = typeof picture === 'string' ? picture.match(/^data:(image\/[\w.+-]+);base64,(.+)$/s) : null;
+    // Only raster formats are served: an SVG "photo" is a document that can run script on this site's origin.
+    const match = typeof picture === 'string' ? picture.match(/^data:(image\/(?:jpeg|jpg|png|webp|gif));base64,(.+)$/is) : null;
     if (!match) return res.status(404).end();
-    res.setHeader('Content-Type', match[1]);
+    res.setHeader('Content-Type', match[1].toLowerCase() === 'image/jpg' ? 'image/jpeg' : match[1].toLowerCase());
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
     // The link carries the photo's version: the same link always means the same picture.
     res.setHeader('Cache-Control', versionOf(picture) === version ? 'private, max-age=31536000, immutable' : 'private, no-cache');

@@ -12,25 +12,27 @@ function setupCodeError(message) {
   return error;
 }
 
-// True for addresses that can only be reached inside the client's own network: localhost, loopback, private IPv4
-// (10/8, 172.16/12, 192.168/16, 169.254/16), private/loopback IPv6, single-label names (HEADOFFICE) and
-// .local / .lan / .internal / .home.arpa names. Self-hosted servers (e.g. the Windows Server package) run there on
-// plain http://, so http is allowed for these and nowhere else.
+// True for addresses where plain http:// is acceptable: "localhost" and literal loopback / private IP addresses
+// (IPv4 127/8, 10/8, 172.16/12, 192.168/16, 169.254/16; IPv6 ::1, fc00::/7, fe80::/10). Self-hosted servers (e.g. the
+// Windows Server package) can run there on plain http://. Names that are resolved by DNS, NetBIOS or mDNS
+// (HEADOFFICE, hr.local, srv.lan) are not accepted on http: anyone on the network can answer for such a name and
+// collect the kiosk's device key, so they must use https.
 function isLocalNetworkHost(hostname) {
   const host = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
   if (!host) return false;
-  if (host === 'localhost' || host.endsWith('.localhost')) return true;
+  if (host === 'localhost') return true;
   const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
   if (ipv4) {
-    const [a, b] = ipv4.slice(1, 3).map(Number);
+    const octets = ipv4.slice(1).map(Number);
+    if (octets.some(octet => octet > 255)) return false;
+    const [a, b] = octets;
     return a === 127 || a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254);
   }
   if (host.includes(':')) return host === '::1' || /^f[cd][0-9a-f]{2}:/.test(host) || /^fe[89ab][0-9a-f]:/.test(host);
-  if (!host.includes('.')) return true;
-  return /\.(local|lan|internal|home\.arpa)$/.test(host);
+  return false;
 }
 
-// https:// everywhere; http:// only for local-network addresses (see isLocalNetworkHost).
+// https:// everywhere; http:// only for localhost and private IP addresses (see isLocalNetworkHost).
 // Returns the address without a trailing slash, or throws a user-facing error.
 function normalizePortalUrl(value, invalidMessage = 'The setup code contains an invalid server address') {
   const text = String(value || '').trim();
@@ -42,7 +44,7 @@ function normalizePortalUrl(value, invalidMessage = 'The setup code contains an 
   }
   if (url.protocol !== 'https:' && !(url.protocol === 'http:' && isLocalNetworkHost(url.hostname))) {
     throw setupCodeError(url.protocol === 'http:'
-      ? 'Server address must use https (http is allowed only for local network addresses such as 192.168.x.x)'
+      ? 'Server address must use https (http is allowed only for localhost and private IP addresses such as 192.168.x.x; a server name such as HEADOFFICE or hr.local needs https)'
       : 'Server address must use https');
   }
   if (url.username || url.password || url.search || url.hash) {
@@ -52,7 +54,7 @@ function normalizePortalUrl(value, invalidMessage = 'The setup code contains an 
 }
 
 // A server address typed by the operator in Settings, e.g. "192.168.86.83:8080", "http://localhost:8080" or
-// "hr.company.com". Without a scheme, local-network addresses get http:// and everything else https://.
+// "hr.company.com". Without a scheme, localhost and private IP addresses get http:// and everything else https://
 function normalizeServerAddress(value) {
   const text = String(value || '').trim();
   if (!text) throw setupCodeError('Enter the server address');

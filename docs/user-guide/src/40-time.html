@@ -14,7 +14,7 @@
     <tr><td>Half Day</td><td>Arrived 2 hours or more late.</td></tr>
     <tr><td>Absent</td><td>No punch on a working day, with no leave and no holiday.</td></tr>
     </table>
-    Overtime is time worked beyond 8 hours (after breaks). Friday and Ramadan timings are used when set.</li>
+    Overtime is time worked beyond 8 hours (after breaks). Friday and Ramadan timings are used when set — also for punches made at the kiosk.<br><b>Night shifts:</b> a punch-out after midnight closes the shift that started the evening before, and punches made between midnight and 5 AM are given the correct date.</li>
   <li><b>Problems are flagged</b> for a person to check: weak face or fingerprint matches, phone punches outside the branch area, impossible travel, hand-typed entries and employee correction requests.</li>
   <li><b>Leave and holidays.</b> Approved leave becomes paid (or unpaid) leave days; holidays and weekly days off are added from the calendar.</li>
   <li><b>Lock.</b> At month end, payroll staff lock ("certify") the register in 10. Payroll Processing. It cannot be locked while any item is waiting for review.</li>
@@ -27,10 +27,11 @@
 <h3>Connect the fingerprint reader (one time per computer)</h3>
 <ol class="steps">
   <li>Install the reader software (DigitalPersona U.are.U SDK or SecuGen FDx SDK Pro) supplied by your IT person, and plug the reader (U.are.U 4500 or SecuGen Hamster Pro) into a USB port.</li>
+  <li><b>Only if you enroll in a web browser (Chrome or Edge):</b> the bridge refuses web pages it does not know. Create a text file named <b>allowed-origins.txt</b> in the same folder as <b>URU4500Bridge.exe</b>. Type the portal address exactly as it appears in the browser's address bar but without any path — for example <b>https://headoffice</b> or <b>https://hr.company.com</b> — one address per line. Save it and restart the bridge (or the PC). The Windows desktop app needs nothing.</li>
   <li>Open <span class="ui">6. Biometric Devices</span> and click <span class="ui">Connect Bridge</span>. The status changes from <i>Disconnected</i> to <i>Native Bridge</i>.</li>
   <li>On the <span class="ui">TEST DEVICE</span> tab, click <span class="ui">Scan Fingerprint</span> and place a finger to check the reader works.</li>
 </ol>
-<p class="small">If you see <i>Bridge connected, but no fingerprint reader was detected</i>, unplug and reconnect the reader and restart the bridge program. <span class="ui">Simulate</span> is only for practice without a reader.</p>
+<p class="small">If you see <i>Bridge connected, but no fingerprint reader was detected</i>, unplug and reconnect the reader and restart the bridge program. If the browser cannot connect at all, check allowed-origins.txt (step 2). <span class="ui">Simulate</span> is only for practice without a reader.</p>
 <h3>Enroll fingerprints</h3>
 <ol class="steps">
   <li>On <span class="ui">ENROLL BIOMETRICS</span>, choose the <span class="ui">EMPLOYEE</span>.</li>
@@ -120,6 +121,10 @@
   <li>Employees apply in the mobile app. Requests appear in <span class="ui">LEAVE APPLICATIONS LIST</span> with the dates, days, reason and remaining balance (red if it is not enough).</li>
   <li>Click <span class="ui">Approve</span> or <span class="ui">Reject</span>. The employee is notified, and approved days are added to the attendance register automatically.</li>
 </ol>
+<ul>
+  <li><b>Nobody can decide their own leave</b> (full edition). On your own request both buttons are grey — another approver must decide it.</li>
+  <li>If a rejection is refused by the server or the connection fails, a message is shown and the request stays as it was.</li>
+</ul>
 <h3>Record leave yourself</h3>
 <ol class="steps">
   <li>Click <span class="ui">Add Leave Record</span>.</li>
@@ -127,5 +132,5 @@
   <li>Click <span class="ui">Approve &amp; Log Leave</span>. The leave balance is checked first, just as for an approval. If it is accepted, the leave is saved as approved and those days are marked <b>On Leave</b> in the attendance register, exactly like an approved request.</li>
   <li>If it is refused (for example not enough balance), a message explains why and the form <b>stays open</b> with what you typed, so you can correct it (for example change the type to Unpaid) and try again.</li>
 </ol>
-<div class="box important"><span class="t">Important</span><ul><li>Leave days are counted as calendar days from start to end, including weekends and holidays.</li><li>If the balance is not enough, approval is blocked with <span class="msg">Approval blocked: … Apply the excess as Unpaid leave.</span> Record the extra days as Unpaid leave.</li></ul></div>
+<div class="box important"><span class="t">Important</span><ul><li>Leave days are counted as calendar days from start to end, including weekends and holidays. (For pay, when the absence deduction basis in 1. Statutory Config is "Scheduled Working Days", weekly days off and holidays inside a leave count as days off, not as leave days — so they are never deducted as unpaid.)</li><li>If the balance is not enough, approval is blocked with <span class="msg">Approval blocked: … Apply the excess as Unpaid leave.</span> Record the extra days as Unpaid leave.</li></ul></div>
 <p>The <span class="ui">DAILY / WEEKLY / MONTHLY / YEARLY REPORTS</span> tab shows who is on approved leave on a date, and monthly and yearly summaries.</p>

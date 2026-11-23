@@ -207,11 +207,11 @@
         <!-- Camera Feed -->
         <div class="camera-stack hidden" id="cameraStack">
           <div class="kiosk-cam-mode-bar" id="kioskCamModeBar">
-            <button type="button" class="kiosk-cam-mode-btn active" id="btnModeMultiFace">
+            <button type="button" class="kiosk-cam-mode-btn hidden" id="btnModeMultiFace">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
               <span>Multi-Face Stream (Boxes)</span>
             </button>
-            <button type="button" class="kiosk-cam-mode-btn" id="btnModeSingleFace">
+            <button type="button" class="kiosk-cam-mode-btn active" id="btnModeSingleFace">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
               <span>1-on-1 Challenge (Oval)</span>
             </button>
@@ -336,6 +336,30 @@
         <div class="reason-grid" id="checkoutReasonList"></div>
       </div>
     </div>
+  </div>
+
+  <div class="overlay message-overlay hidden" id="pinOverlay" aria-hidden="true">
+    <section class="message-dialog" id="pinDialog" data-tone="warning" role="dialog" aria-modal="true" aria-labelledby="pinTitle" aria-describedby="pinText">
+      <header class="message-header">
+        <div class="message-heading">
+          <div class="message-tone-orb" aria-hidden="true">
+            <svg class="message-tone-icon message-tone-icon-warning" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+          </div>
+          <div><div class="message-eyebrow">Administrator</div><h2 id="pinTitle">Enter admin PIN</h2></div>
+        </div>
+        <button class="message-close" id="pinClose" type="button" aria-label="Cancel" title="Cancel"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+      </header>
+      <div class="message-content">
+        <p class="message-text" id="pinText"></p>
+        <label class="form-field full" style="margin-top:12px"><span class="form-label" id="pinLabel">PIN</span><input id="pinInput" class="form-input" type="password" inputmode="numeric" autocomplete="off" maxlength="12" /></label>
+        <label class="form-field full hidden" id="pinConfirmField" style="margin-top:10px"><span class="form-label">Repeat the PIN</span><input id="pinConfirmInput" class="form-input" type="password" inputmode="numeric" autocomplete="off" maxlength="12" /></label>
+        <p class="message-detail hidden" id="pinError" role="alert"></p>
+      </div>
+      <footer class="message-footer">
+        <span class="message-safety-note">Checked by the kiosk; wrong PINs lock it for a while.</span>
+        <div class="message-actions"><button class="btn btn-ghost message-cancel" id="pinCancel" type="button">Cancel</button><button class="btn message-confirm" id="pinConfirm" type="button">Continue</button></div>
+      </footer>
+    </section>
   </div>
 
   <div class="overlay message-overlay hidden" id="messageOverlay" aria-hidden="true">
@@ -601,6 +625,22 @@
                 <small>Locks window to full screen on startup for dedicated terminal use</small>
               </div>
             </label>
+            <label class="toggle-row security-sensitive">
+              <input type="checkbox" id="stAllowMultiFace" class="toggle-input" />
+              <div class="toggle-switch"></div>
+              <div class="toggle-text">
+                <span>Allow Multi-Face walk-through mode <strong>LOW ASSURANCE</strong></span>
+                <small>Recognises several people walking past without a live face check, so a photo of a colleague can be recognised. Every punch made this way is sent to HR for review. Off: only the 1-on-1 live face check is offered.</small>
+              </div>
+            </label>
+            <label class="toggle-row security-sensitive">
+              <input type="checkbox" id="stAllowUnverifiedBridge" class="toggle-input" />
+              <div class="toggle-switch"></div>
+              <div class="toggle-text">
+                <span>Allow unverified fingerprint bridge</span>
+                <small>Only for an older URU4500Bridge.exe or one running as a Windows service, which cannot prove it was started by this kiosk. Keep off with the bridge shipped in this kiosk.</small>
+              </div>
+            </label>
             <label class="toggle-row">
               <input type="checkbox" id="stClassicTheme" class="toggle-input" />
               <div class="toggle-switch"></div>
@@ -609,6 +649,17 @@
                 <small>Restores the original deep-navy palette and small close button. Off keeps the readable theme (default).</small>
               </div>
             </label>
+          </div>
+        </div>
+
+        <div class="dialog-section">
+          <h3 class="dialog-section-title">Admin PIN</h3>
+          <div class="danger-action">
+            <div>
+              <strong>Change the admin PIN</strong>
+              <small>The PIN protects Settings, Exit, clearing the local cache and removing the device key. 6 to 12 digits.</small>
+            </div>
+            <button class="btn btn-ghost" id="stChangePin" type="button">Change PIN</button>
           </div>
         </div>
 

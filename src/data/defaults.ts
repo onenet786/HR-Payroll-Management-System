@@ -10,7 +10,9 @@ import {
   PerformanceReview, CompanyAsset, JobPosting, JobApplication,
   GratuitySettlement, AppNotification, PayrollAdjustment, AttendanceRegisterRow
 } from '../types';
-import { countScheduledWorkingDays } from './attendanceRules';
+import { countScheduledWorkingDays, holidayDatesForYear } from './attendanceRules';
+import { localDateStr } from './localDate';
+import { loanInstallmentsForPeriod, type PayslipLoanDeduction } from './loanRecovery';
 import { registerPayrollSummary } from './attendancePeriod';
 import { establishmentRule, socialSecurityContribution } from './provincialCompliance';
 import { attendancePolicyOf, lateFineForLateDays, policyShift } from './attendancePolicy';
@@ -31,11 +33,13 @@ export function slabRatePercent(rate: number): number {
 
 export const DEFAULT_TAX_SLABS: TaxSlab[] = [
   { id: 'fbr-slab-1', minIncome: 0, maxIncome: 600000, baseTax: 0, percentage: 0 },
-  { id: 'fbr-slab-2', minIncome: 600000, maxIncome: 1200000, baseTax: 0, percentage: 5 },
-  { id: 'fbr-slab-3', minIncome: 1200000, maxIncome: 2200000, baseTax: 30000, percentage: 15 },
-  { id: 'fbr-slab-4', minIncome: 2200000, maxIncome: 3200000, baseTax: 180000, percentage: 25 },
-  { id: 'fbr-slab-5', minIncome: 3200000, maxIncome: 4100000, baseTax: 430000, percentage: 30 },
-  { id: 'fbr-slab-6', minIncome: 4100000, maxIncome: 999999999, baseTax: 700000, percentage: 35 }
+  { id: 'fbr-slab-2', minIncome: 600000, maxIncome: 1200000, baseTax: 0, percentage: 1 },
+  { id: 'fbr-slab-3', minIncome: 1200000, maxIncome: 2200000, baseTax: 6000, percentage: 11 },
+  { id: 'fbr-slab-4', minIncome: 2200000, maxIncome: 3200000, baseTax: 116000, percentage: 20 },
+  { id: 'fbr-slab-5', minIncome: 3200000, maxIncome: 4100000, baseTax: 316000, percentage: 25 },
+  { id: 'fbr-slab-6', minIncome: 4100000, maxIncome: 5600000, baseTax: 541000, percentage: 29 },
+  { id: 'fbr-slab-7', minIncome: 5600000, maxIncome: 7000000, baseTax: 976000, percentage: 32 },
+  { id: 'fbr-slab-8', minIncome: 7000000, maxIncome: 999999999, baseTax: 1424000, percentage: 35 }
 ];
 
 // Default Pakistan Statutory Config
@@ -435,11 +439,8 @@ export function calculateAnnualTax(annualTaxableIncome: number, slabs: TaxSlab[]
     baseCalculatedTax = (matchingSlab.baseTax ?? 0) + (excess * slabRatePercent(matchingSlab.percentage ?? 0)) / 100;
   }
 
-  // Section 4AB: 10% Surcharge on income exceeding Rs. 10 million (PKR 10,000,000)
-  if (annualTaxableIncome > 10000000) {
-    baseCalculatedTax += baseCalculatedTax * 0.10;
-  }
-
+  // Slab tax only. The s.4AB high-income surcharge changes by tax year, so it is applied once, from the
+  // approved statutory configuration, in annualTaxLiability (never hard-coded here).
   return Math.round(baseCalculatedTax);
 }
 
@@ -462,8 +463,12 @@ export function calculateReconciledMonthlyTax(
   year: number,
   slabs: TaxSlab[],
   historicalPayslips: Payslip[] = [],
-  config?: Pick<StatutoryConfig, 'surchargeRatePercent' | 'surchargeThresholdAnnual'>
+  config?: Pick<StatutoryConfig, 'surchargeRatePercent' | 'surchargeThresholdAnnual'>,
+  /** Taxable pay of this period that does not repeat (bonus, commission, arrears, one-off allowances). */
+  oneOffTaxableIncome = 0
 ) {
+  // `grossSalary` is the recurring taxable pay; only it is projected over the rest of the tax year.
+  const oneOff = Number.isFinite(oneOffTaxableIncome) ? oneOffTaxableIncome : 0;
   const taxYear = pakistanTaxYearForPeriod(month, year);
   const taxYearStartYear = Number(taxYear) - 1;
   const taxYearStart = `${taxYearStartYear}-07-01`;
@@ -476,16 +481,22 @@ export function calculateReconciledMonthlyTax(
   const priorEmployerTax = Math.max(0, employee.priorEmployerTaxDeducted || 0);
   // Earlier months contribute what was actually taxable (after exemptions, including perquisites), not cash gross.
   const currentEmployerIncomeBefore = previous.reduce((sum, item) => sum + (item.taxableIncomeThisPeriod ?? item.grossSalary), 0);
-  const currentEmployerTaxBefore = previous.reduce((sum, item) => sum + item.incomeTaxDeduction, 0);
+  // Manual tax adjustments were withheld and deposited too, so they count as tax already deducted.
+  const currentEmployerTaxBefore = previous.reduce((sum, item) => sum + item.incomeTaxDeduction + (item.manualTaxAdjustment || 0), 0);
   const remainingPeriods = month >= 7 ? 19 - month : 7 - month;
-  const projectedAnnualTaxableIncome = priorEmployerIncome + currentEmployerIncomeBefore + grossSalary * remainingPeriods;
+  const recurringProjection = priorEmployerIncome + currentEmployerIncomeBefore + grossSalary * remainingPeriods;
+  const projectedAnnualTaxableIncome = recurringProjection + oneOff;
   const liability = annualTaxLiability(projectedAnnualTaxableIncome, slabs, config);
   const projectedAnnualTaxLiability = liability.tax;
   const taxDeductedBeforeCurrentPeriod = priorEmployerTax + currentEmployerTaxBefore;
-  const incomeTaxDeduction = Math.max(0, Math.round((projectedAnnualTaxLiability - taxDeductedBeforeCurrentPeriod) / remainingPeriods));
+  // Recurring pay spreads its tax over the remaining months; a one-off item is taxed once, in the month it is
+  // paid, at the marginal rate (the extra annual liability it creates).
+  const recurringLiability = oneOff ? annualTaxLiability(recurringProjection, slabs, config).tax : projectedAnnualTaxLiability;
+  const oneOffTax = Math.max(0, projectedAnnualTaxLiability - recurringLiability);
+  const incomeTaxDeduction = Math.max(0, Math.round((recurringLiability - taxDeductedBeforeCurrentPeriod) / remainingPeriods + oneOffTax));
   return {
     taxYear,
-    taxableIncomeYtd: priorEmployerIncome + currentEmployerIncomeBefore + grossSalary,
+    taxableIncomeYtd: priorEmployerIncome + currentEmployerIncomeBefore + grossSalary + oneOff,
     taxDeductedBeforeCurrentPeriod,
     projectedAnnualTaxableIncome,
     projectedAnnualTaxLiability,
@@ -598,6 +609,16 @@ export function calculateFbrSalarySplit(
   };
 }
 
+/**
+ * Fixed monthly package of a salaried employee: basic plus the fixed allowances on the record. Without custom
+ * allowances basicSalary is the whole package (split 50/30/10/10 on the payslip).
+ */
+export function fixedMonthlyPackage(employee: Pick<Employee, 'basicSalary' | 'houseRentAllowance' | 'conveyanceAllowance' | 'medicalAllowance' | 'otherAllowances'>): number {
+  const custom = [employee.houseRentAllowance, employee.conveyanceAllowance, employee.medicalAllowance, employee.otherAllowances].some(value => value !== undefined);
+  return (employee.basicSalary || 0) + (custom
+    ? (employee.houseRentAllowance ?? 0) + (employee.conveyanceAllowance ?? 0) + (employee.medicalAllowance ?? 0) + (employee.otherAllowances ?? 0) : 0);
+}
+
 // Function to calculate exact Pakistan Statutory & gross-to-net payslip details
 export function computePayslipDetails(
   employee: Employee,
@@ -616,7 +637,7 @@ export function computePayslipDetails(
   historicalPayslips: Payslip[] = [],
   payrollAdjustments: PayrollAdjustment[] = [],
   registerRows?: AttendanceRegisterRow[]
-): Payslip {
+): Payslip & { loanDeductions: PayslipLoanDeduction[] } {
   
   // Basic wage context
   const isDailyWager = resolveWageBasis(employee, wageTypes) === 'Daily';
@@ -628,11 +649,22 @@ export function computePayslipDetails(
   const branch = branches.find(b => b.id === employee.branchId);
   const siteRule = establishmentRule(statConfigs, branch?.establishmentType);
 
+  const absenceDeductionBasis = statConfigs.absenceDeductionBasis || 'Calendar Days';
+  // Under a working-day basis a weekly off or a holiday inside a leave is not a day of leave (and never unpaid).
+  const offDaysBeforeLeave = absenceDeductionBasis === 'Scheduled Working Days';
+  const rosterDays = new Set(employee.shift?.workingDays?.length ? employee.shift.workingDays : [1, 2, 3, 4, 5, 6]);
+  const holidayDates = holidayDatesForYear(holidays, year);
+  const isOffDay = (date: string) => !rosterDays.has(new Date(`${date}T00:00:00`).getDay()) || holidayDates.has(date);
   const overlapDays = (startDate: string, endDate: string): number => {
     const start = new Date(`${startDate > periodStart ? startDate : periodStart}T00:00:00`);
     const end = new Date(`${endDate < periodEnd ? endDate : periodEnd}T00:00:00`);
     if (end < start) return 0;
-    return Math.floor((end.getTime() - start.getTime()) / 86400000) + 1;
+    if (!offDaysBeforeLeave) return Math.floor((end.getTime() - start.getTime()) / 86400000) + 1;
+    let days = 0;
+    for (const day = new Date(start); day <= end; day.setDate(day.getDate() + 1)) {
+      if (!isOffDay(localDateStr(day))) days += 1;
+    }
+    return days;
   };
   
   // Count relevant days
@@ -661,18 +693,21 @@ export function computePayslipDetails(
          l.startDate <= periodEnd && l.endDate >= periodStart
   );
   
-  const unpaidLeaveDays = register ? register.unpaidLeaveDays : empLeaves
+  // Registers locked before weekly offs took precedence over leave may still show leave on an off day.
+  const registerLeaveDays = (status: 'Paid Leave' | 'Unpaid Leave', summaryDays: number) => offDaysBeforeLeave
+    ? registerRows!.filter(row => row.employeeId === employee.id && row.status === status && !isOffDay(row.date)).length
+    : summaryDays;
+  const unpaidLeaveDays = register ? registerLeaveDays('Unpaid Leave', register.unpaidLeaveDays) : empLeaves
     .filter(l => l.leaveType === 'Unpaid')
     .reduce((sum, l) => sum + overlapDays(l.startDate, l.endDate), 0);
   const explicitAbsentDays = register ? register.absentDays : absentAttendanceDates.filter(date =>
     !empLeaves.some(l => l.leaveType === 'Unpaid' && l.startDate <= date && l.endDate >= date)
   ).length;
-  const paidLeaveDays = register ? register.paidLeaveDays : empLeaves
+  const paidLeaveDays = register ? registerLeaveDays('Paid Leave', register.paidLeaveDays) : empLeaves
     .filter(l => l.leaveType !== 'Unpaid')
     .reduce((sum, l) => sum + overlapDays(l.startDate, l.endDate), 0);
   const absentDays = explicitAbsentDays + unpaidLeaveDays;
   const scheduledWorkingDays = countScheduledWorkingDays(year, month, employee.shift, holidays);
-  const absenceDeductionBasis = statConfigs.absenceDeductionBasis || 'Calendar Days';
 
   // Company attendance policy: escalating late fines, absences costing more than a day, early-coming reward.
   // A day turned into leave carries no fine or reward because it is no longer a "Late" or worked day.
@@ -743,10 +778,13 @@ export function computePayslipDetails(
     // The per-day basis is organizational policy, so it comes from the statutory configuration.
     // Pre-joining days are prorated on calendar days; under a working-day basis only absences and
     // unpaid leave on rostered days are deducted, which the register already guarantees.
+    // The whole fixed monthly package (basic plus fixed allowances) is earned per paid day, so absences and days
+    // before joining / after leaving reduce allowances too. Under the default split the package is basicSalary.
     const deductionDivisor = absenceDeductionBasis === 'Scheduled Working Days' ? Math.max(1, scheduledWorkingDays)
       : absenceDeductionBasis === 'Fixed 30 Days' ? 30 : totalDaysInMonth;
-    unpaidLeaveDeduction = Math.min(baseContractSalary,
-      chargeableAbsentDays * (baseContractSalary / deductionDivisor) + notJoinedDays * (baseContractSalary / totalDaysInMonth));
+    const monthlyPackage = basicComponent + houseRentAllowance + conveyanceAllowance + medicalAllowance + otherAllowances;
+    unpaidLeaveDeduction = Math.min(monthlyPackage,
+      chargeableAbsentDays * (monthlyPackage / deductionDivisor) + notJoinedDays * (monthlyPackage / totalDaysInMonth));
     
     // Base basic earnings
     basicEarnings = basicComponent;
@@ -784,6 +822,9 @@ export function computePayslipDetails(
   const perquisitesValue = Math.max(0, (employee.perquisiteVehicleMonthly || 0) + (employee.perquisiteAccommodationMonthly || 0) + (employee.perquisiteOtherMonthly || 0));
   const exemptAllowance = isDailyWager ? 0 : Math.round(Math.min(medicalAllowance, basicEarnings * Math.max(0, statConfigs.medicalAllowanceExemptPercentOfBasic ?? 0) / 100));
   const taxableGrossSalary = Math.max(0, baseGrossSalary + taxableAdjustments + perquisitesValue - exemptAllowance);
+  // Approved adjustments belong to this period only; only the recurring part of taxable pay is projected forward.
+  const recurringTaxableSalary = Math.max(0, taxableGrossSalary - taxableAdjustments);
+  const oneOffTaxableIncome = taxableGrossSalary - recurringTaxableSalary;
   
   // 1. Income Tax Calculation (FBR)
   let incomeTaxDeduction = 0;
@@ -793,7 +834,7 @@ export function computePayslipDetails(
     projectedAnnualTaxLiability: 0, surchargeAnnual: 0, incomeTaxDeduction: 0,
   };
   if (employee.fbrEnabled !== false) {
-    taxReconciliation = calculateReconciledMonthlyTax(employee, taxableGrossSalary, month, year, taxSlabs, historicalPayslips, statConfigs);
+    taxReconciliation = calculateReconciledMonthlyTax(employee, recurringTaxableSalary, month, year, taxSlabs, historicalPayslips, statConfigs, oneOffTaxableIncome);
     incomeTaxDeduction = taxReconciliation.incomeTaxDeduction;
   }
   
@@ -821,10 +862,10 @@ export function computePayslipDetails(
   }
   
   // Loan / salary advance installment deduction
-  const activeLoans = loanAdvances.filter(
-    l => l.employeeId === employee.id && l.status === 'Active' && l.remainingInstallments > 0
-  );
-  const loanRepaymentDeduction = activeLoans.reduce((sum, l) => sum + l.monthlyInstallment, 0);
+  // Capped at each loan's outstanding balance; loans disbursed after the period are not recovered yet.
+  // The per-loan lines are what disbursement applies to the loan ledger.
+  const loanDeductions = loanInstallmentsForPeriod(employee.id, loanAdvances, periodEnd);
+  const loanRepaymentDeduction = loanDeductions.reduce((sum, line) => sum + line.amount, 0);
 
   const totalDeductions = Math.round(
     incomeTaxDeduction + manualTaxAdjustment + eobiEmployeeDeduction + providentFundDeduction + loanRepaymentDeduction + otherAdjustmentsDeduction + lateFineDeduction
@@ -879,6 +920,7 @@ export function computePayslipDetails(
     pessiEmployeeDeduction: 0, // usually paid 100% by employer in Pak
     providentFundDeduction,
     loanRepaymentDeduction,
+    loanDeductions,
     unpaidLeaveDeduction: Math.round(unpaidLeaveDeduction),
     totalDeductions,
     netSalary,

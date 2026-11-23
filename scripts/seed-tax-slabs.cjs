@@ -9,14 +9,16 @@ const pool = new Pool({
   ssl: process.env.PG_SSL === 'true' ? { rejectUnauthorized: process.env.PG_SSL_REJECT_UNAUTHORIZED !== 'false' } : false,
 });
 
-// Official FBR Tax Slabs (Finance Act 2024 / 2025 - Salaried Individuals)
+// FBR salaried income tax slabs, Tax Year 2027 (Finance Act 2026, from 1 July 2026)
 const FBR_TAX_SLABS = [
   { id: 'fbr-slab-1', minIncome: 0, maxIncome: 600000, baseTax: 0, percentage: 0 },
-  { id: 'fbr-slab-2', minIncome: 600000, maxIncome: 1200000, baseTax: 0, percentage: 5 },
-  { id: 'fbr-slab-3', minIncome: 1200000, maxIncome: 2200000, baseTax: 30000, percentage: 15 },
-  { id: 'fbr-slab-4', minIncome: 2200000, maxIncome: 3200000, baseTax: 180000, percentage: 25 },
-  { id: 'fbr-slab-5', minIncome: 3200000, maxIncome: 4100000, baseTax: 430000, percentage: 30 },
-  { id: 'fbr-slab-6', minIncome: 4100000, maxIncome: 999999999, baseTax: 700000, percentage: 35 }
+  { id: 'fbr-slab-2', minIncome: 600000, maxIncome: 1200000, baseTax: 0, percentage: 1 },
+  { id: 'fbr-slab-3', minIncome: 1200000, maxIncome: 2200000, baseTax: 6000, percentage: 11 },
+  { id: 'fbr-slab-4', minIncome: 2200000, maxIncome: 3200000, baseTax: 116000, percentage: 20 },
+  { id: 'fbr-slab-5', minIncome: 3200000, maxIncome: 4100000, baseTax: 316000, percentage: 25 },
+  { id: 'fbr-slab-6', minIncome: 4100000, maxIncome: 5600000, baseTax: 541000, percentage: 29 },
+  { id: 'fbr-slab-7', minIncome: 5600000, maxIncome: 7000000, baseTax: 976000, percentage: 32 },
+  { id: 'fbr-slab-8', minIncome: 7000000, maxIncome: 999999999, baseTax: 1424000, percentage: 35 }
 ];
 
 async function main() {

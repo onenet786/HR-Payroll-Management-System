@@ -81,9 +81,21 @@ function evaluateAttendanceTimes(punchIn, punchOut, shift = DEFAULT_SHIFT, break
   if (cutoff !== void 0 && output < cutoff && !isPlausiblyEarly) return { status: "On Leave", workedMinutes, overtimeMinutes: 0, policyLeave: true };
   return { status, workedMinutes, overtimeMinutes: Math.max(0, workedMinutes - overtimeThreshold) };
 }
+function holidayDatesForYear(holidays, year) {
+  const dates = /* @__PURE__ */ new Set();
+  for (const item of holidays) {
+    if (!item?.date || item.type === "Optional") continue;
+    const enteredYear = Number(item.date.slice(0, 4));
+    if (item.isRecurring && enteredYear <= year) {
+      const monthDay = item.date.slice(5);
+      if (monthDay !== "02-29" || new Date(year, 1, 29).getMonth() === 1) dates.add(`${year}-${monthDay}`);
+    } else if (enteredYear === year) dates.add(item.date);
+  }
+  return dates;
+}
 function countScheduledWorkingDays(year, month, shift = DEFAULT_SHIFT, holidays = []) {
   const workingDays = new Set(shift.workingDays?.length ? shift.workingDays : DEFAULT_SHIFT.workingDays);
-  const holidayDates = new Set(holidays.map((item) => item.date));
+  const holidayDates = holidayDatesForYear(holidays, year);
   const lastDay = new Date(year, month, 0).getDate();
   let total = 0;
   for (let day = 1; day <= lastDay; day += 1) {
@@ -94,6 +106,20 @@ function countScheduledWorkingDays(year, month, shift = DEFAULT_SHIFT, holidays 
   return total;
 }
 var DUPLICATE_PUNCH_WINDOW_MS = 2 * 6e4;
+
+// src/data/localDate.ts
+function localDateStr(date = /* @__PURE__ */ new Date()) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+// src/data/loanRecovery.ts
+function loanOutstanding(loan) {
+  return loan.approvedAmount > 0 ? Math.max(0, loan.approvedAmount - (loan.totalRepaid || 0)) : loan.monthlyInstallment * Math.max(0, loan.remainingInstallments);
+}
+var recoverable = (loan, employeeId, periodEnd) => loan.employeeId === employeeId && loan.status === "Active" && loan.remainingInstallments > 0 && !(periodEnd && loan.disbursedDate && loan.disbursedDate > periodEnd);
+function loanInstallmentsForPeriod(employeeId, loans, periodEnd) {
+  return loans.filter((loan) => recoverable(loan, employeeId, periodEnd)).map((loan) => ({ loanId: loan.id, amount: Math.round(Math.max(0, Math.min(loan.monthlyInstallment, loanOutstanding(loan)))) })).filter((line) => line.amount > 0);
+}
 
 // src/data/attendancePeriod.ts
 function attendancePeriodId(month, year) {
@@ -143,9 +169,13 @@ function employedDuring(employee, periodStart, periodEnd) {
   if (employee.separationDate && employee.separationDate < periodStart) return false;
   return employee.status === "Active" || employee.status === "On Leave" || employee.status === "Terminated" && Boolean(employee.separationDate);
 }
+var storedRegisterOptions = (options) => ({
+  ...options.noPunchDayStatus && { noPunchDayStatus: options.noPunchDayStatus },
+  ...options.offDaysBeforeLeave && { offDaysBeforeLeave: true }
+});
 function buildAttendanceRegister(attendances, employees, leaves, holidays, month, year, options = {}) {
   const attendanceByEmployeeDay = new Map(attendances.filter((item) => item.date.startsWith(`${year}-${String(month).padStart(2, "0")}`)).map((item) => [`${item.employeeId}|${item.date}`, item]));
-  const holidayDates = new Set(holidays.map((item) => item.date));
+  const holidayDates = holidayDatesForYear(holidays, year);
   const lastDay = new Date(year, month, 0).getDate();
   const eligible = employees.filter((employee) => employedDuring(employee, dayKey(year, month, 1), dayKey(year, month, lastDay)));
   return eligible.flatMap((employee) => Array.from({ length: lastDay }, (_, offset) => {
@@ -163,6 +193,7 @@ function buildAttendanceRegister(attendances, employees, leaves, holidays, month
       return { employeeId: employee.id, date, status, attendanceId: attendance.id, source: attendance.method };
     }
     if (holidayDates.has(date)) return { employeeId: employee.id, date, status: "Holiday", source: "Holiday" };
+    if (options.offDaysBeforeLeave && !workingDays.includes(weekday2)) return { employeeId: employee.id, date, status: "Weekly Off", source: "Roster" };
     if (leave) return { employeeId: employee.id, date, status: leave.leaveType === "Unpaid" ? "Unpaid Leave" : "Paid Leave", source: "Leave" };
     if (!workingDays.includes(weekday2)) return { employeeId: employee.id, date, status: "Weekly Off", source: "Roster" };
     return { employeeId: employee.id, date, status: options.noPunchDayStatus || "Absent", source: "Roster" };
@@ -195,6 +226,7 @@ function createAttendancePeriod(attendances, employees, leaves, holidays, month,
     registerVersion: (previous?.registerVersion || 0) + 1,
     registerRows,
     registerHash: hashRows(registerRows),
+    registerOptions: storedRegisterOptions(options),
     history: [...previous?.history || [], { action: "Locked", at: now2, by: actor, registerVersion: (previous?.registerVersion || 0) + 1, registerHash: hashRows(registerRows) }]
   };
 }
@@ -304,11 +336,13 @@ function slabRatePercent(rate) {
 }
 var DEFAULT_TAX_SLABS = [
   { id: "fbr-slab-1", minIncome: 0, maxIncome: 6e5, baseTax: 0, percentage: 0 },
-  { id: "fbr-slab-2", minIncome: 6e5, maxIncome: 12e5, baseTax: 0, percentage: 5 },
-  { id: "fbr-slab-3", minIncome: 12e5, maxIncome: 22e5, baseTax: 3e4, percentage: 15 },
-  { id: "fbr-slab-4", minIncome: 22e5, maxIncome: 32e5, baseTax: 18e4, percentage: 25 },
-  { id: "fbr-slab-5", minIncome: 32e5, maxIncome: 41e5, baseTax: 43e4, percentage: 30 },
-  { id: "fbr-slab-6", minIncome: 41e5, maxIncome: 999999999, baseTax: 7e5, percentage: 35 }
+  { id: "fbr-slab-2", minIncome: 6e5, maxIncome: 12e5, baseTax: 0, percentage: 1 },
+  { id: "fbr-slab-3", minIncome: 12e5, maxIncome: 22e5, baseTax: 6e3, percentage: 11 },
+  { id: "fbr-slab-4", minIncome: 22e5, maxIncome: 32e5, baseTax: 116e3, percentage: 20 },
+  { id: "fbr-slab-5", minIncome: 32e5, maxIncome: 41e5, baseTax: 316e3, percentage: 25 },
+  { id: "fbr-slab-6", minIncome: 41e5, maxIncome: 56e5, baseTax: 541e3, percentage: 29 },
+  { id: "fbr-slab-7", minIncome: 56e5, maxIncome: 7e6, baseTax: 976e3, percentage: 32 },
+  { id: "fbr-slab-8", minIncome: 7e6, maxIncome: 999999999, baseTax: 1424e3, percentage: 35 }
 ];
 var DEFAULT_STATUTORY_CONFIG = {
   id: "stat-pk-2026-27",
@@ -369,9 +403,6 @@ function calculateAnnualTax(annualTaxableIncome, slabs) {
     const excess = annualTaxableIncome - (matchingSlab.minIncome ?? 0);
     baseCalculatedTax = (matchingSlab.baseTax ?? 0) + excess * slabRatePercent(matchingSlab.percentage ?? 0) / 100;
   }
-  if (annualTaxableIncome > 1e7) {
-    baseCalculatedTax += baseCalculatedTax * 0.1;
-  }
   return Math.round(baseCalculatedTax);
 }
 function annualTaxLiability(annualTaxableIncome, slabs, config) {
@@ -383,7 +414,8 @@ function annualTaxLiability(annualTaxableIncome, slabs, config) {
 function pakistanTaxYearForPeriod(month, year) {
   return String(month >= 7 ? year + 1 : year);
 }
-function calculateReconciledMonthlyTax(employee, grossSalary, month, year, slabs, historicalPayslips = [], config) {
+function calculateReconciledMonthlyTax(employee, grossSalary, month, year, slabs, historicalPayslips = [], config, oneOffTaxableIncome = 0) {
+  const oneOff = Number.isFinite(oneOffTaxableIncome) ? oneOffTaxableIncome : 0;
   const taxYear = pakistanTaxYearForPeriod(month, year);
   const taxYearStartYear = Number(taxYear) - 1;
   const taxYearStart = `${taxYearStartYear}-07-01`;
@@ -392,16 +424,19 @@ function calculateReconciledMonthlyTax(employee, grossSalary, month, year, slabs
   const priorEmployerIncome = Math.max(0, employee.priorEmployerTaxableIncome || 0);
   const priorEmployerTax = Math.max(0, employee.priorEmployerTaxDeducted || 0);
   const currentEmployerIncomeBefore = previous.reduce((sum, item) => sum + (item.taxableIncomeThisPeriod ?? item.grossSalary), 0);
-  const currentEmployerTaxBefore = previous.reduce((sum, item) => sum + item.incomeTaxDeduction, 0);
+  const currentEmployerTaxBefore = previous.reduce((sum, item) => sum + item.incomeTaxDeduction + (item.manualTaxAdjustment || 0), 0);
   const remainingPeriods = month >= 7 ? 19 - month : 7 - month;
-  const projectedAnnualTaxableIncome = priorEmployerIncome + currentEmployerIncomeBefore + grossSalary * remainingPeriods;
+  const recurringProjection = priorEmployerIncome + currentEmployerIncomeBefore + grossSalary * remainingPeriods;
+  const projectedAnnualTaxableIncome = recurringProjection + oneOff;
   const liability = annualTaxLiability(projectedAnnualTaxableIncome, slabs, config);
   const projectedAnnualTaxLiability = liability.tax;
   const taxDeductedBeforeCurrentPeriod = priorEmployerTax + currentEmployerTaxBefore;
-  const incomeTaxDeduction = Math.max(0, Math.round((projectedAnnualTaxLiability - taxDeductedBeforeCurrentPeriod) / remainingPeriods));
+  const recurringLiability = oneOff ? annualTaxLiability(recurringProjection, slabs, config).tax : projectedAnnualTaxLiability;
+  const oneOffTax = Math.max(0, projectedAnnualTaxLiability - recurringLiability);
+  const incomeTaxDeduction = Math.max(0, Math.round((recurringLiability - taxDeductedBeforeCurrentPeriod) / remainingPeriods + oneOffTax));
   return {
     taxYear,
-    taxableIncomeYtd: priorEmployerIncome + currentEmployerIncomeBefore + grossSalary,
+    taxableIncomeYtd: priorEmployerIncome + currentEmployerIncomeBefore + grossSalary + oneOff,
     taxDeductedBeforeCurrentPeriod,
     projectedAnnualTaxableIncome,
     projectedAnnualTaxLiability,
@@ -416,11 +451,21 @@ function computePayslipDetails(employee, month, year, attendances, leaves, statC
   const periodEnd = `${year}-${String(month).padStart(2, "0")}-${String(totalDaysInMonth).padStart(2, "0")}`;
   const branch = branches.find((b) => b.id === employee.branchId);
   const siteRule = establishmentRule(statConfigs, branch?.establishmentType);
+  const absenceDeductionBasis = statConfigs.absenceDeductionBasis || "Calendar Days";
+  const offDaysBeforeLeave = absenceDeductionBasis === "Scheduled Working Days";
+  const rosterDays = new Set(employee.shift?.workingDays?.length ? employee.shift.workingDays : [1, 2, 3, 4, 5, 6]);
+  const holidayDates = holidayDatesForYear(holidays, year);
+  const isOffDay = (date) => !rosterDays.has((/* @__PURE__ */ new Date(`${date}T00:00:00`)).getDay()) || holidayDates.has(date);
   const overlapDays = (startDate, endDate) => {
     const start = /* @__PURE__ */ new Date(`${startDate > periodStart ? startDate : periodStart}T00:00:00`);
     const end = /* @__PURE__ */ new Date(`${endDate < periodEnd ? endDate : periodEnd}T00:00:00`);
     if (end < start) return 0;
-    return Math.floor((end.getTime() - start.getTime()) / 864e5) + 1;
+    if (!offDaysBeforeLeave) return Math.floor((end.getTime() - start.getTime()) / 864e5) + 1;
+    let days = 0;
+    for (const day = new Date(start); day <= end; day.setDate(day.getDate() + 1)) {
+      if (!isOffDay(localDateStr(day))) days += 1;
+    }
+    return days;
   };
   const empAtts = attendances.filter(
     (a) => a.employeeId === employee.id && a.date.startsWith(`${year}-${String(month).padStart(2, "0")}`)
@@ -436,14 +481,14 @@ function computePayslipDetails(employee, month, year, attendances, leaves, statC
   const empLeaves = leaves.filter(
     (l) => l.employeeId === employee.id && l.status === "Approved" && l.startDate <= periodEnd && l.endDate >= periodStart
   );
-  const unpaidLeaveDays = register ? register.unpaidLeaveDays : empLeaves.filter((l) => l.leaveType === "Unpaid").reduce((sum, l) => sum + overlapDays(l.startDate, l.endDate), 0);
+  const registerLeaveDays = (status, summaryDays) => offDaysBeforeLeave ? registerRows.filter((row) => row.employeeId === employee.id && row.status === status && !isOffDay(row.date)).length : summaryDays;
+  const unpaidLeaveDays = register ? registerLeaveDays("Unpaid Leave", register.unpaidLeaveDays) : empLeaves.filter((l) => l.leaveType === "Unpaid").reduce((sum, l) => sum + overlapDays(l.startDate, l.endDate), 0);
   const explicitAbsentDays = register ? register.absentDays : absentAttendanceDates.filter(
     (date) => !empLeaves.some((l) => l.leaveType === "Unpaid" && l.startDate <= date && l.endDate >= date)
   ).length;
-  const paidLeaveDays = register ? register.paidLeaveDays : empLeaves.filter((l) => l.leaveType !== "Unpaid").reduce((sum, l) => sum + overlapDays(l.startDate, l.endDate), 0);
+  const paidLeaveDays = register ? registerLeaveDays("Paid Leave", register.paidLeaveDays) : empLeaves.filter((l) => l.leaveType !== "Unpaid").reduce((sum, l) => sum + overlapDays(l.startDate, l.endDate), 0);
   const absentDays = explicitAbsentDays + unpaidLeaveDays;
   const scheduledWorkingDays = countScheduledWorkingDays(year, month, employee.shift, holidays);
-  const absenceDeductionBasis = statConfigs.absenceDeductionBasis || "Calendar Days";
   const policy = attendancePolicyOf(statConfigs);
   const absentDeductionDays = policy.absentDeductionDays ?? 1;
   const chargeableAbsentDays = explicitAbsentDays * absentDeductionDays + unpaidLeaveDays;
@@ -489,9 +534,10 @@ function computePayslipDetails(employee, month, year, attendances, leaves, statC
       medicalAllowance = baseContractSalary * 0.1;
     }
     const deductionDivisor = absenceDeductionBasis === "Scheduled Working Days" ? Math.max(1, scheduledWorkingDays) : absenceDeductionBasis === "Fixed 30 Days" ? 30 : totalDaysInMonth;
+    const monthlyPackage = basicComponent + houseRentAllowance + conveyanceAllowance + medicalAllowance + otherAllowances;
     unpaidLeaveDeduction = Math.min(
-      baseContractSalary,
-      chargeableAbsentDays * (baseContractSalary / deductionDivisor) + notJoinedDays * (baseContractSalary / totalDaysInMonth)
+      monthlyPackage,
+      chargeableAbsentDays * (monthlyPackage / deductionDivisor) + notJoinedDays * (monthlyPackage / totalDaysInMonth)
     );
     basicEarnings = basicComponent;
     const otBaseHourly = basicComponent / (statConfigs.standardMonthlyHours || 208);
@@ -521,6 +567,8 @@ function computePayslipDetails(employee, month, year, attendances, leaves, statC
   const perquisitesValue = Math.max(0, (employee.perquisiteVehicleMonthly || 0) + (employee.perquisiteAccommodationMonthly || 0) + (employee.perquisiteOtherMonthly || 0));
   const exemptAllowance = isDailyWager ? 0 : Math.round(Math.min(medicalAllowance, basicEarnings * Math.max(0, statConfigs.medicalAllowanceExemptPercentOfBasic ?? 0) / 100));
   const taxableGrossSalary = Math.max(0, baseGrossSalary + taxableAdjustments + perquisitesValue - exemptAllowance);
+  const recurringTaxableSalary = Math.max(0, taxableGrossSalary - taxableAdjustments);
+  const oneOffTaxableIncome = taxableGrossSalary - recurringTaxableSalary;
   let incomeTaxDeduction = 0;
   let taxReconciliation = {
     taxYear: pakistanTaxYearForPeriod(month, year),
@@ -532,7 +580,7 @@ function computePayslipDetails(employee, month, year, attendances, leaves, statC
     incomeTaxDeduction: 0
   };
   if (employee.fbrEnabled !== false) {
-    taxReconciliation = calculateReconciledMonthlyTax(employee, taxableGrossSalary, month, year, taxSlabs, historicalPayslips, statConfigs);
+    taxReconciliation = calculateReconciledMonthlyTax(employee, recurringTaxableSalary, month, year, taxSlabs, historicalPayslips, statConfigs, oneOffTaxableIncome);
     incomeTaxDeduction = taxReconciliation.incomeTaxDeduction;
   }
   let eobiEmployeeDeduction = 0;
@@ -550,10 +598,8 @@ function computePayslipDetails(employee, month, year, attendances, leaves, statC
     providentFundDeduction = Math.round(basicEarnings * (employee.providentFundRate / 100));
     providentFundEmployerContribution = providentFundDeduction;
   }
-  const activeLoans = loanAdvances.filter(
-    (l) => l.employeeId === employee.id && l.status === "Active" && l.remainingInstallments > 0
-  );
-  const loanRepaymentDeduction = activeLoans.reduce((sum, l) => sum + l.monthlyInstallment, 0);
+  const loanDeductions = loanInstallmentsForPeriod(employee.id, loanAdvances, periodEnd);
+  const loanRepaymentDeduction = loanDeductions.reduce((sum, line) => sum + line.amount, 0);
   const totalDeductions = Math.round(
     incomeTaxDeduction + manualTaxAdjustment + eobiEmployeeDeduction + providentFundDeduction + loanRepaymentDeduction + otherAdjustmentsDeduction + lateFineDeduction
   );
@@ -601,6 +647,7 @@ function computePayslipDetails(employee, month, year, attendances, leaves, statC
     // usually paid 100% by employer in Pak
     providentFundDeduction,
     loanRepaymentDeduction,
+    loanDeductions,
     unpaidLeaveDeduction: Math.round(unpaidLeaveDeduction),
     totalDeductions,
     netSalary,
@@ -692,14 +739,31 @@ function payrollPreflight(employees, draftPayslips, historicalPayslips, branches
 }
 
 // src/data/lifecycle.ts
+function serviceMonths(dateOfJoining, lastWorkingDate) {
+  const parse = (value) => value.split("-").map(Number);
+  const [jy, jm, jd] = parse(dateOfJoining);
+  const [ly, lm, ld] = parse(lastWorkingDate);
+  const endDate = new Date(Date.UTC(ly, lm - 1, ld) + 864e5);
+  const ey = endDate.getUTCFullYear(), em = endDate.getUTCMonth() + 1, ed = endDate.getUTCDate();
+  if (![jy, jm, jd].every(Number.isFinite) || !Number.isFinite(endDate.getTime())) return 0;
+  let months = (ey - jy) * 12 + (em - jm) - (ed < jd ? 1 : 0);
+  if (months < 0) return 0;
+  const anchorMonth = jm - 1 + months;
+  const anchorYear = jy + Math.floor(anchorMonth / 12);
+  const anchorMonthIndex = anchorMonth % 12;
+  const anchorDay = Math.min(jd, new Date(Date.UTC(anchorYear, anchorMonthIndex + 1, 0)).getUTCDate());
+  const remainderDays = Math.max(0, (endDate.getTime() - Date.UTC(anchorYear, anchorMonthIndex, anchorDay)) / 864e5);
+  months += remainderDays / 30.436875;
+  return months;
+}
 function gratuityServiceYears(dateOfJoining, separationDate, rules) {
-  const months = Math.max(0, (Date.parse(`${separationDate}T00:00:00Z`) - Date.parse(`${dateOfJoining}T00:00:00Z`)) / (30.436875 * 864e5));
+  const months = serviceMonths(dateOfJoining, separationDate);
   const completed = Math.floor(months / 12);
   return completed + (rules.gratuityCountPartYearOverSixMonths && months - completed * 12 > 6 ? 1 : 0);
 }
 function gratuityEntitlement(monthlyBasis, dateOfJoining, separationDate, separationType, rules) {
   const years = gratuityServiceYears(dateOfJoining, separationDate, rules);
-  const exactYears = Math.max(0, (Date.parse(`${separationDate}T00:00:00Z`) - Date.parse(`${dateOfJoining}T00:00:00Z`)) / (365.2425 * 864e5));
+  const exactYears = serviceMonths(dateOfJoining, separationDate) / 12;
   if (exactYears < (rules.gratuityMinimumServiceYears ?? 1)) return { years, amount: 0 };
   const daily = monthlyBasis / (rules.settlementDailyRateDivisor || 30);
   const resignationPercent = separationType === "Resignation" && exactYears < 5 ? rules.gratuityResignationUnderFiveYearsPercent ?? 100 : 100;

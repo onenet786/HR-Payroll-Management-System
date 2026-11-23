@@ -1,5 +1,6 @@
 import type { Employee, PayrollRun, Payslip } from '../types';
 import type { Province } from '../types';
+import { csvCell as safeCsvCell } from './csvSafe';
 
 export type StatutoryReportKind = 'FBR' | 'EOBI' | 'SOCIAL_SECURITY';
 
@@ -11,11 +12,6 @@ export interface StatutoryReport {
   warnings: string[];
 }
 
-const safeCsvCell = (value: string | number | undefined) => {
-  let text = String(value ?? '');
-  if (/^[=+\-@]/.test(text)) text = `'${text}`;
-  return `"${text.replace(/"/g, '""')}"`;
-};
 const row = (values: Array<string | number | undefined>) => values.map(safeCsvCell).join(',');
 const socialSecurityScheme = (province?: Province | string) => ({ Punjab: 'PESSI', Sindh: 'SESSI', KPK: 'KP ESSI', Balochistan: 'BESSI', ICT: 'Federal / ICT' }[province || ''] || 'Province review required');
 
@@ -32,7 +28,7 @@ export function createStatutoryReport(kind: StatutoryReportKind, run: PayrollRun
 
   if (kind === 'FBR') {
     headers = ['Period', 'Employee Code', 'Employee Name', 'CNIC', 'Tax Year', 'Taxable Gross PKR', 'Tax Withheld PKR'];
-    rows = sheets.map(sheet => [period, sheet.employeeCode, sheet.employeeName, sheet.cnic, sheet.taxYear, sheet.grossSalary, sheet.incomeTaxDeduction]);
+    rows = sheets.map(sheet => [period, sheet.employeeCode, sheet.employeeName, sheet.cnic, sheet.taxYear, sheet.taxableIncomeThisPeriod ?? sheet.grossSalary, sheet.incomeTaxDeduction]);
     total = sheets.reduce((sum, sheet) => sum + sheet.incomeTaxDeduction, 0);
     sheets.forEach(sheet => { if (!/^\d{5}-\d{7}-\d$/.test(sheet.cnic)) warnings.push(`${sheet.employeeCode}: invalid CNIC`); });
   } else if (kind === 'EOBI') {

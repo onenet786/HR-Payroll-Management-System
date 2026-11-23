@@ -22,10 +22,23 @@ dist-kiosk
 
 ## Supported Punch Methods
 
-- Employee code / ID / card suffix
-- Webcam proof punch
+- Employee code / ID / card suffix (recorded as an `RFID/code` punch, never as fingerprint or face)
+- Webcam proof punch: single-person 1-on-1 mode with the liveness head-turn by default. Multi-face mode (several people at once) is off by default; switch it on in Settings → **Allow Multi-Face walk-through mode** (with a warning). Multi-face punches have no liveness check, so every one is sent to HR review (Needs Review).
 - IP camera proof punch by snapshot or MJPEG URL
 - DigitalPersona U.are.U / URU4500 or SecuGen Hamster Pro fingerprint identification through `URU4500Bridge.exe`
+
+## Kiosk Security
+
+**Admin PIN.** The first time Settings is opened, the kiosk asks you to set an admin PIN (6 to 12 digits; repeated or consecutive digits such as 111111 or 123456 are refused). Keep it safe; **Change PIN** in Settings changes it. After that the PIN is needed to open or save Settings, Exit the kiosk, clear the local attendance cache, register or unregister (remove device key), and test an IP camera.
+
+- 5 wrong PINs lock PIN entry for 30 seconds, doubling with each further failure up to 15 minutes. The lock is stored on disk and survives a restart.
+- The admin session ends after 5 idle minutes or when Settings is closed.
+
+**Locked window.** There is no menu, DevTools, reload, Alt+F4 or other shortcuts. The kiosk cannot navigate away from its screen or open new windows, and it closes only through **Exit** (with the PIN) or Windows shutdown / log-off. Developers can start it with `KIOSK_DEVTOOLS=1` to get DevTools.
+
+**Clock checks.** The server sends a kiosk punch to HR review (Needs Review) when the kiosk's clock is more than 10 minutes wrong, or when a punch saved offline arrives more than 12 hours late. Keep the kiosk PC's date, time and time zone correct: time zone (UTC+05:00) Islamabad, Karachi, with "Set time automatically" on. A kiosk cannot overwrite attendance that HR has corrected; it can still add the punch-out.
+
+**Server address.** Plain `http://` is accepted only for an IP address (for example `http://192.168.1.10:8080`) or localhost. Names such as `HEADOFFICE` or `*.local` need `https://`: run `Enable-Https.ps1` on the Windows server, then install its CA certificate on the kiosk PC. A name typed without `http://` or `https://` is treated as https. Setup codes made on a plain-http Windows server contain the server's IP address automatically.
 
 ## Optional: Three Exit Buttons, Attendance Policy, Classic Theme
 
@@ -52,6 +65,8 @@ When the attendance policy is filled in, late and half-day decisions use the bra
 3. The bridge starts by itself at every Windows login (the kiosk setup registers `URU4500Bridge.exe` under the all-users Run key), and the kiosk also starts and watches it. Do **not** install the bridge as a Windows service: a service runs in session 0, where the DigitalPersona SDK cannot see U.are.U / HID readers (SecuGen still works there, which hides the problem). The kiosk setup removes a legacy service automatically.
    - HR PCs that use only the web biometric module (no kiosk): run `tools\uru4500-bridge\install-autostart.bat` once as administrator. It removes any old service and registers the same login auto-start; `uninstall-autostart.bat` reverses it.
    - A second copy started while one is already listening on port 15896 exits quietly, so the Run entry and the kiosk never fight.
+   - The kiosk starts its own bridge with a secret and checks it before use. An older bridge installed as a service (or an old `URU4500Bridge.exe`) cannot prove this and is refused until it is updated: copy the new `URU4500Bridge.exe` from the kiosk package over it. Only if that is impossible, switch on **Allow unverified fingerprint bridge** in kiosk Settings (not recommended).
+   - Web browsers cannot use the bridge unless allowed. On an HR PC that enrolls fingerprints in the web portal in Chrome/Edge, create a text file `allowed-origins.txt` next to `URU4500Bridge.exe` containing the portal address exactly as in the browser address bar, without a path (for example `https://headoffice` or `https://hr.company.com`), one per line, then restart the bridge. The Windows desktop app needs nothing.
 4. Use Fingerprint mode. The kiosk sends enrolled templates to the bridge, captures a live finger, and the native SDK returns the matched employee. The bridge tries the U.are.U reader first and falls back to SecuGen; **Test Fingerprint Scanner** in kiosk settings shows which reader captured and the exact reason when a capture fails.
 
 ## Working Without Internet
@@ -92,7 +107,7 @@ Local kiosk data is stored under Electron's app data folder. Use Settings > Open
 
 ## Exit Kiosk
 
-Use the red `Exit` button in the top-right corner of the kiosk. It leaves Windows kiosk fullscreen mode and closes the app cleanly.
+Use the red `Exit` button in the top-right corner of the kiosk and enter the admin PIN. It leaves Windows kiosk fullscreen mode and closes the app cleanly. Alt+F4 and closing the window are blocked; Windows shutdown or log-off also closes it.
 
 ## IP Camera (Hikvision and others)
 

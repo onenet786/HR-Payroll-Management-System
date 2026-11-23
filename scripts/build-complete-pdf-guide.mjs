@@ -419,7 +419,7 @@ const htmlContent = `<!DOCTYPE html>
     <div class="cover-features">
       <div class="cover-feat-card">
         <h4>Pakistan Statutory Engine</h4>
-        <p>Official FBR Finance Act 2024/2025 Slabs, Section 4AB Surcharge, EOBI, SESSI/PESSI provincial social security caps, and automated minimum wage checks.</p>
+        <p>FBR Finance Act 2026 salaried slabs (Tax Year 2027), optional high-income surcharge, EOBI, SESSI/PESSI provincial social security caps, and automated minimum wage checks.</p>
       </div>
       <div class="cover-feat-card">
         <h4>Multi-Channel Attendance</h4>
@@ -442,7 +442,7 @@ const htmlContent = `<!DOCTYPE html>
         <p>Target Audience: <strong>HR Directors, Payroll Specialists, Line Managers &amp; Operations Auditors</strong></p>
       </div>
       <div style="text-align: right;">
-        <p>Applicable Fiscal Periods: <strong>Tax Years 2024–2025 &amp; 2025–2026</strong></p>
+        <p>Built-in tax slabs: <strong>Tax Year 2027 (from 1 July 2026)</strong></p>
         <p>Published: <strong>November 2026</strong></p>
       </div>
     </div>
@@ -456,21 +456,21 @@ const htmlContent = `<!DOCTYPE html>
       <div class="toc-item"><span>1. System Architecture &amp; Data Flow</span><span>Page 3</span></div>
       <div class="toc-item"><span>2. Diagram 1: Flow of Data Between Screens</span><span>Page 3</span></div>
       <div class="toc-item"><span>3. Diagram 2: How a Punch Becomes a Paid Day</span><span>Page 5</span></div>
-      <div class="toc-item"><span>4. Menu 1: Operations Dashboard (Step 12)</span><span>Page 8</span></div>
-      <div class="toc-item"><span>5. Menu 2: Company Setup &amp; Master Data (Step 2)</span><span>Page 8</span></div>
-      <div class="toc-item"><span>6. Menu 3: Statutory Settings &amp; FBR Tax Slabs (Step 1)</span><span>Page 10</span></div>
-      <div class="toc-item"><span>7. Menu 4: Employee Directory &amp; Profiles (Step 3)</span><span>Page 12</span></div>
-      <div class="toc-item"><span>8. Menu 5: Holiday Calendar (Step 4)</span><span>Page 13</span></div>
-      <div class="toc-item"><span>9. Menu 6: Leave Management &amp; Approvals (Step 5)</span><span>Page 14</span></div>
-      <div class="toc-item"><span>10. Menu 7: Attendance Register &amp; Needs Review (Step 7)</span><span>Page 15</span></div>
-      <div class="toc-item"><span>11. Menu 8: Biometrics, Cameras &amp; Kiosk (Step 6)</span><span>Page 16</span></div>
-      <div class="toc-item"><span>12. Menu 9: Loans &amp; Salary Advances (Step 8)</span><span>Page 16</span></div>
-      <div class="toc-item"><span>13. Menu 10: Salary Revisions &amp; Increments (Step 9)</span><span>Page 17</span></div>
-      <div class="toc-item"><span>14. Menu 11: Payroll Processing Engine (Step 10)</span><span>Page 18</span></div>
-      <div class="toc-item"><span>15. Menu 12: Gratuity &amp; Final Settlement (Step 11)</span><span>Page 19</span></div>
-      <div class="toc-item"><span>16. Supporting Modules: Assets, Recruitment &amp; Appraisals</span><span>Page 24</span></div>
-      <div class="toc-item"><span>17. Statutory Outputs, Banking &amp; Accounting Journals</span><span>Page 25</span></div>
-      <div class="toc-item"><span>18. Standard Operating Procedures (SOP Checklist)</span><span>Page 26</span></div>
+      <div class="toc-item"><span>4. Menu 1: Operations Dashboard (Step 12)</span><span>Page 9</span></div>
+      <div class="toc-item"><span>5. Menu 2: Company Setup &amp; Master Data (Step 2)</span><span>Page 9</span></div>
+      <div class="toc-item"><span>6. Menu 3: Statutory Settings &amp; FBR Tax Slabs (Step 1)</span><span>Page 11</span></div>
+      <div class="toc-item"><span>7. Menu 4: Employee Directory &amp; Profiles (Step 3)</span><span>Page 13</span></div>
+      <div class="toc-item"><span>8. Menu 5: Holiday Calendar (Step 4)</span><span>Page 14</span></div>
+      <div class="toc-item"><span>9. Menu 6: Leave Management &amp; Approvals (Step 5)</span><span>Page 15</span></div>
+      <div class="toc-item"><span>10. Menu 7: Attendance Register &amp; Needs Review (Step 7)</span><span>Page 16</span></div>
+      <div class="toc-item"><span>11. Menu 8: Biometrics, Cameras &amp; Kiosk (Step 6)</span><span>Page 18</span></div>
+      <div class="toc-item"><span>12. Menu 9: Loans &amp; Salary Advances (Step 8)</span><span>Page 19</span></div>
+      <div class="toc-item"><span>13. Menu 10: Salary Revisions &amp; Increments (Step 9)</span><span>Page 19</span></div>
+      <div class="toc-item"><span>14. Menu 11: Payroll Processing Engine (Step 10)</span><span>Page 21</span></div>
+      <div class="toc-item"><span>15. Menu 12: Gratuity &amp; Final Settlement (Step 11)</span><span>Page 23</span></div>
+      <div class="toc-item"><span>16. Supporting Modules: Assets, Recruitment &amp; Appraisals</span><span>Page 28</span></div>
+      <div class="toc-item"><span>17. Statutory Outputs, Banking &amp; Accounting Journals</span><span>Page 29</span></div>
+      <div class="toc-item"><span>18. Standard Operating Procedures (SOP Checklist)</span><span>Page 30</span></div>
     </div>
   </div>
 
@@ -565,6 +565,9 @@ const htmlContent = `<!DOCTYPE html>
     <p><strong>Jump to record (Ctrl+K):</strong> press Ctrl+K, type a name, employee code or CNIC and choose the employee: the Employee Directory opens filtered to that person (and, with permission to edit employees, their record opens for editing).</p>
     <p><strong>Employees in a web browser:</strong> an employee who signs in from a browser gets the employee self-service screens &mdash; the same as the phone app (today's status, attendance punch when allowed, leave, payslips, notices) &mdash; with a <strong>Change password</strong> button, not the HR portal.</p>
     <p><strong>Your own password:</strong> every user can change it in <strong>My Security &rarr; Change password</strong>: current password, then a new one of at least 12 characters (twice). Your other signed-in devices are signed out, and remembered devices ask for the MFA code again.</p>
+    <p><strong>Signing out:</strong> after <strong>Logout</strong> the page reloads completely, so the next person on the same browser sees none of the previous user's data.</p>
+    <p><strong>Saving is safe:</strong> when you create, approve or disburse a payroll run, add or edit an employee, add an attendance entry, decide a regularization, reject leave or delete a holiday, and the server refuses or the connection fails, a message tells you why and the screen does <em>not</em> pretend it saved; forms stay open with what you typed. A double click cannot create two payroll runs.</p>
+    <p><strong>Security notes for administrators:</strong> two-step verification stays on the method that was enrolled &mdash; an account that uses an authenticator app cannot switch to an email code at sign-in (use an MFA reset if the phone is lost). A user account that is not linked to an employee sees only what its role permits (it has no "own records"). Employee photos must be JPEG, PNG, WebP or GIF images.</p>
     <p><strong>Dates:</strong> "today" is always your computer's own local date (earlier versions could show yesterday's date before 5 AM in Pakistan).</p>
   </div>
 
@@ -617,8 +620,8 @@ const htmlContent = `<!DOCTYPE html>
     </div>
     <p><strong>Business Purpose:</strong> Houses the statutory tax matrices and social insurance parameters governing all monthly gross-to-net payroll deductions across Pakistan.</p>
 
-    <h4>Official FBR Income Tax Slabs (Finance Act 2024 / 2025):</h4>
-    <p>Enacted under the First Schedule, Part I, Division I, Clause (2) of the Income Tax Ordinance, 2001 for salaried individuals:</p>
+    <h4>Built-in FBR Salaried Tax Slabs (Finance Act 2026, Tax Year 2027, from 1 July 2026):</h4>
+    <p>Income Tax Ordinance, 2001, First Schedule, Part I, Division I (salaried individuals); Finance Act 2026 rates. This is the table the program ships with; tax rates change with every Finance Act, so <strong>check them against FBR every year</strong>.</p>
 
     <table>
       <thead>
@@ -635,50 +638,69 @@ const htmlContent = `<!DOCTYPE html>
           <td><strong>Slab 1</strong></td>
           <td>Rs. 0 &ndash; 600,000</td>
           <td>Rs. 0</td>
-          <td>0.0%</td>
-          <td>Where taxable income does not exceed Rs. 600,000: 0%</td>
+          <td>0%</td>
+          <td>Nil</td>
         </tr>
         <tr>
           <td><strong>Slab 2</strong></td>
           <td>Rs. 600,001 &ndash; 1,200,000</td>
           <td>Rs. 0</td>
-          <td>5.0%</td>
-          <td>5% of the amount exceeding Rs. 600,000</td>
+          <td>1%</td>
+          <td>1% of the amount exceeding Rs. 600,000</td>
         </tr>
         <tr>
           <td><strong>Slab 3</strong></td>
           <td>Rs. 1,200,001 &ndash; 2,200,000</td>
-          <td>Rs. 30,000</td>
-          <td>15.0%</td>
-          <td>Rs. 30,000 + 15% of the amount exceeding Rs. 1,200,000</td>
+          <td>Rs. 6,000</td>
+          <td>11%</td>
+          <td>Rs. 6,000 + 11% of the amount exceeding Rs. 1,200,000</td>
         </tr>
         <tr>
           <td><strong>Slab 4</strong></td>
           <td>Rs. 2,200,001 &ndash; 3,200,000</td>
-          <td>Rs. 180,000</td>
-          <td>25.0%</td>
-          <td>Rs. 180,000 + 25% of the amount exceeding Rs. 2,200,000</td>
+          <td>Rs. 116,000</td>
+          <td>20%</td>
+          <td>Rs. 116,000 + 20% of the amount exceeding Rs. 2,200,000</td>
         </tr>
         <tr>
           <td><strong>Slab 5</strong></td>
           <td>Rs. 3,200,001 &ndash; 4,100,000</td>
-          <td>Rs. 430,000</td>
-          <td>30.0%</td>
-          <td>Rs. 430,000 + 30% of the amount exceeding Rs. 3,200,000</td>
+          <td>Rs. 316,000</td>
+          <td>25%</td>
+          <td>Rs. 316,000 + 25% of the amount exceeding Rs. 3,200,000</td>
         </tr>
         <tr>
           <td><strong>Slab 6</strong></td>
-          <td>Exceeding Rs. 4,100,000</td>
-          <td>Rs. 700,000</td>
-          <td>35.0%</td>
-          <td>Rs. 700,000 + 35% of the amount exceeding Rs. 4,100,000</td>
+          <td>Rs. 4,100,001 &ndash; 5,600,000</td>
+          <td>Rs. 541,000</td>
+          <td>29%</td>
+          <td>Rs. 541,000 + 29% of the amount exceeding Rs. 4,100,000</td>
+        </tr>
+        <tr>
+          <td><strong>Slab 7</strong></td>
+          <td>Rs. 5,600,001 &ndash; 7,000,000</td>
+          <td>Rs. 976,000</td>
+          <td>32%</td>
+          <td>Rs. 976,000 + 32% of the amount exceeding Rs. 5,600,000</td>
+        </tr>
+        <tr>
+          <td><strong>Slab 8</strong></td>
+          <td>Exceeding Rs. 7,000,000</td>
+          <td>Rs. 1,424,000</td>
+          <td>35%</td>
+          <td>Rs. 1,424,000 + 35% of the amount exceeding Rs. 7,000,000</td>
         </tr>
       </tbody>
     </table>
 
     <div class="callout callout-warning">
-      <strong>Section 4AB Surcharge (Finance Act 2024 / 2025)</strong>
-      A mandatory <strong>10% super-tax surcharge</strong> is automatically levied on the total income tax payable for high-earning salaried individuals whose annual taxable income exceeds <strong>PKR 10,000,000 (10 Million PKR)</strong>.
+      <strong>High-income surcharge (Section 4AB) &mdash; only if you set it</strong>
+      No surcharge is added by default (rate 0). If the Finance Act for the year sets one, enter the <strong>Surcharge rate (% of tax)</strong> and the income threshold in Statutory Settings &rarr; Salary tax rules; it is then added to the tax of employees above that threshold.
+    </div>
+
+    <div class="callout callout-statutory">
+      <strong>Existing companies keep their own slabs</strong>
+      New installations start with the table above. A company that already has slabs keeps them unchanged until someone clicks <strong>Update from FBR</strong> and a second authorized user approves the proposal.
     </div>
 
     <h4>Social Security &amp; Minimum Wage Parameters:</h4>
@@ -692,7 +714,7 @@ const htmlContent = `<!DOCTYPE html>
     <h4>Built-In UI Controls:</h4>
     <ul>
       <li><strong>"Download CSV":</strong> Generates an official spreadsheet export of the active FBR tax table.</li>
-      <li><strong>"Update from FBR":</strong> One-click button to synchronize and restore the official Finance Act rates directly into the PostgreSQL database.</li>
+      <li><strong>"Update from FBR":</strong> does not go online. It proposes the built-in Tax Year 2027 table (above) in place of your slabs; a second person must approve it before payroll uses it.</li>
     </ul>
 
     <div class="callout callout-warning">
@@ -726,10 +748,11 @@ const htmlContent = `<!DOCTYPE html>
         </ul>
       </li>
       <li><strong>Statutory Opt-Ins:</strong> Check eligibility for FBR Income Tax withholding, EOBI, Provincial Social Security, and Provident Fund (with employee contribution %).</li>
-      <li><strong>Banking Advice:</strong> Select Pakistani Bank (HBL, MCB, UBL, Alfalah, Meezan, etc.), Bank Account Number, and 24-character Pakistani IBAN (<span class="code-snippet">PK...</span>).</li>
+      <li><strong>Banking Advice:</strong> Select Pakistani Bank (HBL, MCB, UBL, Alfalah, Meezan, etc.), Bank Account Number, and 24-character Pakistani IBAN (<span class="code-snippet">PK...</span>). The IBAN may be typed with spaces or in small letters; it is saved in capitals without spaces and checked with the international IBAN check digits, so a mistyped IBAN is refused (<em>This IBAN is not valid: its check digits do not match&hellip;</em>).</li>
       <li>Save the record. The employee is now active and immediately eligible for attendance and payroll inclusion.</li>
     </ol>
     <p><strong>Editing an employee:</strong> the form also holds Father's Name, Blood Group, Religion and Present / Permanent Address. Employees imported from CyberAP show an <em>Imported from CyberAP</em> box: their CyberAP ID, notes, salary heads, per-day allowance rates, and amber warnings when the salary was WITHHELD in CyberAP or CyberAP had no real basic salary (load salaries with Salary Revisions &rarr; Upload salary sheet).</p>
+    <p><strong>Salary on the edit form:</strong> with two-person control on (full edition), an existing employee's salary is read-only in Edit Employee, with the note <em>Change salary through Salary Revisions (needs a second approver)</em>. Use Menu 10. New employees still get their salary on the add form. The edit form also refuses a CNIC that already belongs to another employee.</p>
   </div>
 
   <!-- MENU 5: HOLIDAY CALENDAR -->
@@ -791,7 +814,7 @@ const htmlContent = `<!DOCTYPE html>
           <td><strong>Unpaid Leave (LWP)</strong></td>
           <td>As approved</td>
           <td>Unpaid</td>
-          <td>Deducts calendar-day salary: <span class="code-snippet">(Basic Salary / Total Days in Month) &times; Unpaid Days</span></td>
+          <td>Deducts the monthly package (basic + allowances) per unpaid day on the configured absence basis, e.g. <span class="code-snippet">(Monthly Package / Total Days in Month) &times; Unpaid Days</span>. With the "Scheduled Working Days" basis, weekly offs and holidays inside a leave are not charged.</td>
         </tr>
       </tbody>
     </table>
@@ -800,7 +823,7 @@ const htmlContent = `<!DOCTYPE html>
     <ol class="step-list">
       <li>Employee submits leave via mobile app or web portal specifying type, dates, and reason.</li>
       <li>HR or Line Manager receives alert under <strong>"Pending Leave Requests"</strong>.</li>
-      <li>Manager reviews quota balance and selects <strong>Approve</strong> or <strong>Reject</strong>.</li>
+      <li>Manager reviews quota balance and selects <strong>Approve</strong> or <strong>Reject</strong>. Nobody can approve or reject their own leave (full edition): both buttons are disabled on your own request.</li>
       <li>Approved leave immediately reflects on the Attendance Stream as <span class="badge badge-blue">On Leave</span>, protecting the employee from unexcused absence penalties.</li>
     </ol>
     <p><strong>Add Leave Record (HR records leave directly):</strong> the leave balance is checked the same way as for an approval. If the server refuses (for example not enough balance), the message is shown and the form stays open so you can correct it. A recorded approved leave also marks those days <span class="badge badge-blue">On Leave</span> in attendance, like a normal approval.</p>
@@ -819,6 +842,7 @@ const htmlContent = `<!DOCTYPE html>
       <li><strong>15-Minute Grace Window:</strong> Shift starts at 09:00 AM. Punch-ins between 09:00:01 and 09:15:00 are marked <span class="badge badge-green">Present</span>. Punch-ins at 09:15:01 or later are classified as <span class="badge badge-amber">Late</span>.</li>
       <li><strong>Half-Day Calculation:</strong> If total hours worked between Punch-In and Punch-Out are under 4 hours, status updates to <span class="badge badge-amber">Half Day</span>.</li>
       <li><strong>Overtime Engine:</strong> Working hours exceeding 8 hours (480 mins) are stored in <span class="code-snippet">overtimeMinutes</span> and converted to hours for 2x overtime payroll compensation.</li>
+      <li><strong>Night shifts, Fridays and Ramadan (also at the kiosk):</strong> a punch-out after midnight closes the previous day's shift; punches between midnight and 5 AM get the correct date; the employee's Friday and Ramadan timings apply to kiosk punches too.</li>
     </ul>
 
     <h4>The "Needs Review" Queue:</h4>
@@ -846,6 +870,18 @@ const htmlContent = `<!DOCTYPE html>
       <li><strong>IP RTSP Camera:</strong> Direct stream ingestion for entrance gates with automatic face recognition matching against enrolled employee vectors.</li>
       <li><strong>2-Minute Anti-Passback Cooldown:</strong> Enforces a strict 120-second timer between consecutive punches. Prevents accidental double-swipes or buddy-punching duplicates.</li>
     </ul>
+    <div class="callout callout-warning">
+      <strong>Kiosk security (admin PIN and locked window)</strong>
+      The first time Settings is opened, the kiosk asks you to set an <strong>admin PIN</strong> (6 to 12 digits; keep it safe; <em>Change PIN</em> in Settings). After that the PIN is needed to open or save Settings, Exit, clear the local attendance cache, register or remove the device key, and test an IP camera. 5 wrong PINs lock it for 30 seconds, doubling up to 15 minutes (the lock survives a restart); the admin session ends after 5 idle minutes or when Settings closes. The window is locked: no menu, DevTools, reload, Alt+F4 or other shortcuts, no navigating away; it closes only through Exit with the PIN or Windows shutdown / log-off (developers: <span class="code-snippet">KIOSK_DEVTOOLS=1</span>).
+    </div>
+    <ul>
+      <li><strong>Face camera:</strong> the default is the single-person 1-on-1 mode with the liveness head-turn. <em>Multi-Face</em> (several people at once) is off by default; switch it on in Settings (<em>Allow Multi-Face walk-through mode</em>, with a warning). Multi-face punches have no liveness check, so every one goes to Needs Review.</li>
+      <li><strong>Employee-code punches</strong> are recorded as <em>RFID/code</em> punches, never as fingerprint or face.</li>
+      <li><strong>Clock checks:</strong> a punch goes to Needs Review when the kiosk clock is more than 10 minutes wrong, or when a punch saved offline arrives more than 12 hours late. Keep the kiosk PC's date, time and time zone correct (Pakistan, automatic time). A kiosk cannot overwrite attendance HR has corrected; it can still add the punch-out.</li>
+      <li><strong>Fingerprint bridge:</strong> the kiosk starts its own <span class="code-snippet">URU4500Bridge.exe</span> with a secret and checks it before use. An older bridge installed as a service is refused until replaced with the new one from the kiosk package (or <em>Allow unverified fingerprint bridge</em> is switched on &mdash; not recommended). For web enrollment in Chrome/Edge, put <span class="code-snippet">allowed-origins.txt</span> next to the bridge with the portal address exactly as in the address bar, without a path (e.g. <span class="code-snippet">https://hr.company.com</span>), one per line, and restart the bridge. The Windows desktop app needs nothing.</li>
+      <li><strong>Server address:</strong> plain <span class="code-snippet">http://</span> only for an IP address (e.g. <span class="code-snippet">http://192.168.1.10:8080</span>) or localhost; names such as HEADOFFICE or *.local need <span class="code-snippet">https://</span> (run Enable-Https.ps1 on the Windows server and install its CA on the kiosk PC). A name typed without http/https is treated as https. Setup codes made on a plain-http Windows server contain its IP address automatically.</li>
+      <li><strong>Android app:</strong> its data is not backed up and cannot be transferred to another phone; sign in again on a new device.</li>
+    </ul>
     <p><strong>Registering a kiosk PC:</strong> in User Management &rarr; Kiosk terminals, click <strong>Create setup code</strong>, copy the code (shown once) and paste it on the kiosk PC under Settings &rarr; Server Registration &rarr; Setup code. Alternatively sign in there once with a Kiosk Terminal account. The Kiosk terminals list shows the account name for every kiosk, including those registered with a setup code.</p>
   </div>
 
@@ -861,8 +897,8 @@ const htmlContent = `<!DOCTYPE html>
     <ol class="step-list">
       <li>Create loan record: specify Employee, Type (Company Loan or Salary Advance), Principal Amount, Monthly Installment, and Repayment Tenure (months).</li>
       <li><strong>Two-person approval:</strong> the system records who entered the application. A <em>different</em> authorized user selects <strong>Approve</strong> or <strong>Reject</strong>; the person who entered it cannot decide it, and an employee cannot decide their own loan. Approving cannot change the amount or number of installments. In the Lite edition (no maker-checker) one owner may do both.</li>
-      <li>Once active, the system automatically deducts the monthly installment from the employee's net payslip during every payroll run.</li>
-      <li>The system tracks total repaid amount and decrements <span class="code-snippet">remainingInstallments</span>.</li>
+      <li>After approval the loan's terms are fixed. Once active, the system deducts the monthly installment from the employee's payslip in every payroll run. A loan approved after the end of a payroll month is not deducted in that month.</li>
+      <li>Repayment only moves forward when that salary is <strong>disbursed</strong>: the system then adds to the repaid amount and reduces <span class="code-snippet">remainingInstallments</span>. Each payslip records exactly which loans it deducted and how much, and an installment never exceeds what is still owed.</li>
       <li>If an employee leaves before full repayment, the remaining unpaid balance is automatically recovered from their final gratuity settlement.</li>
     </ol>
   </div>
@@ -877,7 +913,7 @@ const htmlContent = `<!DOCTYPE html>
     <ul>
       <li>Records Old Basic Salary, New Basic Salary, Effective Date, and Appraisal Reference.</li>
       <li>Every draft records who prepared it, and the preparer cannot approve it &mdash; including drafts created automatically from approved performance reviews.</li>
-      <li>The payroll engine checks effective dates and applies revised salary structures automatically.</li>
+      <li>The payroll engine checks effective dates and applies revised salary structures automatically. A back-dated revision creates arrears that count each past month once. In the full edition this is the only way to change an existing employee's salary.</li>
       <li><strong>Upload salary sheet</strong> (many employees at once, e.g. after a CyberAP migration): download the template (current staff, those without a salary first), fill the <em>Basic Salary</em> column in Excel, save as CSV and upload. The preview shows each row as <em>Draft revision</em> or the reason it is skipped (unknown code, blank, same salary, employee has left). Each usable row becomes a draft revision.</li>
       <li><strong>Approve all drafts</strong> approves every draft another user prepared, one by one, and updates each basic salary. With maker-checker on, the person who uploaded the sheet cannot approve it.</li>
     </ul>
@@ -898,8 +934,8 @@ const htmlContent = `<!DOCTYPE html>
       <li><strong>Attendance Verification:</strong> Ingests the locked attendance register. Verifies payable days, unpaid leaves, and overtime hours.</li>
       <li><strong>Money Inputs Ingestion:</strong> Ingests approved salary revisions, active loan installments, and terminal settlements.</li>
       <li><strong>Gross-to-Net Computation:</strong> Simulates gross earnings, FBR tax withholding, EOBI, PESSI, Provident Fund, and Net Pay for all eligible employees.</li>
-      <li><strong>Draft Creation &amp; Dual Approval:</strong> Manager reviews the draft register and selects <strong>Approve</strong>. Approval freezes the calculations and commits loan deductions.</li>
-      <li><strong>Disbursement Authorization:</strong> Once bank funds are transferred, select <strong>Mark Disbursed</strong> to finalize the cycle.</li>
+      <li><strong>Draft Creation &amp; Dual Approval:</strong> <em>Run New Payroll Cycle</em> is disabled while it works, so a double click cannot create two runs. A different user reviews the draft register and selects <strong>Approve</strong>, which freezes the calculations.</li>
+      <li><strong>Disbursement Authorization:</strong> Once bank funds are transferred, select <strong>Mark Disbursed</strong> to finalize the cycle. Loan repayments are recorded at this step.</li>
       <li><strong>Output Delivery:</strong> Generate individual digital payslips, download bank advice CSVs, and export statutory schedules.</li>
     </ol>
     <div class="callout callout-statutory">
@@ -919,7 +955,7 @@ const htmlContent = `<!DOCTYPE html>
       <tbody>
         <tr>
           <td><strong>Gross Salary</strong></td>
-          <td>Basic + House Rent + Conveyance + Medical + Other + Overtime Pay &minus; Unpaid Leave Deduction</td>
+          <td>Basic + House Rent + Conveyance + Medical + Other + Overtime Pay &minus; Unpaid Leave Deduction (allowances are reduced for absence and for joiners / leavers in the same proportion as basic)</td>
           <td>Employment Contract</td>
         </tr>
         <tr>
@@ -929,7 +965,7 @@ const htmlContent = `<!DOCTYPE html>
         </tr>
         <tr>
           <td><strong>FBR Income Tax</strong></td>
-          <td>Annualize Gross &times; 12 &rarr; Apply 6 Progressive Slabs (+ 10% Surcharge if &gt; 10M) &divide; 12</td>
+          <td>Project the recurring taxable salary for the year &rarr; apply the 8 progressive slabs (+ surcharge only if configured) &rarr; monthly withholding. One-off taxable bonuses are taxed in the month paid (not projected as if repeated); manual Tax Adjustments count as tax already deducted.</td>
           <td>ITO 2001, 1st Sched Part I Div I</td>
         </tr>
         <tr>
@@ -971,7 +1007,7 @@ const htmlContent = `<!DOCTYPE html>
     <div class="callout callout-statutory">
       <strong>Gratuity Calculation Formula</strong>
       <span class="code-snippet">Gratuity = (Completed Years of Service) &times; (Last Drawn Basic Salary) &times; (30 / 30)</span>
-      <p style="margin-top: 4px; font-size: 8pt;">Pro-rated for fractions of service exceeding 6 months. Service is counted from the employee's Date of Joining.</p>
+      <p style="margin-top: 4px; font-size: 8pt;">Pro-rated for fractions of service exceeding 6 months. Service is counted from the employee's Date of Joining up to and including the last working day, so someone who worked exactly 5 years gets 5 years.</p>
     </div>
 
     <h4>Terminal Settlement Checklist:</h4>
@@ -1138,7 +1174,7 @@ const htmlContent = `<!DOCTYPE html>
     <p>Itemized statement of total taxable salary paid and total income tax deducted at source under the First Schedule of the Income Tax Ordinance, 2001.</p>
 
     <h3>6. General Ledger Accounting Journal Entry</h3>
-    <p>Provides dual-entry bookkeeping records for the enterprise accounting department:</p>
+    <p>Provides dual-entry bookkeeping records for the enterprise accounting department. The journal balances also when there are late-arrival fines, and CSV exports keep negative amounts as numbers (e.g. -1500) so spreadsheets can total them:</p>
     <table>
       <thead>
         <tr>

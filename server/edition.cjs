@@ -93,32 +93,30 @@ async function saveEdition(queryable, raw, actor, request = {}) {
 }
 
 // ─── Vendor console credentials ───────────────────────────────────────────────
-// Login "onenet" with password OneNet + DDMonYYYY (for example OneNet19Oct2026) opens the edition console.
-// The password rotates daily on Pakistan time; the day before and after are accepted for clock drift.
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const KARACHI_OFFSET_MS = 5 * 3_600_000;
+// Login "onenet" (VENDOR_LOGIN) with this server's own console password, VENDOR_CONSOLE_PASSWORD in .env. The setup
+// scripts generate a random one per installation and show it once for OneNet to keep. The old date-based password
+// (OneNet + DDMonYYYY) could be worked out by anyone and is no longer accepted. Without a password of at least
+// 16 characters the console is off.
+const MIN_VENDOR_PASSWORD_LENGTH = 16;
 const vendorLogin = () => String(process.env.VENDOR_LOGIN || 'onenet').trim().toLowerCase();
-const vendorPrefix = () => String(process.env.VENDOR_PASSWORD_PREFIX || 'OneNet');
-
-function vendorPasswordFor(now = Date.now(), dayOffset = 0) {
-  const date = new Date(now + KARACHI_OFFSET_MS + dayOffset * 86_400_000);
-  return `${vendorPrefix()}${String(date.getUTCDate()).padStart(2, '0')}${MONTHS[date.getUTCMonth()]}${date.getUTCFullYear()}`;
-}
+const vendorPassword = () => String(process.env.VENDOR_CONSOLE_PASSWORD || '');
 
 const sameSecret = (given, expected) => {
-  const a = Buffer.from(String(given));
-  const b = Buffer.from(String(expected));
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
+  // Compared as SHA-256 digests so the length of the stored password is not revealed by timing either.
+  const a = crypto.createHash('sha256').update(String(given)).digest();
+  const b = crypto.createHash('sha256').update(String(expected)).digest();
+  return crypto.timingSafeEqual(a, b);
 };
 
-function vendorConsoleEnabled() { return process.env.VENDOR_CONSOLE_DISABLED !== 'true'; }
+function vendorConsoleEnabled() {
+  return process.env.VENDOR_CONSOLE_DISABLED !== 'true' && vendorPassword().length >= MIN_VENDOR_PASSWORD_LENGTH;
+}
 
-/** True only for the vendor login name with today's (+/-1 day) console password. */
-function vendorCredentialsValid(login, password, now = Date.now()) {
+/** True only for the vendor login name with this server's console password. */
+function vendorCredentialsValid(login, password) {
   if (!vendorConsoleEnabled()) return false;
   if (String(login || '').trim().toLowerCase() !== vendorLogin()) return false;
-  // Every candidate is compared so timing does not reveal which day matched.
-  return [-1, 0, 1].map(offset => sameSecret(password, vendorPasswordFor(now, offset))).some(Boolean);
+  return sameSecret(password, vendorPassword());
 }
 
 const VENDOR_TOKEN_TTL_MS = 30 * 60_000;
@@ -139,7 +137,7 @@ function vendorAuth(req, res, next) {
   const header = req.get('authorization') || '';
   const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
   if (!vendorConsoleEnabled() || !vendorTokenValid(token)) {
-    return res.status(401).json({ error: 'Vendor console session expired. Sign in again with the current console password.', correlationId: req.correlationId });
+    return res.status(401).json({ error: 'Vendor console session expired. Sign in again with the console password of this server.', correlationId: req.correlationId });
   }
   next();
 }
@@ -214,6 +212,6 @@ router.put('/installation', vendorAuth, async (req, res, next) => {
 module.exports = {
   EDITION_FEATURE_KEYS, EDITION_PRESETS, EDITION_LABELS, FULL_EDITION,
   normalizeEdition, loadEdition, saveEdition, resetEditionCache,
-  vendorPasswordFor, vendorCredentialsValid, vendorConsoleEnabled, issueVendorToken, vendorTokenValid, vendorAuth,
+  vendorCredentialsValid, vendorConsoleEnabled, issueVendorToken, vendorTokenValid, vendorAuth,
   router,
 };

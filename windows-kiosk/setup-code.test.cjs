@@ -36,7 +36,7 @@ test('a damaged code is refused', () => {
   assert.throws(() => parseSetupCode(encode({ v: 1, n: 'Acme', u: ['https://a.com'] })), { message: 'The setup code is damaged' }, 'no token');
 });
 
-test('server addresses must use https, except local-network addresses', () => {
+test('server addresses must use https, except localhost and private IP addresses', () => {
   const httpsOnly = /^Server address must use https/;
   assert.throws(() => parseSetupCode(encode({ v: 1, n: 'Acme', u: ['http://acme.binishaqsoft.com'], t: 'tok' })), { message: httpsOnly });
   assert.throws(() => parseSetupCode(encode({ v: 1, n: 'Acme', u: ['https://acme.binishaqsoft.com', 'http://203.0.113.5'], t: 'tok' })), { message: httpsOnly });
@@ -45,14 +45,19 @@ test('server addresses must use https, except local-network addresses', () => {
   assert.deepEqual(parseSetupCode(encode({ v: 1, n: 'Dev', u: ['http://localhost:3001'], t: 'tok' })).urls, ['http://localhost:3001']);
   assert.deepEqual(parseSetupCode(encode({ v: 1, n: 'Dev', u: ['http://127.0.0.1:8080/'], t: 'tok' })).urls, ['http://127.0.0.1:8080']);
   assert.deepEqual(parseSetupCode(encode({ v: 1, n: 'HQ', u: ['http://192.168.86.83:8080'], t: 'tok' })).urls, ['http://192.168.86.83:8080']);
-  assert.deepEqual(parseSetupCode(encode({ v: 1, n: 'HQ', u: ['http://HEADOFFICE:8080', 'http://10.0.0.5'], t: 'tok' })).urls, ['http://headoffice:8080', 'http://10.0.0.5']);
+  assert.deepEqual(parseSetupCode(encode({ v: 1, n: 'HQ', u: ['http://10.0.0.5', 'https://HEADOFFICE:8443'], t: 'tok' })).urls, ['http://10.0.0.5', 'https://headoffice:8443']);
+  // Names resolved by DNS / NetBIOS / mDNS can be answered by any machine on the network: https only.
+  for (const name of ['http://HEADOFFICE:8080', 'http://hr.local', 'http://srv.lan', 'http://hr.corp.internal', 'http://box.localhost']) {
+    assert.throws(() => parseSetupCode(encode({ v: 1, n: 'HQ', u: [name], t: 'tok' })), { message: /needs https/ }, name);
+  }
+  assert.throws(() => parseSetupCode(encode({ v: 1, n: 'HQ', u: ['http://HEADOFFICE:8080', 'http://10.0.0.5'], t: 'tok' })), { message: httpsOnly }, 'one bad address refuses the code');
 });
 
-test('local-network hosts are recognised', () => {
-  for (const host of ['localhost', '127.0.0.1', '10.1.2.3', '172.16.0.1', '172.31.255.255', '192.168.86.83', '169.254.1.1', '[::1]', 'fd12:3456::1', 'HEADOFFICE', 'hr.local', 'srv.lan', 'hr.corp.internal']) {
+test('plain http is allowed only for localhost and literal private IP addresses', () => {
+  for (const host of ['localhost', 'LOCALHOST', '127.0.0.1', '10.1.2.3', '172.16.0.1', '172.31.255.255', '192.168.86.83', '169.254.1.1', '[::1]', 'fd12:3456::1', 'fe80::1']) {
     assert.equal(isLocalNetworkHost(host), true, host);
   }
-  for (const host of ['8.8.8.8', '172.15.0.1', '172.32.0.1', '203.0.113.5', 'attendance.binishaqsoft.com', '2001:db8::1', '']) {
+  for (const host of ['8.8.8.8', '172.15.0.1', '172.32.0.1', '203.0.113.5', '192.168.1.300', 'attendance.binishaqsoft.com', '2001:db8::1', '', 'HEADOFFICE', 'hr.local', 'srv.lan', 'hr.corp.internal', 'x.home.arpa', 'box.localhost', '10.0.0.5.nip.io']) {
     assert.equal(isLocalNetworkHost(host), false, host);
   }
 });
@@ -63,6 +68,8 @@ test('a server address typed in Settings gets the right scheme', () => {
   assert.equal(normalizeServerAddress('attendance.binishaqsoft.com'), 'https://attendance.binishaqsoft.com');
   assert.equal(normalizeServerAddress('http://192.168.86.83:8080'), 'http://192.168.86.83:8080');
   assert.equal(normalizeServerAddress('https://192.168.86.83'), 'https://192.168.86.83');
+  assert.equal(normalizeServerAddress('HEADOFFICE:8443'), 'https://headoffice:8443', 'a server name defaults to https');
+  assert.throws(() => normalizeServerAddress('http://HEADOFFICE:8080'), { message: /needs https/ });
   assert.throws(() => normalizeServerAddress('http://attendance.binishaqsoft.com'), { message: /^Server address must use https/ });
   assert.throws(() => normalizeServerAddress(''), { message: 'Enter the server address' });
   assert.throws(() => normalizeServerAddress('http://user:pw@192.168.1.1'), { message: 'The server address is not valid' });

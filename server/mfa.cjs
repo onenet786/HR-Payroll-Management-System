@@ -185,6 +185,7 @@ publicRouter.post('/send-email-login-code', async (req, res, next) => {
       if (previousCode.rows[0]?.sent_at && new Date(previousCode.rows[0].sent_at).getTime() > Date.now() - 60_000) throw Object.assign(new Error('Please wait one minute before requesting another code.'), { status: 429 });
       if ((previousCode.rows[0]?.send_count || 0) >= 5) throw Object.assign(new Error('Too many email code requests. Sign in again to start over.'), { status: 429 });
       const account = await client.query(`SELECT data FROM users WHERE id=$1`, [item.user_id]);
+      if (account.rows[0]?.data?.mfaMethod === 'totp') throw Object.assign(new Error('This account signs in with an authenticator app code.'), { status: 409 });
       const email = account.rows[0]?.data?.email;
       if (!validEmail(email)) throw Object.assign(new Error('This account does not have a valid registered email address.'), { status: 409 });
       await client.query(`INSERT INTO mfa_email_login_codes(challenge_hash,code_hash,expires_at,sent_at,send_count) VALUES($1,$2,now()+interval '10 minutes',now(),1) ON CONFLICT(challenge_hash) DO UPDATE SET code_hash=EXCLUDED.code_hash,expires_at=EXCLUDED.expires_at,sent_at=now(),send_count=mfa_email_login_codes.send_count+1`, [hash(challenge), hash(`${challenge}:${code}`)]);
@@ -215,7 +216,12 @@ publicRouter.post('/verify-login', async (req, res, next) => {
       const profile = account.rows[0];
       const emailCodeRecord = useEmail ? await client.query(`SELECT code_hash FROM mfa_email_login_codes WHERE challenge_hash=$1 AND expires_at>now() FOR UPDATE`, [hash(challenge)]) : null;
       const emailAccepted = Boolean(emailCodeRecord?.rows[0]?.code_hash) && crypto.timingSafeEqual(Buffer.from(emailCodeRecord.rows[0].code_hash, 'hex'), Buffer.from(hash(`${challenge}:${cleanCode(code)}`), 'hex'));
-      const authenticated = useEmail ? emailAccepted : profile?.data?.mfaSecretCipher && verifyTotp(decryptSecret(profile.data.mfaSecretCipher), cleanCode(code));
+      // Only the method the account enrolled may be used: an authenticator-app account cannot fall back to email
+      // (that would let a stolen password plus mailbox access skip the authenticator). Older accounts with no
+      // recorded method keep both, as the sign-in screen offers.
+      const enrolledMethod = profile?.data?.mfaMethod;
+      const methodAllowed = enrolledMethod === 'totp' ? !useEmail : enrolledMethod === 'email' ? useEmail : true;
+      const authenticated = methodAllowed && (useEmail ? emailAccepted : profile?.data?.mfaSecretCipher && verifyTotp(decryptSecret(profile.data.mfaSecretCipher), cleanCode(code)));
       if (!profile?.data?.mfaEnabled || !authenticated) {
         await client.query(`UPDATE mfa_login_challenges SET attempts=attempts+1 WHERE challenge_hash=$1`, [hash(challenge)]);
         return null;

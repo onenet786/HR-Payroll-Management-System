@@ -22,8 +22,8 @@ interface Props {
   company?: Company;
   periodMonth: number;
   periodYear: number;
-  onCreateSupplementaryRun: (month: number, year: number) => void;
-  onCreateFinalSettlementRun: (settlementId: string) => void;
+  onCreateSupplementaryRun: (month: number, year: number) => void | Promise<unknown>;
+  onCreateFinalSettlementRun: (settlementId: string) => void | Promise<unknown>;
   onRecordTaxDeposit: (runId: string, cprNumber: string, amount: number, depositedOn: string) => void;
   currentUser: { id: string; username: string };
   onCreatePayrollAdjustment: (adjustment: PayrollAdjustment) => void | Promise<void>;
@@ -44,6 +44,13 @@ export function PayrollReportsPanel(props: Props) {
   const [taxYear, setTaxYear] = useState(taxYearOfPeriod(periodMonth, periodYear));
   const [certificateEmployeeId, setCertificateEmployeeId] = useState('');
   const [retro, setRetro] = useState({ payslipId: '', days: '', reason: '' });
+  // Off-cycle run buttons are disabled while a run is being created, so a double click cannot create two runs.
+  const [creatingRun, setCreatingRun] = useState(false);
+  const createRun = async (action: () => void | Promise<unknown>) => {
+    if (creatingRun) return;
+    setCreatingRun(true);
+    try { await action(); } catch (error) { alert(error instanceof Error ? error.message : 'The payroll run could not be created.'); } finally { setCreatingRun(false); }
+  };
   const processedRunIds = new Set(payrollRuns.filter(item => item.status === 'Disbursed' || item.status === 'Approved').map(item => item.id));
   const retroCandidates = payrollPayslips.filter(item => processedRunIds.has(item.payrollRunId) && (item.runType || 'Regular') === 'Regular')
     .sort((a, b) => `${b.periodYear}${String(b.periodMonth).padStart(2, '0')}`.localeCompare(`${a.periodYear}${String(a.periodMonth).padStart(2, '0')}`) || a.employeeName.localeCompare(b.employeeName));
@@ -139,14 +146,14 @@ export function PayrollReportsPanel(props: Props) {
         </div>}
         <div className="rounded-lg border border-slate-200 p-3">
           <h4 className="font-bold text-slate-900">Off-cycle runs</h4>
-          <button type="button" onClick={() => props.onCreateSupplementaryRun(periodMonth, periodYear)} className="mt-2 rounded-lg bg-indigo-700 px-3 py-2 font-bold text-white hover:bg-indigo-800">Run supplementary payroll for {periodMonth}/{periodYear}</button>
+          <button type="button" disabled={creatingRun} onClick={() => createRun(() => props.onCreateSupplementaryRun(periodMonth, periodYear))} className="mt-2 rounded-lg bg-indigo-700 px-3 py-2 font-bold text-white hover:bg-indigo-800 disabled:cursor-wait disabled:opacity-60">Run supplementary payroll for {periodMonth}/{periodYear}</button>
           <p className="mt-1 text-[11px] text-slate-500">Pays bonuses, arrears and other adjustments approved after the regular run{features.incomeTax ? ', taxed at the marginal rate' : ''}.</p>
           {features.gratuity && <>
           <p className="mt-3 font-semibold text-slate-700">Approved settlements awaiting payroll ({settlementsReady.length})</p>
           {settlementsReady.length === 0 ? <p className="text-slate-500">{features.makerChecker ? 'None. A settlement must be processed by an independent approver first.' : 'None. Process a settlement under Gratuity & Settlement first.'}</p> : <ul className="mt-1 space-y-1">
             {settlementsReady.map(item => <li key={item.id} className="flex items-center justify-between gap-2">
               <span>{employees.find(employee => employee.id === item.employeeId)?.fullName || item.employeeId} · {item.separationType} {item.separationDate} · PKR {item.totalSettlementAmount.toLocaleString()}</span>
-              <button type="button" onClick={() => props.onCreateFinalSettlementRun(item.id)} className="shrink-0 font-semibold text-indigo-700 hover:underline">Create final settlement run</button>
+              <button type="button" disabled={creatingRun} onClick={() => createRun(() => props.onCreateFinalSettlementRun(item.id))} className="shrink-0 font-semibold text-indigo-700 hover:underline disabled:cursor-wait disabled:text-slate-400">Create final settlement run</button>
             </li>)}
           </ul>}
           </>}

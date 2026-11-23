@@ -20,8 +20,9 @@ const calculate = (attendances: AttendanceLog[] = [], leaves: LeaveRequest[] = [
   computePayslipDetails(employee, 7, 2026, attendances, leaves, DEFAULT_STATUTORY_CONFIG, DEFAULT_TAX_SLABS, DEFAULT_DEPARTMENTS, DEFAULT_DESIGNATIONS, DEFAULT_BRANCHES);
 
 test('applies Finance Act 2026 salaried slab progression', () => {
+  // 120,000 a month = 1,440,000 a year: 6,000 + 11% of 240,000 = 32,400 a year = 2,700 a month (Tax Year 2027).
   const result = calculate();
-  assert.equal(result.incomeTaxDeduction, 5500);
+  assert.equal(result.incomeTaxDeduction, 2700);
   assert.equal(result.calculationVersion, 'PK-PAYROLL-3.0-YTD');
 });
 

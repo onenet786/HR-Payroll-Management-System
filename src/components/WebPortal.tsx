@@ -15,7 +15,7 @@ import { LicenceBanner } from './LicenceBanner';
 import { apiBase } from '../data/apiBase';
 import { DateField } from './DateField';
 import { RequiredMark, RequiredNote } from './RequiredMark';
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { empAvatarUrl } from '../utils/avatar';
 import {
   Users, Calendar, CreditCard, ShieldCheck, FileText, Download, UserPlus,
@@ -193,8 +193,9 @@ export interface WebPortalProps {
   payrollAdjustments: PayrollAdjustment[];
   onCreatePayrollAdjustment: (adjustment: PayrollAdjustment) => void | Promise<void>;
   onReviewPayrollAdjustment: (id: string, status: 'Approved' | 'Rejected') => void | Promise<void>;
-  onAddEmployee: (emp: Employee) => void;
-  onUpdateEmployee: (emp: Employee) => void;
+  // May return a promise that rejects with the server's message; the form stays open on failure.
+  onAddEmployee: (emp: Employee) => void | Promise<void>;
+  onUpdateEmployee: (emp: Employee) => void | Promise<void>;
   onUpdateStatConfig: (config: StatutoryConfig) => void;
   onUpdateTaxSlabs: (slabs: TaxSlab[]) => void;
   onApproveLeave: (id: string) => void;
@@ -202,10 +203,10 @@ export interface WebPortalProps {
   onApproveRegularization: (id: string, reviewComment: string) => void;
   onCorrectPunchOut?: (id: string, punchOut: string, reason: string) => void;
   onRejectRegularization: (id: string, reviewComment: string) => void;
-  onCreatePayrollRun: (title: string, month: number, year: number) => void;
+  onCreatePayrollRun: (title: string, month: number, year: number) => void | Promise<unknown>;
   onLockAttendancePeriod: (month: number, year: number) => void;
   onReopenAttendancePeriod: (month: number, year: number, reason: string) => void;
-  onUpdatePayrollStatus: (runId: string, status: 'Approved' | 'Disbursed', disbursementReference?: string) => void;
+  onUpdatePayrollStatus: (runId: string, status: 'Approved' | 'Disbursed', disbursementReference?: string) => void | Promise<unknown>;
   onCancelPayrollRun: (runId: string, reason: string) => void;
   statutoryChangeRequests: StatutoryChangeRequest[];
   onReviewStatutoryChange: (id: string, decision: 'Approved' | 'Rejected', comment: string) => void;
@@ -213,8 +214,8 @@ export interface WebPortalProps {
   onCreateLifecycleRequest: (draft: Omit<LifecycleRequest, 'id' | 'status' | 'createdAt' | 'createdById' | 'createdBy'>) => Promise<boolean>;
   onReviewLifecycleRequest: (id: string, decision: 'Approved' | 'Rejected', comment: string) => void;
   onUpdateOnboarding: (employeeId: string, item: OnboardingChecklistItem, done: boolean) => void;
-  onCreateSupplementaryRun: (month: number, year: number) => void;
-  onCreateFinalSettlementRun: (settlementId: string) => void;
+  onCreateSupplementaryRun: (month: number, year: number) => void | Promise<unknown>;
+  onCreateFinalSettlementRun: (settlementId: string) => void | Promise<unknown>;
   onRecordTaxDeposit: (runId: string, cprNumber: string, amount: number, depositedOn: string) => void;
   onMarkPaymentFailed: (payslipId: string, reason: string) => void;
   onRecordPaymentRetry: (payslipIds: string[], reference: string) => void;
@@ -225,7 +226,7 @@ export interface WebPortalProps {
   onRecordBankAdvice: (runId: string, checksum: string, employeeCount: number, total: number, profile: PayrollRun['bankAdviceProfile'], batch?: { batchReference: string; controlHash: string; verified: boolean }) => void | Promise<void>;
   onSendPayslips: (runId: string) => Promise<{ sent: number; skipped: number; failed: Array<{ employeeId: string; error: string }> }>;
   onApplyLeave: (leave: LeaveRequest) => void | Promise<boolean | void>;
-  onAddAttendance: (log: AttendanceLog) => void;
+  onAddAttendance: (log: AttendanceLog) => void | Promise<boolean>;
   branches: Branch[];
   companies: Company[];
   onSaveCompanySetup: (payload: CompanySetupPayload) => Promise<void>;
@@ -882,10 +883,12 @@ export function WebPortal({
     if (tab === 'holidays') return userPermissions.includes('manage_attendance') || userPermissions.includes('manage_settings');
     if (tab === 'loans') return userPermissions.includes('manage_payroll') || userPermissions.includes('manage_employees');
     if (tab === 'revisions') return userPermissions.includes('manage_payroll') || userPermissions.includes('manage_employees');
-    if (tab === 'performance') return userPermissions.includes('manage_employees') || userPermissions.includes('view_dashboard');
-    if (tab === 'assets') return userPermissions.includes('manage_employees') || userPermissions.includes('manage_settings');
+    // Same rules the server enforces (server/collections.cjs): performanceReviews and companyAssets need
+    // manage_employees; gratuitySettlements allow manage_payroll or manage_employees.
+    if (tab === 'performance') return userPermissions.includes('manage_employees');
+    if (tab === 'assets') return userPermissions.includes('manage_employees');
     if (tab === 'recruitment') return userPermissions.includes('manage_employees');
-    if (tab === 'gratuity') return userPermissions.includes('manage_payroll');
+    if (tab === 'gratuity') return userPermissions.includes('manage_payroll') || userPermissions.includes('manage_employees');
     if (tab === 'lifecycle') return userPermissions.includes('manage_employees');
     if (tab === 'notifications') return true;
     if (tab === 'help') return true;
@@ -1725,8 +1728,42 @@ export function WebPortal({
     return sum + emp.basicSalary;
   }, 0);
 
-  const handleCreateEmployeeSubmit = (e: React.SyntheticEvent<HTMLFormElement>) => {
+  // IBAN rules shared by Add and Edit: stored uppercase without spaces, Pakistan format, and the ISO 13616 mod-97
+  // check digits must be right (catches a mistyped digit before a salary is sent to the wrong account).
+  const normaliseIban = (value: unknown) => String(value || '').replace(/\s/g, '').toUpperCase();
+  const ibanChecksumValid = (iban: string) => {
+    const rearranged = iban.slice(4) + iban.slice(0, 4);
+    let remainder = 0;
+    for (const char of rearranged) {
+      const digits = /[A-Z]/.test(char) ? String(char.charCodeAt(0) - 55) : char;
+      for (const digit of digits) remainder = (remainder * 10 + Number(digit)) % 97;
+    }
+    return remainder === 1;
+  };
+  const ibanError = (iban: string) => {
+    if (!iban) return '';
+    if (!/^PK\d{2}[A-Z0-9]{20}$/.test(iban)) return 'IBAN must be a 24-character Pakistan IBAN (PK + 22 letters/digits).';
+    if (!ibanChecksumValid(iban)) return 'This IBAN is not valid: its check digits do not match. Check the IBAN for a mistyped character.';
+    return '';
+  };
+  const employeeSaving = useRef(false);
+  // Payroll create / approve / disburse: buttons are disabled while one is saving, and a refusal is shown.
+  const [payrollActionBusy, setPayrollActionBusy] = useState(false);
+  const runPayrollAction = async (action: () => void | Promise<unknown>, failure: string) => {
+    if (payrollActionBusy) return;
+    setPayrollActionBusy(true);
+    try {
+      await action();
+    } catch (err) {
+      alert(`${failure}: ${err instanceof Error && err.message ? err.message : 'check the connection and try again'}.`);
+    } finally {
+      setPayrollActionBusy(false);
+    }
+  };
+
+  const handleCreateEmployeeSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (employeeSaving.current) return;
     if (!newEmpForm.fullName || (features.requireEmployeeEmail && !newEmpForm.email) || !newEmpForm.cnic) {
       alert('Kindly fill in all required fields.');
       return;
@@ -1736,8 +1773,9 @@ export function WebPortal({
     const cnicRegex = /^\d{5}-\d{7}-\d{1}$/;
     const sameCnic = employees.find(item => item.status !== 'Terminated' && (item.cnic || '').replace(/\D/g, '') === newEmpForm.cnic.replace(/\D/g, ''));
     if (sameCnic) { alert(`CNIC ${newEmpForm.cnic} already belongs to ${sameCnic.fullName} (${sameCnic.employeeCode}).`); return; }
-    const newIban = String(newEmpForm.iban || '').replace(/\s/g, '').toUpperCase();
-    if (newIban && !/^PK\d{2}[A-Z0-9]{20}$/.test(newIban)) { alert('IBAN must be a 24-character Pakistan IBAN (PK + 22 letters/digits).'); return; }
+    const newIban = normaliseIban(newEmpForm.iban);
+    const newIbanError = ibanError(newIban);
+    if (newIbanError) { alert(newIbanError); return; }
     if (newIban && employees.some(item => item.status !== 'Terminated' && (item.iban || '').replace(/\s/g, '').toUpperCase() === newIban)) {
       if (!window.confirm('This IBAN is already used by another employee. Save anyway (e.g. a shared family account)?')) return;
     }
@@ -1810,7 +1848,7 @@ export function WebPortal({
       bankName: newEmpForm.bankName,
       bankBranchName: 'Main Corporate Branch',
       bankAccountNumber: newEmpForm.bankAccountNumber,
-      iban: newEmpForm.iban,
+      iban: newIban,
       eobiNumber: newEmpForm.eobiNumber,
       socialSecurityNumber: newEmpForm.socialSecurityNumber,
       eobiExemptionReason: newEmpForm.eobiExemptionReason || undefined,
@@ -1835,14 +1873,24 @@ export function WebPortal({
       maritalStatus: newEmpForm.maritalStatus as 'Single' | 'Married' | 'Divorced' | 'Widowed'
     };
 
-    onAddEmployee(newEmp);
+    // Saved first: on failure the modal stays open with the form filled in, and the server's message is shown.
+    employeeSaving.current = true;
+    try {
+      await onAddEmployee(newEmp);
+    } catch (err) {
+      alert(`The employee was not saved: ${err instanceof Error && err.message ? err.message : 'check the connection and try again'}.`);
+      return;
+    } finally {
+      employeeSaving.current = false;
+    }
     setShowAddEmpModal(false);
     setNewEmpTakeHome(false);
     setNewEmpForm(blankNewEmployeeForm());
   };
 
-  const handleEditEmployeeSubmit = (e: React.SyntheticEvent<HTMLFormElement>) => {
+  const handleEditEmployeeSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (employeeSaving.current) return;
     if (!editEmpForm.fullName || (features.requireEmployeeEmail && !editEmpForm.email) || !editEmpForm.cnic) {
       alert('Kindly fill in all required fields.');
       return;
@@ -1854,6 +1902,17 @@ export function WebPortal({
       alert('CNIC format must be valid (e.g. 42101-1234567-3)');
       return;
     }
+    // Same identity and bank checks as Add Employee (excluding the employee being edited).
+    const editedId = editingEmployee?.id;
+    const sameEditCnic = employees.find(item => item.id !== editedId && item.status !== 'Terminated' && (item.cnic || '').replace(/\D/g, '') === editEmpForm.cnic.replace(/\D/g, ''));
+    if (sameEditCnic) { alert(`CNIC ${editEmpForm.cnic} already belongs to ${sameEditCnic.fullName} (${sameEditCnic.employeeCode}).`); return; }
+    const editIban = normaliseIban(editEmpForm.iban);
+    const editIbanError = ibanError(editIban);
+    if (editIbanError) { alert(editIbanError); return; }
+    if (editIban && editIban !== normaliseIban(editingEmployee?.iban)
+      && employees.some(item => item.id !== editedId && item.status !== 'Terminated' && normaliseIban(item.iban) === editIban)) {
+      if (!window.confirm('This IBAN is already used by another employee. Save anyway (e.g. a shared family account)?')) return;
+    }
 
     if (!isValidPakMobileNumber(formatPakMobileNumber(editEmpForm.contactNumber))) {
       alert('Mobile Contact must start with +923 followed by exactly 9 digits (e.g. +923214444444).');
@@ -1864,7 +1923,7 @@ export function WebPortal({
       alert('Select the Disbursal Bank. Salaries cannot be paid without it.');
       return;
     }
-    if (!(Number(editEmpForm.basicSalary) > 0)) {
+    if (!dualControl && !(Number(editEmpForm.basicSalary) > 0)) {
       alert('Enter a basic wage greater than zero.');
       return;
     }
@@ -1921,14 +1980,15 @@ export function WebPortal({
       dateOfJoining: editEmpForm.dateOfJoining || editingEmployee.dateOfJoining,
       wageTypeId: selectedWageType?.id,
       wageType: selectedWageType?.name ?? editEmpForm.wageType,
-      basicSalary: Number(editEmpForm.basicSalary),
+      // With maker-checker on, salary changes only through an approved Salary Revision: keep the stored value.
+      basicSalary: dualControl ? editingEmployee.basicSalary : Number(editEmpForm.basicSalary),
       shift: { id: editingEmployee.shift?.id || 'employee-shift', name: editingEmployee.shift?.name || 'Employee Shift', startTime: editEmpForm.shiftStartTime, endTime: editEmpForm.shiftEndTime, graceMinutes: Number(editEmpForm.shiftGraceMinutes), halfDayMinutes: Number(editEmpForm.shiftHalfDayMinutes), overtimeMultiplier: editingEmployee.shift?.overtimeMultiplier || statConfig.overtimeMultiplier || 2, breakMinutes: Number(editEmpForm.shiftBreakMinutes), workingDays: editingEmployee.shift?.workingDays || [1, 2, 3, 4, 5, 6], ramadanStartDate: editEmpForm.ramadanStartDate || undefined, ramadanEndDate: editEmpForm.ramadanEndDate || undefined, ramadanStartTime: editEmpForm.ramadanStartTime || undefined, ramadanEndTime: editEmpForm.ramadanEndTime || undefined, fridayStartTime: editEmpForm.fridayStartTime || undefined, fridayEndTime: editEmpForm.fridayEndTime || undefined },
       providentFundOptIn: editEmpForm.providentFundOptIn,
       providentFundRate: Number(editEmpForm.providentFundRate),
       gratuityOptIn: editEmpForm.gratuityOptIn,
       bankName: editEmpForm.bankName,
       bankAccountNumber: editEmpForm.bankAccountNumber,
-      iban: editEmpForm.iban,
+      iban: editIban,
       eobiNumber: editEmpForm.eobiNumber,
       socialSecurityNumber: editEmpForm.socialSecurityNumber,
       eobiExemptionReason: editEmpForm.eobiExemptionReason || undefined,
@@ -1958,7 +2018,15 @@ export function WebPortal({
       religion: editEmpForm.religion.trim() || undefined,
     };
 
-    onUpdateEmployee(updatedEmp);
+    employeeSaving.current = true;
+    try {
+      await onUpdateEmployee(updatedEmp);
+    } catch (err) {
+      alert(`The changes were not saved: ${err instanceof Error && err.message ? err.message : 'check the connection and try again'}.`);
+      return;
+    } finally {
+      employeeSaving.current = false;
+    }
     setShowEditEmpModal(false);
     setEditEmpTakeHome(false);
     setEditingEmployee(null);
@@ -2065,7 +2133,7 @@ export function WebPortal({
     setShowEditEmpModal(true);
   };
 
-  const handleCreateAttendanceSubmit = (e: React.SyntheticEvent<HTMLFormElement>) => {
+  const handleCreateAttendanceSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!newAttendanceForm.employeeId || !newAttendanceForm.date) {
       alert('Kindly select an employee and date.');
@@ -2081,7 +2149,8 @@ export function WebPortal({
       status: newAttendanceForm.status,
       overtimeMinutes: 0
     };
-    onAddAttendance(log);
+    // The modal stays open when the save was refused (the handler has shown why).
+    if (await onAddAttendance(log) === false) return;
     setShowAddAttendanceModal(false);
   };
 
@@ -3384,15 +3453,20 @@ export function WebPortal({
                                   <td className="px-6 py-4 whitespace-nowrap text-right text-xs">
                                     {lv.status === 'Pending' ? (
                                       <div className="inline-flex space-x-1.5 justify-end">
+                                        {/* Maker-checker: the server refuses deciding your own leave; another approver must. */}
                                         <button
+                                          disabled={dualControl && Boolean(currentUserAccount.employeeId) && lv.employeeId === currentUserAccount.employeeId}
+                                          title={dualControl && Boolean(currentUserAccount.employeeId) && lv.employeeId === currentUserAccount.employeeId ? 'Your own leave: another approver must decide it (maker-checker).' : 'Reject leave'}
                                           onClick={() => onRejectLeave(lv.id)}
-                                          className="text-rose-600 hover:text-rose-800 bg-rose-50 border border-rose-200 font-semibold px-2.5 py-1 rounded transition cursor-pointer"
+                                          className="text-rose-600 hover:text-rose-800 bg-rose-50 border border-rose-200 font-semibold px-2.5 py-1 rounded transition cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                                         >
                                           Reject
                                         </button>
                                         <button
+                                          disabled={dualControl && Boolean(currentUserAccount.employeeId) && lv.employeeId === currentUserAccount.employeeId}
+                                          title={dualControl && Boolean(currentUserAccount.employeeId) && lv.employeeId === currentUserAccount.employeeId ? 'Your own leave: another approver must decide it (maker-checker).' : 'Approve leave'}
                                           onClick={() => onApproveLeave(lv.id)}
-                                          className="text-emerald-700 hover:text-emerald-800 bg-emerald-50 border border-emerald-300 font-semibold px-2.5 py-1 rounded transition cursor-pointer"
+                                          className="text-emerald-700 hover:text-emerald-800 bg-emerald-50 border border-emerald-300 font-semibold px-2.5 py-1 rounded transition cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                                         >
                                           Approve
                                         </button>
@@ -3681,8 +3755,9 @@ export function WebPortal({
                         </button>
                       )}
                       <button 
-                        onClick={() => onCreatePayrollRun(`Payroll - ${new Date(payrollYear, payrollMonth - 1).toLocaleString('en-PK', { month: 'long', year: 'numeric' })}`, payrollMonth, payrollYear)}
-                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3 py-2 rounded-lg flex items-center space-x-1 shadow transition"
+                        disabled={payrollActionBusy}
+                        onClick={() => runPayrollAction(() => onCreatePayrollRun(`Payroll - ${new Date(payrollYear, payrollMonth - 1).toLocaleString('en-PK', { month: 'long', year: 'numeric' })}`, payrollMonth, payrollYear), 'The payroll run was not created')}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3 py-2 rounded-lg flex items-center space-x-1 shadow transition disabled:cursor-wait disabled:opacity-60"
                       >
                         <span>Run New Payroll Cycle</span>
                       </button>
@@ -3843,8 +3918,8 @@ export function WebPortal({
                                 >
                                   <Download className="w-3 h-3 mr-0.5" /> Bank Advice File
                                 </button>
-                                {run.status === 'Draft' && <button disabled={dualControl && run.createdById === currentUserAccount.id} title={dualControl && run.createdById === currentUserAccount.id ? 'Prepared by you; another payroll officer must approve.' : 'Approve payroll'} onClick={() => onUpdatePayrollStatus(run.id, 'Approved')} className="text-blue-700 hover:underline disabled:cursor-not-allowed disabled:text-slate-400 disabled:no-underline">Approve</button>}
-                                {run.status === 'Approved' && <button disabled={(dualControl && run.approvedById === currentUserAccount.id) || (features.bankPayroll && !run.bankAdviceChecksum)} title={dualControl && run.approvedById === currentUserAccount.id ? 'Approved by you; another authorized user must disburse.' : features.bankPayroll && !run.bankAdviceChecksum ? 'Generate and download bank advice first.' : 'Mark payroll disbursed'} onClick={() => { const reference = window.prompt(features.bankPayroll || run.bankAdviceChecksum ? 'Enter the bank transaction/reference number shown by your bank:' : 'Enter the payment reference (bank transaction number or cash voucher number):')?.trim(); if (reference) onUpdatePayrollStatus(run.id, 'Disbursed', reference); }} className="text-emerald-700 hover:underline disabled:cursor-not-allowed disabled:text-slate-400 disabled:no-underline">Mark Disbursed</button>}
+                                {run.status === 'Draft' && <button disabled={payrollActionBusy || (dualControl && run.createdById === currentUserAccount.id)} title={dualControl && run.createdById === currentUserAccount.id ? 'Prepared by you; another payroll officer must approve.' : 'Approve payroll'} onClick={() => runPayrollAction(() => onUpdatePayrollStatus(run.id, 'Approved'), 'The payroll was not approved')}className="text-blue-700 hover:underline disabled:cursor-not-allowed disabled:text-slate-400 disabled:no-underline">Approve</button>}
+                                {run.status === 'Approved' && <button disabled={payrollActionBusy || (dualControl && run.approvedById === currentUserAccount.id) || (features.bankPayroll && !run.bankAdviceChecksum)} title={dualControl && run.approvedById === currentUserAccount.id ? 'Approved by you; another authorized user must disburse.' : features.bankPayroll && !run.bankAdviceChecksum ? 'Generate and download bank advice first.' : 'Mark payroll disbursed'} onClick={() => { const reference = window.prompt(features.bankPayroll || run.bankAdviceChecksum ? 'Enter the bank transaction/reference number shown by your bank:' : 'Enter the payment reference (bank transaction number or cash voucher number):')?.trim(); if (reference) void runPayrollAction(() => onUpdatePayrollStatus(run.id, 'Disbursed', reference), 'The payroll was not marked as disbursed'); }} className="text-emerald-700 hover:underline disabled:cursor-not-allowed disabled:text-slate-400 disabled:no-underline">Mark Disbursed</button>}
                                 {(run.status === 'Draft' || run.status === 'Approved') && <button type="button" onClick={() => { const reason = window.prompt('Reason for cancelling this payroll run (min 10 characters). Payslips are kept for audit:')?.trim(); if (reason) onCancelPayrollRun(run.id, reason); }} className="text-rose-700 hover:underline">Cancel Run</button>}
                               </div>
                               {run.status !== 'Draft' && run.status !== 'Cancelled' && <div className="flex flex-wrap gap-x-3 gap-y-1 border-t border-slate-200 pt-2 text-[10px] font-semibold">
@@ -6200,7 +6275,10 @@ export function WebPortal({
                         aria-label="Basic Monthly Wage / Daily Rate (PKR)"
                         placeholder="e.g. 100000"
                         value={editEmpForm.basicSalary}
+                        readOnly={dualControl}
+                        title={dualControl ? 'Change salary through Salary Revisions (needs a second approver).' : undefined}
                         onChange={(e) => {
+                          if (dualControl) return;
                           const val = Number(e.target.value);
                           if (editEmpTakeHome) {
                             const split = calculateFbrSalarySplit(val, true, taxSlabs, (statConfig?.minimumWage || 37000));
@@ -6216,8 +6294,10 @@ export function WebPortal({
                             setEditEmpForm({ ...editEmpForm, basicSalary: val });
                           }
                         }}
-                        className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg font-mono text-xs text-slate-900 bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all focus:outline-none placeholder:text-slate-400"
+                        className={`w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg font-mono text-xs text-slate-900 ${dualControl ? 'bg-slate-100 cursor-not-allowed' : 'bg-white'} focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all focus:outline-none placeholder:text-slate-400`}
                       />
+                      {/* Maker-checker: the server refuses a salary change on an employee record; Salary Revisions set it. */}
+                      {dualControl && <p className="mt-1 text-[10px] text-slate-500">Change salary through Salary Revisions (needs a second approver).</p>}
                     </div>
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">

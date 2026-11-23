@@ -451,10 +451,10 @@ SESSION_IDLE_MINUTES=30
 SESSION_ABSOLUTE_HOURS=12
 DOCUMENT_STORAGE_PATH=$DATA_DIR
 
-# Vendor edition console (login "onenet", password OneNet + DDMonYYYY) switches
-# the full / lite edition. "hrpayrollctl edition $SLUG lite|full" also works.
+# Vendor edition console (login "onenet", password below, random per server) switches
+# the full / lite edition and the licence. "hrpayrollctl edition $SLUG lite|full" also works.
 # VENDOR_LOGIN=onenet
-# VENDOR_PASSWORD_PREFIX=OneNet
+VENDOR_CONSOLE_PASSWORD=$(rand_base64 | tr -dc 'A-Za-z0-9' | head -c 20)
 VENDOR_CONSOLE_DISABLED=$([[ $VENDOR_CONSOLE == disabled ]] && echo true || echo false)
 EOF
   umask 022
@@ -620,6 +620,7 @@ EOF
     Sign in:     $ADMIN_EMAIL
     $pw_line
     Edition:     ${EDITION^}
+    Vendor console (OneNet, login onenet): password in $(env_file "$SLUG") as VENDOR_CONSOLE_PASSWORD
 
     Kiosk & mobile apps:  set the server address to $url
     Manage:      hrpayrollctl status $SLUG | logs $SLUG | backup $SLUG | update $SLUG <bundle.run>

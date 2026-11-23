@@ -2,6 +2,7 @@
 // becomes a Draft salary revision, so the maker-checker approval and the audit trail apply as for a single revision.
 import type { Employee } from '../types';
 import { parseCsvLine } from './parallelRun';
+import { csvCell } from './csvSafe';
 
 export interface SalarySheetRow {
   line: number;
@@ -91,11 +92,6 @@ export function planSalarySheet(text: string, employees: Employee[], defaults: {
   return { rows, usable: rows.filter(r => !r.problem), errors };
 }
 
-const csvCell = (value: string | number) => {
-  let text = String(value ?? '');
-  if (/^[=+\-@]/.test(text)) text = `'${text}`;
-  return `"${text.replace(/"/g, '""')}"`;
-};
 
 /** The template to fill in: current staff, those without a real salary first. */
 export function salarySheetTemplate(employees: Employee[], branchName: (id: string) => string): string {

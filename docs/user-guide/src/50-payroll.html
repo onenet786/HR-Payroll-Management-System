@@ -34,6 +34,9 @@
 </ul>
 <ul>
   <li>Each month the instalment is deducted in payroll. The balance goes down only when that month's payroll is marked <b>Disbursed</b>. When nothing remains, the loan becomes <b>Closed</b>.</li>
+  <li><b>After approval the loan's terms are fixed</b> — amount, instalments and monthly deduction cannot be edited. Repayment only moves forward when salary is disbursed; it is never wound back by editing the loan.</li>
+  <li>Each payslip records exactly <b>which loans</b> it deducted and how much. An instalment is never more than what is still owed (the last one is smaller if needed).</li>
+  <li>A loan approved <b>after</b> the end of a payroll month is not deducted in that month's payroll; the first instalment comes in the next month.</li>
   <li>The cards show Repaid, Remaining instalments and a progress bar. Filter with the employee list and the Pending / Active / Closed / Rejected buttons.</li>
 </ul>
 <div class="box important"><span class="t">Important</span><p>Keep your company's own paperwork too (for example a signed loan form) before approving. If Submit does nothing, choose the employee again in the list and resubmit.</p></div>
@@ -48,7 +51,8 @@
   <li>A <b>different</b> person clicks <span class="ui">Approve &amp; Apply</span>. The salary now changes.</li>
 </ol>
 <p class="small">Every draft records who prepared it, and that person cannot approve it — this also applies to drafts created from performance reviews (section C4) and promotions (section C2). In the Lite edition one owner may do both.</p>
-<div class="box note"><span class="t">Good to know — back-dated increases</span><p>If the effective date is in a month already paid, the system works out the difference and creates an <b>Arrears</b> item for the current month. It appears in 10. Payroll Processing → One-time payroll adjustments and must be approved there before the next payroll.</p></div>
+<div class="box note"><span class="t">Good to know — back-dated increases</span><p>If the effective date is in a month already paid, the system works out the difference and creates an <b>Arrears</b> item for the current month. Each paid month is counted <b>once</b>. It appears in 10. Payroll Processing → One-time payroll adjustments and must be approved there before the next payroll.</p></div>
+<p class="small">To change an existing employee's salary, always use this page: the salary box on the employee's Edit Record form is read-only (full edition).</p>
 
 <h2 id="payroll"><span class="num">E4</span>Running payroll — 10. Payroll Processing</h2>
 <p>Payroll runs move through these stages:</p>
@@ -74,12 +78,12 @@
   <li>Type the amount and reason. For bonus, commission and arrears, tick <span class="ui">Include in taxable salary</span> if it is taxable.</li>
   <li>Click <span class="ui">Submit for approval</span>. Another payroll user clicks <span class="ui">Approve</span> or <span class="ui">Reject</span>.</li>
 </ol>
-<p class="small">Each item is paid by one payroll run only. Items approved after the month's run are paid with a supplementary run (below).</p>
+<p class="small">Each item is paid by one payroll run only. Items approved after the month's run are paid with a supplementary run (below). A one-off taxable bonus is taxed in the month it is paid — it is not treated as if it were repeated every month. A <b>Tax Adjustment</b> item counts towards the tax already deducted for the year.</p>
 
 <h3>Step 3 — Create the payroll run</h3>
 <figure><img src="shots/52b-runs-draft.png"><figcaption><b>A Draft run</b> under Historical Runs (left) and the Payroll Preview with each employee's figures (right).</figcaption></figure>
 <ol class="steps">
-  <li>Click <span class="ui">Run New Payroll Cycle</span>. The system first checks everything; if a check fails you get a clear message (see the table below).</li>
+  <li>Click <span class="ui">Run New Payroll Cycle</span>. The system first checks everything; if a check fails you get a clear message (see the table below). The button is disabled while it works, so a double click cannot create two runs. If the server refuses or the connection fails, the message is shown and no run appears on screen — the same applies to <span class="ui">Approve</span> and <span class="ui">Mark Disbursed</span>.</li>
   <li>When it succeeds you see <span class="msg">Draft payroll created for N employees…</span> with total gross and net pay. Only Active and On-Leave employees are included.</li>
   <li>Check the <b>Payroll Preview</b> table: gross, FBR tax, EOBI, social security, provident fund and net pay per person. Read any <b>material pay variance warning</b> (pay changed by 25% or more since last month).</li>
   <li>Once the month has a payroll run (that is not cancelled), the Payroll Preview shows the <b>payslips saved by that run</b> — the same amounts that go into the bank file. Only staff who are not in that run are calculated live. (Earlier versions recalculated the preview, so it could disagree with the run.)</li>
@@ -100,6 +104,7 @@
   <li><b>Earnings components:</b> basic pay, house rent, medical, conveyance, overtime and any bonus or arrears.</li>
   <li><b>Statutory deductions:</b> FBR income tax (with tax year, taxable income so far, tax already deducted and projected yearly income), EOBI, provident fund, loan recovery, absence and other deductions.</li>
   <li><b>Net Take-home pay</b> at the bottom.</li>
+  <li>For an absence, or for someone who joins or leaves during the month, house rent, conveyance, medical and other allowances are reduced <b>in the same proportion as basic pay</b>.</li>
   <li>Buttons: <span class="ui">English + اردو</span> (adds Urdu labels), <span class="ui">PDF</span> (downloads the payslip), <span class="ui">Print / Save as PDF</span>, <span class="ui">Close</span>.</li>
 </ul>
 
@@ -135,10 +140,10 @@
 <tr><td><span class="ui">FBR withholding CSV</span></td><td>Monthly income-tax withholding file for FBR.</td></tr>
 <tr><td><span class="ui">EOBI return CSV</span> / <span class="ui">EOBI upload file</span></td><td>EOBI contributions (the upload file uses your EOBI template).</td></tr>
 <tr><td><span class="ui">Provincial social-security CSV</span> / <span class="ui">Social-security upload file</span></td><td>PESSI / SESSI etc. contributions.</td></tr>
-<tr><td><span class="ui">Accounting journal CSV</span></td><td>A balanced journal entry for your accounting software, using your chart of accounts.</td></tr>
+<tr><td><span class="ui">Accounting journal CSV</span></td><td>A balanced journal entry for your accounting software, using your chart of accounts (it also balances when there are late-arrival fines).</td></tr>
 <tr><td><span class="ui">Payment exceptions</span></td><td>Handle payments the bank returned (below).</td></tr>
 </table>
-<p class="small">Files show warnings for missing CNIC, EOBI or social-security numbers — fix those records before filing.</p>
+<p class="small">Files show warnings for missing CNIC, EOBI or social-security numbers — fix those records before filing. Negative amounts in CSV files stay as numbers (for example -1500), so Excel can add them up.</p>
 
 <h3>Yearly and statutory reports</h3>
 <p>In <span class="ui">Statutory, finance &amp; off-cycle payroll</span>, set the <b>Tax year</b> and download: <span class="ui">PF ledger</span>, <span class="ui">Gratuity provision</span>, <span class="ui">Tax deposit reconciliation</span>, <span class="ui">Annual tax summary</span>, <span class="ui">Missing registrations</span> and <span class="ui">Tax vs annual liability</span>. To give an employee their yearly <b>salary tax certificate (section 149)</b>, choose them and click <span class="ui">Open certificate</span>, then print. Only approved and paid runs are counted.</p>
@@ -183,4 +188,4 @@
   <li>A second payroll user clicks <span class="ui">Process</span>.</li>
   <li>Pay it either with a final settlement payroll run (section E4) or, after paying outside payroll, a third person clicks <span class="ui">Mark Paid</span>.</li>
 </ol>
-<p class="small">Gratuity follows your rules in 1. Statutory Config (minimum service, part-years, resignation percentage). Employees with less than the minimum service get no gratuity. A settlement <b>cannot be processed or paid while any company asset is still assigned</b> to the employee — mark the assets returned first (section C5). Years of service are counted from the employee's Date of Joining.</p>
+<p class="small">Gratuity follows your rules in 1. Statutory Config (minimum service, part-years, resignation percentage). Employees with less than the minimum service get no gratuity. A settlement <b>cannot be processed or paid while any company asset is still assigned</b> to the employee — mark the assets returned first (section C5). Years of service are counted from the employee's Date of Joining up to <b>and including</b> the last working day — someone who worked exactly 5 years gets 5 full years.</p>

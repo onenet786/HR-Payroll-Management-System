@@ -121,7 +121,13 @@ async function getActiveBranding() {
 
 const app = express();
 app.disable('x-powered-by');
-app.set('trust proxy', 1);
+// Behind aaPanel's nginx the client address arrives in X-Forwarded-For (one proxy hop, the default). A server that
+// is reached directly (the Windows package) sets TRUST_PROXY=false, otherwise any client could fake its address and
+// slip past the sign-in rate limits and the audit log.
+const trustProxySetting = String(process.env.TRUST_PROXY ?? '').trim().toLowerCase();
+app.set('trust proxy', trustProxySetting === '' || trustProxySetting === 'true' ? 1
+  : trustProxySetting === 'false' || trustProxySetting === '0' ? false
+    : /^\d+$/.test(trustProxySetting) ? Number(trustProxySetting) : trustProxySetting);
 
 app.use((req, res, next) => {
   req.correlationId = crypto.randomUUID();
@@ -286,7 +292,7 @@ if (!process.env.DATA_BACKEND || (process.env.DATA_BACKEND || '').trim().toLower
       if (!email || !password) {
         return res.status(400).json({ error: 'Email and password are required.' });
       }
-      // The vendor signs in from the same screen (login "onenet", password OneNet + DDMonYYYY) and gets a
+      // The vendor signs in from the same screen (login "onenet", password VENDOR_CONSOLE_PASSWORD from .env) and gets a
       // console-only token that can change the product edition and nothing else. No user record is involved.
       if (edition.vendorCredentialsValid(email, password)) {
         const session = edition.issueVendorToken();
@@ -304,15 +310,15 @@ if (!process.env.DATA_BACKEND || (process.env.DATA_BACKEND || '').trim().toLower
       }
 
       const user = userDoc.data;
-      if (user.status !== 'Active') {
-        return res.status(403).json({ error: 'Account is suspended. Contact your administrator.' });
-      }
-
       // Legacy plain-text passwords are compared in constant time and stored hashed from then on.
       const passwordValid = await userSecrets.verifyUserPassword(pool, user, password);
 
       if (!passwordValid) {
         return res.status(401).json({ error: 'Invalid email or password.' });
+      }
+      // Checked after the password, so the answer does not reveal which addresses belong to suspended accounts.
+      if (user.status !== 'Active') {
+        return res.status(403).json({ error: 'Account is suspended. Contact your administrator.' });
       }
 
       if (process.env.MFA_ENFORCE_PRIVILEGED === 'true' && !user.mfaEnabled) {
@@ -548,13 +554,17 @@ app.get(/^\/assets\/index-.*\.js$/, async (req, res, next) => {
     if (!fs.existsSync(filePath)) {
       return next();
     }
-    const branding = await getActiveBranding();
+    let branding = await getActiveBranding();
     const stat = fs.statSync(filePath);
     const cacheKey = `${filePath}:${stat.mtimeMs}:${branding.name}`;
 
     let content = jsAssetCache.get(cacheKey);
     if (!content) {
       let raw = fs.readFileSync(filePath, 'utf8');
+      // The name goes inside string literals of the bundle (any quote style): escape it so a company name cannot
+      // close the string and inject script into every page.
+      const jsText = text => JSON.stringify(String(text)).slice(1, -1).replace(/['`$<>]/g, ch => '\\u' + ch.charCodeAt(0).toString(16).padStart(4, '0'));
+      branding = { ...branding, name: jsText(branding.name) };
       if (raw.includes('BIN ISHAQ HR SUITE')) {
         raw = raw.replaceAll('BIN ISHAQ HR SUITE', branding.name);
       }
@@ -609,9 +619,12 @@ h1{font-size:20px;margin:0 0 6px;color:#fff}p{margin:0;color:#94a3b8}.k{margin-t
     const editionModule = require('./server/edition.cjs');
     const activeEdition = await editionModule.loadEdition().catch(() => editionModule.FULL_EDITION);
     let html = fs.readFileSync(indexPath, 'utf8');
-    html = html.replace(/<title>.*?<\/title>/i, `<title>${branding.name} - HR &amp; Payroll Management System</title>`);
-    const configScript = `<script>window.__APP_CONFIG__=${JSON.stringify({ companyName: branding.name, companySubtitle: branding.subtitle, edition: activeEdition })};</script>`;
-    html = html.replace('</head>', `${configScript}</head>`);
+    const htmlText = text => String(text ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+    html = html.replace(/<title>.*?<\/title>/i, () => `<title>${htmlText(branding.name)} - HR &amp; Payroll Management System</title>`);
+    // < > & are escaped inside the JSON so a value cannot close the script tag.
+    const configJson = JSON.stringify({ companyName: branding.name, companySubtitle: branding.subtitle, edition: activeEdition }).replace(/[<>&\u2028\u2029]/g, ch => '\\u' + ch.charCodeAt(0).toString(16).padStart(4, '0'));
+    const configScript = `<script>window.__APP_CONFIG__=${configJson};</script>`;
+    html = html.replace('</head>', () => `${configScript}</head>`);
     res.setHeader('Content-Type', 'text/html; charset=UTF-8');
     res.setHeader('Cache-Control', 'no-cache');
     return res.send(html);

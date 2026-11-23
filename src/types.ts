@@ -377,6 +377,8 @@ export interface BiometricMatchEvidence {
 }
 
 export interface AttendancePeriod {
+  /** Options the register was built with; re-validation rebuilds it the same way. */
+  registerOptions?: { noPunchDayStatus?: 'Absent' | 'Unpaid Leave'; offDaysBeforeLeave?: boolean };
   id: string;
   periodMonth: number;
   periodYear: number;
@@ -680,6 +682,8 @@ export interface PayrollAuditEvent {
 
 // Individual Payslip details calculated under a Payroll Run
 export interface Payslip {
+  /** Loans and amounts this payslip deducted (repaid exactly at disbursement). */
+  loanDeductions?: Array<{ loanId: string; amount: number }>;
   id: string;
   payrollRunId: string;
   employeeId: string;

@@ -65,7 +65,7 @@ Everything else happens automatically:
 The wizard asks for the edition. Unattended installs take `EDITION=` or `--edition lite`. For Lite, the FBR tax slabs are skipped unless you ask for them. The edition is stored in the database, and you can change it at any time without losing data, in either of two ways:
 
 - `sudo hrpayrollctl edition <id> lite|full` on the server
-- the OneNet vendor console on the sign-in screen (login `onenet`, password `OneNet` + today's date as `DDMonYYYY`)
+- the OneNet vendor console on the sign-in screen (login `onenet`, password `VENDOR_CONSOLE_PASSWORD` from the server's `.env`, random per installation)
 
 Pass `--no-vendor-console` (or `VENDOR_CONSOLE=disabled`) to switch that console off for a client.
 

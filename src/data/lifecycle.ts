@@ -50,17 +50,42 @@ export function lifecycleReviewError(request: LifecycleRequest, actorId: string,
 
 type GratuityRules = Pick<StatutoryConfig, 'gratuityRateDaysPerYear' | 'settlementDailyRateDivisor' | 'gratuityMinimumServiceYears' | 'gratuityCountPartYearOverSixMonths' | 'gratuityResignationUnderFiveYearsPercent'>;
 
+/**
+ * Service in months from the joining date through the last working day, both inclusive (joined 1 March,
+ * last day 28 February = exactly 12 months). Whole calendar months plus the remaining days as a fraction.
+ */
+export function serviceMonths(dateOfJoining: string, lastWorkingDate: string): number {
+  const parse = (value: string) => value.split('-').map(Number);
+  const [jy, jm, jd] = parse(dateOfJoining);
+  const [ly, lm, ld] = parse(lastWorkingDate);
+  // The day after the last working day, so that day itself counts as service.
+  const endDate = new Date(Date.UTC(ly, lm - 1, ld) + 86_400_000);
+  const ey = endDate.getUTCFullYear(), em = endDate.getUTCMonth() + 1, ed = endDate.getUTCDate();
+  if (![jy, jm, jd].every(Number.isFinite) || !Number.isFinite(endDate.getTime())) return 0;
+  let months = (ey - jy) * 12 + (em - jm) - (ed < jd ? 1 : 0);
+  if (months < 0) return 0;
+  // Anniversary of the joining day after `months` whole months (clamped to the month's length).
+  const anchorMonth = jm - 1 + months;
+  const anchorYear = jy + Math.floor(anchorMonth / 12);
+  const anchorMonthIndex = anchorMonth % 12;
+  const anchorDay = Math.min(jd, new Date(Date.UTC(anchorYear, anchorMonthIndex + 1, 0)).getUTCDate());
+  const remainderDays = Math.max(0, (endDate.getTime() - Date.UTC(anchorYear, anchorMonthIndex, anchorDay)) / 86_400_000);
+  months += remainderDays / 30.436875;
+  return months;
+}
+
 /** Service years that earn gratuity: completed years, optionally counting a final part-year over six months as a full year. */
 export function gratuityServiceYears(dateOfJoining: string, separationDate: string, rules: GratuityRules): number {
-  const months = Math.max(0, (Date.parse(`${separationDate}T00:00:00Z`) - Date.parse(`${dateOfJoining}T00:00:00Z`)) / (30.436875 * 86_400_000));
+  const months = serviceMonths(dateOfJoining, separationDate);
   const completed = Math.floor(months / 12);
   return completed + (rules.gratuityCountPartYearOverSixMonths && months - completed * 12 > 6 ? 1 : 0);
 }
 
 // One rule for every settlement path (Gratuity module, offboarding and lifecycle approvals).
+// The separation date is the last working day, which is itself a day of service.
 export function gratuityEntitlement(monthlyBasis: number, dateOfJoining: string, separationDate: string, separationType: GratuitySettlement['separationType'], rules: GratuityRules) {
   const years = gratuityServiceYears(dateOfJoining, separationDate, rules);
-  const exactYears = Math.max(0, (Date.parse(`${separationDate}T00:00:00Z`) - Date.parse(`${dateOfJoining}T00:00:00Z`)) / (365.2425 * 86_400_000));
+  const exactYears = serviceMonths(dateOfJoining, separationDate) / 12;
   if (exactYears < (rules.gratuityMinimumServiceYears ?? 1)) return { years, amount: 0 };
   const daily = monthlyBasis / (rules.settlementDailyRateDivisor || 30);
   const resignationPercent = separationType === 'Resignation' && exactYears < 5 ? (rules.gratuityResignationUnderFiveYearsPercent ?? 100) : 100;

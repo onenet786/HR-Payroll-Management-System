@@ -108,7 +108,9 @@ function allowed(rule, identity, documentId, employeeId) {
   if (rule === 'signedIn') return true;
   if (rule === 'selfUser') return identity.uid === documentId;
   if (rule.startsWith('selfUserOr:')) return identity.uid === documentId || hasAny(identity, rule.slice(11));
-  if (rule.startsWith('selfEmployeeOr:')) return identity.employeeId === employeeId || hasAny(identity, rule.slice(15));
+  // "Own records" needs a real employee link: an account with no linked employee (an HR login, or an employee login
+  // whose link was removed) must not match records that also have no employee, nor get an unfiltered list.
+  if (rule.startsWith('selfEmployeeOr:')) return (Boolean(identity.employeeId) && identity.employeeId === employeeId) || hasAny(identity, rule.slice(15));
   if (rule.includes('Or:')) return hasAny(identity, rule.replace('Or:', ','));
   return identity.permissions.has(rule);
 }

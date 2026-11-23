@@ -184,6 +184,7 @@ if ($AdminEmail -notmatch '^[^@\s]+@[^@\s]+\.[^@\s]+$') { Fail 'A valid administ
 $generatedPassword = $false
 if (-not $AdminPassword) { $AdminPassword = (RandomPassword 12) + '-7'; $generatedPassword = $true }
 if ($AdminPassword.Length -lt 12) { Fail 'The administrator password must have at least 12 characters.' }
+$vendorPassword = RandomPassword 15
 $useHttps = [bool]($httpsPfx -or ($httpsCert -and $httpsKey))
 
 # -- Checks -------------------------------------------------------------------
@@ -307,10 +308,12 @@ $envValues = [ordered]@{
   PG_POOL_MAX = '10'; PG_SSL = 'false'
   PG_DUMP_PATH = (Join-Path $pgBin 'pg_dump.exe'); PG_RESTORE_PATH = (Join-Path $pgBin 'pg_restore.exe')
   PORT = "$AppPort"; HOST = '0.0.0.0'; NODE_ENV = 'production'; DEBUG = 'false'; RATE_LIMIT_MAX = '10000'
+  TRUST_PROXY = 'false'   # reached directly, no reverse proxy: X-Forwarded-For from clients must not be believed
   APP_URL = $appUrl; PORTAL_URL = $appUrl; ALLOWED_ORIGIN = $appUrl; ALLOWED_ORIGINS = ($urls -join ',')
   MANAGED_INSTALLATION = 'true'
   DOCUMENT_STORAGE_PATH = "$DataDir\documents"; LEGACY_IMPORT_DIR = "$DataDir\imports"
   BACKUP_DIR = "$DataDir\backups"; BACKUP_RETENTION_COUNT = '14'; BACKUP_ENCRYPTION_KEY = (RandomBase64)
+  VENDOR_CONSOLE_PASSWORD = $vendorPassword   # OneNet vendor console (login "onenet"); random per server
   MFA_ENCRYPTION_KEY = (RandomBase64); MFA_ISSUER = "$($CompanyName -replace '"','') HR"; MFA_ENFORCE_PRIVILEGED = 'false'
   SESSION_IDLE_MINUTES = '30'
   SMTP_HOST = $smtp.Host; SMTP_PORT = $smtp.Port; SMTP_SECURE = $(if ($smtp.Port -eq '465') { 'true' } else { 'false' }); SMTP_REQUIRE_TLS = 'true'; SMTP_USER = $smtp.User; SMTP_PASS = $smtp.Pass; SMTP_FROM = $smtp.From
@@ -395,6 +398,11 @@ if ($Portable) {
   $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 3)
   Register-ScheduledTask -TaskName 'HR Payroll Nightly Backup' -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'Encrypted backup of the HR & Payroll database (keeps 14).' | Out-Null
   Info "Backup: every day at $backupTime to $DataDir\backups$(if ($backupCopyTo) { " and a copy to $backupCopyTo" })."
+
+  # SYSTEM runs the program folder's tools and Node.js every night: only administrators may change them, and only
+  # administrators, SYSTEM and the service account may open the data folder (see Set-HRFolderPermissions).
+  Set-HRFolderPermissions $InstallDir $DataDir
+  Info "Permissions: $InstallDir changeable by Administrators only; $DataDir open to Administrators, SYSTEM and NETWORK SERVICE only."
 }
 
 # -- Record the installation --------------------------------------------------
@@ -441,6 +449,7 @@ $summary = @(
   "Also reachable:  $(($urls | Select-Object -Skip 1) -join '  ')",
   "Sign in:         $AdminEmail",
   $(if ($generatedPassword) { "Password:        $AdminPassword   (generated; change it at first sign-in)" } else { 'Password:        the one you entered' }),
+  "Password:        OneNet vendor console (login onenet): $vendorPassword   (for OneNet's records; also in config\.env as VENDOR_CONSOLE_PASSWORD)",
   '',
   "Program:         $InstallDir",
   "Data:            $DataDir  (database, documents, backups, logs)",
@@ -449,7 +458,28 @@ $summary = @(
   "Tools:           $toolsDir  (status, backup, restore, update, uninstall)",
   "Setup log:       $logFile"
 )
+($summary | Where-Object { $_ -notmatch '^Password:' }) | Set-Content -Path (Join-Path $configDir 'install-summary.txt') -Encoding UTF8
+
+# The administrator password must not stay in a file: a password given in the config file is blanked there.
+$configNote = ''
+if ($ConfigFile -and $cfg['AdminPassword']) {
+  try {
+    $cfgPath = (Resolve-Path $ConfigFile).Path
+    $bytes = [IO.File]::ReadAllBytes($cfgPath)
+    $hasBom = $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
+    $text = [IO.File]::ReadAllText($cfgPath)
+    $blanked = [regex]::Replace($text, "(?m)^(\s*AdminPassword\s*=\s*)(?:'(?:[^']|'')*'|`"(?:[^`"``]|``.)*`")", "`$1''")
+    [IO.File]::WriteAllText($cfgPath, $blanked, (New-Object Text.UTF8Encoding($hasBom)))
+    if ((Import-PowerShellDataFile -Path $cfgPath)['AdminPassword']) { throw 'the password is still there' }
+    $configNote = "The administrator password was removed from $cfgPath (AdminPassword = ''). Delete that file if it still holds other secrets (SMTP, PFX passphrase)."
+  } catch {
+    $configNote = "Could not remove the administrator password from ${ConfigFile}: $($_.Exception.Message). DELETE THAT FILE NOW."
+  }
+}
+if ($configNote) { Write-Host ''; Write-Host "    $configNote" -ForegroundColor Yellow }
+
+# The transcript (setup log) stops before the summary, so a generated password is shown on screen only, never logged.
+Stop-Transcript | Out-Null
 Write-Host ''
 $summary | ForEach-Object { Write-Host $_ -ForegroundColor Green }
-($summary | Where-Object { $_ -notmatch '^Password:' }) | Set-Content -Path (Join-Path $configDir 'install-summary.txt') -Encoding UTF8
-Stop-Transcript | Out-Null
+if ($generatedPassword) { Write-Host '(The password is shown only here, not written to the setup log or any file.)' -ForegroundColor Yellow }

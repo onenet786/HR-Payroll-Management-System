@@ -1,4 +1,5 @@
 import type { JournalAccount, JournalAccountKey, PayrollRun, Payslip, StatutoryConfig } from '../types';
+import { csvCell } from './csvSafe';
 
 export interface JournalLine {
   accountCode: string;
@@ -47,12 +48,6 @@ export function resolveJournalAccounts(config?: Pick<StatutoryConfig, 'journalAc
   return resolved;
 }
 
-const csvCell = (value: string | number) => {
-  let text = String(value);
-  if (/^[=+\-@]/.test(text)) text = `'${text}`;
-  return `"${text.replace(/"/g, '""')}"`;
-};
-
 function buildLines(sheets: Payslip[], period: string, accounts: Record<JournalAccountKey, JournalAccount>, narration: string): JournalLine[] {
   const lines: JournalLine[] = [];
   const add = (key: JournalAccountKey, costCenter: string, debit: number, credit: number) => {
@@ -83,7 +78,11 @@ function buildLines(sheets: Payslip[], period: string, accounts: Record<JournalA
   add('socialSecurityPayable', 'Corporate', 0, sum(sheet => sheet.pessiEmployeeDeduction) + employerSocial);
   add('providentFundPayable', 'Corporate', 0, sum(sheet => sheet.providentFundDeduction) + employerPf);
   add('loanRecovery', 'Corporate', 0, sum(sheet => sheet.loanRepaymentDeduction));
-  add('otherDeductions', 'Corporate', 0, sum(sheet => sheet.otherAdjustmentsDeduction || 0));
+  // Every deduction in totalDeductions without its own account (late fines, itemised catalogue deductions…) is
+  // credited to other deductions, so the journal balances against net pay.
+  const posted = (sheet: Payslip) => sheet.incomeTaxDeduction + (sheet.manualTaxAdjustment || 0) + sheet.eobiEmployeeDeduction
+    + sheet.providentFundDeduction + sheet.loanRepaymentDeduction + (sheet.otherAdjustmentsDeduction || 0);
+  add('otherDeductions', 'Corporate', 0, sum(sheet => (sheet.otherAdjustmentsDeduction || 0) + Math.max(0, (sheet.totalDeductions || 0) - posted(sheet))));
   add('bankPayable', 'Corporate', 0, sum(sheet => sheet.netSalary));
   return lines;
 }

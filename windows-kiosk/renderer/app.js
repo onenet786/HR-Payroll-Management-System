@@ -53,7 +53,8 @@ let autoCaptureGoodFrames = 0;
 let autoCaptureIsPunching = false;
 let autoCaptureHoldUntil = 0;
 let autoCaptureAwaitingFaceExit = false;
-let kioskCamMode = 'multi';
+// 1-on-1 live face check by default; Multi-Face walk-through only when an administrator allowed it (low assurance).
+let kioskCamMode = 'single';
 let multiFaceTimer = null;
 const employeeSessions = new Map();
 let nextTrackId = 1;
@@ -76,6 +77,17 @@ const el = {
   regBanner:      id('regBanner'),
   regBannerBtn:   id('regBannerBtn'),
   exitBtn:        id('exitBtn'),
+  pinOverlay:     id('pinOverlay'),
+  pinTitle:       id('pinTitle'),
+  pinText:        id('pinText'),
+  pinLabel:       id('pinLabel'),
+  pinInput:       id('pinInput'),
+  pinConfirmField:id('pinConfirmField'),
+  pinConfirmInput:id('pinConfirmInput'),
+  pinError:       id('pinError'),
+  pinCancel:      id('pinCancel'),
+  pinClose:       id('pinClose'),
+  pinConfirm:     id('pinConfirm'),
   modeNav:        id('modeNav'),
   codeModeBtn:    id('codeModeBtn'),
   // stats
@@ -200,6 +212,9 @@ const el = {
   camDirectionTag2: id('camDirectionTag2'),
   camSelectBar:   id('camSelectBar'),
   stAllowCodeOnlyPunch: id('stAllowCodeOnlyPunch'),
+  stAllowMultiFace: id('stAllowMultiFace'),
+  stAllowUnverifiedBridge: id('stAllowUnverifiedBridge'),
+  stChangePin:    id('stChangePin'),
   stReqCodeFp:    id('stReqCodeFp'),
   stReqCodeCam:   id('stReqCodeCam'),
   stAutoCaptureCamera: id('stAutoCaptureCamera'),
@@ -256,7 +271,7 @@ function setMode(mode) {
 
   if (isCam) {
     startCamera();
-    setKioskCamMode(kioskCamMode || 'multi');
+    setKioskCamMode(kioskCamMode || 'single');
   } else {
     stopCamera();
     stopAutoCapture();
@@ -288,6 +303,13 @@ function setMode(mode) {
 }
 
 function applyModeSecurity() {
+  const allowMulti = multiFaceAllowed();
+  el.btnModeMultiFace?.classList.toggle('hidden', !allowMulti);
+  el.btnModeSingleFace?.classList.toggle('hidden', !allowMulti);
+  if (!allowMulti && kioskCamMode === 'multi') {
+    if (activeMode === MODE.CAM) setKioskCamMode('single');
+    else kioskCamMode = 'single';
+  }
   const allowCodeOnlyPunch = !!kioskState?.terminal?.allowCodeOnlyPunch;
   el.codeModeBtn.classList.toggle('hidden', !allowCodeOnlyPunch);
   el.codeModeBtn.setAttribute('aria-hidden', String(!allowCodeOnlyPunch));
@@ -1158,7 +1180,13 @@ function drawKioskMultiFaceHUD(canvas, faces) {
   }
 }
 
-function setKioskCamMode(mode) {
+function multiFaceAllowed() {
+  return kioskState?.terminal?.allowMultiFaceMode === true;
+}
+
+function setKioskCamMode(requested) {
+  // The main process refuses multi-face punches unless the terminal allows them; the screen follows the same setting.
+  const mode = requested === 'multi' && multiFaceAllowed() ? 'multi' : 'single';
   kioskCamMode = mode;
   const isMulti = mode === 'multi';
   el.cameraView?.classList.toggle('mode-multi-face', isMulti);
@@ -1756,7 +1784,7 @@ async function performCameraPunch() {
   let descriptor = null;
   let livenessProof = null;
 
-  if (kioskCamMode === 'multi') {
+  if (kioskCamMode === 'multi' && multiFaceAllowed()) {
     try {
       const source = faceSource();
       let targetBox = null;
@@ -2394,9 +2422,100 @@ function setPill(pill, state) {
   pill.className = `status-pill ${state}`;
 }
 
+// ─── Admin PIN ────────────────────────────────────────────────────────────────
+// Settings, Exit, clearing the cache and removing the device key need the admin PIN. The main process checks it and
+// refuses those actions without an open admin session; this dialog only collects it.
+let pinResolver = null;
+function closePinDialog(value) {
+  if (!pinResolver) return;
+  const resolve = pinResolver;
+  pinResolver = null;
+  el.pinOverlay.classList.add('hidden');
+  el.pinOverlay.setAttribute('aria-hidden', 'true');
+  el.pinInput.value = '';
+  el.pinConfirmInput.value = '';
+  resolve(value);
+}
+
+function askPin({ title, text, setup = false, error = '' }) {
+  if (pinResolver) return Promise.resolve(null);
+  el.pinTitle.textContent = title;
+  el.pinText.textContent = text;
+  el.pinLabel.textContent = setup ? 'New admin PIN (6 to 12 digits)' : 'Admin PIN';
+  el.pinConfirmField.classList.toggle('hidden', !setup);
+  el.pinError.textContent = error;
+  el.pinError.classList.toggle('hidden', !error);
+  el.pinInput.value = '';
+  el.pinConfirmInput.value = '';
+  el.pinOverlay.classList.remove('hidden');
+  el.pinOverlay.setAttribute('aria-hidden', 'false');
+  requestAnimationFrame(() => el.pinInput.focus());
+  return new Promise(resolve => {
+    pinResolver = resolve;
+    el.pinConfirm.onclick = () => {
+      const pin = el.pinInput.value.trim();
+      if (setup && pin !== el.pinConfirmInput.value.trim()) {
+        el.pinError.textContent = 'The two PINs do not match.';
+        el.pinError.classList.remove('hidden');
+        el.pinConfirmInput.focus();
+        return;
+      }
+      closePinDialog(pin);
+    };
+  });
+}
+
+// Resolves true once the main process has an open admin session (setting the first PIN when none exists yet).
+async function ensureAdmin(purpose) {
+  const status = await api.adminStatus().catch(() => null);
+  if (!status) return false;
+  if (status.unlocked) return true;
+  if (!status.pinSet) {
+    // First open after install, or after upgrading from a build without a PIN: registration and data are kept.
+    let error = '';
+    for (;;) {
+      const pin = await askPin({ title: 'Set the admin PIN', text: 'This kiosk has no admin PIN yet. Choose one now; it will be needed for Settings, Exit, clearing the local cache and removing the device key. Keep it away from employees.', setup: true, error });
+      if (pin === null) return false;
+      const result = await api.adminSetPin(pin);
+      if (result?.ok) return true;
+      error = result?.message || 'The PIN could not be saved.';
+    }
+  }
+  let error = status.lockedUntil ? `Locked after wrong PINs. Try again at ${new Date(status.lockedUntil).toLocaleTimeString('en-GB')}.` : '';
+  for (;;) {
+    const pin = await askPin({ title: 'Enter admin PIN', text: `The admin PIN is required to ${purpose}.`, error });
+    if (pin === null) return false;
+    const result = await api.adminUnlock(pin);
+    if (result?.ok) return true;
+    error = result?.message || 'Wrong PIN.';
+  }
+}
+
+async function changeAdminPin() {
+  if (!(await ensureAdmin('change the admin PIN'))) return;
+  let error = '';
+  for (;;) {
+    const pin = await askPin({ title: 'Change the admin PIN', text: 'Enter the new admin PIN twice.', setup: true, error });
+    if (pin === null) return;
+    const result = await api.adminSetPin(pin);
+    if (result?.ok) { await showMessageDialog({ tone: 'success', eyebrow: 'Admin PIN', title: 'Admin PIN changed', message: 'Use the new PIN from now on.' }); return; }
+    error = result?.message || 'The PIN could not be saved.';
+  }
+}
+
+// A protected action answered "admin PIN required" (the admin session timed out): close Settings and say so.
+function adminSessionExpired(result) {
+  if (!result?.adminRequired) return false;
+  closeSettings();
+  showResult('err', 'ADMIN PIN REQUIRED', 'The admin session ended. Open Settings again and enter the admin PIN.');
+  scheduleReset();
+  return true;
+}
+
 // ─── Settings Dialog ──────────────────────────────────────────────────────────
-function openSettings() {
-  if (!kioskState) return;
+async function openSettings() {
+  if (!kioskState) return false;
+  if (!(await ensureAdmin('open Settings'))) return false;
   const t = kioskState.terminal;
   el.stTerminalId.value     = t.id || '';
   el.stLocation.value       = t.location || '';
@@ -2431,6 +2550,8 @@ function openSettings() {
   }
   updateCameraSourceFields();
   el.stAllowCodeOnlyPunch.checked = !!t.allowCodeOnlyPunch;
+  if (el.stAllowMultiFace) el.stAllowMultiFace.checked = t.allowMultiFaceMode === true;
+  if (el.stAllowUnverifiedBridge) el.stAllowUnverifiedBridge.checked = t.allowUnverifiedBridge === true;
   el.stReqCodeFp.checked    = !!t.requireCodeWithFingerprint;
   el.stReqCodeCam.checked   = false;
   el.stAutoCaptureCamera.checked = t.autoCaptureCamera !== false;
@@ -2460,6 +2581,7 @@ function openSettings() {
     if (changed) renderRegistration(registration);
   }).catch(() => { /* keep what is shown */ });
   el.settingsOverlay.classList.remove('hidden');
+  return true;
 }
 
 function updateRegistrationBanner() {
@@ -2593,6 +2715,7 @@ async function unregisterKiosk() {
   });
   if (!confirmed) return;
   const registration = await api.unregisterDevice();
+  if (adminSessionExpired(registration)) return;
   if (kioskState) kioskState.deviceRegistration = registration;
   renderRegistration(registration);
 }
@@ -2614,6 +2737,7 @@ async function renderSettingsEvents() {
 
 function closeSettings() {
   el.settingsOverlay.classList.add('hidden');
+  api.adminLock().catch(() => {});
 }
 
 async function saveSettings() {
@@ -2624,6 +2748,23 @@ async function saveSettings() {
     return;
   }
   el.stBranchId.style.borderColor = '';
+  const enablingMultiFace = !!el.stAllowMultiFace?.checked && kioskState?.terminal?.allowMultiFaceMode !== true;
+  if (enablingMultiFace) {
+    const confirmed = await showMessageDialog({
+      tone: 'danger',
+      eyebrow: 'Security Exception',
+      title: 'Allow Multi-Face walk-through?',
+      message: 'Multi-Face mode punches people as they walk past without a live face check, so a printed or phone photo of a colleague can be recognised.',
+      detail: 'Every Multi-Face punch is sent to HR for review. The 1-on-1 live face check stays available.',
+      confirmLabel: 'Allow Low-Assurance Mode',
+      cancelLabel: 'Keep Off',
+      showCancel: true,
+    });
+    if (!confirmed) {
+      el.stAllowMultiFace.checked = false;
+      return;
+    }
+  }
   const enablingCodeOnly = el.stAllowCodeOnlyPunch.checked && !kioskState?.terminal?.allowCodeOnlyPunch;
   if (enablingCodeOnly) {
     const confirmed = await showMessageDialog({
@@ -2652,12 +2793,15 @@ async function saveSettings() {
     }),
     outCameraReason: el.stOutCameraReason?.value || '',
     allowCodeOnlyPunch: el.stAllowCodeOnlyPunch.checked,
+    allowMultiFaceMode: !!el.stAllowMultiFace?.checked,
+    allowUnverifiedBridge: !!el.stAllowUnverifiedBridge?.checked,
     requireCodeWithFingerprint: el.stReqCodeFp.checked,
     requireCodeWithCamera: false,
     autoCaptureCamera: el.stAutoCaptureCamera.checked,
     autoFullscreen: el.stAutoFullscreen.checked,
     classicTheme: !!el.stClassicTheme?.checked,
   });
+  if (adminSessionExpired(terminal)) return;
   if (kioskState) kioskState.terminal = terminal;
   [1, 2].forEach(n => { const fields = cameraFields(n); if (fields.password) fields.password.value = ''; });
   selectedCameraIndex = 0;
@@ -2767,6 +2911,7 @@ async function clearLocalAttendanceCache() {
   el.stClearAttendanceCache.textContent = 'Clearing...';
   try {
     const result = await api.clearLocalAttendanceCache();
+    if (adminSessionExpired(result)) return;
     await performSync();
     closeSettings();
     showResult(
@@ -2862,13 +3007,20 @@ function bindEvents() {
 
   // Settings
   el.settingsBtn.addEventListener('click', openSettings);
-  el.regBannerBtn?.addEventListener('click', () => {
-    openSettings();
+  el.regBannerBtn?.addEventListener('click', async () => {
+    if (!(await openSettings())) return;
     (registrationMethod() === 'code' ? el.stRegSetupCode : (el.stRegServerUrl || el.stRegEmail))?.focus();
   });
   el.settingsClose.addEventListener('click', closeSettings);
   el.stSave.addEventListener('click', saveSettings);
   el.stClearAttendanceCache.addEventListener('click', clearLocalAttendanceCache);
+  el.stChangePin?.addEventListener('click', changeAdminPin);
+  el.pinCancel.addEventListener('click', () => closePinDialog(null));
+  el.pinClose.addEventListener('click', () => closePinDialog(null));
+  el.pinOverlay.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closePinDialog(null); }
+    if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); el.pinConfirm.click(); }
+  });
   el.messageCancel.addEventListener('click', () => closeMessageDialog(false));
   el.messageClose.addEventListener('click', () => closeMessageDialog(false));
   el.messageConfirm.addEventListener('click', () => closeMessageDialog(true));
@@ -2965,6 +3117,7 @@ function bindEvents() {
 
   // Exit
   el.exitBtn.addEventListener('click', async () => {
+    if (!(await ensureAdmin('exit the kiosk'))) return;
     const confirmed = await showMessageDialog({
       tone: 'danger',
       eyebrow: 'Secure Session',
@@ -2975,7 +3128,9 @@ function bindEvents() {
       cancelLabel: 'Cancel',
       showCancel: true,
     });
-    if (confirmed) api.exit();
+    if (!confirmed) { api.adminLock().catch(() => {}); return; }
+    const result = await api.exit();
+    if (result?.adminRequired) showResult('err', 'ADMIN PIN REQUIRED', 'The admin session ended. Press Exit again and enter the admin PIN.');
   });
 
   // Directory search

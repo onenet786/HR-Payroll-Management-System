@@ -45,8 +45,57 @@ function personalOutAllowanceFor(branch, policy) {
   return Number.isFinite(minutes) && minutes > 0 ? minutes : undefined;
 }
 
+/** Friday and Ramadan timings for one work date (YYYY-MM-DD); mirror of effectiveShiftForDate in src/data/attendanceRules.ts. */
+function effectiveShiftForDate(shift, workDate) {
+  const base = { ...DEFAULT_SHIFT, ...(shift || {}) };
+  if (!workDate) return base;
+  const inRamadan = !!(base.ramadanStartDate && base.ramadanEndDate && workDate >= base.ramadanStartDate && workDate <= base.ramadanEndDate);
+  const dated = inRamadan ? { ...base, startTime: base.ramadanStartTime || base.startTime, endTime: base.ramadanEndTime || base.endTime } : base;
+  const isFriday = new Date(`${workDate}T00:00:00`).getDay() === 5;
+  return isFriday ? { ...dated, startTime: base.fridayStartTime || dated.startTime, endTime: base.fridayEndTime || dated.endTime } : dated;
+}
+
+/** Calendar date (YYYY-MM-DD) in the kiosk's own time zone; toISOString() is UTC and lags Pakistan by 5 hours. */
+function localDateString(date = new Date()) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function previousDateString(dateString) {
+  const [year, month, day] = dateString.split('-').map(Number);
+  return localDateString(new Date(year, month - 1, day - 1));
+}
+
+/** A shift whose end is before its start (e.g. 20:00-04:00) ends on the next calendar day. */
+function crossesMidnight(shift) {
+  const start = timeMinutes(shift && shift.startTime);
+  const end = timeMinutes(shift && shift.endTime);
+  return start !== undefined && end !== undefined && end < start;
+}
+
+/**
+ * The attendance record a punch belongs to: today's record, or - for a night shift that crosses midnight - the
+ * still-open record of yesterday's shift when the punch comes before today's shift begins. "Open" means punched in
+ * and not out, or out on a temporary exit (isAwayOnBreak). Anything else starts today's record as before.
+ */
+function findAttendanceLogForPunch(logs, employeeId, today, at, shift, isAwayOnBreak = () => false) {
+  const mine = (logs || []).filter(log => log && log.employeeId === employeeId);
+  const todayLog = mine.find(log => log.date === today);
+  if (todayLog) return todayLog;
+  const yesterday = previousDateString(today);
+  const yesterdayShift = effectiveShiftForDate(shift, yesterday);
+  if (!crossesMidnight(yesterdayShift)) return undefined;
+  const now = timeMinutes(at);
+  const todayStart = timeMinutes(effectiveShiftForDate(shift, today).startTime);
+  if (now === undefined || todayStart === undefined || now >= todayStart) return undefined;
+  const yesterdayStart = timeMinutes(yesterdayShift.startTime);
+  // A record closed after midnight is also returned, so a repeat scan is refused instead of opening a new day.
+  const closedAfterMidnight = log => { const out = timeMinutes(log.punchOut); return out !== undefined && out < yesterdayStart; };
+  return mine.find(log => log.date === yesterday && log.punchIn && (!log.punchOut || isAwayOnBreak(log) || closedAfterMidnight(log))) || undefined;
+}
+
 function evaluateAttendanceTimes(punchIn, punchOut, configuredShift, breaks = [], context = {}) {
-  const shift = { ...DEFAULT_SHIFT, ...(configuredShift || {}) };
+  // context.workDate applies the Friday / Ramadan timings of that date.
+  const shift = effectiveShiftForDate(configuredShift, context.workDate);
   const start = timeMinutes(shift.startTime);
   const end = timeMinutes(shift.endTime);
   const input = timeMinutes(punchIn);
@@ -82,4 +131,5 @@ module.exports = {
   DEFAULT_SHIFT, KIOSK_OUT_REASONS, OFFICIAL_BREAK_REASONS, LOW_CONFIDENCE_BIOMETRIC_PERCENT,
   biometricMatchEvidence, evaluateAttendanceTimes, completedBreakMinutes, personalOutMinutes, isOfficialBreak,
   policyShift, halfTimeCutoffFor, personalOutAllowanceFor,
+  effectiveShiftForDate, localDateString, previousDateString, crossesMidnight, findAttendanceLogForPunch,
 };

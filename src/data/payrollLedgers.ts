@@ -1,14 +1,10 @@
 import type { Company, Employee, PayrollRun, Payslip, StatutoryConfig, WageType } from '../types';
 import { resolveWageBasis } from './masterData';
 import { complianceAlerts } from './complianceAlerts';
+import { csvCell as cell } from './csvSafe';
 
 export interface CsvReport { filename: string; csv: string; rowCount: number; total: number }
 
-const cell = (value: string | number | undefined) => {
-  let text = String(value ?? '');
-  if (/^[=+\-@]/.test(text)) text = `'${text}`;
-  return `"${text.replace(/"/g, '""')}"`;
-};
 const toCsv = (rows: Array<Array<string | number | undefined>>) => rows.map(row => row.map(cell).join(',')).join('\r\n');
 const escapeHtml = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!);
 const money = (value: number) => Math.round(value).toLocaleString('en-PK');

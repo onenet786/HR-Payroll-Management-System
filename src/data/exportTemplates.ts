@@ -1,5 +1,6 @@
 import type { Employee, PayrollRun, Payslip } from '../types';
 import { localDateStr } from './localDate';
+import { neutraliseFormula } from './csvSafe';
 
 /**
  * Bank and statutory upload layouts differ per institution and change over time, so they are data,
@@ -104,14 +105,29 @@ export function renderExport(template: ExportTemplate, payslips: Payslip[], cont
     .sort((a, b) => (a.employeeCode || '').localeCompare(b.employeeCode || ''));
   if (!sheets.length) errors.push('No payable rows for this template.');
   const separator = template.format === 'Delimited' ? (template.delimiter ?? ',') : '';
-  const cell = (value: string) => template.format === 'Delimited' && template.quoteValues ? `"${(/^[=+\-@]/.test(value) ? `'${value}` : value).replace(/"/g, '""')}"` : value;
+  const quoted = template.format === 'Delimited' && !!template.quoteValues;
+  const cell = (value: string) => quoted ? `"${neutraliseFormula(value).replace(/"/g, '""')}"` : value;
+  // Employee data must never add a column or a line. Line breaks are always removed; without quoting (most bank
+  // layouts) the delimiter and double quotes are removed from the data too, since the format has no escape for them.
+  const cleanData = (values: Record<string, string | number>, onChange: (token: string) => void) => Object.fromEntries(Object.entries(values).map(([token, raw]) => {
+    if (typeof raw !== 'string') return [token, raw];
+    let text = raw.replace(/[\r\n\t]+/g, ' ');
+    if (template.format === 'Delimited' && !quoted) {
+      if (separator) text = text.split(separator).join(' ');
+      text = text.replace(/"/g, '');
+    }
+    text = text.replace(/ {2,}/g, ' ').trim();
+    if (text !== raw.trim()) onChange(token);
+    return [token, text];
+  }));
 
   const fixedBatch: Record<string, string | number> = {
     batchReference: context.batchReference, period: `${context.run.periodYear}${String(context.run.periodMonth).padStart(2, '0')}`, valueDate: context.valueDate,
     debitAccount: template.debitAccount || '', companyName: context.companyName, generatedOn: localDateStr(),
   };
   const dataLines = sheets.map((sheet, index) => {
-    const values = { ...fixedBatch, ...rowValues(sheet, context.employees.find(item => item.id === sheet.employeeId), index) };
+    const values = cleanData({ ...fixedBatch, ...rowValues(sheet, context.employees.find(item => item.id === sheet.employeeId), index) },
+      token => warnings.push(`${sheet.employeeCode}: line breaks${quoted ? '' : ', delimiters or quotes'} removed from {${token}} to keep the file's columns intact.`));
     return template.columns.map(column => {
       let value = formatValue(substitute(column.value, values), column.format);
       if (column.required && !value.trim()) errors.push(`${sheet.employeeCode}: "${column.title}" is empty.`);

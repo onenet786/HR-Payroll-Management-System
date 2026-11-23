@@ -84,3 +84,22 @@ test('with an entrance and an exit camera the punch is tied to the camera id fro
   const noId = authorizeCameraAttempt({ payload: { code: '', livenessProof: {}, meta: { camera: 'ip-camera' } }, terminal, terminalId: 't1', ...fixture() });
   assert.equal(noId.ok, false, 'two cameras: the camera must be named');
 });
+
+test('multi-face walk-through (no liveness) is refused unless the terminal allows it', () => {
+  const f = fixture({ ok: false, message: 'should not be called' });
+  const refused = authorizeCameraAttempt({ payload: { mode: 'multi-face', code: '' }, terminal: {}, terminalId: 't1', ...f });
+  assert.equal(refused.ok, false);
+  assert.match(refused.message, /Multi-Face walk-through is turned off/);
+  assert.equal(f.calls(), 0);
+  const allowed = authorizeCameraAttempt({ payload: { mode: 'multi-face', code: '' }, terminal: { allowMultiFaceMode: true }, terminalId: 't1', ...f });
+  assert.equal(allowed.ok, true);
+  assert.equal(allowed.liveness.summary.method, 'multi-face-walkthrough', 'marked low assurance for savePunch');
+  assert.equal(authorizeCameraAttempt({ payload: { mode: 'multi-face' }, terminal: { allowMultiFaceMode: 'yes' }, terminalId: 't1', ...f }).ok, false, 'only a real true');
+});
+
+test('a single-face punch still needs the challenge when multi-face is allowed', () => {
+  const f = fixture({ ok: false, message: 'A privileged active liveness challenge is required.' });
+  const result = authorizeCameraAttempt({ payload: { code: '' }, terminal: { allowMultiFaceMode: true }, terminalId: 't1', ...f });
+  assert.equal(result.ok, false);
+  assert.equal(f.calls(), 1);
+});

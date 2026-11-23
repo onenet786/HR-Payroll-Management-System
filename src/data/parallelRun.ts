@@ -1,4 +1,5 @@
 import type { Payslip } from '../types';
+import { neutraliseFormula } from './csvSafe';
 
 /**
  * Parallel-run reconciliation: before going live, the same month is processed in the legacy payroll and in
@@ -107,7 +108,7 @@ export function compareParallelRun(legacy: ParsedLegacyPayroll, sheets: Payslip[
 
 export function parallelRunCsv(result: ParallelRunResult): string {
   // Text cells are neutralised against spreadsheet formulas; numeric cells (including negatives) stay numeric.
-  const cell = (value: string | number) => typeof value === 'number' ? String(value) : `"${value.replace(/^([=+\-@])/, "'$1").replace(/"/g, '""')}"`;
+  const cell = (value: string | number) => typeof value === 'number' ? String(value) : `"${neutraliseFormula(value).replace(/"/g, '""')}"`;
   const rows: Array<Array<string | number>> = [['Employee Code', 'Employee Name', 'Status', 'Field', 'Legacy PKR', 'This System PKR', 'Difference PKR']];
   for (const line of result.lines) {
     if (!line.differences.length) rows.push([line.employeeCode, line.employeeName, line.status, '', '', '', '']);

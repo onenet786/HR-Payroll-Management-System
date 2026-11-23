@@ -72,6 +72,7 @@ function attendanceRegisterHash(rows) {
 const canonical = value => Array.isArray(value) ? value.map(canonical)
   : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().filter(key => value[key] !== undefined).map(key => [key, canonical(value[key])]))
   : value;
+const salaryValue = value => (value === undefined || value === null || value === '' ? null : Number(value));
 const sameJson = (left, right) => JSON.stringify(canonical(left)) === JSON.stringify(canonical(right));
 const onlyChanged = (before, after, fields) => [...new Set([...Object.keys(before || {}), ...Object.keys(after || {})])]
   .every(key => fields.includes(key) || sameJson(before?.[key], after?.[key]));
@@ -324,6 +325,13 @@ async function authorizeWrite(client, name, table, id, identity, existing, next)
       } else return false;
     }
   }
+  // With maker-checker on, an existing employee's salary changes only through an approved salary revision (which
+  // sets it on the server); a direct edit of the employee record would skip the second person.
+  if ((name === 'employees' || table === 'employees') && existing && dual
+    && salaryValue(next.basicSalary) !== salaryValue(existing.data?.basicSalary)) return false;
+  // Leave decisions: nobody approves or rejects their own leave (the lite edition's single owner excepted).
+  if ((name === 'leaves' || table === 'leaves') && existing && existing.data.status === 'Pending' && next.status !== 'Pending'
+    && dual && identity.employeeId && identity.employeeId === existing.data.employeeId) return false;
   if ((name === 'employees' || table === 'employees') && typeof next.employeeCode === 'string') {
     // New or changed employee codes must carry the company prefix; existing codes are left untouched.
     const codeChanged = !existing || String(existing.data?.employeeCode || '').toUpperCase() !== next.employeeCode.trim().toUpperCase();
@@ -335,7 +343,10 @@ async function authorizeWrite(client, name, table, id, identity, existing, next)
     }
   }
   if (name === 'payrollPayslips' || table === 'payroll_payslips') {
-    const runId = next.payrollRunId || existing?.data?.payrollRunId;
+    // An existing payslip stays on its run: judging it by a run named in the request would let an issued payslip
+    // be pointed at a Draft run and escape every restriction below.
+    if (existing && next.payrollRunId !== existing.data.payrollRunId) return false;
+    const runId = existing ? existing.data.payrollRunId : next.payrollRunId;
     const runResult = await client.query(`SELECT data FROM payroll_runs WHERE id=$1 FOR SHARE`, [runId]);
     const run = runResult.rows[0]?.data;
     if (!run) return false;
@@ -346,7 +357,10 @@ async function authorizeWrite(client, name, table, id, identity, existing, next)
       const previous = existing.data;
       if (!onlyChanged(previous, next, [...payslipPaymentFields, ...payslipRedactionFields])) return false;
       const redacted = payslipRedactionFields.some(field => !sameJson(previous[field], next[field]));
-      if (redacted && (next.employeeName !== '[REDACTED]' || !String(next.employeeId || '').startsWith('deleted-'))) return false;
+      // Redaction (erasing a deleted employee) can only blank the personal and bank fields, never set new ones,
+      // so it cannot be used to send an issued salary to a different account.
+      if (redacted && (next.employeeName !== '[REDACTED]' || next.employeeCode !== '[REDACTED]' || next.cnic !== '[REDACTED]'
+        || !String(next.employeeId || '').startsWith('deleted-') || next.bankName || next.bankAccountNumber || next.iban)) return false;
       if (next.paymentStatus !== previous.paymentStatus) {
         // Paid / Unpaid is the per-employee (cash) payment record and may be kept from approval onwards;
         // bank returns (Failed / Retried) exist only once the run is disbursed.
@@ -430,6 +444,17 @@ async function authorizeWrite(client, name, table, id, identity, existing, next)
     if (!existing) {
       // Every application records who entered it, so a different user can be required to decide it.
       if (next.status !== 'Pending' || next.createdById !== identity.uid) return false;
+    } else if (existing.data.status !== 'Pending' && existing.data.status !== 'Rejected') {
+      // A loan in repayment: its terms and decision are fixed; repayment only moves forward (fewer instalments
+      // left, more repaid, Active to Closed), and an employee cannot change their own loan.
+      const previous = existing.data;
+      if (identity.employeeId && identity.employeeId === previous.employeeId) return false;
+      if (['employeeId', 'type', 'principalAmount', 'approvedAmount', 'totalInstallments', 'monthlyInstallment', 'reason', 'appliedOn', 'createdById', 'decidedById', 'approvedBy', 'approvedOn']
+        .some(field => !sameJson(previous[field], next[field]))) return false;
+      if (Number(next.remainingInstallments) > Number(previous.remainingInstallments) || Number(next.totalRepaid) < Number(previous.totalRepaid)) return false;
+      if (next.status !== previous.status && !(previous.status === 'Active' && next.status === 'Closed')) return false;
+    } else if (existing.data.status === 'Rejected') {
+      if (!sameJson(existing.data, next)) return false;
     } else if (existing.data.status === 'Pending' && next.status !== 'Pending') {
       const previous = existing.data;
       if (!['Active', 'Rejected'].includes(next.status) || next.decidedById !== identity.uid
@@ -571,6 +596,25 @@ async function authorizeWrite(client, name, table, id, identity, existing, next)
   if (existing && existing.data.employeeId !== next.employeeId) return false;
   if (!existing && next.regularizationRequested === true) return true;
   if (next.method !== 'Mobile GPS' || typeof next.mobileDutyAuthorizationId !== 'string') return false;
+  if (existing) {
+    // An employee updating their own mobile punch (visits, punch-out) may add to it, not rewrite it: the day,
+    // punch-in and any review stay as they are, a raised review cannot be withdrawn, a recorded punch-out cannot
+    // be moved, and overtime cannot exceed the time actually between punch-in and punch-out.
+    const before = existing.data;
+    // A day started elsewhere (e.g. the kiosk) may be finished on the phone: that punch-out makes it a mobile record.
+    const mobilePunchOutOfOtherDay = before.method !== 'Mobile GPS' && !before.punchOut && Boolean(next.punchOut);
+    if ((before.method !== 'Mobile GPS' && !mobilePunchOutOfOtherDay) || before.date !== next.date || (before.punchIn || '') !== (next.punchIn || '')) return false;
+    if (before.punchOut && before.punchOut !== next.punchOut) return false;
+    if (before.regularizationRequested === true && next.regularizationRequested !== true) return false;
+    if (['regularizationApproved', 'reviewedAt', 'reviewedBy', 'reviewedById', 'reviewComment', 'leaveRequestId']
+      .some(field => !sameJson(before[field], next[field]))) return false;
+    if (before.mobileDutyAuthorizationId && before.mobileDutyAuthorizationId !== next.mobileDutyAuthorizationId) return false;
+    const minutes = value => { const match = /^(\d{1,2}):(\d{2})/.exec(String(value || '')); return match ? Number(match[1]) * 60 + Number(match[2]) : undefined; };
+    const inAt = minutes(next.punchIn);
+    const outAt = minutes(next.punchOut);
+    const span = inAt !== undefined && outAt !== undefined ? (outAt >= inAt ? outAt - inAt : outAt + 1440 - inAt) : 0;
+    if (Number(next.overtimeMinutes || 0) > span) return false;
+  }
   const authorization = await client.query(
     `SELECT data FROM mobile_duty_authorizations WHERE id=$1`,
     [next.mobileDutyAuthorizationId],

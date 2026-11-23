@@ -1,5 +1,6 @@
-const { app, BrowserWindow, ipcMain, dialog, session, safeStorage, net: electronNet } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, session, safeStorage, Menu, net: electronNet } = require('electron');
 const { execFile, spawn } = require('child_process');
+const crypto = require('crypto');
 const fs = require('fs');
 const net = require('net');
 const path = require('path');
@@ -19,9 +20,12 @@ const { authorizeCameraAttempt, requireSecureEnrollment } = require('./camera-au
 const {
   LOW_CONFIDENCE_BIOMETRIC_PERCENT, KIOSK_OUT_REASONS, OFFICIAL_BREAK_REASONS,
   biometricMatchEvidence, evaluateAttendanceTimes, policyShift, halfTimeCutoffFor, personalOutAllowanceFor, personalOutMinutes,
+  localDateString, findAttendanceLogForPunch,
 } = require('./attendance-rules.cjs');
 const { FACE_IDENTIFY_THRESHOLD, FACE_VERIFY_THRESHOLD, FACE_STRONG_DISTANCE, normalizeFaceDescriptor, identifyFace } = require('./face-match.cjs');
 const { parseSetupCode, normalizeServerAddress, orderedPortalUrls, tryPortalUrls } = require('./setup-code.cjs');
+const { createAdminGuard } = require('./admin-pin.cjs');
+const { newBridgeSecret, clientHandshake, verifyBridgeProof, parseHttpResponseHead } = require('./bridge-auth.cjs');
 
 // Server requests use Node's https, which by default trusts only its built-in list of public authorities. Also trust
 // the certificates installed in Windows, so a self-hosted server whose certificate comes from the client's own CA
@@ -51,6 +55,12 @@ if (!process.env.PORTAL_URL) process.env.PORTAL_URL = process.env.VITE_API_BASE_
 
 
 const bridgePort = 15896;
+// Per-session secret for the fingerprint bridge this kiosk starts (see bridge-auth.cjs).
+const bridgeSecret = newBridgeSecret();
+// DevTools, reload and closing the window with Alt+F4 stay off unless the kiosk is started with KIOSK_DEVTOOLS=1.
+const devToolsAllowed = process.env.KIOSK_DEVTOOLS === '1';
+// Set only by the PIN-protected Exit, a Windows shutdown / log-off, or a second start of the app that has to quit.
+let quitAuthorized = false;
 let mainWindow;
 let splashWindow;
 let bridgeProcess = null;
@@ -248,6 +258,12 @@ function defaultStore() {
       autoCaptureConfigVersion: 1,
       autoFullscreen: true,
       classicTheme: false,
+      // Multi-Face walk-through has no liveness check (a photo can be recognised); off unless an administrator turns
+      // it on, and every punch it makes is sent to HR for review.
+      allowMultiFaceMode: false,
+      // Use a fingerprint bridge that cannot prove it was started by this kiosk (an older URU4500Bridge.exe, or one
+      // running as a Windows service). Off: such a bridge is refused.
+      allowUnverifiedBridge: false,
     },
     employees: [],
     attendances: [],
@@ -342,8 +358,24 @@ function queryBridgeService() {
   });
 }
 
+// A bridge left running by an earlier kiosk session (crash, or one started by the old autostart entries) does not know
+// this session's secret. It is stopped once, so the kiosk can start its own; a bridge of another user or a service
+// cannot be stopped this way and stays refused unless "allow unverified bridge" is on.
+let staleBridgeCheckDone = false;
+async function replaceUnverifiedBridge() {
+  if (staleBridgeCheckDone || process.platform !== 'win32') return;
+  staleBridgeCheckDone = true;
+  if (readStore().terminal.allowUnverifiedBridge || !(await isBridgePortOpen())) return;
+  const verified = await verifyBridge();
+  if (verified.ok) return;
+  addEvent('security', `Fingerprint bridge on port ${bridgePort} did not prove it was started by this kiosk (${verified.message}); restarting it`);
+  await new Promise(resolve => execFile('taskkill.exe', ['/IM', 'URU4500Bridge.exe', '/F'], { windowsHide: true, timeout: 5000 }, () => resolve()));
+  for (let i = 0; i < 10 && await isBridgePortOpen(); i += 1) await new Promise(resolve => setTimeout(resolve, 300));
+}
+
 async function startUru4500Bridge() {
   if (process.platform !== 'win32') return { ok: false, message: 'Windows biometric driver host starts only on Windows.' };
+  await replaceUnverifiedBridge();
   if (await isBridgePortOpen()) return { ok: true, message: 'Windows biometric driver host already running.' };
   // A running service is still opening its port (or restarting after a crash); a second copy would fight it.
   const serviceState = await queryBridgeService();
@@ -358,11 +390,13 @@ async function startUru4500Bridge() {
 
   const logPath = path.join(app.getPath('userData'), 'biometric-driver-host.log');
   const logFd = fs.openSync(logPath, 'a');
+  // The secret goes in the environment (not the command line, which other programs can list).
   bridgeProcess = spawn(bridgePath, [], {
     cwd: path.dirname(bridgePath),
     detached: true,
     stdio: ['ignore', logFd, logFd],
     windowsHide: true,
+    env: { ...process.env, URU4500_BRIDGE_SECRET: bridgeSecret },
   });
   bridgeProcess.once('exit', (code, signal) => {
     addEvent('device', 'Windows biometric driver host exited', { code, signal });
@@ -375,6 +409,7 @@ async function startUru4500Bridge() {
 }
 
 async function ensureBiometricDriverHost() {
+  if (!staleBridgeCheckDone) await replaceUnverifiedBridge();
   const running = await isBridgePortOpen();
   if (running) return { ok: true, running: true, message: 'Windows biometric driver host online.' };
   const started = await startUru4500Bridge();
@@ -427,6 +462,8 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      webviewTag: false,
+      devTools: devToolsAllowed,
       enableBlinkFeatures: 'FaceDetector',
     },
   });
@@ -435,24 +472,78 @@ function createWindow() {
     mainWindow.show();
     closeSplashWindow();
   });
-  mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  lockDownKioskWindow(mainWindow);
+  mainWindow.loadFile(rendererIndexPath);
 }
 
-function configureCameraPermission() {
-  const rendererUrl = pathToFileURL(path.join(__dirname, 'renderer', 'index.html')).toString();
-  // Trust only the kiosk's own window showing the bundled renderer. Comparing the exact URL text failed when the
-  // app was installed under a path with spaces (e.g. C:\Program Files\...), which blocked the camera.
-  const normalizeFileUrl = url => {
-    try { return decodeURIComponent(new URL(url).pathname).replace(/\\/g, '/').toLowerCase(); } catch { return ''; }
-  };
-  const trustedPath = normalizeFileUrl(rendererUrl);
-  const isTrustedRenderer = webContents => {
-    if (!webContents || webContents.isDestroyed()) return false;
-    const url = webContents.getURL();
-    const trusted = url.startsWith('file:') && normalizeFileUrl(url) === trustedPath;
-    return trusted || (!!mainWindow && !mainWindow.isDestroyed() && webContents.id === mainWindow.webContents.id && url.startsWith('file:'));
-  };
+const rendererIndexPath = path.join(__dirname, 'renderer', 'index.html');
+// file:///C:/Program%20Files/... → "c:/program files/.../renderer/index.html" (spaces and case as Windows sees them).
+function normalizedFilePath(url) {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'file:' ? decodeURIComponent(parsed.pathname).replace(/\\/g, '/').replace(/^\/([a-z]:)/i, '$1').toLowerCase() : '';
+  } catch { return ''; }
+}
+const trustedRendererPath = normalizedFilePath(pathToFileURL(rendererIndexPath).toString());
+function isAppIndexUrl(url) {
+  return !!trustedRendererPath && normalizedFilePath(url) === trustedRendererPath;
+}
 
+// The kiosk window shows only renderer/index.html: no menu (Ctrl+R, Ctrl+Shift+I, Ctrl+W accelerators), no DevTools,
+// no navigation or pop-up windows, and the window closes only through the PIN-protected Exit (or a Windows shutdown).
+function lockDownKioskWindow(window) {
+  const contents = window.webContents;
+  contents.on('before-input-event', (event, input) => {
+    if (devToolsAllowed || input.type !== 'keyDown') return;
+    const key = String(input.key || '').toLowerCase();
+    const ctrl = input.control || input.meta;
+    const blocked = key === 'f12' ||
+      (ctrl && input.shift && ['i', 'j', 'c', 'r', 'delete'].includes(key)) ||
+      (ctrl && ['r', 'w', 'p', 'o', 's', 'u', 'n', 't'].includes(key)) ||
+      (input.alt && key === 'f4') ||
+      (ctrl && key === 'f5');
+    if (blocked) event.preventDefault();
+  });
+  contents.on('devtools-opened', () => { if (!devToolsAllowed) contents.closeDevTools(); });
+  contents.on('will-navigate', (event, url) => {
+    if (!isAppIndexUrl(url)) { event.preventDefault(); addEvent('security', 'Navigation away from the kiosk screen was blocked'); }
+  });
+  contents.on('will-redirect', (event, url) => { if (!isAppIndexUrl(url)) event.preventDefault(); });
+  contents.on('will-attach-webview', event => event.preventDefault());
+  contents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  window.on('close', event => {
+    if (quitAuthorized || devToolsAllowed) return;
+    event.preventDefault();
+    addEvent('security', 'Closing the kiosk window without the admin PIN was blocked');
+  });
+  // Windows shutdown / log-off must not be held up by the close guard.
+  window.on('session-end', () => { quitAuthorized = true; });
+}
+
+// Only the kiosk's own window showing the bundled renderer/index.html. The path is compared decoded and
+// case-insensitively, so an install under C:\Program Files\... (spaces) still matches.
+function isTrustedRenderer(webContents) {
+  if (!webContents || webContents.isDestroyed()) return false;
+  if (!mainWindow || mainWindow.isDestroyed() || webContents.id !== mainWindow.webContents.id) return false;
+  return isAppIndexUrl(webContents.getURL());
+}
+
+// IPC is answered only for the trusted kiosk window (a frame or window that somehow loaded other content gets nothing).
+function trustedSender(event) {
+  if (!isTrustedRenderer(event?.sender)) return false;
+  const frame = event.senderFrame;
+  return !frame || (frame.routingId === event.sender.mainFrame?.routingId && isAppIndexUrl(frame.url));
+}
+const rawHandle = ipcMain.handle.bind(ipcMain);
+ipcMain.handle = (channel, handler) => rawHandle(channel, (event, ...args) => {
+  if (!trustedSender(event)) {
+    addEvent('security', `IPC ${channel} refused: request did not come from the kiosk window`);
+    throw new Error('Request refused.');
+  }
+  return handler(event, ...args);
+});
+
+function configureCameraPermission() {
   session.defaultSession.setPermissionCheckHandler((webContents, permission, _origin, details) =>
     permission === 'media' &&
     isTrustedRenderer(webContents) &&
@@ -646,9 +737,10 @@ async function fetchFirestoreCollectionByIds(collectionName, fieldName, values) 
   return all.filter(item => set.has(String(item[fieldName])));
 }
 
-async function putFirestoreDocument(collectionName, docId, data) {
+async function putFirestoreDocument(collectionName, docId, data, { queued = false } = {}) {
   // documentId makes the punch idempotent on the server, so retrying it on the fallback address after a timeout is safe.
-  return await portalRequest('POST', '/api/kiosk/punch', { collection: collectionName, documentId: docId, data });
+  // deviceSentAt / queued let the server flag a wrong kiosk clock or a punch that arrives long after it was made.
+  return await portalRequest('POST', '/api/kiosk/punch', { collection: collectionName, documentId: docId, data, deviceSentAt: new Date().toISOString(), queued: !!queued });
 }
 
 async function findEmployeeForCrossBranchCamera(code, _currentBranchId) {
@@ -798,7 +890,7 @@ async function performSyncNow() {
   const remaining = [];
   for (const item of store.pendingSync || []) {
     try {
-      await putFirestoreDocument(item.collection, item.id, item.data);
+      await putFirestoreDocument(item.collection, item.id, item.data, { queued: true });
       report.pushed += 1;
     } catch (error) {
       // 400/403/404/409 mean the server will never accept this punch (too old, locked month, inactive
@@ -858,7 +950,8 @@ async function loadCrossBranchAttendanceContext(store, employeeId) {
   store.attendances = [...otherEmployeeLogs, ...records];
 }
 
-function todayDate() { return new Date().toISOString().slice(0, 10); }
+// Local calendar date: nowTime() is local, and a UTC date would file punches before 05:00 PKT under yesterday.
+function todayDate() { return localDateString(); }
 function nowTime() { return new Date().toTimeString().slice(0, 8); }
 
 // Callers pass the store they already loaded. Reading it here instead (as earlier builds did) re-parsed the whole
@@ -979,10 +1072,11 @@ function mergeEmployeeBiometricTemplates(employees, biometricRecords) {
 function computePunch(existingLog, method, terminal, evidenceId, outReason, at, shift, branch, policy, options) {
   const effectiveShift = policyShift(shift, branch, policy || {});
   if (!existingLog) {
-    const evaluated = evaluateAttendanceTimes(at, undefined, effectiveShift);
+    const workDate = todayDate();
+    const evaluated = evaluateAttendanceTimes(at, undefined, effectiveShift, [], { workDate });
     return {
       id: `att-kiosk-${Date.now()}`,
-      date: todayDate(),
+      date: workDate,
       punchIn: at,
       method,
       status: evaluated.status,
@@ -1006,7 +1100,9 @@ function computePunch(existingLog, method, terminal, evidenceId, outReason, at, 
     lastPunchAt: at,
   };
   const finalExit = String(outReason || '').toLowerCase() === 'duty off';
+  // A night-shift punch-out after midnight closes yesterday's record, so that record's date sets the timings.
   const evaluated = evaluateAttendanceTimes(updated.punchIn, at, effectiveShift, updated.breaks, {
+    workDate: existingLog.date,
     ...(options?.officialExitsNotDeducted && { excludedBreakReasons: OFFICIAL_BREAK_REASONS }),
     leaveIfOutBefore: finalExit ? halfTimeCutoffFor(branch, policy || {}) : undefined,
   });
@@ -1031,8 +1127,11 @@ const PUNCH_MIN_GAP_SECONDS = 60;
 
 function savePunch(store, employee, method, evidence, meta) {
   const date = todayDate();
-  const existing = (store.attendances || []).find(log => log.employeeId === employee.id && log.date === date);
   const at = nowTime();
+  const employeeBranch = (store.branches || []).find(item => item.id === employee.branchId);
+  // Today's record, or yesterday's still-open night-shift record when the shift crosses midnight.
+  const existing = findAttendanceLogForPunch(store.attendances, employee.id, date, at,
+    policyShift(employee.shift, employeeBranch, store.attendancePolicy || {}), canReturnFromTemporaryExit);
   const isReturningFromBreak = canReturnFromTemporaryExit(existing);
   if (existing?.punchIn && existing?.punchOut && !isReturningFromBreak) {
     return {
@@ -1093,15 +1192,22 @@ function savePunch(store, employee, method, evidence, meta) {
         evidenceId: evidence?.id,
       })
     : null;
-  const employeeBranch = (store.branches || []).find(item => item.id === employee.branchId);
+  // Review reasons raised by this punch. meta is built in this process (rendererPunchMeta + the matcher's result).
+  const reviewReasons = [
+    biometricMatch?.lowConfidence && `Low-confidence ${biometricMatch.kind} match (${biometricMatch.strengthPercent}% strength); supervisor verification required.`,
+    meta?.livenessMethod === 'multi-face-walkthrough' && 'Multi-Face walk-through punch without a liveness check; verify the evidence photo.',
+  ].filter(Boolean);
   const log = {
     ...(resumed?.log || computePunch(existing, method, store.terminal, evidence?.id, outReason, at, employee.shift, employeeBranch, store.attendancePolicy, store.companyOptions)),
     ...(biometricMatch && { biometricMatch }),
-    ...(biometricMatch?.lowConfidence && existing?.regularizationApproved === undefined && {
+    ...(meta?.livenessMethod && { livenessMethod: meta.livenessMethod }),
+    ...(reviewReasons.length && existing?.regularizationApproved === undefined && {
       regularizationRequested: true,
-      requestedAt: new Date().toISOString(),
-      regularizationReason: `Low-confidence ${biometricMatch.kind} match (${biometricMatch.strengthPercent}% strength); supervisor verification required.`,
+      requestedAt: existing?.requestedAt || new Date().toISOString(),
+      regularizationReason: [...new Set([...(existing?.regularizationRequested && existing?.regularizationReason ? [existing.regularizationReason] : []), ...reviewReasons])].join('; '),
     }),
+    // The server compares the punch time with its own clock (server/kiosk.cjs) and needs the kiosk's UTC offset.
+    deviceUtcOffsetMinutes: -new Date().getTimezoneOffset(),
     employeeId: employee.id,
     employeeName: employee.fullName || '',
     employeeCode: employee.employeeCode || '',
@@ -1166,6 +1272,34 @@ function markedAtThisKiosk(store, deviceId = readDeviceRegistration()?.deviceId 
   return log => (Array.isArray(log.kioskInstallIds) && log.kioskInstallIds.includes(installId)) ||
     (!!deviceId && log.kioskDeviceId === deviceId);
 }
+
+// ─── Admin PIN ──────────────────────────────────────────────────────────────
+// Settings, Exit, clearing the local cache and removing the device key need the admin PIN (admin-pin.cjs). The hash
+// lives in the kiosk store (adminPin), never in what is sent to the renderer.
+const adminGuard = createAdminGuard({
+  readRecord: () => readStore().adminPin || null,
+  writeRecord: record => { const store = readStore(); store.adminPin = record; writeStore(store); },
+});
+const ADMIN_REQUIRED = { ok: false, adminRequired: true, message: 'Enter the admin PIN in Settings first.' };
+function requireAdmin(action) {
+  if (adminGuard.isUnlocked()) return true;
+  addEvent('security', `${action} refused: admin PIN not entered`);
+  return false;
+}
+const pinText = value => (typeof value === 'string' ? value.slice(0, 64) : '');
+
+ipcMain.handle('kiosk:admin-status', async () => adminGuard.status());
+ipcMain.handle('kiosk:admin-set-pin', async (_event, pin) => {
+  const result = adminGuard.setPin(pinText(pin));
+  if (result.ok) addEvent('security', result.firstPin ? 'Admin PIN set on this kiosk' : 'Admin PIN changed');
+  return result;
+});
+ipcMain.handle('kiosk:admin-unlock', async (_event, pin) => {
+  const result = adminGuard.unlock(pinText(pin));
+  if (!result.ok && !result.needsSetup) addEvent('security', result.lockedUntil ? 'Admin PIN locked after repeated wrong entries' : 'Wrong admin PIN entered');
+  return result;
+});
+ipcMain.handle('kiosk:admin-lock', async () => adminGuard.lock());
 
 // ─── IPC Handlers ───────────────────────────────────────────────────────────
 
@@ -1257,7 +1391,9 @@ ipcMain.handle('kiosk:lookup-employee', async (_event, code) => {
   if (!employee) return { found: false };
 
   const today = todayDate();
-  const todayLog = (store.attendances || []).find(l => l.employeeId === employee.id && l.date === today);
+  const lookupBranch = (store.branches || []).find(item => item.id === employee.branchId);
+  const todayLog = findAttendanceLogForPunch(store.attendances, employee.id, today, nowTime(),
+    policyShift(employee.shift, lookupBranch, store.attendancePolicy || {}), canReturnFromTemporaryExit);
   const isPunchedIn = todayLog?.punchIn && !todayLog?.punchOut;
   const canReturn = canReturnFromTemporaryExit(todayLog);
 
@@ -1277,6 +1413,7 @@ ipcMain.handle('kiosk:lookup-employee', async (_event, code) => {
 });
 
 ipcMain.handle('kiosk:clear-local-attendance-cache', async () => {
+  if (!requireAdmin('Clearing the local attendance cache')) return ADMIN_REQUIRED;
   const store = readStore();
   const clearedCount = (store.attendances || []).length;
   const discardedPendingCount = (store.pendingSync || []).filter(item => item.collection === 'attendances').length;
@@ -1293,7 +1430,9 @@ ipcMain.handle('kiosk:clear-local-attendance-cache', async () => {
   };
 });
 
-ipcMain.handle('kiosk:save-settings', async (_event, settings) => {
+ipcMain.handle('kiosk:save-settings', async (_event, submitted) => {
+  if (!requireAdmin('Saving kiosk settings')) return ADMIN_REQUIRED;
+  const settings = submitted && typeof submitted === 'object' && !Array.isArray(submitted) ? submitted : {};
   const store = readStore();
   const before = normalizeCameraSettings(store.terminal);
   const prevBranchId = store.terminal.branchId;
@@ -1313,8 +1452,13 @@ ipcMain.handle('kiosk:save-settings', async (_event, settings) => {
     autoCaptureCamera: settings.autoCaptureCamera !== false,
     autoFullscreen: !!settings.autoFullscreen,
     classicTheme: !!settings.classicTheme,
+    allowMultiFaceMode: !!settings.allowMultiFaceMode,
+    allowUnverifiedBridge: !!settings.allowUnverifiedBridge,
   });
   writeStore(store);
+  for (const [field, label] of [['allowCodeOnlyPunch', 'Code-only attendance'], ['allowMultiFaceMode', 'Multi-Face walk-through (no liveness, punches sent for review)'], ['allowUnverifiedBridge', 'Unverified fingerprint bridge']]) {
+    if (!!before[field] !== !!store.terminal[field]) addEvent('security', `${label} ${store.terminal[field] ? 'enabled' : 'disabled'}`);
+  }
 
   if (settings.branchId !== prevBranchId) {
     addEvent('config', `Terminal branch changed to ${settings.branchId || 'unassigned'}`);
@@ -1391,6 +1535,8 @@ app.on('before-quit', () => stopIpCameraStream());
 // Settings → "Test camera": tries the values as typed (an unsaved password included) once, so a wrong user or
 // password is caught before the preview loop starts.
 ipcMain.handle('kiosk:test-ip-camera', async (_event, payload) => {
+  // The saved camera password is used for the typed URL, so this is a Settings action.
+  if (!requireAdmin('Camera test')) return { ok: false, message: ADMIN_REQUIRED.message, bytes: 0 };
   const { terminal } = readStore();
   const url = String(payload?.url || '').trim();
   const user = String(payload?.user || '').trim();
@@ -1420,6 +1566,8 @@ ipcMain.handle('kiosk:parse-setup-code', async (_event, text) => {
 // address(es) to use), or a Kiosk Terminal account's email and password against the server address typed in
 // Settings (e.g. http://192.168.86.83:8080 for a self-hosted server), else the current server address.
 ipcMain.handle('kiosk:register-device', async (_event, payload) => {
+  // Registering points the kiosk at a server (and its employee list): a Settings action.
+  if (!requireAdmin('Kiosk registration')) return { ok: false, error: ADMIN_REQUIRED.message };
   const setupCodeText = String(payload?.setupCode || '').trim();
   let setup = null;
   let body;
@@ -1480,6 +1628,7 @@ ipcMain.handle('kiosk:register-device', async (_event, payload) => {
 });
 
 ipcMain.handle('kiosk:unregister-device', async () => {
+  if (!requireAdmin('Removing the device key')) return { ...publicDeviceRegistration(), ...ADMIN_REQUIRED };
   writeDeviceRegistration(null);
   activePortalUrl = null;
   allPortalsFailedAt = 0;
@@ -1520,13 +1669,30 @@ ipcMain.handle('kiosk:punch-by-code', async (_event, payload) => {
   if (!allowCodeOnlyPunch) {
     return { ok: false, message: 'Code-only attendance is disabled on this terminal for security. Scan fingerprint or face to punch.' };
   }
+  const code = String(payload?.code || '').trim().slice(0, 64);
   const employees = mergeEmployeeBiometricTemplates(store.employees || [], store.biometricTemplates || []);
-  const employee = findEmployeeByCode(employees, payload.code);
-  if (!employee) return { ok: false, message: `No active employee found with code "${payload.code}".` };
+  const employee = findEmployeeByCode(employees, code);
+  if (!employee) return { ok: false, message: `No active employee found with code "${code}".` };
   if (employee.status === 'Terminated') return { ok: false, message: 'This employee account is terminated.' };
   if (employee.status === 'Suspended') return { ok: false, message: 'This employee account is suspended.' };
-  return savePunch(store, employee, payload.method || 'RFID', payload.evidence || null, payload.meta || {});
+  // Always recorded as a code punch ('RFID' is the server's method for it): the renderer cannot claim 'Biometric'
+  // or supply match scores, evidence or a camera direction.
+  return savePunch(store, employee, 'RFID', null, rendererPunchMeta(payload));
 });
+
+// The only punch details taken from the renderer: the checkout reason the employee picked. Everything else
+// (method, match score and threshold, camera id and direction, evidence) is decided in this process.
+function rendererPunchMeta(payload) {
+  const outReason = normalizeCheckoutReason(payload?.meta?.outReason);
+  return outReason ? { outReason } : {};
+}
+
+// Evidence ids the renderer passes must be photos this process saved (kiosk:save-evidence) in the last 2 minutes.
+function savedEvidence(store, evidence) {
+  const id = typeof evidence?.id === 'string' ? evidence.id : '';
+  const found = id ? (store.evidence || []).find(item => item.id === id) : null;
+  return found && Date.now() - Date.parse(found.at) < 120_000 ? { id: found.id } : null;
+}
 
 ipcMain.handle('kiosk:begin-camera-liveness', async (_event, cameraId) => {
   const store = readStore();
@@ -1551,6 +1717,8 @@ ipcMain.handle('kiosk:punch-camera', async (_event, payload) => {
     return { ok: false, message: `${authorization.message}${lockMessage}` };
   }
   const liveness = authorization.liveness;
+  // Decided by authorizeCameraAttempt from the terminal settings, never by the renderer's mode alone.
+  const multiFace = liveness.summary?.method === 'multi-face-walkthrough';
   const employees = mergeEmployeeBiometricTemplates(store.employees || [], store.biometricTemplates || []);
   let typedEmployee = payload.code ? findEmployeeByCode(employees, payload.code) : null;
   let crossBranch = false;
@@ -1566,18 +1734,18 @@ ipcMain.handle('kiosk:punch-camera', async (_event, payload) => {
     }
   }
   if (payload.code && !typedEmployee) {
-    if (payload.mode !== 'multi-face') cameraChallenges.recordFailure(terminalId);
+    if (!multiFace) cameraChallenges.recordFailure(terminalId);
     return { ok: false, message: 'Employee ID was not found. Cross-branch attendance requires the complete employee ID and face verification.' };
   }
 
   const candidates = typedEmployee ? [typedEmployee] : employees;
   if (!candidates || candidates.length === 0) {
-    if (payload.mode !== 'multi-face') cameraChallenges.recordFailure(terminalId);
+    if (!multiFace) cameraChallenges.recordFailure(terminalId);
     return { ok: false, message: 'No employees found in the local kiosk directory. Please sync the kiosk in Settings.' };
   }
   const secureDescriptorCount = candidates.reduce((count, employee) => count + getFaceDescriptors(employee).length, 0);
   if (secureDescriptorCount === 0) {
-    if (payload.mode !== 'multi-face') cameraChallenges.recordFailure(terminalId);
+    if (!multiFace) cameraChallenges.recordFailure(terminalId);
     if (!readDeviceRegistration()) {
       return { ok: false, message: 'This kiosk is not registered with the server, so enrolled faces cannot download. Open Settings → Server Registration and sign in with the kiosk account.' };
     }
@@ -1593,7 +1761,7 @@ ipcMain.handle('kiosk:punch-camera', async (_event, payload) => {
   });
   if (!match.ok && (match.ambiguous || match.duplicate)) addEvent('security', `Camera match refused: ${match.message} (distance ${Number(match.score).toFixed(3)})`);
   if (!match.ok) {
-    if (payload.mode !== 'multi-face') {
+    if (!multiFace) {
       const failure = cameraChallenges.recordFailure(terminalId);
       return { ...match, lockedUntil: failure.lockedUntil || undefined };
     }
@@ -1606,8 +1774,8 @@ ipcMain.handle('kiosk:punch-camera', async (_event, payload) => {
 
   // Direction and camera identity come from the terminal's settings (resolved by authorizeCameraAttempt), not the payload.
   const camera = authorization.camera;
-  const result = await savePunch(store, employee, 'Camera', payload.evidence || null, {
-    ...(payload.meta || {}),
+  const result = await savePunch(store, employee, 'Camera', savedEvidence(store, payload.evidence), {
+    ...rendererPunchMeta(payload),
     camera: camera ? 'ip-camera' : 'webcam',
     cameraId: camera?.id || '',
     cameraName: camera?.name || '',
@@ -1616,7 +1784,7 @@ ipcMain.handle('kiosk:punch-camera', async (_event, payload) => {
     threshold: matchThreshold,
     recognizedBy: crossBranch ? 'cross-branch-code-face-liveness' : typedEmployee ? 'camera-code-face-liveness' : 'camera-face-liveness',
     crossBranch,
-    livenessMethod: payload.mode === 'multi-face' ? 'multi-face-walkthrough' : 'active-turn-v1',
+    livenessMethod: multiFace ? 'multi-face-walkthrough' : 'active-turn-v1',
   });
   if (result?.needsOutReason) {
     const token = require('crypto').randomBytes(24).toString('hex');
@@ -1672,7 +1840,7 @@ ipcMain.handle('kiosk:punch-fingerprint', async (_event, payload) => {
   const employee = employees.find(emp => emp.id === match.employeeId);
   if (!employee) return { ok: false, message: 'Fingerprint matched a missing employee record. Please re-enroll.' };
   return savePunch(store, employee, 'Biometric', null, {
-    ...(payload.meta || {}),
+    ...rendererPunchMeta(payload),
     quality: match.quality,
     score: match.score,
     threshold: FINGERPRINT_MATCH_THRESHOLD,
@@ -1724,6 +1892,8 @@ ipcMain.handle('kiosk:check-bridge', async () => {
 });
 
 ipcMain.handle('kiosk:exit', async () => {
+  if (!requireAdmin('Exit')) return ADMIN_REQUIRED;
+  quitAuthorized = true;
   addEvent('system', 'Kiosk closed from Exit button');
   if (mainWindow) {
     mainWindow.setKiosk(false);
@@ -1737,6 +1907,18 @@ ipcMain.handle('kiosk:exit', async () => {
 
 // DigitalPersona dissimilarity threshold for a false-accept rate of 1 in 1,000,000 (0x7FFFFFFF / 1,000,000).
 const FINGERPRINT_MATCH_THRESHOLD = 2147;
+
+// Connects, checks the bridge's proof and disconnects; { ok } or { ok: false, message }.
+function verifyBridge() {
+  return new Promise(resolve => {
+    let settled = false;
+    const done = result => { if (!settled) { settled = true; clearTimeout(timer); try { socket.close(); } catch {} resolve(result); } };
+    const socket = new WebSocketClient(`ws://127.0.0.1:${bridgePort}`, { allowUnverified: false });
+    const timer = setTimeout(() => done({ ok: false, message: 'no answer' }), 3000);
+    socket.on('open', () => done({ ok: true }));
+    socket.on('error', error => done({ ok: false, message: error?.message || 'connection failed' }));
+  });
+}
 
 function identifyFingerprint(gallery) {
   return new Promise(resolve => {
@@ -1778,7 +1960,7 @@ function identifyFingerprint(gallery) {
     });
     socket.on('error', error => {
       clearTimeout(timeout);
-      resolve({ ok: false, message: 'Fingerprint reader is unavailable.', correlationId: require('crypto').randomUUID() });
+      resolve({ ok: false, message: error?.code === 'BRIDGE_UNVERIFIED' || /refused this kiosk/.test(error?.message || '') ? `${error.message} Restart the kiosk, or ask the administrator.` : 'Fingerprint reader is unavailable.', correlationId: require('crypto').randomUUID() });
     });
   });
 }
@@ -1828,27 +2010,36 @@ function testFingerprintScanner() {
     });
     socket.on('error', error => {
       clearTimeout(timeout);
-      resolve({ ok: false, message: 'Scanner test could not connect to the driver host.', correlationId: require('crypto').randomUUID() });
+      resolve({ ok: false, message: error?.code === 'BRIDGE_UNVERIFIED' || /refused this kiosk/.test(error?.message || '') ? error.message : 'Scanner test could not connect to the driver host.', correlationId: require('crypto').randomUUID() });
     });
   });
 }
 
 // ─── WebSocket Client (pure Node, no ws dependency) ─────────────────────────
 
+// Talks to the fingerprint bridge only after it proved it was started by this kiosk (bridge-auth.cjs). With
+// "allow unverified bridge" on, an older bridge without the proof is still used (and an event is logged once).
+let unverifiedBridgeLogged = false;
 class WebSocketClient {
-  constructor(url) {
+  constructor(url, { secret = bridgeSecret, allowUnverified = !!readStore().terminal.allowUnverifiedBridge } = {}) {
     this.url = new URL(url);
     this.handlers = {};
     this.socket = null;
     this.buffer = Buffer.alloc(0);
+    this.head = Buffer.alloc(0);
     this.handshakeDone = false;
+    this.secret = secret;
+    this.allowUnverified = allowUnverified;
+    this.verified = false;
     this.connect();
   }
   on(event, fn) { this.handlers[event] = fn; }
   emit(event, payload) { if (this.handlers[event]) this.handlers[event](payload); }
   connect() {
     this.socket = net.createConnection({ host: this.url.hostname, port: Number(this.url.port) }, () => {
-      const key = Buffer.from(String(Date.now()) + Math.random()).toString('base64').slice(0, 24);
+      const key = crypto.randomBytes(16).toString('base64');
+      const auth = clientHandshake(this.secret);
+      this.nonce = auth.nonce;
       this.socket.write([
         `GET / HTTP/1.1`,
         `Host: ${this.url.host}`,
@@ -1856,38 +2047,72 @@ class WebSocketClient {
         'Connection: Upgrade',
         `Sec-WebSocket-Key: ${key}`,
         'Sec-WebSocket-Version: 13',
+        ...Object.entries(auth.headers).map(([name, value]) => `${name}: ${value}`),
         '',
         '',
       ].join('\r\n'));
     });
+    this.socket.setTimeout(60_000, () => this.fail(new Error('Fingerprint bridge did not answer.')));
     this.socket.on('data', chunk => this.handleData(chunk));
     this.socket.on('error', error => this.emit('error', error));
     this.socket.on('close', () => this.emit('close'));
   }
+  fail(error) {
+    try { this.socket.destroy(); } catch {}
+    const handler = this.handlers.error;
+    this.handlers = {};
+    if (handler) handler(error);
+  }
   send(text) {
+    if (!this.handshakeDone) throw new Error('Fingerprint bridge connection is not open.');
     const payload = Buffer.from(text);
     let header;
     if (payload.length < 126) header = Buffer.from([0x81, 0x80 | payload.length]);
-    else {
+    else if (payload.length < 65536) {
       header = Buffer.alloc(4);
       header[0] = 0x81; header[1] = 0x80 | 126;
       header.writeUInt16BE(payload.length, 2);
+    } else {
+      header = Buffer.alloc(10);
+      header[0] = 0x81; header[1] = 0x80 | 127;
+      header.writeUInt32BE(Math.floor(payload.length / 0x100000000), 2);
+      header.writeUInt32BE(payload.length % 0x100000000, 6);
     }
-    const mask = Buffer.from([1, 2, 3, 4]);
+    const mask = crypto.randomBytes(4);
     const masked = Buffer.alloc(payload.length);
     for (let i = 0; i < payload.length; i++) masked[i] = payload[i] ^ mask[i % 4];
     this.socket.write(Buffer.concat([header, mask, masked]));
   }
   close() { try { this.socket.end(); } catch {} }
   handleData(chunk) {
-    if (!this.handshakeDone && chunk.toString('utf8').startsWith('HTTP/1.1 101')) {
-      this.handshakeDone = true;
-      const split = chunk.indexOf('\r\n\r\n');
-      this.emit('open');
-      if (split >= 0 && split + 4 < chunk.length) this.readFrames(chunk.slice(split + 4));
+    if (this.handshakeDone) { this.readFrames(chunk); return; }
+    this.head = Buffer.concat([this.head, chunk]);
+    const split = this.head.indexOf('\r\n\r\n');
+    if (split < 0) {
+      if (this.head.length > 16384) this.fail(new Error('Fingerprint bridge sent an invalid handshake.'));
       return;
     }
-    this.readFrames(chunk);
+    const { status, headers } = parseHttpResponseHead(this.head.slice(0, split).toString('latin1'));
+    const rest = this.head.slice(split + 4);
+    this.head = Buffer.alloc(0);
+    if (status !== 101) {
+      this.fail(new Error(status === 403 ? 'Fingerprint bridge refused this kiosk (it was started by another program or session).' : `Fingerprint bridge handshake failed (HTTP ${status || '?'}).`));
+      return;
+    }
+    this.verified = verifyBridgeProof(this.secret, this.nonce, headers['x-bridge-proof']);
+    if (!this.verified) {
+      if (!this.allowUnverified) {
+        if (!unverifiedBridgeLogged) addEvent('security', 'Fingerprint bridge could not prove it was started by this kiosk; refused. Update URU4500Bridge.exe or, for an old bridge, enable "Allow unverified fingerprint bridge" in Settings.');
+        unverifiedBridgeLogged = true;
+        this.fail(Object.assign(new Error('Fingerprint bridge is not verified.'), { code: 'BRIDGE_UNVERIFIED' }));
+        return;
+      }
+      if (!unverifiedBridgeLogged) addEvent('security', 'Using an unverified fingerprint bridge (allowed in Settings)');
+      unverifiedBridgeLogged = true;
+    }
+    this.handshakeDone = true;
+    this.emit('open');
+    if (rest.length) this.readFrames(rest);
   }
   readFrames(chunk) {
     this.buffer = Buffer.concat([this.buffer, chunk]);
@@ -1926,7 +2151,15 @@ if (!gotLock) {
     mainWindow.focus();
   });
 
+  // No window, frame or webview created by any page may open further windows or navigate off the kiosk screen.
+  app.on('web-contents-created', (_event, contents) => {
+    contents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    contents.on('will-attach-webview', event => event.preventDefault());
+  });
+
   app.whenReady().then(async () => {
+    // The default menu carries Reload, Force Reload, Toggle DevTools and Close accelerators.
+    Menu.setApplicationMenu(null);
     configureCameraPermission();
     createSplashWindow();
     writeStore(readStore());

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog } = require('electron');
+const { app, BrowserWindow, dialog, session, shell } = require('electron');
 const { spawn } = require('child_process');
 const fs = require('fs');
 const net = require('net');
@@ -190,6 +190,61 @@ async function startUru4500Bridge() {
   bridgeProcess.unref();
 }
 
+// The app window shows only the bundled dist/index.html (file://). Paths are compared decoded and case-insensitively,
+// so an install under C:\Program Files\... (spaces) matches.
+const appIndexPath = path.join(__dirname, '..', 'dist', 'index.html');
+function normalizedFilePath(url) {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'file:' ? decodeURIComponent(parsed.pathname).replace(/\\/g, '/').replace(/^\/([a-z]:)/i, '$1').toLowerCase() : '';
+  } catch { return ''; }
+}
+const trustedAppPath = normalizedFilePath(pathToFileURL(appIndexPath).toString());
+const isAppUrl = url => !!trustedAppPath && normalizedFilePath(url) === trustedAppPath;
+const isTrustedContents = contents => !!contents && !contents.isDestroyed() && isAppUrl(contents.getURL());
+
+// Camera (face enrollment, video only), location (mobile punch), sanitized clipboard writes (copy buttons) and
+// fullscreen, for the app's own page only. Microphone, notifications, HID/serial/USB, MIDI, screen capture and every
+// other permission are refused.
+function mediaVideoOnly(details) {
+  const types = Array.isArray(details?.mediaTypes) ? details.mediaTypes : [];
+  return types.includes('video') && !types.includes('audio');
+}
+function configurePermissions() {
+  const allowedRequest = (contents, permission, details) => {
+    if (!isTrustedContents(contents)) return false;
+    if (permission === 'media') return mediaVideoOnly(details);
+    return ['geolocation', 'clipboard-sanitized-write', 'fullscreen'].includes(permission);
+  };
+  session.defaultSession.setPermissionRequestHandler((contents, permission, callback, details) => callback(allowedRequest(contents, permission, details)));
+  session.defaultSession.setPermissionCheckHandler((contents, permission, _origin, details) => {
+    if (!isTrustedContents(contents)) return false;
+    if (permission === 'media') return !details?.mediaType || details.mediaType === 'video';
+    return ['geolocation', 'clipboard-sanitized-write', 'fullscreen'].includes(permission);
+  });
+  session.defaultSession.setDevicePermissionHandler(() => false);
+}
+
+// Links to web pages (maps, help) open in the default browser; the printable-document window
+// (window.open('', '_blank') in src/data/lifecycle.ts) opens as a sandboxed about:blank child; nothing else opens.
+function lockDownContents(contents) {
+  contents.on('will-navigate', (event, url) => {
+    if (!isAppUrl(url)) event.preventDefault();
+  });
+  contents.on('will-redirect', (event, url) => { if (!isAppUrl(url)) event.preventDefault(); });
+  contents.on('will-attach-webview', event => event.preventDefault());
+  contents.setWindowOpenHandler(({ url }) => {
+    if (url === 'about:blank' || url === '') {
+      return { action: 'allow', overrideBrowserWindowOptions: { webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, javascript: false } } };
+    }
+    try {
+      const target = new URL(url);
+      if (target.protocol === 'https:' || target.protocol === 'http:') shell.openExternal(target.toString());
+    } catch { /* not a URL */ }
+    return { action: 'deny' };
+  });
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1366,
@@ -204,6 +259,7 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      webviewTag: false,
       enableBlinkFeatures: 'FaceDetector',
     },
   });
@@ -213,7 +269,7 @@ function createWindow() {
     closeSplashWindow();
   });
 
-  mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
+  mainWindow.loadFile(appIndexPath);
 }
 
 const gotLock = app.requestSingleInstanceLock();
@@ -226,7 +282,17 @@ if (!gotLock) {
     mainWindow.focus();
   });
 
+  // Every window, child window and frame: no navigation off the app, no webviews, no pop-ups (see lockDownContents).
+  app.on('web-contents-created', (_event, contents) => {
+    lockDownContents(contents);
+    contents.on('did-create-window', child => {
+      // The printable document is static HTML written by the app; it may not navigate anywhere.
+      child.webContents.on('will-navigate', event => event.preventDefault());
+    });
+  });
+
   app.whenReady().then(async () => {
+    configurePermissions();
     createSplashWindow();
     await startUru4500Bridge();
     createWindow();

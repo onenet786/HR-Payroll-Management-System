@@ -28,11 +28,12 @@ contextBridge.exposeInMainWorld('kioskApi', {
     : { email: String(credentials?.email || '').slice(0, 254), password: String(credentials?.password || '').slice(0, 256), serverUrl: String(credentials?.serverUrl || '').slice(0, 512) }),
   parseSetupCode: text => ipcRenderer.invoke('kiosk:parse-setup-code', String(text || '').slice(0, 8192)),
   unregisterDevice: () => ipcRenderer.invoke('kiosk:unregister-device'),
-  punchByCode: payload => ipcRenderer.invoke('kiosk:punch-by-code', payload),
+  // Only the code and the chosen checkout reason are passed; the main process decides the method and everything else.
+  punchByCode: payload => ipcRenderer.invoke('kiosk:punch-by-code', { code: String(payload?.code || '').slice(0, 64), meta: { outReason: String(payload?.meta?.outReason || '').slice(0, 60) } }),
   punchCamera: invokeCameraPunch,
   beginCameraLiveness: cameraId => ipcRenderer.invoke('kiosk:begin-camera-liveness', typeof cameraId === 'string' ? cameraId.slice(0, 16) : undefined),
   cancelCameraLiveness: challengeId => ipcRenderer.invoke('kiosk:cancel-camera-liveness', challengeId),
-  punchFingerprint: payload => ipcRenderer.invoke('kiosk:punch-fingerprint', payload),
+  punchFingerprint: payload => ipcRenderer.invoke('kiosk:punch-fingerprint', { code: String(payload?.code || '').slice(0, 64), meta: { outReason: String(payload?.meta?.outReason || '').slice(0, 60) } }),
   testFingerprintScanner: () => ipcRenderer.invoke('kiosk:test-fingerprint-scanner'),
   saveEvidence: payload => ipcRenderer.invoke('kiosk:save-evidence', payload),
   startIpCameraStream: cameraIds => ipcRenderer.invoke('kiosk:start-ip-camera-stream', Array.isArray(cameraIds) ? cameraIds.map(String).slice(0, 4) : undefined),
@@ -44,6 +45,11 @@ contextBridge.exposeInMainWorld('kioskApi', {
   startBridge: () => ipcRenderer.invoke('kiosk:start-bridge'),
   checkBridge: () => ipcRenderer.invoke('kiosk:check-bridge'),
   exit: () => ipcRenderer.invoke('kiosk:exit'),
+  // Admin PIN (Settings, Exit, clear cache, remove device key); checked in the main process.
+  adminStatus: () => ipcRenderer.invoke('kiosk:admin-status'),
+  adminSetPin: pin => ipcRenderer.invoke('kiosk:admin-set-pin', String(pin || '').slice(0, 64)),
+  adminUnlock: pin => ipcRenderer.invoke('kiosk:admin-unlock', String(pin || '').slice(0, 64)),
+  adminLock: () => ipcRenderer.invoke('kiosk:admin-lock'),
   onSyncComplete: (callback) => {
     ipcRenderer.on('kiosk:sync-complete', (_event, data) => callback(data));
   },

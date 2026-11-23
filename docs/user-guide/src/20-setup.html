@@ -33,7 +33,7 @@
 <h3>The sections on this page</h3>
 <table>
 <tr><th style="width:27%">Section</th><th>What to enter</th></tr>
-<tr><td><b>Salary tax rules</b></td><td><span class="ui">Medical allowance exempt (% of basic)</span>, <span class="ui">Surcharge rate (% of tax)</span> and the income above which the surcharge applies. Take these from the Finance Act for the tax year.</td></tr>
+<tr><td><b>Salary tax rules</b></td><td><span class="ui">Medical allowance exempt (% of basic)</span>, <span class="ui">Surcharge rate (% of tax)</span> and the income above which the surcharge applies. Take these from the Finance Act for the tax year. The surcharge starts at <b>0</b> (none); it is added only if you enter a rate here.</td></tr>
 <tr><td><b>Provincial social security coverage</b></td><td>Who pays social security (everyone up to the wage ceiling, or only people earning below it), which worker categories are excluded (Supervisory, Managerial, Contract, Apprentice), and the wage ceiling for each province.</td></tr>
 <tr><td><b>Leave entitlements</b></td><td>Days per calendar year for Annual, Casual, Sick, Maternity, Paternity and Hajj leave. <b>Paternity and Hajj start at 0</b> — enter your policy, otherwise these leaves cannot be approved as paid.</td></tr>
 <tr><td><b>Factories vs shops &amp; establishments</b></td><td>Different overtime rate, weekly overtime limit, consecutive-day limit or minimum wage for factories, shops and other sites. Leave a box empty ("global") to use the normal setting.</td></tr>
@@ -53,9 +53,22 @@
 <p>Type <b>11</b> for 11%, <b>1</b> for 1%, <b>35</b> for 35%. (Older screens suggested typing 0.11; the system now reads such small numbers correctly as well, but whole percentages are clearer.)</p></div>
 <ul>
   <li><span class="ui">Download CSV</span> saves the table for your records.</li>
-  <li><span class="ui">Update from FBR</span> does <b>not</b> go online. It replaces your slabs with the table built into the program, which may be from an earlier year. Always compare with the current Finance Act before approving.</li>
-  <li>A 10% surcharge is added automatically when yearly taxable income is above PKR 10 million (or the threshold you set).</li>
+  <li><span class="ui">Update from FBR</span> does <b>not</b> go online. It proposes the table built into the program (shown below) in place of your slabs; a second person must approve it like any other rate change. Always compare with the current Finance Act before approving.</li>
+  <li>The high-income surcharge is added only when you have set a <span class="ui">Surcharge rate</span> above 0 in <b>Salary tax rules</b> (default 0). It then applies to yearly taxable income above the threshold you set.</li>
 </ul>
+<h4>The built-in table: Finance Act 2026, Tax Year 2027 (from 1 July 2026)</h4>
+<table>
+<tr><th>Yearly taxable salary (PKR)</th><th>Tax</th></tr>
+<tr><td>Up to 600,000</td><td>Nil</td></tr>
+<tr><td>600,001 – 1,200,000</td><td>1% of the amount above 600,000</td></tr>
+<tr><td>1,200,001 – 2,200,000</td><td>6,000 + 11% of the amount above 1,200,000</td></tr>
+<tr><td>2,200,001 – 3,200,000</td><td>116,000 + 20% of the amount above 2,200,000</td></tr>
+<tr><td>3,200,001 – 4,100,000</td><td>316,000 + 25% of the amount above 3,200,000</td></tr>
+<tr><td>4,100,001 – 5,600,000</td><td>541,000 + 29% of the amount above 4,100,000</td></tr>
+<tr><td>5,600,001 – 7,000,000</td><td>976,000 + 32% of the amount above 5,600,000</td></tr>
+<tr><td>Above 7,000,000</td><td>1,424,000 + 35% of the amount above 7,000,000</td></tr>
+</table>
+<div class="box note"><span class="t">Good to know — your company keeps its own slabs</span><p>New installations start with this table. A company that already has slabs keeps them unchanged until someone clicks <span class="ui">Update from FBR</span> and a second person approves. Tax rates change with each year's Finance Act — check your slabs against FBR every year.</p></div>
 <div class="box important"><span class="t">Important — every July</span><p>The tax year changes on 1 July. Before the first July payroll, update the tax year, effective date and slabs, and have them approved. Otherwise payroll refuses to run with <span class="msg">Payroll refused: statutory configuration is not valid for this period.</span></p></div>
 
 <h3>Bank, EOBI and social-security file templates</h3>

@@ -33,9 +33,10 @@ interface MobileAppProps {
   attendances: AttendanceLog[];
   mobileDutyAuthorizations: MobileDutyAuthorization[];
   leaves: LeaveRequest[];
-  onApplyLeave: (leave: LeaveRequest) => void;
+  // Resolve false when the request was not saved (the user has been told why).
+  onApplyLeave: (leave: LeaveRequest) => void | Promise<boolean | void>;
   onSimulatePunch: (employeeId: string, punchIn: string, punchOut: string, method: string, lat?: number, lon?: number, locationAccuracyMeters?: number, locationCapturedAt?: string, locationAddress?: string, mobileDetails?: MobilePunchDetails) => void | Promise<void>;
-  onAddRegularization: (employeeId: string, date: string, reason: string, evidenceDocumentIds?: string[]) => void;
+  onAddRegularization: (employeeId: string, date: string, reason: string, evidenceDocumentIds?: string[]) => void | Promise<boolean | void>;
   hideMockPhoneFrame?: boolean;
   loggedInUser?: UserAccount;
   onLogout?: () => void;
@@ -451,9 +452,13 @@ export function MobileApp({
     return () => window.clearInterval(timer);
   }, [cameraReady, canSubmitSelectedAction, currentEmp, handleCameraPunch, mobileTab, punchReason.clientName, punchReason.note, punchStep, selectedAction]);
 
-  const handleApplyLeaveSubmit = (e: React.SyntheticEvent) => {
+  const handleApplyLeaveSubmit = async (e: React.SyntheticEvent) => {
     e.preventDefault();
     if (!currentEmp) return;
+    if (!leaveForm.startDate || !leaveForm.endDate || leaveForm.endDate < leaveForm.startDate) {
+      triggerWaToast('The leave end date cannot be before the start date.');
+      return;
+    }
     const start = new Date(leaveForm.startDate);
     const end = new Date(leaveForm.endDate);
     const totalDays = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / 86400000) + 1);
@@ -470,7 +475,8 @@ export function MobileApp({
       status: 'Pending',
       appliedOn: todayStr
     };
-    onApplyLeave(request);
+    // Confirmed only after the save succeeded.
+    if (await onApplyLeave(request) === false) return;
     triggerWaToast(`📋 Leave request for ${totalDays} day(s) submitted for HR review.`);
     setLeaveForm(p => ({ ...p, reason: '' }));
   };
@@ -483,7 +489,8 @@ export function MobileApp({
     try {
       // Evidence (gate pass, client sign-off, travel ticket) lets the line manager decide without chasing paper.
       const evidenceIds = regEvidence ? [await uploadEmployeeDocument(currentEmp.id, 'attendance-evidence', regEvidence)] : [];
-      onAddRegularization(currentEmp.id, regForm.date, regForm.reason, evidenceIds);
+      // "Sent" only after the server accepted it; on failure the handler has already explained why.
+      if (await onAddRegularization(currentEmp.id, regForm.date, regForm.reason, evidenceIds) === false) return;
       triggerWaToast(`📝 Regularization for ${regForm.date} sent to your line manager${evidenceIds.length ? ' with evidence' : ''}.`);
       setRegForm(p => ({ ...p, reason: '' }));
       setRegEvidence(null);
@@ -908,7 +915,7 @@ export function MobileApp({
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">To<MobileRequiredMark /></label>
-                  <DateField aria-label="Leave end date" required value={leaveForm.endDate}
+                  <DateField aria-label="Leave end date" required value={leaveForm.endDate} min={leaveForm.startDate || undefined}
                     onChange={e => setLeaveForm(p => ({ ...p, endDate: e.target.value }))}
                     className="w-full bg-slate-800 border border-slate-700 text-white text-xs rounded-xl px-3 py-2.5 focus:outline-none focus:ring-1 focus:ring-emerald-500" />
                 </div>

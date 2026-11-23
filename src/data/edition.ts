@@ -5,7 +5,7 @@ import type { Employee, StatutoryConfig } from '../types';
  *
  * The full edition keeps every compliance rule (FBR withholding, EOBI, social security, maker-checker approvals).
  * The lite edition is for small shops with 10-15 staff: only what payroll and attendance need to operate. The vendor
- * chooses it from the login screen (login "onenet", password OneNet + DDMonYYYY) and the choice is stored on the server.
+ * chooses it from the login screen (login "onenet", password VENDOR_CONSOLE_PASSWORD set per server) and the choice is stored on the server.
  *
  * Mirrors server/edition.cjs (EDITION_FEATURE_KEYS and EDITION_PRESETS must stay identical; edition.test.ts checks it).
  */

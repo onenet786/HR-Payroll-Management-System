@@ -17,13 +17,14 @@
 #    db      Asks the database name, user and password again and updates the database.
 #    admin   Creates the first administrator, or sets a new password for an administrator.
 #    backup  Encrypted database backup (for aaPanel -> Cron).
+#    vendor  Shows this server's OneNet vendor-console password (creates one if it is missing).
 #    rollback Switches back to the version before the last update (then Restart in aaPanel).
 #
 #  Usage (as root; when you log in as another user such as onenetsol, put sudo in front):
 #    sudo bash hrpayroll-server.sh setup
 #    sudo bash hrpayroll-server.sh update
 #    sudo bash hrpayroll-server.sh check
-#    sudo bash hrpayroll-server.sh key | db | admin | backup
+#    sudo bash hrpayroll-server.sh key | db | admin | backup | vendor
 #
 #  Settings you can change by putting them in front of the command, for example
 #    APP_DIR=/www/wwwroot/hr BRANCH=main bash hrpayroll-server.sh setup
@@ -31,7 +32,9 @@
 #      DATA_DIR  documents and backups, new installs only (default /www/hrpayroll-data, outside the web root)
 #      BRANCH    Git branch to deploy            (setup suggests the newest branch on GitHub;
 #                                                 update keeps the branch the server is on)
-#      RUN_USER  owner of the files              (default www, aaPanel's web user)
+#      RUN_USER  user the app runs as            (default www, aaPanel's web user). It owns ONLY the data
+#                                                 folders (documents, backups) and can read .env; the code, .git
+#                                                 and node_modules belong to root, because root runs them here.
 #      KEY_FILE  deploy key                      (default /root/.ssh/hrpayroll_deploy_ed25519)
 #
 #  Done in aaPanel, not by this script (on purpose):
@@ -164,10 +167,42 @@ Host ${REPO_HOST_ALIAS}
 EOF
     ok "Added host alias ${REPO_HOST_ALIAS} to $cfg"
   fi
-  if ! ssh-keygen -F "$REPO_HOST" -f /root/.ssh/known_hosts >/dev/null 2>&1; then
-    ssh-keyscan -t ed25519,rsa "$REPO_HOST" >> /root/.ssh/known_hosts 2>/dev/null || warn "Could not read the host key of $REPO_HOST"
-    chmod 600 /root/.ssh/known_hosts
+  pin_host_key
+}
+
+# GitHub's published SSH host key (docs.github.com -> "GitHub's SSH key fingerprints"):
+#   ED25519  SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU
+# It is written directly instead of trusting whatever answers ssh-keyscan (an attacker on the network could answer
+# it). For another Git host the scanned key is shown with its fingerprint and must be confirmed.
+GITHUB_ED25519="AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"
+GITHUB_ED25519_FP="SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU"
+pin_host_key() {
+  local kh=/root/.ssh/known_hosts line fp scanned
+  touch "$kh" && chmod 600 "$kh"
+  if [ "$REPO_HOST" = "github.com" ]; then
+    line="github.com ssh-ed25519 $GITHUB_ED25519"
+    fp="$(printf '%s\n' "$line" | ssh-keygen -lf - 2>/dev/null | awk '{print $2}')"
+    [ "$fp" = "$GITHUB_ED25519_FP" ] || die "The built-in GitHub host key does not match its fingerprint (script damaged?)."
+    if ! grep -qxF "$line" "$kh"; then
+      # Older (scanned) github.com entries are replaced by the published key.
+      ssh-keygen -R github.com -f "$kh" >/dev/null 2>&1 || true
+      rm -f "$kh.old"
+      printf '%s\n' "$line" >> "$kh"
+      chmod 600 "$kh"
+      ok "GitHub host key pinned ($GITHUB_ED25519_FP)"
+    fi
+    return 0
   fi
+  ssh-keygen -F "$REPO_HOST" -f "$kh" >/dev/null 2>&1 && return 0
+  scanned="$(ssh-keyscan -t ed25519 "$REPO_HOST" 2>/dev/null | grep -v '^#' || true)"
+  [ -n "$scanned" ] || die "Could not read the SSH host key of $REPO_HOST."
+  fp="$(printf '%s\n' "$scanned" | ssh-keygen -lf - 2>/dev/null | awk '{print $2}')"
+  warn "Host key of $REPO_HOST: $fp"
+  echo "     Compare it with the fingerprint your Git host publishes before you accept it."
+  { interactive && ask_yn "Is this the correct fingerprint?" "n"; } \
+    || die "Host key not accepted. Add the correct line for $REPO_HOST to $kh yourself, then run this again."
+  printf '%s\n' "$scanned" >> "$kh"
+  ok "Host key of $REPO_HOST saved"
 }
 
 show_key() {
@@ -212,6 +247,8 @@ set_env() {   # set_env FILE KEY VALUE   (replaces "KEY=..." or "# KEY=..." or a
 get_env() { grep -E "^$2=" "$1" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '\r' | sed -E 's/[[:space:]]+$//; s/^"(.*)"$/\1/; s/^'"'"'(.*)'"'"'$/\1/' || true; }
 urlencode() { node -e 'process.stdout.write(encodeURIComponent(process.argv[1]))' "$1"; }
 random_key() { node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("base64"))'; }
+# Vendor console password (login "onenet"): random per server, 20 URL-safe characters.
+random_vendor_password() { node -e 'process.stdout.write(require("crypto").randomBytes(15).toString("base64url"))'; }
 
 free_port() {   # first free TCP port from 8080
   local p=8080
@@ -256,6 +293,7 @@ make_env() {
   fi
   set_env "$ENV_FILE" BACKUP_ENCRYPTION_KEY "$(random_key)"
   set_env "$ENV_FILE" MFA_ENCRYPTION_KEY "$(random_key)"
+  set_env "$ENV_FILE" VENDOR_CONSOLE_PASSWORD "$(random_vendor_password)"
   [ -n "$company" ] && set_env "$ENV_FILE" MFA_ISSUER "$company HR"
   set_env "$ENV_FILE" BACKUP_DIR "$DATA_DIR/backups"
   set_env "$ENV_FILE" BACKUP_RETENTION_COUNT 14
@@ -304,12 +342,14 @@ install_packages() {
   # The web app is built here, so the build tools (devDependencies) are needed too. The Electron and
   # Capacitor tools in the same package are never run on the server: skip their large downloads.
   export ELECTRON_SKIP_BINARY_DOWNLOAD=1 PUPPETEER_SKIP_DOWNLOAD=1
+  # npm runs as root here, so package install scripts are NOT run (--ignore-scripts). Nothing the server needs has
+  # one: esbuild finds its platform binary without its postinstall; the others are Electron/Windows build tools.
   if [ -f "$lock" ]; then
     info "Installing Node packages (npm ci; a few minutes the first time)"
-    (cd "$APP_DIR" && npm ci --include=dev --no-audit --no-fund --loglevel=error)
+    (cd "$APP_DIR" && npm ci --include=dev --ignore-scripts --no-audit --no-fund --loglevel=error)
   else
     warn "package-lock.json is missing: using npm install instead of npm ci"
-    (cd "$APP_DIR" && npm install --include=dev --no-audit --no-fund --loglevel=error)
+    (cd "$APP_DIR" && npm install --include=dev --ignore-scripts --no-audit --no-fund --loglevel=error)
   fi
   ok "Packages installed"
 }
@@ -355,12 +395,59 @@ prepare_dirs() {
   chmod 700 "$DATA_DIR" "$DATA_DIR/documents" "$DATA_DIR/backups"
 }
 
+# The folders the app itself writes to while it runs (as RUN_USER): employee documents and backups (the app makes a
+# safety backup before a data import). Paths come from .env; relative ones are relative to the app folder (its
+# working directory). Without a setting, the app's own defaults apply.
+data_dirs() {
+  local docs bdir
+  docs="$(get_env "$ENV_FILE" DOCUMENT_STORAGE_PATH)"; docs="${docs:-$(dirname "$APP_DIR")/hr-payroll-private-documents}"
+  bdir="$(get_env "$ENV_FILE" BACKUP_DIR)"; bdir="${bdir:-$APP_DIR/backups}"
+  case "$docs" in /*) ;; *) docs="$APP_DIR/$docs" ;; esac
+  case "$bdir" in /*) ;; *) bdir="$APP_DIR/$bdir" ;; esac
+  printf '%s\n' "$docs" "$bdir"
+}
+
+# Ownership: root runs code from the app folder (update, migrations, admin, backup), so the code, .git and
+# node_modules belong to root and are only readable for the app user. Otherwise a compromised website running as
+# www could plant code or Git settings that root then runs. RUN_USER owns only the data folders and can read .env.
 fix_owner() {
-  if id "$RUN_USER" >/dev/null 2>&1; then
-    chown -R "$RUN_USER:$RUN_USER" "$APP_DIR" "$DATA_DIR" 2>/dev/null || true
-    chmod 600 "$ENV_FILE" 2>/dev/null || true
-    ok "Files owned by $RUN_USER"
-  fi
+  id "$RUN_USER" >/dev/null 2>&1 || { warn "User $RUN_USER does not exist: ownership not changed."; return 0; }
+  local f d
+  chown -R root:root "$APP_DIR"
+  chmod -R go-w,go+rX "$APP_DIR"
+  for f in "$APP_DIR/.env" "$APP_DIR/.env.local"; do
+    if [ -f "$f" ]; then chown "root:$RUN_USER" "$f"; chmod 640 "$f"; fi
+  done
+  if [ -d "$DATA_DIR" ]; then chown "$RUN_USER:$RUN_USER" "$DATA_DIR"; chmod 700 "$DATA_DIR"; fi
+  while IFS= read -r d; do
+    d="$(readlink -m "$d")"
+    case "$d" in
+      /|/www|/www/wwwroot|/root|/root/*|"$APP_DIR"|"$APP_DIR"/.git|"$APP_DIR"/.git/*|"$APP_DIR"/node_modules|"$APP_DIR"/node_modules/*)
+        warn "Not giving $RUN_USER the data folder $d (unsafe place: change it in .env)"; continue ;;
+    esac
+    case "$APP_DIR/" in "$d"/*) warn "Not giving $RUN_USER the data folder $d (it contains the app folder)"; continue ;; esac
+    mkdir -p "$d"
+    chown -R "$RUN_USER:$RUN_USER" "$d"
+    chmod 700 "$d"
+  done < <(data_dirs)
+  ok "Code owned by root (read-only for $RUN_USER); .env readable by $RUN_USER; data folders owned by $RUN_USER"
+}
+
+# Older versions of this script gave the app folder to www and told Git to trust it (safe.directory). Those entries
+# are removed: the folder belongs to root now, so Git needs no exception for it.
+drop_old_trust() {
+  local d
+  for d in "$1" "$1/.git" "$1.new" "$1.new/.git"; do
+    git config --global --fixed-value --unset-all safe.directory "$d" >/dev/null 2>&1 || true
+  done
+}
+
+# True when the app folder, .git and everything outside node_modules belongs to root (node_modules is checked by
+# its top folder only, to stay fast).
+code_is_root_owned() {
+  [ "$(stat -c %u "$APP_DIR" 2>/dev/null)" = 0 ] || return 1
+  [ ! -e "$APP_DIR/node_modules" ] || [ "$(stat -c %u "$APP_DIR/node_modules")" = 0 ] || return 1
+  [ -z "$(find "$APP_DIR" -path "$APP_DIR/node_modules" -prune -o ! -uid 0 -print -quit 2>/dev/null)" ]
 }
 
 run_backup() {   # quiet=1 for cron
@@ -370,7 +457,11 @@ run_backup() {   # quiet=1 for cron
   local dump; dump="$(get_env "$ENV_FILE" PG_DUMP_PATH)"
   if [ -z "$dump" ]; then local pgbin; pgbin="$(find_pg_bin || true)"; [ -n "$pgbin" ] && dump="$pgbin/pg_dump"; fi
   info "Database backup (encrypted)"
-  if (cd "$APP_DIR" && PG_DUMP_PATH="${dump:-pg_dump}" node scripts/postgres-backup.cjs); then
+  # The backup folder belongs to the app user, so the backup runs as that user too: root never writes into a folder
+  # www controls. The code it runs is root-owned (fix_owner).
+  local as=()
+  if [ "$(id -u)" -eq 0 ] && id "$RUN_USER" >/dev/null 2>&1 && command -v runuser >/dev/null 2>&1; then as=(runuser -u "$RUN_USER" --); fi
+  if (cd "$APP_DIR" && "${as[@]}" env PG_DUMP_PATH="${dump:-pg_dump}" "$NODE_BIN/node" scripts/postgres-backup.cjs); then
     ok "Backup written to $(get_env "$ENV_FILE" BACKUP_DIR || echo "$APP_DIR/backups")"
   else
     warn "The backup FAILED (see above)."
@@ -443,13 +534,15 @@ next_steps() {
      Start command     : node server.cjs          (or "Run script: start")
      Node version      : $(basename "$(dirname "$NODE_BIN")")
      Port              : ${port:-8080}
-     Run as user       : $RUN_USER
+     Run as user       : $RUN_USER   (reads the code and .env; writes only the data folders)
 3. Mapping:   in the Node project, Mapping -> add ${domain:-your domain}.
 4. SSL:       in the Node project, SSL -> Let's Encrypt -> apply, then turn on "Force HTTPS".
 5. Firewall:  aaPanel -> Security: ports 80 and 443 open; do NOT open port ${port:-8080} (the app listens on 127.0.0.1 only).
 6. Cron:      aaPanel -> Cron -> Add task -> Shell script, daily 02:30:
                 bash $(readlink -f "$0") backup      (aaPanel Cron runs as root: no sudo here)
 7. Open https://${domain:-your-domain}, sign in as the administrator.
+8. OneNet vendor console (sign-in screen, login "onenet"): password  $(get_env "$ENV_FILE" VENDOR_CONSOLE_PASSWORD)
+                keep it in OneNet's records, not with the client; show it again with: bash $(readlink -f "$0") vendor
 
 Every update from now on:
      sudo bash $(readlink -f "$0") update      then aaPanel -> Node project -> Restart
@@ -494,7 +587,6 @@ swap_adopted() {
   mv "$LIVE_DIR" "$old"
   mv "$APP_DIR" "$LIVE_DIR"
   APP_DIR="$LIVE_DIR"; ENV_FILE="$APP_DIR/.env"
-  git config --global --add safe.directory "$APP_DIR" 2>/dev/null || true
   ok "The live folder is now the GitHub copy; the old files are kept in $old"
   warn "Restart the app NOW: aaPanel -> Website -> Node project -> Restart (it still runs the old code from memory)."
 }
@@ -512,7 +604,9 @@ cmd_setup() {
   if interactive; then read -r -p "Press Enter after you have added the deploy key... " _ || true; fi
   test_access
 
+  drop_old_trust "$APP_DIR"
   if [ -d "$APP_DIR/.git" ]; then
+    fix_owner   # an older install may still belong to www: root takes the code back before it runs Git in it
     BRANCH="${BRANCH:-$(current_branch)}"
     ok "Code already in $APP_DIR (updating it on branch $BRANCH)"
     git -C "$APP_DIR" remote set-url origin "$REPO_SSH_URL"
@@ -531,7 +625,6 @@ cmd_setup() {
     BRANCH="${BRANCH:-$(ask "Branch to deploy" "${newest:-main}")}"
     git -C "$APP_DIR" checkout --quiet -B "$BRANCH" "origin/$BRANCH" || die "Branch $BRANCH does not exist on GitHub."
   fi
-  git config --global --add safe.directory "$APP_DIR" 2>/dev/null || true
   ok "Code is at commit $(git -C "$APP_DIR" log -1 --format='%h %s')"
 
   restore_adopted_env
@@ -550,7 +643,9 @@ cmd_update() {
   need_git
   need_installed
   find_node
-  git config --global --add safe.directory "$APP_DIR" 2>/dev/null || true
+  drop_old_trust "$APP_DIR"
+  # An older install may still belong to www: root takes the code back before it runs Git, npm or node in it.
+  fix_owner
   # The live folder is never changed while the new version is prepared: the code is checked out, installed and
   # built in APP_DIR.new, and only when everything succeeded are the folders swapped (a second). The running app
   # keeps serving the old version until you press Restart. APP_DIR.previous keeps the old version for rollback.
@@ -587,7 +682,6 @@ cmd_update() {
   git -C "$stage" fetch --quiet "$live" "$sha"
   git -C "$stage" checkout --quiet -B "$branch" "$sha"
   git -C "$stage" remote set-url origin "$(git -C "$live" remote get-url origin)"
-  git config --global --add safe.directory "$stage" 2>/dev/null || true
   local f
   for f in .env .env.local; do
     if [ -f "$live/$f" ]; then cp -p "$live/$f" "$stage/$f"; fi
@@ -608,10 +702,12 @@ cmd_update() {
   # Backups written into the app folder (when BACKUP_DIR is not set) move along with it.
   if [ -d "$prev/backups" ] && [ ! -e "$live/backups" ]; then mv "$prev/backups" "$live/backups"; fi
   APP_DIR="$live"; ENV_FILE="$live/.env"
-  git config --global --add safe.directory "$live" 2>/dev/null || true
   fix_owner
   ok "Version $after is in place; the previous version is kept in $prev"
   echo
+  if [ -z "$(get_env "$ENV_FILE" VENDOR_CONSOLE_PASSWORD)" ]; then
+    warn "The OneNet vendor console is off on this server until it has its own password: run  sudo bash $0 vendor"
+  fi
   bold "Now restart the app: aaPanel -> Website -> Node project -> HR & Payroll -> Restart."
   echo "Then check it with:      sudo bash $0 check"
   echo "If something is wrong:   sudo bash $0 rollback   (then Restart again)"
@@ -629,6 +725,7 @@ cmd_rollback() {
   mv "$prev" "$live"
   mv "$tmp" "$prev"
   if [ -d "$prev/backups" ] && [ ! -e "$live/backups" ]; then mv "$prev/backups" "$live/backups"; fi
+  fix_owner
   ok "Switched back. (Running rollback again returns to the newer version.)"
   bold "Now restart the app: aaPanel -> Website -> Node project -> HR & Payroll -> Restart."
 }
@@ -637,6 +734,12 @@ cmd_check() {
   need_installed
   find_node
   local problems=0 port url code
+  if [ "$(id -u)" -eq 0 ] && ! code_is_root_owned; then
+    warn "Files in $APP_DIR do not all belong to root (an older install, or something changed them)."
+    echo "     root does not run Git or Node from a folder another user can change. Fix it with: sudo bash $0 update"
+    echo "     (FORCE=1 in front rebuilds even when there is no new code). The other checks are skipped."
+    return 1
+  fi
   ok "Code: branch $(current_branch), commit $(git -C "$APP_DIR" log -1 --format='%h %ci %s')"
   if git -C "$APP_DIR" fetch --quiet origin "$(current_branch)" 2>/dev/null; then
     local behind; behind="$(git -C "$APP_DIR" rev-list --count HEAD.."origin/$(current_branch)")"
@@ -698,7 +801,29 @@ cmd_admin() {
 cmd_backup() {
   need_installed
   find_node
+  if [ "$(id -u)" -eq 0 ] && ! code_is_root_owned; then
+    die "Files in $APP_DIR do not all belong to root; root will not run code from there. Run once: sudo bash $0 update"
+  fi
   run_backup
+}
+
+# The vendor console (edition and licence) needs a per-server password; the old date-based one is no longer accepted.
+cmd_vendor() {
+  need_root
+  [ -f "$ENV_FILE" ] || die "$ENV_FILE not found. Run setup first."
+  local pass
+  pass="$(get_env "$ENV_FILE" VENDOR_CONSOLE_PASSWORD)"
+  if [ -z "$pass" ]; then
+    find_node
+    pass="$(random_vendor_password)"
+    set_env "$ENV_FILE" VENDOR_CONSOLE_PASSWORD "$pass"
+    fix_owner
+    ok "Created a vendor console password for this server."
+    bold "Restart the app so it takes effect: aaPanel -> Website -> Node project -> HR & Payroll -> Restart."
+  fi
+  echo
+  echo "OneNet vendor console: sign-in screen, login \"onenet\", password:  $pass"
+  echo "Keep it in OneNet's records; it only opens the edition and licence console."
 }
 
 cmd_key() {
@@ -714,6 +839,7 @@ case "${1:-}" in
   db)     shift; cmd_db "$@" ;;
   admin)  shift; cmd_admin "$@" ;;
   backup) shift; cmd_backup "$@" ;;
+  vendor) shift; cmd_vendor "$@" ;;
   rollback) shift; cmd_rollback "$@" ;;
   *)
     awk 'NR>1 && /^set -euo/{exit} NR>1' "$0" | sed 's/^# \{0,1\}//'

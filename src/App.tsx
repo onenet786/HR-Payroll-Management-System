@@ -21,6 +21,7 @@ import { attendancePolicyOf, companyOptionsOf, evaluationContext, personalOutMin
 import { attendanceLocations, evaluateBranchGeofence, impossibleTravel, validateLocationEvidence } from './data/geofence';
 import { applyLifecycleRequest, dueSeparations, lifecycleRequestError, lifecycleReviewError } from './data/lifecycle';
 import { leaveBalanceError } from './data/leavePolicy';
+import { applyLoanRepayments } from './data/loanRecovery';
 import { computeFinalSettlementPayslip, computeSupplementaryPayslip, retroRecalculationAdjustment } from './data/offCyclePayroll';
 import { attendanceReviewError, isRegularizationOverdue, lineManagerReviewer, payrollCancellationError, payrollTransitionError, salaryRevisionApprovalError, salaryRevisionArrears, statutoryChangedFields, statutoryReviewError } from './data/approvalRules';
 import { resolveWageBasis } from './data/masterData';
@@ -315,12 +316,17 @@ function HrApp() {
   };
 
   const handleLogout = () => {
-    void authenticatedApiRequest('/api/auth/logout', { method: 'POST', body: '{}' }).catch(() => undefined);
+    // keepalive lets the sign-out request finish although the page reloads straight after.
+    void authenticatedApiRequest('/api/auth/logout', { method: 'POST', body: '{}', keepalive: true }).catch(() => undefined);
     setAuthToken(null);
     setLoggedInUser(null);
     setCurrentUserAccount(emptyUserAccount);
     privacyStorage.removeItem('hr_logged_in_user');
     privacyStorage.removeItem('hr_current_user');
+    // A full reload drops every collection held in memory (employees, payslips, users, loans, requests...), so the
+    // next person to sign in on this device never sees the previous user's data. The chosen company server
+    // (hr_server_urls) and trusted-device keys are kept in localStorage and survive the reload.
+    window.location.reload();
   };
 
   useEffect(() => {
@@ -590,18 +596,15 @@ function HrApp() {
   }, [loggedInUser?.id]);
 
   // ─── Employee Handlers ────────────────────────────────────────────────────
+  // Saved first; the list changes only after the server accepted the record. Errors are rethrown so the form can
+  // stay open and show the server's message.
   const handleAddEmployee = async (newEmp: Employee) => {
+    await setDoc(doc(db, 'employees', newEmp.id), cleanData(newEmp));
     setEmployees(prev => {
-      const updated = [...prev, newEmp];
+      const updated = [...prev.filter(e => e.id !== newEmp.id), newEmp];
       privacyStorage.setItem('hr_employees', JSON.stringify(updated));
       return updated;
     });
-    try {
-      await setDoc(doc(db, 'employees', newEmp.id), cleanData(newEmp));
-    } catch (err) {
-      console.warn('PostgreSQL employee add delayed:');
-
-    }
   };
 
   const handleUpdateEmployee = async (updatedEmp: Employee) => {
@@ -612,11 +615,6 @@ function HrApp() {
     const fingerprintTemplates = getFingerprintTemplates(employeeWithKnownTemplates);
     const employeeForSave: Employee = { ...updatedEmp, fingerprintTemplates };
 
-    setEmployees(prev => {
-      const updated = prev.map(e => e.id === updatedEmp.id ? employeeForSave : e);
-      privacyStorage.setItem('hr_employees', JSON.stringify(updated));
-      return updated;
-    });
     try {
       if (fingerprintTemplates.length > 0) {
         const biometricRecord = cleanData({
@@ -646,9 +644,14 @@ function HrApp() {
       }
       await setDoc(doc(db, 'employees', employeeForSave.id), cleanData(employeeForSave), { merge: true });
     } catch (err) {
-      console.warn('PostgreSQL employee update delayed:');
+      console.warn('PostgreSQL employee update refused or failed:');
       throw err;
     }
+    setEmployees(prev => {
+      const updated = prev.map(e => e.id === updatedEmp.id ? employeeForSave : e);
+      privacyStorage.setItem('hr_employees', JSON.stringify(updated));
+      return updated;
+    });
   };
 
   // A resignation or termination takes effect after the last working day: the next HR/admin session marks it.
@@ -766,7 +769,17 @@ function HrApp() {
 
 
   // ─── Leave Handlers ───────────────────────────────────────────────────────
-  const handleApproveLeave = async (id: string) => {
+  // In-flight locks: a second click on the same action is ignored until the first save has finished.
+  // (The buttons themselves are also disabled while busy in WebPortal / PayrollReportsPanel.)
+  const busyActions = useRef(new Set<string>());
+  const withActionLock = async <T,>(key: string, action: () => Promise<T>): Promise<T | undefined> => {
+    if (busyActions.current.has(key)) return undefined;
+    busyActions.current.add(key);
+    try { return await action(); } finally { busyActions.current.delete(key); }
+  };
+
+  const handleApproveLeave = (id: string) => withActionLock(`leave-${id}`, () => approveLeave(id));
+  const approveLeave = async (id: string) => {
     const pendingLeave = leaves.find(item => item.id === id);
     const leaveEmployee = pendingLeave && employees.find(item => item.id === pendingLeave.employeeId);
     const approvalBalanceError = pendingLeave && leaveEmployee ? leaveBalanceError(pendingLeave, leaveEmployee, leaves, statConfig) : undefined;
@@ -817,10 +830,18 @@ function HrApp() {
         });
       }
       if (autoLogs.length > 0) {
-        await Promise.all(autoLogs.map(log => setDoc(doc(db, 'attendances', log.id), log).catch(() =>
-          console.warn('PostgreSQL auto-attendance sync delayed:'))));
+        const saved = await Promise.all(autoLogs.map(log => setDoc(doc(db, 'attendances', log.id), log).then(() => log).catch(() => {
+          console.warn('PostgreSQL auto-attendance sync delayed:');
+          return null;
+        })));
+        const savedLogs = saved.filter((log): log is AttendanceLog => Boolean(log));
+        // Merge against the latest state: rows another call (or the live sync) added meanwhile are not duplicated.
         setAttendances((prev: AttendanceLog[]) => {
-          const updated = [...prev, ...autoLogs];
+          const ids = new Set(prev.map(a => a.id));
+          const days = new Set(prev.filter(a => a.employeeId === targetLeave.employeeId).map(a => a.date));
+          const fresh = savedLogs.filter(log => !ids.has(log.id) && !days.has(log.date));
+          if (!fresh.length) return prev;
+          const updated = [...prev, ...fresh];
           privacyStorage.setItem('hr_attendances', JSON.stringify(updated));
           return updated;
         });
@@ -842,9 +863,17 @@ function HrApp() {
   };
 
 
-  const handleRejectLeave = async (id: string) => {
+  const handleRejectLeave = (id: string) => withActionLock(`leave-${id}`, () => rejectLeave(id));
+  const rejectLeave = async (id: string) => {
     const today = todayStr();
     const targetLeave = leaves.find(l => l.id === id);
+    // Saved first; the screen and the employee's notification change only after the server accepted it.
+    try {
+      await updateDoc(doc(db, 'leaves', id), { status: 'Rejected', approvedBy: loggedInUser?.username, approvedOn: today });
+    } catch (err) {
+      alert(`Leave rejection was not saved: ${err instanceof Error && err.message ? err.message : 'check the connection and try again'}.`);
+      return;
+    }
     setLeaves(prev => {
       const updated = prev.map(l =>
         l.id === id ? { ...l, status: 'Rejected', approvedBy: loggedInUser?.username, approvedOn: today } as LeaveRequest : l
@@ -852,11 +881,6 @@ function HrApp() {
       privacyStorage.setItem('hr_leaves', JSON.stringify(updated));
       return updated;
     });
-    try {
-      await updateDoc(doc(db, 'leaves', id), { status: 'Rejected', approvedBy: loggedInUser?.username, approvedOn: today });
-    } catch (err) {
-      console.warn('PostgreSQL leave rejection delayed:');
-    }
     if (targetLeave) {
       await handleAddNotification({
         id: `leave-rejected-${targetLeave.id}-${Date.now()}`,
@@ -1197,29 +1221,34 @@ function HrApp() {
       requestedAt: new Date().toISOString(),
       ...(evidenceDocumentIds.length && { evidenceDocumentIds })
     };
+    // Saved first; resolves false (after telling the user why) when the server refused it or the save failed.
+    try {
+      await setDoc(doc(db, 'attendances', newRegLog.id), cleanData(newRegLog));
+    } catch (err) {
+      alert(`The correction request was not sent: ${err instanceof Error && err.message ? err.message : 'check the connection and try again'}.`);
+      return false;
+    }
     setAttendances(prev => {
       const updated = [...prev, newRegLog];
       privacyStorage.setItem('hr_attendances', JSON.stringify(updated));
       return updated;
     });
-    try {
-      await setDoc(doc(db, 'attendances', newRegLog.id), cleanData(newRegLog));
-    } catch (err) {
-      console.warn('Database regularization delayed:');
-    }
+    return true;
   };
 
-  const handleAddAttendance = async (newAtt: AttendanceLog) => {
+  const handleAddAttendance = async (newAtt: AttendanceLog): Promise<boolean> => {
+    try {
+      await setDoc(doc(db, 'attendances', newAtt.id), cleanData(newAtt));
+    } catch (err) {
+      alert(`The attendance entry was not saved: ${err instanceof Error && err.message ? err.message : 'check the connection and try again'}.`);
+      return false;
+    }
     setAttendances(prev => {
       const updated = [...prev, newAtt];
       privacyStorage.setItem('hr_attendances', JSON.stringify(updated));
       return updated;
     });
-    try {
-      await setDoc(doc(db, 'attendances', newAtt.id), cleanData(newAtt));
-    } catch (err) {
-      console.warn('Database attendance add delayed:');
-    }
+    return true;
   };
 
   // ─── Payroll Handler ──────────────────────────────────────────────────────
@@ -1239,7 +1268,7 @@ function HrApp() {
     }
     try {
       const period = createAttendancePeriod(attendances, employees, leaves, holidays, month, year, currentUserAccount.username || currentUserAccount.id, undefined, existing,
-        { noPunchDayStatus: attendancePolicyOf(statConfig).noPunchDayStatus });
+        { noPunchDayStatus: attendancePolicyOf(statConfig).noPunchDayStatus, offDaysBeforeLeave: statConfig.absenceDeductionBasis === 'Scheduled Working Days' });
       await setDoc(doc(db, 'attendancePeriods', period.id), cleanData(period));
       setAttendancePeriods(previous => [...previous.filter(item => item.id !== period.id), period]);
       alert(`Attendance register locked. Integrity reference: ${period.integrityHash}`);
@@ -1261,7 +1290,8 @@ function HrApp() {
     }
   };
 
-  const handleCreatePayrollRun = async (title: string, month: number, year: number) => {
+  const handleCreatePayrollRun = (title: string, month: number, year: number) => withActionLock('payroll-create', () => createPayrollRun(title, month, year));
+  const createPayrollRun = async (title: string, month: number, year: number) => {
     if (payrollRuns.some(run => run.periodMonth === month && run.periodYear === year && run.status !== 'Cancelled')) {
       alert('A payroll run already exists for this period. Open the existing run instead of creating a duplicate.');
       return;
@@ -1340,28 +1370,46 @@ function HrApp() {
       preflightWarningCount,
     };
 
-    setPayrollRuns(prev => {
-      const updated = [...prev, newRun];
+    const saveError = (err: unknown) => err instanceof Error && err.message ? err.message : 'check the connection and try again';
+    const addRunToState = () => setPayrollRuns(prev => {
+      const updated = [...prev.filter(item => item.id !== newRun.id), newRun];
       privacyStorage.setItem('hr_payroll_runs', JSON.stringify(updated));
       return updated;
     });
 
-    // Process loan installments — reduce remaining installments
+    // Saved in order (run, payslips, adjustments) before the screen changes, so a refused save never shows a run
+    // that does not exist on the server.
+    try {
+      await setDoc(doc(db, 'payrollRuns', newRun.id), cleanData(newRun));
+    } catch (err) {
+      alert(`The payroll run was not created: ${saveError(err)}.`);
+      return;
+    }
+    const savedSheets = await Promise.all(sheets.map(sheet => setDoc(doc(db, 'payrollPayslips', sheet.id), cleanData(sheet)).then(() => sheet, (err: unknown) => {
+      console.warn('Payslip save failed:', sheet.id);
+      return err instanceof Error ? err : new Error(String(err));
+    })));
+    const failedSheet = savedSheets.find((item): item is Error => item instanceof Error);
+    const storedSheets = savedSheets.filter((item): item is typeof sheets[number] => !(item instanceof Error));
+    addRunToState();
     setPayrollPayslips(prev => {
-      const updated = [...prev, ...sheets];
+      const updated = [...prev.filter(item => !storedSheets.some(sheet => sheet.id === item.id)), ...storedSheets];
       privacyStorage.setItem('hr_payroll_payslips', JSON.stringify(updated));
       return updated;
     });
-
+    if (failedSheet) {
+      alert(`The payroll run "${title}" was created, but ${savedSheets.length - storedSheets.length} of ${sheets.length} payslip(s) could not be saved: ${saveError(failedSheet)}.\n\nThe server will not approve a run with missing payslips. Cancel this run and create it again.`);
+      return;
+    }
     try {
-      await setDoc(doc(db, 'payrollRuns', newRun.id), cleanData(newRun));
-      await Promise.all(sheets.map(sheet => setDoc(doc(db, 'payrollPayslips', sheet.id), cleanData(sheet))));
       const usedAdjustmentIds = new Set(sheets.flatMap(sheet => sheet.payrollAdjustmentIds || []));
-      const assignedAdjustments = payrollAdjustments.map(item => usedAdjustmentIds.has(item.id) ? { ...item, payrollRunId: runId } : item);
-      await Promise.all(assignedAdjustments.filter(item => usedAdjustmentIds.has(item.id)).map(item => setDoc(doc(db, 'payrollAdjustments', item.id), cleanData(item))));
-      setPayrollAdjustments(assignedAdjustments);
+      const assignedAdjustments = payrollAdjustments.filter(item => usedAdjustmentIds.has(item.id)).map(item => ({ ...item, payrollRunId: runId }));
+      await Promise.all(assignedAdjustments.map(item => setDoc(doc(db, 'payrollAdjustments', item.id), cleanData(item))));
+      const assignedById = new Map(assignedAdjustments.map(item => [item.id, item]));
+      setPayrollAdjustments(previous => previous.map(item => assignedById.get(item.id) || item));
     } catch (err) {
-      console.warn('Database payroll run sync delayed:');
+      alert(`The payroll run "${title}" and its payslips were created, but the payroll adjustments could not be linked to it: ${saveError(err)}.\n\nCancel this run and create it again so the adjustments are not paid twice.`);
+      return;
     }
 
     alert(`Draft payroll created for ${eligibleEmployees.length} employees. Review and approve it before loan deductions or disbursement.\nGross Pay: PKR ${totalGrossPay.toLocaleString()}\nNet Pay: PKR ${totalNetPay.toLocaleString()}`);
@@ -1391,7 +1439,9 @@ function HrApp() {
 
   const handleSendPayslips = async (runId: string) => authenticatedApiRequest(`/api/payroll-delivery/${encodeURIComponent(runId)}/send`, { method: 'POST', body: '{}' }) as Promise<{ sent: number; skipped: number; failed: Array<{ employeeId: string; error: string }> }>;
 
-  const handleUpdatePayrollStatus = async (runId: string, nextStatus: 'Approved' | 'Disbursed', disbursementReference?: string) => {
+  const handleUpdatePayrollStatus = (runId: string, nextStatus: 'Approved' | 'Disbursed', disbursementReference?: string) =>
+    withActionLock(`payroll-status-${runId}`, () => updatePayrollStatus(runId, nextStatus, disbursementReference));
+  const updatePayrollStatus = async (runId: string, nextStatus: 'Approved' | 'Disbursed', disbursementReference?: string) => {
     const run = payrollRuns.find(item => item.id === runId);
     if (!run) return;
     const transitionError = payrollTransitionError(run, nextStatus, currentUserAccount.id, dualControl);
@@ -1423,12 +1473,14 @@ function HrApp() {
       auditTrail: [...(run.auditTrail || []), { action: nextStatus, at: now, by: currentUserAccount.username, actorId: currentUserAccount.id }]
     };
 
+    // Saved first: a refused approval/disbursement leaves the run (and loan balances) exactly as they were. The error
+    // is rethrown so the caller can show the server's message.
+    await setDoc(doc(db, 'payrollRuns', runId), cleanData(updatedRun));
     setPayrollRuns(prev => {
       const updated = prev.map(item => item.id === runId ? updatedRun : item);
       privacyStorage.setItem('hr_payroll_runs', JSON.stringify(updated));
       return updated;
     });
-    await setDoc(doc(db, 'payrollRuns', runId), cleanData(updatedRun));
 
     if (nextStatus === 'Disbursed') {
       const paidPayslips = payrollPayslips.filter(item => item.payrollRunId === runId);
@@ -1448,22 +1500,23 @@ function HrApp() {
 
     // Loan balances move only when salary is actually paid; an approved run can still be cancelled.
     if (nextStatus === 'Disbursed') {
-      const runEmployeeIds = new Set(payrollPayslips.filter(p => p.payrollRunId === runId && p.loanRepaymentDeduction > 0).map(p => p.employeeId));
-      const changedLoanIds = new Set<string>();
-      const updatedLoans = loanAdvances.map((loan: LoanAdvance) => {
-        if (!runEmployeeIds.has(loan.employeeId) || loan.status !== 'Active' || loan.remainingInstallments <= 0) return loan;
-        changedLoanIds.add(loan.id);
-        const remainingInstallments = loan.remainingInstallments - 1;
-        return {
-          ...loan,
-          remainingInstallments,
-          totalRepaid: loan.totalRepaid + loan.monthlyInstallment,
-          status: remainingInstallments === 0 ? 'Closed' : 'Active' as LoanAdvance['status']
-        };
-      });
-      setLoanAdvances(updatedLoans);
-      privacyStorage.setItem('hr_loans', JSON.stringify(updatedLoans));
-      await Promise.all(updatedLoans.filter(loan => changedLoanIds.has(loan.id)).map(loan => setDoc(doc(db, 'loanAdvances', loan.id), cleanData(loan))));
+      const runSheets = payrollPayslips.filter(p => p.payrollRunId === runId);
+      // Each payslip carries the exact loans and amounts it deducted (loanDeductions); older payslips fall back to the
+      // installments due in their period, capped at what is still owed (src/data/loanRecovery.ts).
+      const { loans: repaidLoans, changedLoanIds } = applyLoanRepayments(loanAdvances, runSheets);
+      const toSave = repaidLoans.filter(loan => changedLoanIds.has(loan.id));
+      const results = await Promise.allSettled(toSave.map(loan => setDoc(doc(db, 'loanAdvances', loan.id), cleanData(loan))));
+      const savedById = new Map(toSave.filter((_, index) => results[index].status === 'fulfilled').map(loan => [loan.id, loan]));
+      // Merged into the latest loan list (functional update), so loans that arrived meanwhile are not overwritten.
+      if (savedById.size) {
+        setLoanAdvances(prev => {
+          const updated = prev.map(loan => savedById.get(loan.id) || loan);
+          privacyStorage.setItem('hr_loans', JSON.stringify(updated));
+          return updated;
+        });
+      }
+      const failedLoans = toSave.length - savedById.size;
+      if (failedLoans) alert(`Salary was marked as disbursed, but ${failedLoans} loan balance update(s) could not be saved. Check the loan records before the next payroll.`);
     }
   };
 
@@ -1557,9 +1610,15 @@ function HrApp() {
   // ─── Off-cycle Payroll, Tax Deposits & Payment Exceptions ─────────────────
   const persistRun = async (run: PayrollRun, sheets: Payslip[]) => {
     await setDoc(doc(db, 'payrollRuns', run.id), cleanData(run));
-    await Promise.all(sheets.map(sheet => setDoc(doc(db, 'payrollPayslips', sheet.id), cleanData(sheet))));
-    setPayrollRuns(previous => [...previous, run]);
-    setPayrollPayslips(previous => [...previous, ...sheets]);
+    try {
+      await Promise.all(sheets.map(sheet => setDoc(doc(db, 'payrollPayslips', sheet.id), cleanData(sheet))));
+    } catch (error) {
+      // The run exists on the server: show it so it can be cancelled (it cannot be approved without its payslips).
+      setPayrollRuns(previous => [...previous.filter(item => item.id !== run.id), run]);
+      throw new Error(`${error instanceof Error && error.message ? error.message : 'payslips could not be saved'} (the run was saved without all its payslips; cancel it and create it again)`);
+    }
+    setPayrollRuns(previous => [...previous.filter(item => item.id !== run.id), run]);
+    setPayrollPayslips(previous => [...previous.filter(item => !sheets.some(sheet => sheet.id === item.id)), ...sheets]);
   };
 
   const offCycleRun = (title: string, month: number, year: number, sheets: Payslip[], extra: Partial<PayrollRun>): PayrollRun => {
@@ -1575,7 +1634,8 @@ function HrApp() {
     };
   };
 
-  const handleCreateSupplementaryRun = async (month: number, year: number) => {
+  const handleCreateSupplementaryRun = (month: number, year: number) => withActionLock('payroll-create', () => createSupplementaryRun(month, year));
+  const createSupplementaryRun = async (month: number, year: number) => {
     const regular = payrollRuns.find(run => run.periodMonth === month && run.periodYear === year && (run.runType || 'Regular') === 'Regular' && run.status !== 'Cancelled');
     if (!regular) { alert('Create the regular payroll for this period first; supplementary runs pay items approved after it.'); return; }
     const directory = { departments, designations, branches };
@@ -1589,15 +1649,26 @@ function HrApp() {
     const runId = `run-supp-${month}-${year}-${Date.now()}`;
     const run = { ...offCycleRun(`Supplementary payroll - ${month}/${year}`, month, year, sheets, { runType: 'Supplementary', attendancePeriodId: regular.attendancePeriodId, attendanceIntegrityHash: regular.attendanceIntegrityHash, attendanceRegisterHash: regular.attendanceRegisterHash }), id: runId };
     const linked = sheets.map(sheet => ({ ...sheet, id: `${runId}-${sheet.employeeId}`, payrollRunId: runId }));
-    await persistRun(run, linked);
+    try {
+      await persistRun(run, linked);
+    } catch (error) {
+      alert(`The supplementary payroll was not created: ${error instanceof Error && error.message ? error.message : 'check the connection and try again'}.\n\nIf the run appears in the list, cancel it and create it again.`);
+      return;
+    }
     const used = new Set(linked.flatMap(sheet => sheet.payrollAdjustmentIds || []));
     const assigned = payrollAdjustments.filter(item => used.has(item.id)).map(item => ({ ...item, payrollRunId: runId }));
-    await Promise.all(assigned.map(item => setDoc(doc(db, 'payrollAdjustments', item.id), cleanData(item))));
+    try {
+      await Promise.all(assigned.map(item => setDoc(doc(db, 'payrollAdjustments', item.id), cleanData(item))));
+    } catch (error) {
+      alert(`The supplementary run was created, but its adjustments could not be linked to it: ${error instanceof Error && error.message ? error.message : 'check the connection and try again'}.\n\nCancel this run and create it again so the adjustments are not paid twice.`);
+      return;
+    }
     setPayrollAdjustments(previous => previous.map(item => assigned.find(next => next.id === item.id) || item));
     alert(`Supplementary draft created for ${linked.length} employee(s): net PKR ${run.totalNetPay.toLocaleString()}.${dualControl ? ' Another payroll officer must approve it.' : ''}`);
   };
 
-  const handleCreateFinalSettlementRun = async (settlementId: string) => {
+  const handleCreateFinalSettlementRun = (settlementId: string) => withActionLock('payroll-create', () => createFinalSettlementRun(settlementId));
+  const createFinalSettlementRun = async (settlementId: string) => {
     const settlement = gratuitySettlements.find(item => item.id === settlementId);
     const employee = settlement && employees.find(item => item.id === settlement.employeeId);
     if (!settlement || !employee) return;
@@ -2024,12 +2095,19 @@ function HrApp() {
   };
 
   const handleDeleteHoliday = async (id: string) => {
+    // Deleted on the server first (needs manage_settings; every delete is kept in the audit log). Only then is it
+    // removed from the list, so a refused delete does not come back on the next refresh.
+    try {
+      await deleteDoc(doc(db, 'holidays', id));
+    } catch (err) {
+      alert(`The holiday was not deleted: ${err instanceof Error && err.message ? err.message : 'check the connection and try again'}.`);
+      return;
+    }
     setHolidays((prev: Holiday[]) => {
       const updated = prev.filter((h: Holiday) => h.id !== id);
       privacyStorage.setItem('hr_holidays', JSON.stringify(updated));
       return updated;
     });
-    // Soft delete: no database delete to avoid accidental data loss
   };
 
   // ─── Loan & Advance Handlers ──────────────────────────────────────────────

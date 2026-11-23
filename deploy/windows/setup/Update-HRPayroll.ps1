@@ -39,6 +39,37 @@ if ($nodeNew -ne $nodeOld) {
   & robocopy (Join-Path $payload 'runtime\node') (Join-Path $installRoot 'runtime\node') /MIR /NFL /NDL /NJH /NJS /NP | Out-Null
 }
 
+# Settings added by newer versions; existing values are never changed.
+# TRUST_PROXY=false: this server is reached directly (no reverse proxy), so client-sent X-Forwarded-For is ignored.
+$envFile = Join-Path $install.configDir '.env'
+if (Test-Path $envFile) {
+  $envText = [IO.File]::ReadAllText($envFile)
+  if ($envText -notmatch '(?m)^\s*TRUST_PROXY\s*=') {
+    if ($envText -and -not $envText.EndsWith("`n")) { $envText += [Environment]::NewLine }
+    $envText += 'TRUST_PROXY=false' + [Environment]::NewLine
+    [IO.File]::WriteAllText($envFile, $envText, (New-Object Text.UTF8Encoding($false)))
+    Write-Host '    Settings: added TRUST_PROXY=false to config\.env.'
+  }
+  # The OneNet vendor console needs this server's own password (the old date-based one no longer works).
+  $envText = [IO.File]::ReadAllText($envFile)
+  if ($envText -notmatch '(?m)^\s*VENDOR_CONSOLE_PASSWORD\s*=\s*\S') {
+    $vb = New-Object byte[] 15; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($vb)
+    $vendorPassword = [Convert]::ToBase64String($vb).Replace('+', 'A').Replace('/', 'b').TrimEnd('=')
+    $envText = [regex]::Replace($envText, '(?m)^\s*VENDOR_CONSOLE_PASSWORD\s*=.*\r?\n?', '')
+    if ($envText -and -not $envText.EndsWith("`n")) { $envText += [Environment]::NewLine }
+    $envText += "VENDOR_CONSOLE_PASSWORD=$vendorPassword" + [Environment]::NewLine
+    [IO.File]::WriteAllText($envFile, $envText, (New-Object Text.UTF8Encoding($false)))
+    Write-Host "    OneNet vendor console password for this server (login onenet): $vendorPassword" -ForegroundColor Yellow
+    Write-Host '    Keep it in OneNet''s records. It is also in config\.env as VENDOR_CONSOLE_PASSWORD.'
+  }
+}
+
+# Folder permissions (installs made before this was part of setup get them now; see Set-HRFolderPermissions).
+if (-not $install.portable) {
+  try { Set-HRFolderPermissions $installRoot $install.dataDir; Write-Host '    Folder permissions checked (program: Administrators only; data: Administrators, SYSTEM, NETWORK SERVICE).' }
+  catch { Write-Host "    Folder permissions not changed: $($_.Exception.Message)" -ForegroundColor Yellow }
+}
+
 $previous = Get-Content (Join-Path $install.configDir 'release.json') -Raw
 try {
   Write-Host '==> Database changes'

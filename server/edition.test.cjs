@@ -2,23 +2,26 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const edition = require('./edition.cjs');
 
-test('console password is OneNet + DDMonYYYY on Pakistan time', () => {
-  const noon = Date.parse('2026-10-19T07:00:00Z'); // 12:00 in Karachi
-  assert.equal(edition.vendorPasswordFor(noon), 'OneNet19Oct2026');
-  assert.equal(edition.vendorPasswordFor(Date.parse('2026-10-19T20:30:00Z')), 'OneNet20Oct2026', 'after midnight in Karachi the day rolls over');
-  assert.equal(edition.vendorPasswordFor(Date.parse('2026-01-05T07:00:00Z')), 'OneNet05Jan2026', 'day is zero padded');
-});
-
-test('vendor credentials accept only the login name with the current password (+/-1 day)', () => {
-  const now = Date.parse('2026-10-19T07:00:00Z');
-  assert.equal(edition.vendorCredentialsValid('onenet', 'OneNet19Oct2026', now), true);
-  assert.equal(edition.vendorCredentialsValid('OneNet', 'OneNet19Oct2026', now), true, 'login name is case-insensitive');
-  assert.equal(edition.vendorCredentialsValid('onenet', 'OneNet18Oct2026', now), true, 'yesterday still works');
-  assert.equal(edition.vendorCredentialsValid('onenet', 'OneNet20Oct2026', now), true, 'tomorrow still works');
-  assert.equal(edition.vendorCredentialsValid('onenet', 'OneNet17Oct2026', now), false);
-  assert.equal(edition.vendorCredentialsValid('onenet', 'onenet19oct2026', now), false, 'password is case-sensitive');
-  assert.equal(edition.vendorCredentialsValid('admin', 'OneNet19Oct2026', now), false);
-  assert.equal(edition.vendorCredentialsValid('onenet', '', now), false);
+test('the vendor console uses the server own password; the old date password no longer works', () => {
+  const saved = { ...process.env };
+  try {
+    delete process.env.VENDOR_CONSOLE_PASSWORD;
+    assert.equal(edition.vendorConsoleEnabled(), false, 'no password configured: console off');
+    assert.equal(edition.vendorCredentialsValid('onenet', 'OneNet19Oct2026'), false, 'date password refused');
+    process.env.VENDOR_CONSOLE_PASSWORD = 'short';
+    assert.equal(edition.vendorConsoleEnabled(), false, 'a weak password keeps the console off');
+    process.env.VENDOR_CONSOLE_PASSWORD = 'k8Q2-vN4p-Zr7s-Lm3x';
+    assert.equal(edition.vendorConsoleEnabled(), true);
+    assert.equal(edition.vendorCredentialsValid('onenet', 'k8Q2-vN4p-Zr7s-Lm3x'), true);
+    assert.equal(edition.vendorCredentialsValid('OneNet', 'k8Q2-vN4p-Zr7s-Lm3x'), true, 'login name is case-insensitive');
+    assert.equal(edition.vendorCredentialsValid('onenet', 'k8Q2-vN4p-Zr7s-Lm3X'), false, 'password is case-sensitive');
+    assert.equal(edition.vendorCredentialsValid('admin', 'k8Q2-vN4p-Zr7s-Lm3x'), false);
+    assert.equal(edition.vendorCredentialsValid('onenet', ''), false);
+    process.env.VENDOR_CONSOLE_DISABLED = 'true';
+    assert.equal(edition.vendorCredentialsValid('onenet', 'k8Q2-vN4p-Zr7s-Lm3x'), false, 'can still be switched off');
+  } finally {
+    for (const key of ['VENDOR_CONSOLE_PASSWORD', 'VENDOR_CONSOLE_DISABLED']) { if (saved[key] === undefined) delete process.env[key]; else process.env[key] = saved[key]; }
+  }
 });
 
 test('vendor tokens expire', () => {

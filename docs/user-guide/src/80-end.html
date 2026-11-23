@@ -33,11 +33,15 @@
 <h4>An employee is missing from payroll.</h4>
 <p>Only Active and On-Leave employees are included. Check their status, and that their joining date is before the month ends.</p>
 <h4>An employee's tax looks wrong.</h4>
-<p>Check the tax slabs (rates typed as percentages, e.g. 11 for 11%), the tax year and effective date, the employee's prior-employer income and tax (for mid-year joiners), and their perquisites. Use the payslip's tax panel (taxable income so far, projected yearly income) to follow the calculation.</p>
+<p>Check the tax slabs against the current FBR rates (rates typed as percentages, e.g. 11 for 11%; the built-in table is for Tax Year 2027, section B1), whether a surcharge rate is set, the tax year and effective date, the employee's prior-employer income and tax (for mid-year joiners), and their perquisites. Use the payslip's tax panel (taxable income so far, projected yearly income) to follow the calculation.</p>
 <h4>A kiosk does not recognise someone.</h4>
 <p>Check the face box label (section G4). Most often the face needs enrolling again (section D2), the kiosk needs a Sync, or the light is poor.</p>
 <h4>Two people were recognised as the same person.</h4>
 <p>This was a problem with the old face method and is fixed by the October 2026 upgrade. Make sure every kiosk runs version 1.0.2 or later and that every face has been enrolled again.</p>
+<h4>Nobody knows the kiosk's admin PIN.</h4>
+<p>The PIN cannot be read back and there is no reset button on the kiosk. Contact your IT person or your system supplier. Keep the PIN written down in a safe place to avoid this.</p>
+<h4>Many kiosk punches are waiting in Needs Review.</h4>
+<p>Check that Multi-Face mode is switched off in the kiosk Settings (every multi-face punch is reviewed), and that the kiosk PC's clock and time zone are correct and its internet works (section G5).</p>
 <h4>An employee cannot see the Attend tab in the app.</h4>
 <p>Phone attendance needs a mobile-duty assignment for that day (section D3). On normal days they use the kiosk.</p>
 <h4>An employee cannot see their payslip in the app.</h4>
@@ -69,7 +73,9 @@
 <tr><td><span class="msg">CNIC format must be valid (e.g. 42101-1234567-3)</span></td><td>Type the 13 CNIC digits.</td></tr>
 <tr><td><span class="msg">Mobile Contact must start with +923…</span></td><td>Type a Pakistani mobile number (for example 0321-4444444 or +92 321 4444444); it is tidied to +923XXXXXXXXX when you leave the box. Check that it has the right number of digits.</td></tr>
 <tr><td><span class="msg">Employee code must start with … (company prefix).</span></td><td>Tick Auto, or start the code with your company prefix.</td></tr>
-<tr><td><span class="msg">IBAN must be a valid 24-character Pakistan IBAN.</span></td><td>Copy the IBAN from the bank letter — PK + 22 characters.</td></tr>
+<tr><td><span class="msg">IBAN must be a 24-character Pakistan IBAN…</span></td><td>Copy the IBAN from the bank letter — PK + 22 characters. Spaces and small letters are fine.</td></tr>
+<tr><td><span class="msg">This IBAN is not valid: its check digits do not match…</span></td><td>One character is mistyped. Compare the IBAN with the bank letter character by character.</td></tr>
+<tr><td><span class="msg">CNIC … already belongs to …</span></td><td>Another employee already has this CNIC. Check the number, or open the other record.</td></tr>
 <tr><td><span class="msg">Approval blocked: … leave balance …</span></td><td>Not enough leave days. Record the extra as Unpaid leave.</td></tr>
 <tr><td><span class="msg">Attendance period cannot be locked: N exception(s) require review.</span></td><td>Clear the review box in 7. Attendance.</td></tr>
 <tr><td><span class="msg">Payroll refused: …</span></td><td>See the table in section E4, step 3.</td></tr>
@@ -84,7 +90,7 @@
 <h4>Every month</h4>
 <ul class="checklist"><li>Follow the month-end checklist (section E1).</li><li>File FBR, EOBI and social-security returns; record the FBR CPR.</li><li>Make a backup (section H1).</li></ul>
 <h4>Every year</h4>
-<ul class="checklist"><li>Before July payroll: new tax year, tax slabs and rates — proposed and approved (section B1).</li><li>Add next year's public holidays, including Eid dates when announced (section B4).</li><li>Update Ramadan dates on employee records.</li><li>Issue section 149 salary tax certificates (section E4).</li></ul>
+<ul class="checklist"><li>Before July payroll: new tax year, tax slabs and rates — checked against the new Finance Act on the FBR website, proposed and approved (section B1).</li><li>Add next year's public holidays, including Eid dates when announced (section B4).</li><li>Update Ramadan dates on employee records.</li><li>Issue section 149 salary tax certificates (section E4).</li></ul>
 <h4>When people join or leave</h4>
 <ul class="checklist"><li>Joiner: add the employee, enroll face/fingerprint, create a mobile login if needed, complete the onboarding checklist.</li><li>Leaver: Trigger Exit → second-person approval → collect assets → process and pay the settlement → switch their login to Inactive.</li></ul>
 

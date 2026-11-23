@@ -7,7 +7,9 @@
 .DESCRIPTION
   Public authorities (Let's Encrypt) do not issue certificates for internal names such as "headoffice" or for
   192.168.x.x addresses, so this tool creates its own:
-    1. a local CA "<company> HR Payroll Local CA" (10 years; its private key stays on this server, not exportable);
+    1. a local CA "<company> HR Payroll Local CA" that is only valid for this server's names and IP addresses
+       (Name Constraints); it signs the server certificate once and its private key is then deleted, so it can
+       never sign a certificate for any other site;
     2. a server certificate for this server's name, full name, IP addresses and localhost (5 years);
     3. trusts the CA on this server, switches the application to HTTPS on port 443, opens TCP 443 in the firewall;
        port 80 and the application port (8080) redirect to https;
@@ -15,7 +17,8 @@
        Administrator, on every PC and kiosk that opens the system; otherwise browsers show "not private" and the
        kiosk refuses to connect.
   If the application does not answer over HTTPS, the previous settings are restored automatically.
-  Running it again renews the server certificate (e.g. after a new IP address); the CA is kept, so PCs need nothing.
+  Running it again (e.g. after a new IP address or name) makes a NEW CA and server certificate: install the new
+  HRPayroll-CA.cer on every PC and kiosk again. Older CAs are removed from this server after a successful switch.
 
   Kiosks: kiosk version 1.0.44 or later trusts certificates installed in Windows. After switching, remove the device
   key in kiosk Settings and register again with https://<server name> (the old http://...:8080 address only redirects).
@@ -24,7 +27,7 @@
   .\Enable-Https.ps1                                  # turn on HTTPS
   .\Enable-Https.ps1 -ExtraNames hr.aljannat.local     # also cover an extra name (DNS alias)
   .\Enable-Https.ps1 -Check                           # show the current state only
-  .\Enable-Https.ps1 -Remove                          # back to http://<server>:8080 (the CA stays installed)
+  .\Enable-Https.ps1 -Remove                          # back to http://<server>:8080 (the CA stays trusted)
 #>
 param([string[]]$ExtraNames = @(), [switch]$Check, [switch]$Remove, [string]$InstallDir = '')
 . (Join-Path $PSScriptRoot 'hrpayroll-common.ps1')
@@ -147,19 +150,26 @@ if ($others.Count) {
   exit 1
 }
 
-# -- 1. Local CA (created once, kept for renewals) -----------------------------------
+# -- 1. Local CA (new on every run, limited to this server's names, private key deleted after use) ----------------
+# A CA trusted on every PC could otherwise sign a certificate for ANY site (a bank, Microsoft...). So the CA:
+#   - carries a critical Name Constraints extension: it is only valid for this server's names and IP addresses;
+#   - signs exactly one server certificate, after which its private key is deleted, so nothing more can be signed.
+# Consequence: each run makes a new CA, and the PCs and kiosks must install the new HRPayroll-CA.cer again.
 $company = if ($install.company) { ($install.company -replace '[^\w .&-]', '').Trim() } else { '' }
-$ca = Get-ChildItem Cert:\LocalMachine\My | Where-Object { $_.FriendlyName -eq $caFriendly -and $_.HasPrivateKey -and $_.NotAfter -gt (Get-Date).AddYears(1) } | Sort-Object NotAfter -Descending | Select-Object -First 1
-if ($ca) {
-  Say "Using the existing local CA: $($ca.Subject) (valid until $($ca.NotAfter.ToString('yyyy-MM-dd')))."
-} else {
-  Say 'Creating the local certificate authority...'
-  $caName = if ($company) { "$company HR Payroll Local CA" } else { 'HR Payroll Local CA' }
-  $ca = New-SelfSignedCertificate -Type Custom -Subject "CN=$caName" -FriendlyName $caFriendly `
-    -KeyAlgorithm RSA -KeyLength 3072 -HashAlgorithm SHA256 -KeyExportPolicy NonExportable `
-    -KeyUsage CertSign, CRLSign, DigitalSignature -KeyUsageProperty Sign `
-    -TextExtension @('2.5.29.19={critical}{text}ca=1&pathlength=0') `
-    -NotAfter (Get-Date).AddYears(10) -CertStoreLocation Cert:\LocalMachine\My
+$caName = if ($company) { "$company HR Payroll Local CA" } else { 'HR Payroll Local CA' }
+$oldCas = @(Get-ChildItem Cert:\LocalMachine\My | Where-Object { $_.FriendlyName -eq $caFriendly })
+$oldRoots = @(Get-ChildItem Cert:\LocalMachine\Root | Where-Object { $_.Subject -like 'CN=*HR Payroll Local CA' })
+$constraintIps = @(@($ips) + '127.0.0.1' | Select-Object -Unique)
+$nameConstraints = 'SubTree=Include&' + ((@($dnsNames | ForEach-Object { "DNS=$_" }) + @($constraintIps | ForEach-Object { "IPAddress=$_,255.255.255.255" })) -join '&')
+Say 'Creating the local certificate authority (only valid for this server''s names)...'
+$ca = New-SelfSignedCertificate -Type Custom -Subject "CN=$caName" -FriendlyName $caFriendly `
+  -KeyAlgorithm RSA -KeyLength 3072 -HashAlgorithm SHA256 -KeyExportPolicy NonExportable `
+  -KeyUsage CertSign, CRLSign, DigitalSignature -KeyUsageProperty Sign `
+  -TextExtension @('2.5.29.19={critical}{text}ca=1&pathlength=0', "2.5.29.30={critical}{text}$nameConstraints") `
+  -NotAfter (Get-Date).AddYears(10) -CertStoreLocation Cert:\LocalMachine\My
+if (-not ($ca.Extensions | Where-Object { $_.Oid.Value -eq '2.5.29.30' -and $_.Critical })) {
+  Remove-Item "Cert:\LocalMachine\My\$($ca.Thumbprint)" -DeleteKey -ErrorAction SilentlyContinue
+  throw 'Windows did not add the name restriction to the local CA; nothing was changed.'
 }
 # Trust it on this server (local browser, health check).
 New-Item -ItemType Directory -Force -Path $exportDir | Out-Null
@@ -177,6 +187,9 @@ $cert = New-SelfSignedCertificate -Type Custom -Subject "CN=$hostName" -Friendly
   -KeyUsage DigitalSignature, KeyEncipherment `
   -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.1', "2.5.29.17={text}$($san -join '&')", '2.5.29.19={text}ca=0') `
   -NotAfter (Get-Date).AddYears(5) -CertStoreLocation Cert:\LocalMachine\My
+# The CA has done its one job: delete its private key (the public certificate stays trusted in Root).
+Remove-Item "Cert:\LocalMachine\My\$($ca.Thumbprint)" -DeleteKey
+Say 'Local CA private key deleted (the CA cannot sign anything else).'
 $passphrase = -join ((1..32) | ForEach-Object { '{0:x}' -f (Get-Random -Maximum 16) })
 $secure = ConvertTo-SecureString $passphrase -AsPlainText -Force
 if (Test-Path $pfxFile) { Copy-Item $pfxFile "$pfxFile.previous" -Force }
@@ -209,6 +222,15 @@ if (-not (Restart-AndCheck)) {
   Restart-Service HRPayrollApp
   throw "HTTPS could not be started. Nothing else changed. See $($install.dataDir)\logs\app for the reason."
 }
+
+# CAs from earlier runs: their private keys are deleted (older versions of this tool kept them, without a name
+# restriction) and they are no longer trusted on this server. PCs that still trust an old one are harmless once
+# its key is gone; remove it there with certmgr.msc if you like (Trusted Root Certification Authorities).
+foreach ($old in $oldCas) { Remove-Item "Cert:\LocalMachine\My\$($old.Thumbprint)" -DeleteKey -ErrorAction SilentlyContinue }
+foreach ($old in @($oldRoots + $oldCas | Where-Object { $_.Thumbprint -ne $ca.Thumbprint })) {
+  Get-ChildItem Cert:\LocalMachine\Root | Where-Object { $_.Thumbprint -eq $old.Thumbprint } | Remove-Item -ErrorAction SilentlyContinue
+}
+if ($oldCas.Count -or $oldRoots.Count) { Say 'Older local CAs (and any private key they still had) were removed from this server.' }
 
 # http://<server>/ (port 80) -> application port, which now redirects to https.
 $proxy = Get-Port80Proxy
@@ -254,7 +276,7 @@ if ($publicNets.Count) {
   Say "  Or allow the HR Payroll ports on every network:  Set-NetFirewallRule -Group 'HR Payroll' -Profile Any" 'Yellow'
 }
 Say ''
-Say 'On every PC and kiosk that opens the system (once):' 'Yellow'
+Say 'On every PC and kiosk that opens the system (again after every run of this tool: the CA is new each time):' 'Yellow'
 Say "  1. Copy the folder $exportDir to the PC (USB or a shared folder)." 'Yellow'
 Say '  2. Right-click Install-HRPayroll-CA.cmd -> Run as administrator.' 'Yellow'
 Say '  3. Reopen the browser and open the https address above.' 'Yellow'

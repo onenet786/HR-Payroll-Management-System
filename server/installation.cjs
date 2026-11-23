@@ -231,15 +231,36 @@ async function revokeKioskSetupToken(db, id) {
 }
 
 /** The addresses devices should use, in order: the platform subdomain first (stable), then the public/custom domain. */
-async function deviceUrls(db, fallbackAppUrl) {
+// Kiosks accept https, or plain http only to localhost or a literal private/loopback IP (windows-kiosk/setup-code.cjs):
+// a plain-http name such as http://headoffice:8080 can be spoofed on the LAN.
+function kioskAcceptsUrl(url) {
+  try {
+    const { protocol, hostname } = new URL(url);
+    if (protocol === 'https:') return true;
+    if (protocol !== 'http:') return false;
+    if (hostname === 'localhost') return true;
+    const parts = hostname.split('.').map(Number);
+    if (parts.length !== 4 || parts.some(part => !Number.isInteger(part) || part < 0 || part > 255)) return false;
+    return parts[0] === 10 || parts[0] === 127 || (parts[0] === 192 && parts[1] === 168) || (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) || (parts[0] === 169 && parts[1] === 254);
+  } catch { return false; }
+}
+
+/** Server addresses put into kiosk and phone setup codes: the configured ones first, preferring addresses a kiosk
+ * accepts; on a plain-http LAN server that means its IP addresses from ALLOWED_ORIGINS. */
+async function deviceUrls(db, fallbackAppUrl, extraOrigins = process.env.ALLOWED_ORIGINS) {
   const domains = await loadDomains(db);
-  return [...new Set([domains.platformUrl, originOf(fallbackAppUrl), domains.publicUrl].filter(Boolean))].slice(0, 2);
+  const candidates = [...new Set([domains.platformUrl, originOf(fallbackAppUrl), domains.publicUrl,
+    ...String(extraOrigins || '').split(',').map(item => originOf(item.trim()))].filter(Boolean))];
+  // localhost / 127.x only reach a kiosk on the server itself, so they come last.
+  const local = url => /^https?:\/\/(localhost|127\.)/.test(url);
+  const accepted = candidates.filter(kioskAcceptsUrl).sort((a, b) => Number(local(a)) - Number(local(b)));
+  return (accepted.length ? accepted : candidates).slice(0, 2);
 }
 
 module.exports = {
   normalizeLicence, licenceState, loadLicence, saveLicence, licenceGate, assertStaffLimit, SUSPENDED_MESSAGE,
   normalizeDomains, loadDomains, saveDomains, createOriginRegistry, originOf,
   clientDataImportEnabled, setClientDataImport,
-  encodeSetupCode, encodeMobileCode, ensureKioskServiceUser, createKioskSetupToken, consumeKioskSetupToken, listKioskSetupTokens, revokeKioskSetupToken, deviceUrls,
+  encodeSetupCode, encodeMobileCode, ensureKioskServiceUser, createKioskSetupToken, consumeKioskSetupToken, listKioskSetupTokens, revokeKioskSetupToken, deviceUrls, kioskAcceptsUrl,
   readSetting, writeSetting, resetInstallationCache,
 };

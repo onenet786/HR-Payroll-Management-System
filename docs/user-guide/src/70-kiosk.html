@@ -7,6 +7,7 @@
 <ol class="steps">
   <li>Run the installer <b>Bin Ishaq Attendance Kiosk Setup 1.0.x.exe</b> given by your IT person. Choose the install folder and finish. Desktop and Start-menu shortcuts are created.</li>
   <li>The kiosk starts by itself every time Windows starts. Only one copy runs at a time.</li>
+  <li>Set the PC's <b>date, time and time zone</b> correctly: Windows Settings → Time &amp; language → time zone <b>(UTC+05:00) Islamabad, Karachi</b>, with <b>Set time automatically</b> on. The server checks the kiosk's clock (section G5).</li>
   <li>To <b>update</b> to a newer version, just run the newer installer. It closes the running kiosk automatically; punches waiting to be sent are kept. (Version numbers go up with every release — 1.0.1, 1.0.2…; the current version is shown in Settings.)</li>
 </ol>
 <div class="box tip"><span class="t">Tip — first update from version 0.0.0</span><p>If updating from the very first version (0.0.0) fails, uninstall "Bin Ishaq Attendance Kiosk 0.0.0" from Windows Settings → Apps, then run the new installer. Your kiosk settings and waiting punches are kept.</p></div>
@@ -23,12 +24,26 @@
 <tr><td>Right panel</td><td>Employee directory with search (tap a person to fill their code) and recent events.</td></tr>
 </table>
 <p>Keyboard shortcuts: <span class="kbd">F2</span> Fingerprint, <span class="kbd">F3</span> Camera, <span class="kbd">F5</span> Sync, <span class="kbd">Esc</span> closes Settings.</p>
+<div class="box note"><span class="t">Good to know — the kiosk window is locked</span><p>The kiosk has no menu, and reload, developer tools, <span class="kbd">Alt</span>+<span class="kbd">F4</span> and other Windows shortcuts do nothing. It cannot go to other web pages or open new windows. It closes only through <span class="ui">Exit</span> (with the admin PIN) or when Windows shuts down or logs off. (For your IT person: developer tools can be switched on only by starting the kiosk with <b>KIOSK_DEVTOOLS=1</b>.)</p></div>
+
+<h3>The admin PIN</h3>
+<ol class="steps">
+  <li>The first time anyone opens <b>Settings</b> (the gear), the kiosk asks you to <b>Set the admin PIN</b>: type 6 to 12 digits twice. A simple pattern such as 111111 or 123456 is refused.</li>
+  <li>Write the PIN down and keep it safe, away from employees. Only the people who look after the kiosk should know it.</li>
+  <li>From then on the PIN is asked for before you can open or save <b>Settings</b>, <b>Exit</b> the kiosk, <b>Clear Local Cache</b>, register the kiosk or <b>Remove device key</b>, and test an IP camera.</li>
+  <li>To change it, open Settings and click <span class="ui">Change PIN</span> (under <b>Admin PIN</b>), then type the new PIN twice.</li>
+</ol>
+<ul>
+  <li>After <b>5 wrong PINs</b> the kiosk refuses PINs for 30 seconds; each further failure doubles the wait, up to 15 minutes. Restarting the PC does not remove the wait.</li>
+  <li>The admin session ends after <b>5 minutes without activity</b> or when Settings is closed. You then see <span class="msg">ADMIN PIN REQUIRED</span> and enter the PIN again.</li>
+  <li>If the PIN is forgotten, ask your IT person — it cannot be read back from the kiosk.</li>
+</ul>
 
 <h2 id="kiosk-register"><span class="num">G3</span>First start: register the kiosk and choose its branch</h2>
 <figure><img src="shots/87-kiosk-register.png"><figcaption><b>Kiosk Settings — not registered yet.</b> Sign in once with the Kiosk Terminal account.</figcaption></figure>
 <ol class="steps">
   <li>An administrator creates a login with role <b>Kiosk Terminal</b> (section B5).</li>
-  <li>On the kiosk, click the <b>gear</b> (Settings).</li>
+  <li>On the kiosk, click the <b>gear</b> (Settings). The first time, set the admin PIN (see above); after that, enter it.</li>
   <li>Under <span class="ui">SERVER REGISTRATION</span>, type the kiosk account's email (or username) and password, and click <span class="ui">Register this kiosk</span>. The password is used once and not stored; the PC receives its own secret key.</li>
   <li>The line turns green: <span class="msg">Registered as "…" on … with …</span>, and the kiosk downloads employees.</li>
   <li>Under <span class="ui">TERMINAL CONFIGURATION</span>, set the <span class="ui">TERMINAL ID</span> (for example KIOSK-WIN-01), <span class="ui">LOCATION / DESCRIPTION</span> (for example Main Gate) and — required — the <span class="ui">ASSIGNED BRANCH</span>. The kiosk keeps only that branch's employees.</li>
@@ -39,14 +54,23 @@
 <figure><img src="shots/84-kiosk-settings-options.png"><figcaption><b>Punch options.</b></figcaption></figure>
 <table>
 <tr><th style="width:40%">Option</th><th>Meaning</th></tr>
-<tr><td>Enable code-only attendance tab <b>HIGH RISK</b></td><td>Lets people punch by typing an employee code with no face or fingerprint. Anyone could punch for someone else — keep it <b>off</b> except as a short emergency fallback.</td></tr>
+<tr><td>Enable code-only attendance tab <b>HIGH RISK</b></td><td>Lets people punch by typing an employee code with no face or fingerprint. Anyone could punch for someone else — keep it <b>off</b> except as a short emergency fallback. These punches are recorded as <b>RFID/code</b> punches, never as fingerprint or face.</td></tr>
 <tr><td>Require employee code before fingerprint scan</td><td>Employees type their code, then scan their finger (extra safety).</td></tr>
 <tr><td>Automatically verify and punch by face</td><td>The face check starts by itself when one face stays in the oval. Recommended on.</td></tr>
 <tr><td>Enable kiosk fullscreen mode on startup</td><td>Fills the whole screen at start-up.</td></tr>
+<tr><td>Allow Multi-Face walk-through mode <b>LOW ASSURANCE</b></td><td><b>Off by default.</b> When on, the Camera tab also offers Multi-Face Stream, which recognises several people at once <b>without</b> the live head-turn check — so a photo of a colleague could be recognised. Every punch made this way is sent to HR for review (Needs Review). Keep it off unless you really need walk-through punching.</td></tr>
+<tr><td>Allow unverified fingerprint bridge</td><td>Keep <b>off</b>. Only for an older URU4500Bridge.exe, or one running as a Windows service, that cannot prove it was started by this kiosk (see section G6). Not recommended.</td></tr>
 <tr><td>IP camera URL</td><td>Leave empty. Network cameras cannot prove a real person is present, so camera punching is blocked when this is set. Use the PC's webcam.</td></tr>
 </table>
 <p>The footer has <span class="ui">Check Biometric Driver Host</span> and <span class="ui">Test Scanner</span> (tests the fingerprint reader without recording attendance). Further down, <b>Sync Target</b> shows the <b>Kiosk version</b> and server address.</p>
-<div class="box danger"><span class="t">Warning — Clear Local Cache</span><p>The <b>Danger Zone</b> button <span class="ui">Clear Local Cache</span> permanently deletes punches stored on this PC that have not been sent yet. Use it only when your IT person asks, and after a successful Sync.</p></div>
+<div class="box danger"><span class="t">Warning — Clear Local Cache</span><p>The <b>Danger Zone</b> button <span class="ui">Clear Local Cache</span> permanently deletes punches stored on this PC that have not been sent yet. Use it only when your IT person asks, and after a successful Sync. It needs the admin PIN.</p></div>
+<h3>Server address</h3>
+<ul>
+  <li><b>http://</b> (without the "s") is accepted only for an IP address, for example <b>http://192.168.1.10:8080</b>, or for localhost.</li>
+  <li>A server <b>name</b> such as <b>HEADOFFICE</b> or <b>hr.local</b> needs <b>https://</b>. On a Windows server, your IT person runs <b>Enable-Https.ps1</b> and installs its certificate (CA) on the kiosk PC — see the Windows Server guide. Otherwise you see <span class="msg">Server address must use https…</span>.</li>
+  <li>If you type a name without http:// or https://, the kiosk uses https://.</li>
+  <li>Setup codes created on a Windows server that runs on plain http already contain the server's IP address, so they work without extra steps.</li>
+</ul>
 
 <h2 id="kiosk-punch"><span class="num">G4</span>Punching in and out at the kiosk</h2>
 <h3>With a fingerprint</h3>
@@ -55,7 +79,10 @@
   <li>Place the enrolled finger flat on the reader (or press <span class="ui">SCAN FINGERPRINT</span>).</li>
   <li>The result card shows your name and <b>Punch In Recorded</b> or <b>Punch Out Recorded</b>.</li>
 </ol>
-<h3>With your face — several people at once (Multi-Face Stream)</h3>
+<h3>With your face — one at a time (1-on-1 Challenge, the normal way)</h3>
+<p>This is the default face mode: one person at a time, with the head-turn ("liveness") check. See the steps further below.</p>
+<h3>With your face — several people at once (Multi-Face Stream, only if switched on)</h3>
+<div class="box important"><span class="t">Important — off unless an administrator allows it</span><p>Multi-Face Stream appears only after <b>Allow Multi-Face walk-through mode</b> is switched on in Settings. It has no live face check, so <b>every</b> punch made this way goes to HR for review in 7. Attendance before the month can be locked.</p></div>
 <figure><img src="shots/81-kiosk-camera-multi.png"><figcaption><b>Camera tab, Multi-Face Stream.</b> Each face gets a box with a name and status. (The picture was taken without a webcam.)</figcaption></figure>
 <ol class="steps">
   <li>On the <span class="ui">Camera</span> tab choose <span class="ui">Multi-Face Stream (Boxes)</span>.</li>
@@ -72,10 +99,10 @@
 <tr><td>Look at camera · Hold still</td><td>Face turned away, too small or moving.</td></tr>
 <tr><td>Sync kiosk in Settings</td><td>The kiosk has no employee data. Press Sync or register it.</td></tr>
 </table>
-<h3>With your face — one at a time (1-on-1 Challenge)</h3>
+<h3>1-on-1 Challenge — step by step</h3>
 <figure><img src="shots/82-kiosk-camera-single.png"><figcaption><b>1-on-1 Challenge (Oval)</b> with the head-turn liveness steps.</figcaption></figure>
 <ol class="steps">
-  <li>Choose <span class="ui">1-on-1 Challenge (Oval)</span>. Only one person should be in front of the camera.</li>
+  <li>On the <span class="ui">Camera</span> tab, <span class="ui">1-on-1 Challenge (Oval)</span> is selected by default. Only one person should be in front of the camera.</li>
   <li>Put your face inside the oval and hold still (or press <span class="ui">CAPTURE &amp; PUNCH</span>).</li>
   <li>Follow the prompts: <i>Center your face</i> → <i>Turn LEFT</i> → <i>Return to center</i> → <i>Turn RIGHT</i> → <i>Live person verified</i>. A photo is saved as evidence.</li>
 </ol>
@@ -86,6 +113,8 @@
 <tr><td>2 Lunch Break · 3 Tea Break · 4 Official Duty · 5 Client Meeting · 6 Site Visit · 7 Personal Work · 8 Medical Appointment · 12 Prayer</td><td>1 End of Shift · 9 Emergency Leave · 10 Half-Day Leave · 11 Sick Leave</td></tr>
 </table>
 <p class="small">After a day-ending reason, punching again shows <span class="msg">Attendance is already completed today…</span>. Ask HR if it needs correcting.</p>
+<div class="box note"><span class="t">Good to know — night shifts, Fridays and Ramadan</span><p>If your shift runs past midnight, your punch-out after midnight closes the shift you started the evening before. Punches between midnight and 5 AM get the correct date. The kiosk also uses your Friday and Ramadan timings when HR has set them on your record.</p></div>
+<p class="small">Punches made by typing an employee code are recorded as <b>RFID/code</b> punches, never as fingerprint or face punches.</p>
 <h3>Staff from another branch</h3>
 <p>Use the <span class="ui">Camera</span> tab, type your <b>complete</b> employee ID first, then complete the face check. This needs internet; fingerprint cannot be used for another branch.</p>
 
@@ -94,7 +123,9 @@
   <li>Every punch is saved on the PC first and then sent to the server. If the internet is down, punches wait (<b>Pending Sync</b> above 0, <b>Synced</b> light amber) and are sent automatically every 5 minutes, or when you press <span class="ui">Sync</span>. The server accepts waiting punches up to 8 days old — fix internet problems quickly.</li>
   <li>New employees, faces and fingerprints reach the kiosk at the next sync.</li>
   <li>If the sync line says <span class="msg">Not registered — open Settings to register this kiosk</span>, register it again (section G3). This also happens if an administrator clicked <b>Disconnect</b>.</li>
-  <li>To close the kiosk, click <span class="ui">Exit</span> and confirm <span class="ui">Exit Kiosk</span>. Attendance cannot be recorded until it is started again.</li>
+  <li><b>The server checks the kiosk's clock.</b> A punch is sent to HR for review (Needs Review) when the kiosk's clock is more than <b>10 minutes</b> wrong, or when a punch saved offline reaches the server more than <b>12 hours</b> late. Keep the PC's date, time and time zone correct (Pakistan time, set automatically — section G1) and fix internet problems quickly.</li>
+  <li>If HR has corrected someone's attendance for a day, the kiosk cannot overwrite that correction. It can still add the missing punch-out.</li>
+  <li>To close the kiosk, click <span class="ui">Exit</span>, enter the admin PIN and confirm <span class="ui">Exit Kiosk</span>. Attendance cannot be recorded until it is started again.</li>
 </ul>
 <figure><img src="shots/86-kiosk-exit.png" style="max-height:80mm"><figcaption><b>Exit attendance kiosk?</b> Nothing happens until you confirm.</figcaption></figure>
 
@@ -108,7 +139,10 @@
 <tr><td><span class="msg">Please wait … seconds before punching again.</span></td><td>Punches less than 2 minutes apart are ignored.</td></tr>
 <tr><td><span class="msg">Fingerprint not recognized. Please try again.</span></td><td>Clean the reader and finger; press flat; use the enrolled finger.</td></tr>
 <tr><td><span class="msg">No fingerprint templates were found…</span></td><td>Press Sync; check registration; ask HR to enroll fingerprints.</td></tr>
-<tr><td><span class="msg">Fingerprint reader is unavailable.</span> / FP Bridge red</td><td>Reconnect the reader; click Check Biometric Driver Host in Settings.</td></tr>
+<tr><td><span class="msg">Fingerprint reader is unavailable.</span> / FP Bridge red</td><td>Reconnect the reader; click Check Biometric Driver Host in Settings. The kiosk starts its own fingerprint bridge (URU4500Bridge.exe) with a secret and checks it before use. An <b>older bridge installed as a Windows service</b> is refused: copy the new <b>URU4500Bridge.exe</b> from the kiosk package over the old one (or let the kiosk installer replace it). Only if that is impossible, switch on <b>Allow unverified fingerprint bridge</b> in Settings (not recommended).</td></tr>
+<tr><td><span class="msg">Enter admin PIN</span> / <span class="msg">Wrong PIN.</span></td><td>Settings, Exit, Clear Local Cache, registering or removing the device key and testing an IP camera need the admin PIN. After 5 wrong PINs, wait (30 seconds at first, up to 15 minutes).</td></tr>
+<tr><td><span class="msg">ADMIN PIN REQUIRED</span></td><td>The admin session ended (5 minutes idle, or Settings was closed). Enter the PIN again.</td></tr>
+<tr><td><span class="msg">Server address must use https…</span></td><td>Use https:// for a server name, or http:// with the server's IP address (section G3).</td></tr>
 <tr><td><span class="msg">That month is locked for payroll.</span></td><td>The punch is for a month already closed — HR must correct it as an adjustment.</td></tr>
 <tr><td><span class="msg">This employee account is terminated / suspended.</span></td><td>Contact HR.</td></tr>
 </table>
@@ -122,3 +156,4 @@
   <li>To leave kiosk mode, open the gear and tap <span class="ui">LOG OFF / EXIT KIOSK</span>.</li>
 </ol>
 <p class="small">Buttons in the tablet settings: START / RETRY CAMERA, ANDROID CAMERA PERMISSION (opens the app permissions) and FLUSH LOCAL WEB CACHE (does not delete saved attendance).</p>
+<p class="small">The Android app does not allow its data to be backed up or copied to another phone. When a tablet is replaced, install the app on the new one and sign in again with the Kiosk Terminal account.</p>

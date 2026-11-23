@@ -485,3 +485,20 @@ test('notifications older than 90 days are not sent to browsers', async () => {
     await pool.query(`DELETE FROM notifications WHERE id IN ('nt-old', 'nt-new')`);
   }
 });
+
+test('audit fixes: unlinked accounts, salary edits, own leave, approved loans, payslip redaction', async () => {
+  // An Employee-role account with no linked employee must not get the company's payslips or employee records.
+  await pool.query(`INSERT INTO users(id, data) VALUES('u-unlinked', '{"id":"u-unlinked","roleId":"role-employee","status":"Active"}'::jsonb) ON CONFLICT (id) DO UPDATE SET data=EXCLUDED.data`);
+  for (const collection of ['payrollPayslips', 'employees', 'loanAdvances', 'salaryRevisions']) {
+    const res = await fetch(`${base}/${collection}`, { headers: { 'x-test-user': 'u-unlinked' } });
+    const body = res.status === 200 ? await res.json() : { documents: [] };
+    assert.ok(res.status === 403 || body.documents.length === 0, `${collection}: unlinked account got ${body.documents?.length} rows`);
+  }
+  await pool.query(`DELETE FROM users WHERE id='u-unlinked'`);
+
+  // Salary changes on an existing employee go through revisions when maker-checker is on.
+  await seed('employees', 'emp-sal', { fullName: 'Salary Person', status: 'Active', basicSalary: 100000 });
+  const person = await current('employees', 'emp-sal');
+  assert.equal(await put('u-hr', 'employees', 'emp-sal', { ...person, basicSalary: 150000 }), 403, 'direct salary edit refused');
+  assert.equal(await put('u-hr', 'employees', 'emp-sal', { ...person, fullName: 'Salary Person 2' }), 200, 'other edits still work');
+})

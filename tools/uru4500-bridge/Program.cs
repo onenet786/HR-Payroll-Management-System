@@ -31,6 +31,7 @@ namespace Uru4500Bridge
                     Port = port;
                 }
             }
+            LoadAccessSettings(args);
             if (args.Length > 0 && args[0].Equals("--service", StringComparison.OrdinalIgnoreCase))
             {
                 ServiceBase.Run(new BridgeService());
@@ -997,22 +998,120 @@ namespace Uru4500Bridge
             return 65;
         }
 
+        // ─── Who may connect ───────────────────────────────────────────────────────
+        // Any web page the PC opens can reach ws://127.0.0.1, so a handshake carrying a web Origin is refused unless
+        // that origin is allow-listed (the HR portal used for enrollment on an HR PC), via, one per entry:
+        //   allowed-origins.txt next to the exe (one origin per line, # comments), URU4500_ALLOWED_ORIGINS
+        //   (comma-separated) or "--allow-origin https://hr.company.com".
+        // No Origin (native clients) and "file://" (the Electron desktop app and kiosk) are accepted.
+        //
+        // The attendance kiosk starts its own bridge with a per-session secret in URU4500_BRIDGE_SECRET. Then every
+        // client without an allow-listed Origin must prove the secret: it sends "X-Bridge-Nonce: <random>" and
+        // "X-Bridge-Auth: hex(HMAC-SHA256(secret, "kiosk-client:" + nonce))", and the bridge answers with
+        // "X-Bridge-Proof: hex(HMAC-SHA256(secret, "bridge-server:" + nonce))", so the kiosk also knows it talks to the
+        // bridge it started and not a program squatting on the port.
+        private static readonly List<string> AllowedOrigins = new List<string>();
+        private static byte[] BridgeSecret;
+
+        private static void LoadAccessSettings(string[] args)
+        {
+            var secret = Environment.GetEnvironmentVariable("URU4500_BRIDGE_SECRET") ?? "";
+            // Read once and removed, so processes this bridge might start do not inherit it.
+            Environment.SetEnvironmentVariable("URU4500_BRIDGE_SECRET", null);
+            if (secret.Length >= 32) BridgeSecret = Encoding.UTF8.GetBytes(secret);
+
+            var sources = new List<string>();
+            var fromEnv = Environment.GetEnvironmentVariable("URU4500_ALLOWED_ORIGINS");
+            if (!string.IsNullOrEmpty(fromEnv)) sources.AddRange(fromEnv.Split(','));
+            try
+            {
+                var file = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "allowed-origins.txt");
+                if (File.Exists(file)) sources.AddRange(File.ReadAllLines(file));
+            }
+            catch { }
+            for (var i = 0; i + 1 < args.Length; i++)
+            {
+                if (args[i].Equals("--allow-origin", StringComparison.OrdinalIgnoreCase)) sources.Add(args[i + 1]);
+            }
+            foreach (var raw in sources)
+            {
+                var origin = NormalizeOrigin(raw.Split('#')[0]);
+                if (origin.Length > 0 && origin != "null" && !AllowedOrigins.Contains(origin)) AllowedOrigins.Add(origin);
+            }
+            Log("Access: " + (BridgeSecret != null ? "kiosk secret required" : "no kiosk secret") + "; " + AllowedOrigins.Count + " allowed web origin(s)");
+        }
+
+        private static string NormalizeOrigin(string value)
+        {
+            return (value ?? "").Trim().TrimEnd('/').ToLowerInvariant();
+        }
+
+        private static string HmacHex(string message)
+        {
+            using (var hmac = new HMACSHA256(BridgeSecret))
+            {
+                var bytes = hmac.ComputeHash(Encoding.UTF8.GetBytes(message));
+                var text = new StringBuilder(bytes.Length * 2);
+                foreach (var b in bytes) text.Append(b.ToString("x2"));
+                return text.ToString();
+            }
+        }
+
+        private static bool FixedTimeEquals(string a, string b)
+        {
+            if (a == null || b == null || a.Length != b.Length) return false;
+            var diff = 0;
+            for (var i = 0; i < a.Length; i++) diff |= a[i] ^ b[i];
+            return diff == 0;
+        }
+
+        private static void Refuse(NetworkStream stream, string reason)
+        {
+            Log("Handshake refused: " + reason);
+            var bytes = Encoding.ASCII.GetBytes("HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+            try { stream.Write(bytes, 0, bytes.Length); } catch { }
+        }
+
         private static bool Handshake(NetworkStream stream)
         {
             var request = ReadHttpHeader(stream);
             if (request.Length == 0) return false;
 
             var key = "";
+            string origin = null;
+            var nonce = "";
+            var auth = "";
             var lines = request.Split(new[] { "\r\n" }, StringSplitOptions.None);
             foreach (var line in lines)
             {
-                if (line.StartsWith("Sec-WebSocket-Key:", StringComparison.OrdinalIgnoreCase))
-                {
-                    key = line.Substring(line.IndexOf(':') + 1).Trim();
-                    break;
-                }
+                var colon = line.IndexOf(':');
+                if (colon <= 0) continue;
+                var name = line.Substring(0, colon).Trim();
+                var value = line.Substring(colon + 1).Trim();
+                if (name.Equals("Sec-WebSocket-Key", StringComparison.OrdinalIgnoreCase)) key = value;
+                else if (name.Equals("Origin", StringComparison.OrdinalIgnoreCase)) origin = NormalizeOrigin(value);
+                else if (name.Equals("X-Bridge-Nonce", StringComparison.OrdinalIgnoreCase)) nonce = value;
+                else if (name.Equals("X-Bridge-Auth", StringComparison.OrdinalIgnoreCase)) auth = value.ToLowerInvariant();
             }
             if (key.Length == 0) return false;
+
+            var allowListed = origin != null && AllowedOrigins.Contains(origin);
+            // "file://" (normalized to "file:") is what Electron pages loaded from disk send.
+            var localOrigin = origin == null || origin == "file:";
+            if (!localOrigin && !allowListed)
+            {
+                Refuse(stream, "web origin not allowed (" + origin + ")");
+                return false;
+            }
+            var nonceOk = nonce.Length >= 16 && nonce.Length <= 128 && Regex.IsMatch(nonce, "^[A-Za-z0-9_-]+$");
+            if (BridgeSecret != null && !allowListed)
+            {
+                if (!nonceOk || !FixedTimeEquals(auth, HmacHex("kiosk-client:" + nonce)))
+                {
+                    Refuse(stream, "kiosk secret missing or wrong");
+                    return false;
+                }
+            }
 
             var accept = Convert.ToBase64String(
                 SHA1.Create().ComputeHash(Encoding.ASCII.GetBytes(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))
@@ -1021,6 +1120,7 @@ namespace Uru4500Bridge
                 "HTTP/1.1 101 Switching Protocols\r\n" +
                 "Upgrade: websocket\r\n" +
                 "Connection: Upgrade\r\n" +
+                (BridgeSecret != null && nonceOk ? "X-Bridge-Proof: " + HmacHex("bridge-server:" + nonce) + "\r\n" : "") +
                 "Sec-WebSocket-Accept: " + accept + "\r\n\r\n";
             var bytes = Encoding.ASCII.GetBytes(response);
             stream.Write(bytes, 0, bytes.Length);
@@ -1033,6 +1133,7 @@ namespace Uru4500Bridge
             var buffer = new byte[1];
             while (stream.Read(buffer, 0, 1) == 1)
             {
+                if (data.Count >= 16384) return "";
                 data.Add(buffer[0]);
                 var count = data.Count;
                 if (count >= 4 &&
