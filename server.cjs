@@ -248,7 +248,7 @@ const apiLimiter = rateLimit({
 
 // These guards apply automatically when trusted server-side auth routes are added.
 app.use('/api', apiLimiter, express.json({ limit: '2mb', strict: true }));
-app.use(['/api/auth/login', '/api/auth/signup', '/api/auth/otp', '/api/auth/setup', '/api/vendor/login'], loginLimiter);
+app.use(['/api/auth/login', '/api/auth/signup', '/api/auth/otp', '/api/auth/setup', '/api/vendor/login', '/api/auth/change-password'], loginLimiter);
 app.use('/api/auth/password-reset', resetLimiter);
 
 if (!process.env.DATA_BACKEND || (process.env.DATA_BACKEND || '').trim().toLowerCase() === 'postgres') {
@@ -351,6 +351,18 @@ if (!process.env.DATA_BACKEND || (process.env.DATA_BACKEND || '').trim().toLower
       await revokeSession(req.identity.sessionToken);
       res.setHeader('Cache-Control', 'no-store');
       res.status(204).end();
+    } catch (err) { next(err); }
+  });
+
+  // Any signed-in user changes their own password: the current password is checked, the new one is stored hashed,
+  // every other session of the account is signed out, and remembered (trusted) devices stop skipping MFA because
+  // their fingerprint includes the password hash.
+  app.post('/api/auth/change-password', authenticate, async (req, res, next) => {
+    try {
+      const { pool } = require('./server/db.cjs');
+      const result = await require('./server/password-change.cjs').changeOwnPassword(pool, req.identity, req.body, { correlationId: req.correlationId, ip: req.ip });
+      res.setHeader('Cache-Control', 'no-store');
+      res.status(result.status).json(result.body);
     } catch (err) { next(err); }
   });
 

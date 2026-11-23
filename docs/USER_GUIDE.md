@@ -65,11 +65,17 @@ Locks a Windows device into the attendance terminal. It is deliberately separate
 
 If the organization has no account yet, the setup screen creates the first Super Admin. New accounts are stored using password hashing; existing legacy accounts should be reset during production migration.
 
+Employees who sign in from a web browser get the employee self-service screens (the same as the phone app: today's status, attendance punch, leave, payslips and notices), not the HR portal.
+
+### Change your own password
+
+Every user can change their own password: open **My Security** and select **Change password** (employees use the **Change password** button on the self-service screens). Enter the current password and a new password of at least 12 characters, twice. Other signed-in devices are signed out, and remembered devices must enter the MFA code again.
+
 **Screenshot placeholder:** Login and first-admin setup screen.
 
 ### Navigation
 
-The web portal uses a left sidebar. The top area shows the current account and Firestore synchronization state. Mobile users use the Home, Attend, Leave and Payslip bottom tabs. Kiosk accounts enter attendance mode directly.
+The web portal uses a left sidebar. The top area shows the current account and Firestore synchronization state. Mobile users use the Home, Attend, Leave and Payslip bottom tabs. Kiosk accounts enter attendance mode directly. Press Ctrl+K ("Jump to record") and choose an employee to open that employee in the Employee Directory. Dates such as "today" use the computer's local date.
 
 ### Sign out
 
@@ -98,12 +104,13 @@ The dashboard provides orientation before transactional work. Without it, manage
 ### Add an employee
 
 1. Open **Employees** and select the add action.
-2. Enter identity and contact details, including CNIC.
-3. Choose branch, department and designation.
-4. Enter wage type, basic salary, allowances, PF/gratuity choices and statutory identifiers.
-5. Enter Pakistani bank/account/IBAN information.
-6. Add a picture and operational location fields where applicable.
-7. Save the employee.
+2. Enter identity and contact details, including CNIC. The mobile number can be typed in any common form (+92 321 4444444, 0321-4444444, 3214444444); it is tidied to +923XXXXXXXXX when you leave the field.
+3. Enter the **Date of Joining** (defaults to today). Payroll, leave, gratuity and service length count from it; it can be corrected later in the edit form.
+4. Choose branch, department and designation.
+5. Enter wage type, basic salary, allowances, PF/gratuity choices and statutory identifiers.
+6. Enter Pakistani bank/account/IBAN information.
+7. Add a picture and operational location fields where applicable.
+8. Save the employee.
 
 ### Edit or offboard
 
@@ -125,7 +132,7 @@ Every attendance log, leave request, payslip, loan, review, asset and gratuity r
 2. Select a date and daily, weekly, monthly or annual view.
 3. Review present, late, half-day, absent, leave and holiday statuses.
 4. Add a manual record only when authorized.
-5. Review regularization requests and approve or reject them.
+5. Review regularization requests and approve or reject them. If the server refuses a decision (locked month, the line manager's 3-day window, no permission), a message is shown and nothing changes on screen.
 
 ### Employee mobile punch
 
@@ -163,6 +170,8 @@ Attendance supplies payable presence, absence, lateness, half-days and overtime 
 3. Verify dates, type, reason and employee context.
 4. Approve or reject.
 
+**Add Leave Record** (HR records leave directly) checks the leave balance in the same way as an approval; on a refusal the form stays open for correction. A recorded approved leave also marks those days On Leave in attendance, like a normal approval.
+
 Approved unpaid leave contributes to payroll deductions. Cross-month requests are apportioned to the payroll period instead of charging the full request twice.
 
 ### Why it exists
@@ -185,6 +194,8 @@ Leave distinguishes authorized paid absence from unpaid absence. Without it, att
 6. Select **Approve**. Approval records the user/time and posts active loan installments once.
 7. After payment authorization, select **Mark Disbursed**.
 8. Open bank advice and download the CSV. Confirm its layout with the relevant bank before upload.
+
+Once a month has a payroll run that is not cancelled, the preview register shows the payslips that run saved (the amounts in the bank file); only staff not in that run are calculated live.
 
 Only one run is allowed for a month/year. Historical results come from immutable `payrollPayslips`; changes to a current employee record do not rewrite old payslips.
 
@@ -221,6 +232,8 @@ Payroll converts HR evidence into financial obligations. Without a controlled dr
 5. Review minimum wage, EOBI values, provincial social-security rates/ceiling, gratuity and PF controls.
 6. Update settings only from verified official notices and keep evidence of the change.
 
+Statutory settings and Company Options save as you type, but the pending proposal is written to the server once typing pauses (fewer audit entries). A different authorized user approves the proposal before it applies.
+
 ### Why it exists
 
 Pakistan payroll rates change by tax year and province. Hardcoding them makes old calculations impossible to explain and new payroll silently wrong.
@@ -249,7 +262,7 @@ Payroll, biometric and personal data must not be visible to every user. Without 
 
 ## 11. Holidays
 
-Create, edit or delete public, company and optional holidays. Record the date, recurrence and description.
+Create, edit or delete public, company and optional holidays. Record the date, recurrence and description. A holiday marked **Recurring annually** counts every year from the year it was entered. Optional holidays are not days off for everyone: staff who take one apply for leave; others work and are paid normally.
 
 **Why:** Holiday status prevents legitimate closures from being treated as absence and gives employees a shared calendar.
 
@@ -257,7 +270,7 @@ Create, edit or delete public, company and optional holidays. Record the date, r
 
 ## 12. Loans and Salary Advances
 
-Employees/authorized staff create requests with principal, approved amount, installments and reason. Payroll-authorized users approve or reject requests. Active installments are included in payroll; remaining installments and repayment totals move at payroll approval.
+Employees/authorized staff create requests with principal, approved amount, installments and reason. The system records who entered each application; a different payroll-authorized user approves or rejects it (the person who entered it, or the employee it is for, cannot decide it). Approving cannot change the amount or installments. In the lite edition (no maker-checker) one owner may do both. Active installments are included in payroll; remaining installments and repayment totals move at payroll approval.
 
 **Why:** Without a linked loan ledger, deductions are easy to miss, duplicate or continue after closure.
 
@@ -265,7 +278,7 @@ Employees/authorized staff create requests with principal, approved amount, inst
 
 ## 13. Salary Revisions
 
-Create a revision with previous/new salary, amount, percentage, effective date, reason, approver and revision type.
+Create a revision with previous/new salary, amount, percentage, effective date, reason, approver and revision type. Every draft records who prepared it, and the preparer cannot approve it (this includes drafts created from performance reviews).
 
 **Why:** A dated compensation history explains why payroll changed and connects performance/promotion decisions to pay.
 
@@ -273,7 +286,7 @@ Create a revision with previous/new salary, amount, percentage, effective date, 
 
 ## 14. Performance Reviews
 
-Create KPI-based reviews with weights, self/manager scores, comments, strengths, improvement areas and increment recommendation. Progress through Draft, Submitted, Reviewed and Acknowledged.
+Create KPI-based reviews with weights, self/manager scores, comments, strengths, improvement areas and increment recommendation. Progress through Draft, Submitted, Reviewed and Acknowledged. Review periods follow the current year: Annual, H1/H2 and Q1-Q4 for last year, this year and next year.
 
 **Why:** Structured evidence makes appraisal and increment recommendations less arbitrary.
 
@@ -281,7 +294,7 @@ Create KPI-based reviews with weights, self/manager scores, comments, strengths,
 
 ## 15. Asset Management
 
-Register company assets with tag, category, serial, cost, condition and status. Assign and return assets against employee IDs.
+Register company assets with tag, category, serial, cost, condition and status. Assign and return assets against employee IDs. While an asset is still assigned to an employee, their final settlement cannot be processed or paid.
 
 **Why:** Without custody records, laptops, phones, SIMs, vehicles and tools can remain unreturned or unaccounted for during transfers/offboarding.
 
@@ -289,7 +302,7 @@ Register company assets with tag, category, serial, cost, condition and status. 
 
 ## 16. Recruitment
 
-Create job postings, vacancies and requirements. Track candidates through Applied, Shortlisted, Interview Scheduled, Interviewed, Offer Extended, Hired or Rejected.
+Create job postings, vacancies and requirements. Track candidates through Applied, Shortlisted, Interview Scheduled, Interviewed, Offer Extended, Hired or Rejected. A posting may name an optional **Designation (post)**, which is used when a hired applicant is onboarded. Postings past their closing date show **Closed (expired)** and are not counted as open.
 
 **Why:** A consistent candidate pipeline prevents lost applications and undocumented hiring decisions.
 
@@ -305,7 +318,7 @@ Create a settlement using separation type/date, service years, basic salary, gra
 
 ## 18. Notifications
 
-Create targeted or broadcast messages for leave, payroll, loans, assets, review deadlines, holidays and system notices. Employees can mark items read.
+Create targeted or broadcast messages for leave, payroll, loans, assets, review deadlines, holidays and system notices. Employees can mark items read. HR also sees notices sent to individual employees, marked "Seen by employee" or "Not yet seen by employee"; the Unread count is your own inbox.
 
 **Why:** Transactions without communication generate repeated HR queries and missed decisions.
 
@@ -313,7 +326,7 @@ Create targeted or broadcast messages for leave, payroll, loans, assets, review 
 
 ## 19. Biometric Device Management
 
-Use the biometric module and URU 4500 bridge to enroll/manage fingerprint templates and test device communication. Camera descriptors support the alternate attendance path.
+Use the biometric module and URU 4500 bridge to enroll/manage fingerprint templates and test device communication. Camera descriptors support the alternate attendance path. Windows kiosk PCs are registered from **User Management -> Kiosk terminals**: create a setup code and paste it on the kiosk (Settings -> Server Registration -> Setup code), or sign in there once with a Kiosk Terminal account. The list shows the account name for every kiosk, including those registered with a setup code.
 
 **Why:** Device management separates identity enrollment from ordinary punching and reduces manual attendance impersonation risk.
 

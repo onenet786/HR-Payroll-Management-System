@@ -10,7 +10,7 @@
   <li>For an <b>employee who will use the mobile app</b>, choose their name in <span class="ui">LINK EMPLOYEE (REQUIRED FOR MOBILE)</span>. Each employee can be linked to only one login. (Add the employee in 3. Employee Directory first.)</li>
   <li>Click <span class="ui">Create Account</span>. Give the person their email and password privately and ask them to set up two-step verification after their first sign-in.</li>
 </ol>
-<div class="box note"><span class="t">Good to know</span><p>Passwords are stored in scrambled (encrypted) form. Nobody — not even the administrator — can read a person's password. If it is forgotten, set a new one as shown below.</p></div>
+<div class="box note"><span class="t">Good to know</span><p>Passwords are stored in scrambled (encrypted) form. Nobody — not even the administrator — can read a person's password. If it is forgotten, set a new one as shown below. After the first sign-in, people can choose their own new password in <span class="ui">My Security</span> → <span class="ui">Change password</span> (section A5).</p></div>
 
 <h3>Change a login or reset a password</h3>
 <figure><img src="shots/61e-edit-user.png"><figcaption><b>Edit User Account</b> — change role, switch the account off, link an employee or reset the password.</figcaption></figure>
@@ -34,10 +34,15 @@
 
 <h3>Attendance kiosks</h3>
 <p>Each kiosk PC or tablet signs in with its own <b>Kiosk Terminal</b> account. This account can only record attendance — it cannot open any other data.</p>
+<p>There are two ways to register a new kiosk PC:</p>
+<ul>
+  <li><b>With a setup code (easiest):</b> under <span class="ui">Kiosk terminals</span> on this page, type a name for the kiosk (for example "Gate 1 entrance") and click <span class="ui">Create setup code</span>. Copy the code straight away — it is shown only once. On the kiosk PC open <b>Settings → Server Registration → Setup code</b>, paste it and click <b>Register this kiosk</b>. Nobody has to type a password on the kiosk. Cancelling a code later does not disconnect kiosks already registered with it.</li>
+  <li><b>With a Kiosk Terminal login</b>, as in the steps below. Android tablets always use this way.</li>
+</ul>
 <ol class="steps">
   <li>Create a login with role <span class="ui">Kiosk Terminal</span> (for example username <i>kiosk.gate1</i>, email <i>kiosk.gate1@yourcompany.com</i>). Do not link an employee.</li>
   <li>On the kiosk PC, open <b>Settings → Server Registration</b> and sign in once with that account (section G3). For a tablet, sign in to the mobile app with it (section G7).</li>
-  <li>The kiosk now appears under <span class="ui">KIOSK TERMINALS</span> with its last sync time.</li>
+  <li>The kiosk now appears under <span class="ui">KIOSK TERMINALS</span> with its account name and last sync time. (Kiosks registered with a setup code show the name of the code's kiosk account; older versions wrongly showed "deleted account".)</li>
   <li>If a kiosk is lost, stolen or replaced, click <span class="ui">Disconnect</span> next to it. It stops syncing immediately and must be registered again. Switching the kiosk account to Inactive disconnects every kiosk using it.</li>
 </ol>
 <div class="box important"><span class="t">Important</span><p>Never sign in to a kiosk with an administrator or HR account — the system refuses, because kiosks are shared machines.</p></div>

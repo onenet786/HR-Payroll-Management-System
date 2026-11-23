@@ -10,8 +10,8 @@ Write-Host "HR & Payroll $($install.release) - $($install.company)" -ForegroundC
 if (-not $install.portable) {
   foreach ($name in @('HRPayrollDB', 'HRPayrollApp')) {
     $svc = Get-Service $name -ErrorAction SilentlyContinue
-    $state = if ($svc) { "$($svc.Status) ($($svc.StartType))" } else { 'NOT INSTALLED' }
-    Write-Host ("{0,-24} {1}" -f $svc.DisplayName, $state)
+    if ($svc) { $label = $svc.DisplayName; $state = "$($svc.Status) ($($svc.StartType))" } else { $label = $name; $state = 'not installed' }
+    Write-Host ("{0,-24} {1}" -f $label, $state)
   }
 }
 Write-Host ("{0,-24} {1}" -f 'Health', $(if (Test-HRHealth $install 3) { 'OK' } else { 'NOT ANSWERING' }))

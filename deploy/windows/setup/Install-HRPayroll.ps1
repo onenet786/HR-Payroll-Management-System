@@ -47,7 +47,10 @@ function PortFree([int]$port) {
   try { $l = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Any, $port); $l.Start(); $l.Stop(); return $true } catch { return $false }
 }
 function FirstFreePort([int]$start) { $p = $start; while (-not (PortFree $p)) { $p++ }; return $p }
-function Run([string]$exe, [string[]]$arguments, [string]$workDir = $null, [hashtable]$envVars = @{}) {
+# Runs a program and echoes its output (stdout + stderr) as Info lines, so it also lands in the setup log.
+# -Quiet hides the output unless the program fails. Run returns nothing: '| Out-Null' would not hide anything,
+# because the lines are written with Write-Host, not to the pipeline.
+function Run([string]$exe, [string[]]$arguments, [string]$workDir = $null, [hashtable]$envVars = @{}, [switch]$Quiet) {
   $psi = New-Object Diagnostics.ProcessStartInfo
   $psi.FileName = $exe
   $psi.Arguments = ($arguments | ForEach-Object { if ($_ -match '[\s"]') { '"' + ($_ -replace '"', '\"') + '"' } else { $_ } }) -join ' '
@@ -59,9 +62,8 @@ function Run([string]$exe, [string[]]$arguments, [string]$workDir = $null, [hash
   $out = $p.StandardOutput.ReadToEndAsync(); $err = $p.StandardError.ReadToEndAsync()
   $p.WaitForExit()
   $text = ($out.Result + $err.Result).Trim()
-  if ($text) { $text -split "`n" | ForEach-Object { Info $_.TrimEnd() } }
+  if ($text -and (-not $Quiet -or $p.ExitCode -ne 0)) { $text -split "`n" | ForEach-Object { Info $_.TrimEnd() } }
   if ($p.ExitCode -ne 0) { throw "$([IO.Path]::GetFileName($exe)) failed (exit $($p.ExitCode))." }
-  return $text
 }
 # UTF-8 without BOM (Windows PowerShell 5.1's -Encoding UTF8 adds one, which Node and dotenv do not expect).
 function WriteUtf8([string]$file, [string]$text) { [IO.File]::WriteAllText($file, $text, (New-Object Text.UTF8Encoding($false))) }
@@ -227,7 +229,7 @@ $appDbPassword = RandomPassword
 $pwFile = Join-Path $env:TEMP ("hrp-{0}.tmp" -f [guid]::NewGuid())
 Set-Content -Path $pwFile -Value $superPassword -NoNewline -Encoding ASCII
 try {
-  Run (Join-Path $pgBin 'initdb.exe') @('-D', $pgData, '-U', 'postgres', '-A', 'scram-sha-256', "--pwfile=$pwFile", '-E', 'UTF8', '--locale=C') | Out-Null
+  Run (Join-Path $pgBin 'initdb.exe') @('-D', $pgData, '-U', 'postgres', '-A', 'scram-sha-256', "--pwfile=$pwFile", '-E', 'UTF8', '--locale=C') -Quiet
 } finally { Remove-Item $pwFile -Force -ErrorAction SilentlyContinue }
 $pgLog = ("$DataDir\logs\postgresql").Replace('\', '/')
 # Memory sized to this server (less when SQL Server runs here too); see Get-HRMemoryPlan.
@@ -272,7 +274,7 @@ if ($Portable) {
   if ($pgStart.ExitCode -ne 0) { Fail "The database did not start. See $DataDir\logs\postgresql\startup.log." }
 } else {
   foreach ($path in @($pgData, "$DataDir\logs\postgresql")) { & icacls $path /grant '*S-1-5-20:(OI)(CI)M' /T /Q | Out-Null }  # NETWORK SERVICE
-  Run (Join-Path $pgBin 'pg_ctl.exe') @('register', '-N', 'HRPayrollDB', '-U', 'NT AUTHORITY\NetworkService', '-D', $pgData, '-S', 'auto', '-w') | Out-Null
+  Run (Join-Path $pgBin 'pg_ctl.exe') @('register', '-N', 'HRPayrollDB', '-U', 'NT AUTHORITY\NetworkService', '-D', $pgData, '-S', 'auto', '-w') -Quiet
   & sc.exe config HRPayrollDB DisplayName= "HR Payroll Database" | Out-Null
   & sc.exe description HRPayrollDB "Embedded PostgreSQL database of HR & Payroll (localhost only)." | Out-Null
   & sc.exe failure HRPayrollDB reset= 86400 actions= restart/10000/restart/10000/restart/60000 | Out-Null
@@ -283,8 +285,8 @@ for ($i = 0; $i -lt 30 -and -not $ready; $i++) { & (Join-Path $pgBin 'pg_isready
 if (-not $ready) { Fail "The database did not start. See $DataDir\logs\postgresql." }
 $psql = Join-Path $pgBin 'psql.exe'
 $su = @{ PGPASSWORD = $superPassword }
-Run $psql @('-h', 'localhost', '-p', "$DbPort", '-U', 'postgres', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1', '-q', '-c', "CREATE ROLE hr_app LOGIN PASSWORD '$appDbPassword';") $null $su | Out-Null
-Run $psql @('-h', 'localhost', '-p', "$DbPort", '-U', 'postgres', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1', '-q', '-c', "CREATE DATABASE hr_payroll OWNER hr_app ENCODING 'UTF8' TEMPLATE template0;") $null $su | Out-Null
+Run $psql @('-h', 'localhost', '-p', "$DbPort", '-U', 'postgres', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1', '-q', '-c', "CREATE ROLE hr_app LOGIN PASSWORD '$appDbPassword';") $null $su -Quiet
+Run $psql @('-h', 'localhost', '-p', "$DbPort", '-U', 'postgres', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1', '-q', '-c', "CREATE DATABASE hr_payroll OWNER hr_app ENCODING 'UTF8' TEMPLATE template0;") $null $su -Quiet
 Info "Database hr_payroll on localhost:$DbPort (service: HR Payroll Database)"
 
 # -- Application settings -----------------------------------------------------
@@ -336,11 +338,11 @@ require(path.join(releasePath, 'server.cjs'));
 
 # -- Database structure and first administrator -------------------------------
 Step 'Creating the tables and the first administrator'
-Run $nodeExe @((Join-Path $appDir 'scripts\postgres-migrate.cjs')) $configDir | Out-Null
-try { Run $nodeExe @((Join-Path $appDir 'scripts\seed-tax-slabs.cjs')) $configDir | Out-Null } catch { Info "Tax slabs not seeded: $($_.Exception.Message)" }
+Run $nodeExe @((Join-Path $appDir 'scripts\postgres-migrate.cjs')) $configDir
+try { Run $nodeExe @((Join-Path $appDir 'scripts\seed-tax-slabs.cjs')) $configDir } catch { Info "Tax slabs not seeded: $($_.Exception.Message)" }
 $inputFile = Join-Path $env:TEMP ("hrp-setup-{0}.json" -f [guid]::NewGuid())
 (@{ companyName = $CompanyName; adminName = $AdminName; adminEmail = $AdminEmail; adminPassword = $AdminPassword; edition = $Edition; urls = $urls; publicUrl = $appUrl; clientDataImport = $clientDataImport } | ConvertTo-Json) | ForEach-Object { WriteUtf8 $inputFile $_ }
-try { Run $nodeExe @((Join-Path $appDir 'scripts\setup-installation.cjs')) $configDir @{ SETUP_INPUT_FILE = $inputFile } | Out-Null } finally { Remove-Item $inputFile -Force -ErrorAction SilentlyContinue }
+try { Run $nodeExe @((Join-Path $appDir 'scripts\setup-installation.cjs')) $configDir @{ SETUP_INPUT_FILE = $inputFile } } finally { Remove-Item $inputFile -Force -ErrorAction SilentlyContinue }
 
 # -- Application service ------------------------------------------------------
 Step 'Starting the application'
@@ -377,7 +379,7 @@ if ($Portable) {
   <log mode="roll-by-size"><sizeThreshold>10240</sizeThreshold><keepFiles>8</keepFiles></log>
 </service>
 "@
-  Run (Join-Path $serviceDir 'HRPayrollApp.exe') @('install') $serviceDir | Out-Null
+  Run (Join-Path $serviceDir 'HRPayrollApp.exe') @('install') $serviceDir -Quiet
   # Through cmd.exe: Windows PowerShell 5.1 drops the empty password= "" argument when calling sc.exe directly.
   & cmd.exe /c 'sc.exe config HRPayrollApp obj= "NT AUTHORITY\NetworkService" password= ""' | Out-Null
   if ($LASTEXITCODE -ne 0) { Info 'Could not switch the application service to NETWORK SERVICE; it runs as Local System.' }

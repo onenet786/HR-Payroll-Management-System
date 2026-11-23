@@ -80,6 +80,7 @@
   <li><b>Who decides:</b> the employee's line manager first. HR may decide only after <b>3 working days</b>; after that the request shows <span class="msg">OVERDUE — escalate to department head</span> and the manager is reminded.</li>
   <li>Approving re-checks the time against the shift — a late arrival stays <b>Late</b>. Declining a flagged punch marks the day <b>Absent</b>.</li>
   <li>Nobody can decide their own request, and decisions cannot be changed afterwards.</li>
+  <li>If the server refuses a decision — for example the month is locked, it is still within the line manager's 3-day window, or you do not have permission — a message tells you why and <b>nothing changes on screen</b>: the request stays waiting.</li>
 </ul>
 <h3>Add an attendance entry by hand</h3>
 <ol class="steps">
@@ -123,7 +124,8 @@
 <ol class="steps">
   <li>Click <span class="ui">Add Leave Record</span>.</li>
   <li>Choose the employee, leave type, start and end dates and reason.</li>
-  <li>Click <span class="ui">Approve &amp; Log Leave</span>. It is saved as approved immediately.</li>
+  <li>Click <span class="ui">Approve &amp; Log Leave</span>. The leave balance is checked first, just as for an approval. If it is accepted, the leave is saved as approved and those days are marked <b>On Leave</b> in the attendance register, exactly like an approved request.</li>
+  <li>If it is refused (for example not enough balance), a message explains why and the form <b>stays open</b> with what you typed, so you can correct it (for example change the type to Unpaid) and try again.</li>
 </ol>
 <div class="box important"><span class="t">Important</span><ul><li>Leave days are counted as calendar days from start to end, including weekends and holidays.</li><li>If the balance is not enough, approval is blocked with <span class="msg">Approval blocked: … Apply the excess as Unpaid leave.</span> Record the extra days as Unpaid leave.</li></ul></div>
 <p>The <span class="ui">DAILY / WEEKLY / MONTHLY / YEARLY REPORTS</span> tab shows who is on approved leave on a date, and monthly and yearly summaries.</p>

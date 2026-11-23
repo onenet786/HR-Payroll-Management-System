@@ -68,3 +68,23 @@ test('expired, revoked and other-device sessions are rejected', async () => {
   const stolen = await createSession('u-session', request(), true);
   assert.equal(await authenticateWith(stolen, 'SomeOtherBrowser/1.0'), 401, 'a copied token does not work from another device');
 });
+
+test('users change their own password; other sessions are signed out, this one stays', async () => {
+  const bcrypt = require('bcryptjs');
+  const { changeOwnPassword } = require('./password-change.cjs');
+  await pool.query(`UPDATE users SET data = data || jsonb_build_object('passwordHash', $1::text) WHERE id='u-session'`, [await bcrypt.hash('Old-Password-123', 4)]);
+  await pool.query(`DELETE FROM auth_sessions WHERE user_id='u-session'`);
+  const mine = await createSession('u-session', request(), false);
+  const other = await createSession('u-session', request(), false);
+  const identity = { uid: 'u-session', roleId: 'role-session', sessionToken: mine };
+  assert.equal((await changeOwnPassword(pool, identity, { currentPassword: 'wrong-password', newPassword: 'New-Password-456' })).status, 400);
+  assert.equal((await changeOwnPassword(pool, identity, { currentPassword: 'Old-Password-123', newPassword: 'short' })).status, 400);
+  const result = await changeOwnPassword(pool, identity, { currentPassword: 'Old-Password-123', newPassword: 'New-Password-456' });
+  assert.equal(result.status, 200);
+  assert.equal(result.body.otherSessionsSignedOut, 1);
+  const stored = (await pool.query(`SELECT data FROM users WHERE id='u-session'`)).rows[0].data;
+  assert.ok(await bcrypt.compare('New-Password-456', stored.passwordHash));
+  assert.ok(stored.passwordChangedAt);
+  assert.equal(await authenticateWith(mine), 200, 'the session that changed it continues');
+  assert.equal(await authenticateWith(other), 401, 'other devices must sign in again');
+});

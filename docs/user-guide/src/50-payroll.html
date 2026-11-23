@@ -25,13 +25,18 @@
   <li>Click <span class="ui">Apply for Loan/Advance</span>.</li>
   <li>Choose the <span class="ui">Employee</span> and the <span class="ui">Type</span> (Salary Advance or Loan), type the <span class="ui">Amount (PKR)</span>, and move the slider to choose the number of monthly instalments (1–24).</li>
   <li>Type the <span class="ui">Reason</span> and click <span class="ui">Submit Application</span>. It is saved as <b>Pending</b>.</li>
-  <li>To approve, click <span class="ui">Approve &amp; Disburse</span> (or <span class="ui">Reject</span>). The loan becomes <b>Active</b>.</li>
+  <li>The system records who entered the application. A <b>different</b> authorised person clicks <span class="ui">Approve &amp; Disburse</span> (or <span class="ui">Reject</span>). The loan becomes <b>Active</b>.</li>
 </ol>
+<ul>
+  <li>The person who entered the application cannot approve or reject it, and an employee cannot decide their own loan — they see <span class="msg">You entered this application. Another authorized user must approve or reject it.</span> (or <span class="msg">This is your own application…</span>).</li>
+  <li>Approving cannot change the amount or the number of instalments. If these are wrong, reject the application and enter a new one.</li>
+  <li>In the Lite edition (two-person checking switched off) one owner may enter and approve the same loan.</li>
+</ul>
 <ul>
   <li>Each month the instalment is deducted in payroll. The balance goes down only when that month's payroll is marked <b>Disbursed</b>. When nothing remains, the loan becomes <b>Closed</b>.</li>
   <li>The cards show Repaid, Remaining instalments and a progress bar. Filter with the employee list and the Pending / Active / Closed / Rejected buttons.</li>
 </ul>
-<div class="box important"><span class="t">Important</span><p>Loans do not require a second approver in the system. Follow your company's own approval process (for example a signed loan form) before clicking Approve &amp; Disburse. If Submit does nothing, choose the employee again in the list and resubmit.</p></div>
+<div class="box important"><span class="t">Important</span><p>Keep your company's own paperwork too (for example a signed loan form) before approving. If Submit does nothing, choose the employee again in the list and resubmit.</p></div>
 
 <h2 id="revisions"><span class="num">E3</span>Salary increases — 9. Salary Revisions</h2>
 <figure><img src="shots/51b-revision-new.png"><figcaption><b>Process Salary Revision.</b> The preview shows the increase in rupees and percent.</figcaption></figure>
@@ -42,6 +47,7 @@
   <li>Click <span class="ui">Submit Revision for Approval</span>. It shows <b>DRAFT — NOT APPLIED</b>; pay has not changed yet.</li>
   <li>A <b>different</b> person clicks <span class="ui">Approve &amp; Apply</span>. The salary now changes.</li>
 </ol>
+<p class="small">Every draft records who prepared it, and that person cannot approve it — this also applies to drafts created from performance reviews (section C4) and promotions (section C2). In the Lite edition one owner may do both.</p>
 <div class="box note"><span class="t">Good to know — back-dated increases</span><p>If the effective date is in a month already paid, the system works out the difference and creates an <b>Arrears</b> item for the current month. It appears in 10. Payroll Processing → One-time payroll adjustments and must be approved there before the next payroll.</p></div>
 
 <h2 id="payroll"><span class="num">E4</span>Running payroll — 10. Payroll Processing</h2>
@@ -76,6 +82,7 @@
   <li>Click <span class="ui">Run New Payroll Cycle</span>. The system first checks everything; if a check fails you get a clear message (see the table below).</li>
   <li>When it succeeds you see <span class="msg">Draft payroll created for N employees…</span> with total gross and net pay. Only Active and On-Leave employees are included.</li>
   <li>Check the <b>Payroll Preview</b> table: gross, FBR tax, EOBI, social security, provident fund and net pay per person. Read any <b>material pay variance warning</b> (pay changed by 25% or more since last month).</li>
+  <li>Once the month has a payroll run (that is not cancelled), the Payroll Preview shows the <b>payslips saved by that run</b> — the same amounts that go into the bank file. Only staff who are not in that run are calculated live. (Earlier versions recalculated the preview, so it could disagree with the run.)</li>
   <li>Click <span class="ui">View Slip</span> to open any employee's payslip.</li>
 </ol>
 <table>
@@ -176,4 +183,4 @@
   <li>A second payroll user clicks <span class="ui">Process</span>.</li>
   <li>Pay it either with a final settlement payroll run (section E4) or, after paying outside payroll, a third person clicks <span class="ui">Mark Paid</span>.</li>
 </ol>
-<p class="small">Gratuity follows your rules in 1. Statutory Config (minimum service, part-years, resignation percentage). Employees with less than the minimum service get no gratuity. Collect company assets before paying (section C5).</p>
+<p class="small">Gratuity follows your rules in 1. Statutory Config (minimum service, part-years, resignation percentage). Employees with less than the minimum service get no gratuity. A settlement <b>cannot be processed or paid while any company asset is still assigned</b> to the employee — mark the assets returned first (section C5). Years of service are counted from the employee's Date of Joining.</p>

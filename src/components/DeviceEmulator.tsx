@@ -9,6 +9,7 @@ import './DeviceEmulator.css';
 import { WebPortal, type WebPortalProps } from './WebPortal';
 import { KioskTerminal } from './KioskTerminal';
 import { MobileApp } from './MobileApp';
+import { ChangePasswordDialog } from './ChangePasswordDialog';
 import type { FirestoreSyncStatus } from '../App';
 import type { AppEdition } from '../data/edition';
 import {
@@ -49,7 +50,7 @@ interface DeviceEmulatorProps {
   onRecordBankAdvice: (runId: string, checksum: string, employeeCount: number, total: number, profile: PayrollRun['bankAdviceProfile'], batch?: { batchReference: string; controlHash: string; verified: boolean }) => void | Promise<void>;
   onSendPayslips: (runId: string) => Promise<{ sent: number; skipped: number; failed: Array<{ employeeId: string; error: string }> }>;
   onSimulatePunch: (employeeId: string, punchIn: string, punchOut: string, method: string, lat?: number, lon?: number, locationAccuracyMeters?: number, locationCapturedAt?: string, locationAddress?: string) => void | Promise<void>;
-  onApplyLeave: (leave: LeaveRequest) => void;
+  onApplyLeave: (leave: LeaveRequest) => void | Promise<boolean | void>;
   onAddRegularization: (employeeId: string, date: string, reason: string, evidenceDocumentIds?: string[]) => void;
   onAddAttendance: (log: AttendanceLog) => void;
   branches: Branch[];
@@ -211,6 +212,11 @@ export function DeviceEmulator({
   const isKioskUser = loggedInUser?.username === 'kiosk' || loggedInUser?.roleId === 'role-kiosk';
   const isNativeApp = !!(window as any).Capacitor?.isNativePlatform?.();
   const isNativeMobileEmployee = isNativeApp && loggedInUser?.roleId === 'role-employee';
+  // Employees signing in from a web browser get the same self-service screens as the phone app (attendance,
+  // leave, payslips, notices) instead of the HR portal, which has nothing for them.
+  const isWebEmployee = !isNativeApp && loggedInUser?.roleId === 'role-employee' && Boolean(loggedInUser?.employeeId);
+  const [showPasswordDialog, setShowPasswordDialog] = useState(false);
+  const [selfServiceNotice, setSelfServiceNotice] = useState('');
   const [showComplianceOverview, setShowComplianceOverview] = useState(false);
 
   useEffect(() => {
@@ -264,8 +270,8 @@ export function DeviceEmulator({
     );
   }
 
-  if (isNativeMobileEmployee) {
-    return (
+  if (isNativeMobileEmployee || isWebEmployee) {
+    const selfService = (
       <MobileApp
         notifications={notifications}
         onMarkNotificationRead={onMarkNotificationRead}
@@ -283,6 +289,21 @@ export function DeviceEmulator({
         payrollPayslips={payrollPayslips}
         payrollRuns={payrollRuns}
       />
+    );
+    if (isNativeMobileEmployee) return selfService;
+    const companyName = companies[0]?.legalName?.trim() || companies[0]?.name?.trim() || 'HR & Payroll';
+    return (
+      <div className="flex h-screen flex-col bg-slate-950 font-sans">
+        <header className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-800 px-4 py-2 text-xs text-slate-300">
+          <span className="truncate font-semibold">{companyName} · Employee self-service</span>
+          <button type="button" onClick={() => setShowPasswordDialog(true)} className="shrink-0 rounded-lg border border-slate-700 px-3 py-1.5 font-semibold text-slate-200 hover:border-emerald-500 hover:text-white">Change password</button>
+        </header>
+        <div className="flex min-h-0 flex-1 justify-center">
+          <div className="h-full w-full max-w-md overflow-hidden border-x border-slate-800">{selfService}</div>
+        </div>
+        {selfServiceNotice && <div role="status" className="fixed bottom-4 left-1/2 z-[1001] -translate-x-1/2 rounded-xl bg-emerald-700 px-4 py-3 text-sm font-semibold text-white shadow-2xl" onClick={() => setSelfServiceNotice('')}>{selfServiceNotice}</div>}
+        {showPasswordDialog && <ChangePasswordDialog onClose={() => setShowPasswordDialog(false)} onChanged={message => { setShowPasswordDialog(false); setSelfServiceNotice(message); setTimeout(() => setSelfServiceNotice(''), 6000); }} />}
+      </div>
     );
   }
 

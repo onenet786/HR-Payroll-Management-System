@@ -67,19 +67,22 @@ export function NotificationCenter({
     priority: 'medium' as AppNotification['priority']
   });
 
-  const isRead = (n: AppNotification) =>
-    currentEmployeeId ? n.readBy.includes(currentEmployeeId) : n.readBy.length > 0;
+  // HR (canManage) sees every notice, including ones sent to a single employee, so it can follow them up;
+  // everyone else sees notices for everyone and those addressed to them. "Unread" is always the viewer's own inbox.
+  const addressedToMe = (n: AppNotification) => !n.targetEmployeeId || !currentEmployeeId || n.targetEmployeeId === currentEmployeeId;
+  const isRead = (n: AppNotification) => {
+    if (!addressedToMe(n)) return n.readBy.includes(n.targetEmployeeId!); // read by the employee it was sent to
+    return currentEmployeeId ? n.readBy.includes(currentEmployeeId) : n.readBy.length > 0;
+  };
+  const inScope = notifications.filter(n => canManage || addressedToMe(n));
 
-  const visible = notifications
+  const visible = inScope
     .filter(n => filterType === 'All' || n.type === filterType)
     .filter(n => filterPriority === 'All' || n.priority === filterPriority)
     .filter(n => !showUnreadOnly || !isRead(n))
-    .filter(n => !n.targetEmployeeId || !currentEmployeeId || n.targetEmployeeId === currentEmployeeId)
     .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
 
-  const unreadCount = notifications.filter(n =>
-    (!n.targetEmployeeId || !currentEmployeeId || n.targetEmployeeId === currentEmployeeId) && !isRead(n)
-  ).length;
+  const unreadCount = inScope.filter(n => addressedToMe(n) && !isRead(n)).length;
 
   const handleSend = () => {
     if (!form.title || !form.message) return;
@@ -140,7 +143,7 @@ export function NotificationCenter({
       {/* Metric Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5">
         <div className="bg-white border border-slate-200 shadow-2xs rounded-xl p-4.5">
-          <div className="text-2xl font-black text-slate-900">{notifications.length}</div>
+          <div className="text-2xl font-black text-slate-900">{inScope.length}</div>
           <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mt-1">Total</div>
         </div>
 
@@ -151,14 +154,14 @@ export function NotificationCenter({
 
         <div className="bg-white border border-amber-200/80 shadow-2xs rounded-xl p-4.5">
           <div className="text-2xl font-black text-amber-600">
-            {notifications.filter(n => n.priority === 'high').length}
+            {inScope.filter(n => n.priority === 'high').length}
           </div>
           <div className="text-xs font-semibold text-amber-700/80 uppercase tracking-wider mt-1">High Priority</div>
         </div>
 
         <div className="bg-white border border-indigo-200/80 shadow-2xs rounded-xl p-4.5">
           <div className="text-2xl font-black text-indigo-600">
-            {notifications.filter(n => !n.targetEmployeeId).length}
+            {inScope.filter(n => !n.targetEmployeeId).length}
           </div>
           <div className="text-xs font-semibold text-indigo-700/80 uppercase tracking-wider mt-1">Broadcasts</div>
         </div>
@@ -240,6 +243,7 @@ export function NotificationCenter({
           <AnimatePresence initial={false}>
             {visible.map(n => {
               const read = isRead(n);
+              const mine = addressedToMe(n);
 
               let prioClass = 'bg-slate-100 text-slate-700 border-slate-200';
               if (n.priority === 'high') prioClass = 'bg-rose-100 text-rose-800 border-rose-200';
@@ -257,7 +261,7 @@ export function NotificationCenter({
                       ? 'bg-slate-50/70 border-slate-200 hover:bg-white hover:shadow-2xs opacity-90'
                       : 'bg-white border-l-4 border-l-emerald-600 border-t border-r border-b border-slate-200 shadow-2xs hover:shadow-sm'
                   }`}
-                  onClick={() => !read && onMarkRead(n.id)}
+                  onClick={() => mine && !read && onMarkRead(n.id)}
                 >
                   <div className="text-2xl flex-shrink-0 mt-0.5 select-none">{TYPE_ICONS[n.type]}</div>
                   <div className="flex-1 min-w-0">
@@ -289,7 +293,8 @@ export function NotificationCenter({
                         <span className="text-slate-600 font-medium">→ {getEmpName(n.targetEmployeeId)}</span>
                       )}
                       {n.readBy.length > 0 && <span>{n.readBy.length} read</span>}
-                      {!read && (
+                      {!mine && <span className={read ? 'text-emerald-700' : 'text-amber-700'}>{read ? 'Seen by employee' : 'Not yet seen by employee'}</span>}
+                      {mine && !read && (
                         <button
                           type="button"
                           className="text-emerald-700 hover:text-emerald-900 hover:underline font-bold cursor-pointer"

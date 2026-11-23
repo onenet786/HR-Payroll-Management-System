@@ -929,6 +929,7 @@ export interface JobPosting {
   title: string;
   departmentId: string;
   branchId: string;
+  designationId?: string; // the post being filled; used when a hired applicant is onboarded
   vacancies: number;
   experienceRequired: string;  // e.g. "2-4 years"
   qualificationRequired: string;

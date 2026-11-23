@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { SearchableSelect } from './SearchableSelect';
 import { DateField } from './DateField';
 import { RequiredMark, RequiredNote } from './RequiredMark';
@@ -32,7 +32,19 @@ const ratingColors: Record<number, string> = {
 };
 
 const DEFAULT_KPIS = ['Technical Delivery', 'Quality of Work', 'Team Collaboration', 'Communication', 'Attendance & Punctuality'];
-const PERIODS = ['H1-2026', 'H2-2026', 'Annual-2025', 'Annual-2026', 'Q1-2026', 'Q2-2026'];
+const PERIOD_KINDS = ['Annual', 'H1', 'H2', 'Q1', 'Q2', 'Q3', 'Q4'];
+
+/** Review periods for last year, this year and next year, plus any period already used by a saved review. */
+function reviewPeriods(usedPeriods: string[], today = new Date()) {
+  const year = today.getFullYear();
+  const generated = [year - 1, year, year + 1].flatMap(y => PERIOD_KINDS.map(kind => `${kind}-${y}`));
+  const extra = Array.from(new Set(usedPeriods.filter(period => period && !generated.includes(period)))).sort();
+  return [...generated, ...extra];
+}
+
+function currentHalfPeriod(today = new Date()) {
+  return `H${today.getMonth() < 6 ? 1 : 2}-${today.getFullYear()}`;
+}
 
 function StarRating({ value, onChange, readOnly }: { value: number; onChange?: (v: number) => void; readOnly?: boolean }) {
   return (
@@ -57,7 +69,7 @@ export function PerformanceModule({ reviews, employees, currentUserAccount, canM
   const emptyKpis: KpiScore[] = DEFAULT_KPIS.map(k => ({ kpi: k, weight: 20, selfScore: 3, managerScore: 3 }));
   const [form, setForm] = useState({
     employeeId: employees[0]?.id || '',
-    period: 'H1-2026',
+    period: currentHalfPeriod(),
     reviewDate: localDateStr(),
     kpis: emptyKpis,
     strengths: '',
@@ -70,6 +82,15 @@ export function PerformanceModule({ reviews, employees, currentUserAccount, canM
     improvementPlanRequired: false,
     developmentPlan: ''
   });
+
+  const periods = useMemo(() => reviewPeriods(reviews.map(r => r.period)), [reviews]);
+
+  useEffect(() => {
+    if (!showForm) return;
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape' && !event.defaultPrevented) setShowForm(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [showForm]);
 
   const getEmpName = (id: string) => employees.find(e => e.id === id)?.fullName || 'Unknown';
 
@@ -387,7 +408,7 @@ export function PerformanceModule({ reviews, employees, currentUserAccount, canM
                   <label htmlFor="perf-period" className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Review Period<RequiredMark /></label>
                   <select id="perf-period" aria-required="true" value={form.period} onChange={e => setForm(p => ({ ...p, period: e.target.value }))}
                     className="w-full bg-white border border-slate-200 text-slate-900 text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500">
-                    {PERIODS.map(p => <option key={p} value={p}>{p}</option>)}
+                    {periods.map(p => <option key={p} value={p}>{p}</option>)}
                   </select>
                 </div>
                 <div>

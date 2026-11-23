@@ -23,6 +23,8 @@ interface SalaryRevisionModuleProps {
   onAddSalaryRevision: (revision: SalaryRevision) => void | Promise<boolean | void>;
   /** Branch names for the salary sheet template. */
   branches?: Array<{ id: string; name: string }>;
+  /** Designation titles for the salary register. */
+  designations?: Array<{ id: string; title: string }>;
   /** False in the lite edition: the preparer may approve their own revision. */
   makerChecker?: boolean;
 }
@@ -34,7 +36,7 @@ const revisionTypeColors: Record<string, string> = {
   'Market Correction': 'bg-indigo-50 text-indigo-700 border-indigo-200'
 };
 
-export function SalaryRevisionModule({ salaryRevisions, employees, currentUserAccount, onAddSalaryRevision, makerChecker = true, branches = [] }: SalaryRevisionModuleProps) {
+export function SalaryRevisionModule({ salaryRevisions, employees, currentUserAccount, onAddSalaryRevision, makerChecker = true, branches = [], designations = [] }: SalaryRevisionModuleProps) {
   const [showForm, setShowForm] = useState(false);
   const [showSheet, setShowSheet] = useState(false);
   const [sheetText, setSheetText] = useState('');
@@ -235,7 +237,7 @@ export function SalaryRevisionModule({ salaryRevisions, employees, currentUserAc
                       <div className="font-semibold text-slate-900">{emp.fullName}</div>
                       <div className="text-slate-500">{emp.employeeCode}</div>
                     </td>
-                    <td className="py-2 pr-4 text-slate-600">{emp.wageType}</td>
+                    <td className="py-2 pr-4 text-slate-600">{designations.find(item => item.id === emp.designationId)?.title || '—'}{emp.wageType && <span className="block text-[10px] text-slate-400">{emp.wageType}</span>}</td>
                     <td className="py-2 pr-4 text-right font-bold text-slate-900">
                       PKR {(emp.basicSalary || 0).toLocaleString()}
                     </td>

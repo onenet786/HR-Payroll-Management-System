@@ -149,7 +149,7 @@ const canManage = identity => identity.roleId === 'role-admin' || identity.permi
 adminRouter.get('/', async (req, res, next) => {
   try {
     if (!canManage(req.identity)) return res.status(403).json({ error: 'Access administrator permission required.' });
-    const result = await pool.query(`SELECT d.id, d.name, d.user_id, u.data->>'username' AS username, d.created_at, d.last_seen_at, d.revoked_at
+    const result = await pool.query(`SELECT d.id, d.name, d.user_id, COALESCE(NULLIF(u.data->>'username',''), NULLIF(u.data->>'name',''), u.data->>'email') AS username, d.created_at, d.last_seen_at, d.revoked_at
       FROM kiosk_devices d LEFT JOIN users u ON u.id=d.user_id ORDER BY d.revoked_at NULLS FIRST, d.last_seen_at DESC NULLS LAST, d.created_at DESC LIMIT 200`);
     res.json({ devices: result.rows });
   } catch (error) { next(error); }

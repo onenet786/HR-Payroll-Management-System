@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { SearchableSelect } from './SearchableSelect';
 import { DateField } from './DateField';
 import { RequiredMark, RequiredNote } from './RequiredMark';
@@ -57,6 +57,20 @@ export function AssetModule({ assets, employees, canManage, onAddAsset, onUpdate
   };
   const [form, setForm] = useState<Partial<CompanyAsset>>(emptyForm);
 
+  // Escape closes the open modal, the same as its Cancel button.
+  const modalOpen = showForm || !!assignModal || !!returnModal;
+  useEffect(() => {
+    if (!modalOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      if (showForm) { setShowForm(false); setForm(emptyForm); }
+      setAssignModal(null);
+      setReturnModal(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
   const getEmpName = (id?: string) => employees.find(e => e.id === id)?.fullName || '—';
 
   const filtered = assets
@@ -101,6 +115,7 @@ export function AssetModule({ assets, employees, canManage, onAddAsset, onUpdate
         <div>
           <h2 className="text-lg font-bold text-slate-900">Asset Management</h2>
           <p className="text-xs text-slate-500 mt-0.5">Track company assets, assignments, and lifecycle status</p>
+          <p className="text-xs text-slate-500 mt-0.5">While an asset is still assigned to an employee, that employee's final settlement cannot be processed or paid. Mark it returned first.</p>
         </div>
         {canManage && (
           <button onClick={() => setShowForm(true)}

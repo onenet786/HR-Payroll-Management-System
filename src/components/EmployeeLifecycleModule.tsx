@@ -26,15 +26,19 @@ interface Props {
   statConfig: StatutoryConfig;
 }
 
+type View = 'requests' | 'onboarding' | 'letters';
 const TYPES: LifecycleRequestType[] = ['Probation Confirmation', 'Probation Extension', 'Transfer', 'Promotion', 'Resignation', 'Termination'];
 const emptyForm = { employeeId: '', type: 'Probation Confirmation' as LifecycleRequestType, effectiveDate: localDateStr(), reason: '', newBranchId: '', newDepartmentId: '', newDesignationId: '', newBasicSalary: '', newProbationEndDate: '', noticeDays: '0', leaveEncashDays: '0' };
 
 export function EmployeeLifecycleModule({ employees, branches, departments, designations, companies, lifecycleRequests, currentUserId, onCreate, onReview, onUpdateOnboarding, leaves, statConfig, makerChecker = true }: Props) {
-  const [view, setView] = useState<'requests' | 'onboarding' | 'letters'>('requests');
+  const [view, setView] = useState<View>('requests');
   const [form, setForm] = useState(emptyForm);
-  const [search, setSearch] = useState('');
-  const employeeMatches = (employee: Employee | undefined, ...extra: unknown[]) => matchesSearch(search, employee?.fullName, employee?.employeeCode, employee?.cnic, departmentName(employee?.departmentId), designationTitle(employee?.designationId), ...extra);
-  const requestMatches = (request: LifecycleRequest) => employeeMatches(employees.find(employee => employee.id === request.employeeId), request.type, request.status, request.effectiveDate, request.reason, request.createdBy, request.reviewedBy);
+  // Each tab keeps its own search, so text typed on one tab never silently filters another.
+  const [searches, setSearches] = useState<Record<View, string>>({ requests: '', onboarding: '', letters: '' });
+  const search = searches[view];
+  const setSearch = (value: string) => setSearches(current => ({ ...current, [view]: value }));
+  const employeeMatches = (query: string, employee: Employee | undefined, ...extra: unknown[]) => matchesSearch(query, employee?.fullName, employee?.employeeCode, employee?.cnic, departmentName(employee?.departmentId), designationTitle(employee?.designationId), ...extra);
+  const requestMatches = (request: LifecycleRequest) => employeeMatches(searches.requests, employees.find(employee => employee.id === request.employeeId), request.type, request.status, request.effectiveDate, request.reason, request.createdBy, request.reviewedBy);
   const active = employees.filter(employee => employee.status !== 'Terminated');
   const name = (id?: string) => employees.find(employee => employee.id === id)?.fullName || 'Employee';
   const designationTitle = (id?: string) => designations.find(item => item.id === id)?.title || '—';
@@ -46,8 +50,8 @@ export function EmployeeLifecycleModule({ employees, branches, departments, desi
   const decided = lifecycleRequests.filter(item => item.status !== 'Pending' && requestMatches(item)).sort((a, b) => (b.reviewedAt || '').localeCompare(a.reviewedAt || '')).slice(0, 12);
   const onboardingQueue = useMemo(() => active.map(employee => ({ employee, status: onboardingStatus(employee) }))
     .filter(item => Object.values(item.status).some(done => !done))
-    .filter(item => employeeMatches(item.employee))
-    .sort((a, b) => (b.employee.dateOfJoining || '').localeCompare(a.employee.dateOfJoining || '')), [active, search]);
+    .filter(item => employeeMatches(searches.onboarding, item.employee))
+    .sort((a, b) => (b.employee.dateOfJoining || '').localeCompare(a.employee.dateOfJoining || '')), [active, searches.onboarding]);
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -162,7 +166,7 @@ export function EmployeeLifecycleModule({ employees, branches, departments, desi
       {view === 'letters' && <section className="rounded-xl border border-slate-200 bg-white p-4 text-xs shadow-sm">
         <p className="text-slate-500">Employment letters for current staff and experience certificates for separated staff open as printable pages.</p>
         <ul className="mt-3 divide-y divide-slate-100">
-          {employees.filter(employee => employeeMatches(employee, employee.status)).sort((a, b) => (a.fullName || '').localeCompare(b.fullName || '')).map(employee => <li key={employee.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+          {employees.filter(employee => employeeMatches(searches.letters, employee, employee.status)).sort((a, b) => (a.fullName || '').localeCompare(b.fullName || '')).map(employee => <li key={employee.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
             <span><strong>{employee.fullName}</strong> · {designationTitle(employee.designationId)} · {employee.status}{employee.separationDate ? ` (left ${employee.separationDate})` : ''}</span>
             <button type="button" onClick={() => { try { openPrintableHtml(experienceLetterHtml(employee, designationTitle(employee.designationId), departmentName(employee.departmentId), companies.find(item => item.id === employee.companyId) || companies[0])); } catch (error) { alert(error instanceof Error ? error.message : 'Letter could not be opened.'); } }} className="rounded border border-emerald-300 px-3 py-1 font-semibold text-emerald-700 hover:bg-emerald-50">
               {employee.status === 'Terminated' ? 'Experience certificate' : 'Employment letter'}

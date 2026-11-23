@@ -436,18 +436,19 @@ next_steps() {
   echo
   bold "========================  Next steps in aaPanel  ========================"
   cat <<EOF
-1. Node project  (Website -> Node project -> Add Node project)
+1. DNS:       at your domain provider, an A record:  ${domain:-hr.yourcompany.com}  ->  ${ip:-<this server's IP>}
+                (do this first: the SSL certificate in step 4 can only be issued once the domain points here)
+2. Node project  (Website -> Node project -> Add Node project)
      Project directory : $APP_DIR
      Start command     : node server.cjs          (or "Run script: start")
      Node version      : $(basename "$(dirname "$NODE_BIN")")
      Port              : ${port:-8080}
      Run as user       : $RUN_USER
-2. Mapping:   in the Node project, Mapping -> add ${domain:-your domain}.
-3. SSL:       in the Node project, SSL -> Let's Encrypt -> apply, then turn on "Force HTTPS".
-4. Firewall:  aaPanel -> Security: ports 80 and 443 open; do NOT open port ${port:-8080} (the app listens on 127.0.0.1 only).
-5. Cron:      aaPanel -> Cron -> Add task -> Shell script, daily 02:30:
+3. Mapping:   in the Node project, Mapping -> add ${domain:-your domain}.
+4. SSL:       in the Node project, SSL -> Let's Encrypt -> apply, then turn on "Force HTTPS".
+5. Firewall:  aaPanel -> Security: ports 80 and 443 open; do NOT open port ${port:-8080} (the app listens on 127.0.0.1 only).
+6. Cron:      aaPanel -> Cron -> Add task -> Shell script, daily 02:30:
                 bash $(readlink -f "$0") backup      (aaPanel Cron runs as root: no sudo here)
-6. DNS:       at your domain provider, an A record:  ${domain:-hr.yourcompany.com}  ->  ${ip:-<this server's IP>}
 7. Open https://${domain:-your-domain}, sign in as the administrator.
 
 Every update from now on:

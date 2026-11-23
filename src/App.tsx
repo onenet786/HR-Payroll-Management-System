@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Eye, EyeOff, Mail, Lock, ArrowRight, ShieldCheck, Sparkles,
   Clock, TrendingUp, Database, AlertCircle, HelpCircle
@@ -666,6 +666,25 @@ function HrApp() {
   // only reach the live configuration after a different authorized user approves them.
   const pendingStatutoryChange = statutoryChangeRequests.find(item => item.status === 'Pending');
 
+  // The statutory and Company Options pages save as you type. The screen updates at once, but the database
+  // (and its audit log) receives one write when typing pauses, not one per keystroke. Pending saves are sent
+  // straight away if the page is closed.
+  const typingSaves = useRef(new Map<string, { timer: ReturnType<typeof setTimeout>; run: () => Promise<void> }>());
+  const pendingSlabRemovals = useRef<string[]>([]);
+  const saveWhenTypingPauses = (key: string, run: () => Promise<void>, delayMs = 900) => {
+    const previous = typingSaves.current.get(key);
+    if (previous) clearTimeout(previous.timer);
+    const timer = setTimeout(() => { typingSaves.current.delete(key); void run(); }, delayMs);
+    typingSaves.current.set(key, { timer, run });
+  };
+  useEffect(() => {
+    const flush = () => {
+      for (const [key, pending] of typingSaves.current) { clearTimeout(pending.timer); typingSaves.current.delete(key); void pending.run(); }
+    };
+    window.addEventListener('pagehide', flush);
+    return () => { window.removeEventListener('pagehide', flush); flush(); };
+  }, []);
+
   const proposeStatutoryChange = async (proposedConfig: StatutoryConfig, proposedTaxSlabs: TaxSlab[]) => {
     if (pendingStatutoryChange && pendingStatutoryChange.createdById !== currentUserAccount.id) {
       alert(`A statutory change proposed by ${pendingStatutoryChange.createdBy} is awaiting review. Approve or reject it before proposing another change.`);
@@ -682,11 +701,13 @@ function HrApp() {
       createdBy: currentUserAccount.username,
     };
     setStatutoryChangeRequests(previous => [...previous.filter(item => item.id !== request.id), request]);
-    try {
-      await setDoc(doc(db, 'statutoryChangeRequests', request.id), cleanData(request));
-    } catch (err) {
-      console.warn('PostgreSQL statutory change request delayed:');
-    }
+    saveWhenTypingPauses('statutory', async () => {
+      try {
+        await setDoc(doc(db, 'statutoryChangeRequests', request.id), cleanData(request));
+      } catch (err) {
+        console.warn('PostgreSQL statutory change request delayed:');
+      }
+    });
   };
 
   // Without maker-checker (lite edition) the live rates are written directly; the server accepts that under the same switch.
@@ -697,13 +718,18 @@ function HrApp() {
     setTaxSlabs(nextSlabs);
     privacyStorage.setItem('hr_stat_config', JSON.stringify(liveConfig));
     privacyStorage.setItem('hr_tax_slabs', JSON.stringify(nextSlabs));
-    try {
-      await setDoc(doc(db, 'statConfig', liveConfig.id), cleanData(liveConfig));
-      await Promise.all(nextSlabs.map(slab => setDoc(doc(db, 'taxSlabs', slab.id), cleanData(slab))));
-      await Promise.all(removedSlabs.map(slab => deleteDoc(doc(db, 'taxSlabs', slab.id))));
-    } catch (err) {
-      console.warn('PostgreSQL statutory config save delayed:');
-    }
+    pendingSlabRemovals.current = [...new Set([...pendingSlabRemovals.current, ...removedSlabs.map(slab => slab.id)])].filter(id => !nextSlabs.some(slab => slab.id === id));
+    saveWhenTypingPauses('statutory', async () => {
+      const removals = pendingSlabRemovals.current;
+      pendingSlabRemovals.current = [];
+      try {
+        await setDoc(doc(db, 'statConfig', liveConfig.id), cleanData(liveConfig));
+        await Promise.all(nextSlabs.map(slab => setDoc(doc(db, 'taxSlabs', slab.id), cleanData(slab))));
+        await Promise.all(removals.map(id => deleteDoc(doc(db, 'taxSlabs', id))));
+      } catch (err) {
+        console.warn('PostgreSQL statutory config save delayed:');
+      }
+    });
   };
 
   const handleUpdateStatConfig = (newConfig: StatutoryConfig) =>
@@ -719,6 +745,9 @@ function HrApp() {
     const reviewError = withdrawing ? undefined : statutoryReviewError(request, currentUserAccount.id, dualControl);
     if (reviewError) { alert(`Maker-checker control: ${reviewError}`); return; }
     if (!withdrawing && reviewComment.trim().length < 5) { alert('Enter a review comment (for example the FBR/EOBI notification reference).'); return; }
+    // A decision replaces any proposal edit still waiting to be saved, so the old edit cannot reopen it.
+    const waiting = typingSaves.current.get('statutory');
+    if (waiting) { clearTimeout(waiting.timer); typingSaves.current.delete('statutory'); }
     const now = new Date().toISOString();
     const decided: StatutoryChangeRequest = { ...request, status: decision, reviewedAt: now, reviewedById: currentUserAccount.id, reviewedBy: currentUserAccount.username, reviewComment: reviewComment.trim() || 'Withdrawn by proposer' };
     await setDoc(doc(db, 'statutoryChangeRequests', id), cleanData(decided));
@@ -760,9 +789,15 @@ function HrApp() {
       return updated;
     });
 
-    // One "On Leave" attendance entry per leave day, so the daily/monthly attendance reports show the leave.
     const targetLeave = leaves.find(l => l.id === id);
-    if (targetLeave) {
+    if (targetLeave) await recordApprovedLeaveDays({ ...targetLeave, status: 'Approved', approvedBy: approverName, approvedOn: today });
+  };
+
+  // After a leave is approved (or recorded as approved by HR): one "On Leave" attendance entry per leave day, so the
+  // daily/monthly attendance reports and the register show the leave, and the employee is told.
+  const recordApprovedLeaveDays = async (targetLeave: LeaveRequest) => {
+    const approverName = targetLeave.approvedBy || loggedInUser?.username || 'HR Manager';
+    {
       const autoLogs: AttendanceLog[] = [];
       for (let d = new Date(`${targetLeave.startDate}T00:00:00Z`); d <= new Date(`${targetLeave.endDate}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + 1)) {
         const dateStr = d.toISOString().slice(0, 10);
@@ -806,6 +841,7 @@ function HrApp() {
     }
   };
 
+
   const handleRejectLeave = async (id: string) => {
     const today = todayStr();
     const targetLeave = leaves.find(l => l.id === id);
@@ -837,20 +873,25 @@ function HrApp() {
     }
   };
 
-  const handleApplyLeave = async (leave: LeaveRequest) => {
+  // Resolves false when the leave was not saved (the user has been told why), so a form can stay open.
+  const handleApplyLeave = async (leave: LeaveRequest): Promise<boolean> => {
     const applicant = employees.find(item => item.id === leave.employeeId);
     const balanceError = applicant ? leaveBalanceError(leave, applicant, leaves, statConfig) : undefined;
-    if (balanceError) { alert(balanceError); return; }
+    if (balanceError) { alert(balanceError); return false; }
+    try {
+      await setDoc(doc(db, 'leaves', leave.id), cleanData(leave));
+    } catch (err) {
+      alert(`The leave was not saved: ${err instanceof Error && err.message ? err.message : 'check the connection and try again'}.`);
+      return false;
+    }
     setLeaves(prev => {
       const updated = [...prev, leave];
       privacyStorage.setItem('hr_leaves', JSON.stringify(updated));
       return updated;
     });
-    try {
-      await setDoc(doc(db, 'leaves', leave.id), cleanData(leave));
-    } catch (err) {
-      console.warn('PostgreSQL leave apply delayed:');
-    }
+    // HR recording a leave that was already agreed (status Approved) gets the same attendance entries as an approval.
+    if (leave.status === 'Approved') await recordApprovedLeaveDays(leave);
+    return true;
   };
 
   // ─── Attendance Handlers ──────────────────────────────────────────────────
@@ -879,6 +920,14 @@ function HrApp() {
     const evaluated = attendance.punchIn ? evaluateAttendanceTimes(attendance.punchIn, attendance.punchOut, policyEval.shift, attendance.breaks, attendance.date, policyEval.context) : undefined;
     const status: AttendanceLog['status'] = evaluated ? evaluated.status : attendance.status === 'Absent' ? 'Present' : attendance.status;
     const decision = { status, ...(evaluated && attendance.punchOut && { overtimeMinutes: evaluated.overtimeMinutes }), ...(evaluated?.policyLeave && { policyLeave: true }), regularizationApproved: true, reviewedAt, reviewedBy, reviewedById, reviewComment: reviewComment.trim() };
+    // Saved first: a decision the server refuses (locked month, the line manager's review window, no permission)
+    // must not look decided on screen.
+    try {
+      await updateDoc(doc(db, 'attendances', id), decision);
+    } catch (err) {
+      alert(`The attendance item was not approved: ${err instanceof Error && err.message ? err.message : 'the server refused the change'}. Nothing was changed.`);
+      return;
+    }
     setAttendances(prev => {
       const updated = prev.map(att =>
         att.id === id ? { ...att, ...decision } as AttendanceLog : att
@@ -886,11 +935,6 @@ function HrApp() {
       privacyStorage.setItem('hr_attendances', JSON.stringify(updated));
       return updated;
     });
-    try {
-      await updateDoc(doc(db, 'attendances', id), decision);
-    } catch (err) {
-      console.warn('PostgreSQL regularization approval delayed:');
-    }
   };
 
   // A forgotten punch-out is corrected on the same record and goes to review; approval re-evaluates the day.
@@ -928,6 +972,14 @@ function HrApp() {
     const reviewedById = currentUserAccount.id;
     // Rejecting a flagged punch (off-site, low-confidence biometric, suspicious GPS) means the day is not credited.
     const decision = { regularizationApproved: false, reviewedAt, reviewedBy, reviewedById, reviewComment: reviewComment.trim(), ...(attendance.punchIn && { status: 'Absent' as const }) };
+    // Saved first: a decision the server refuses (locked month, the line manager's review window, no permission)
+    // must not look decided on screen.
+    try {
+      await updateDoc(doc(db, 'attendances', id), decision);
+    } catch (err) {
+      alert(`The attendance item was not rejected: ${err instanceof Error && err.message ? err.message : 'the server refused the change'}. Nothing was changed.`);
+      return;
+    }
     setAttendances(prev => {
       const updated = prev.map(att =>
         att.id === id ? { ...att, ...decision } : att
@@ -935,11 +987,6 @@ function HrApp() {
       privacyStorage.setItem('hr_attendances', JSON.stringify(updated));
       return updated;
     });
-    try {
-      await updateDoc(doc(db, 'attendances', id), decision);
-    } catch (err) {
-      console.warn('PostgreSQL regularization rejection delayed:');
-    }
   };
 
 

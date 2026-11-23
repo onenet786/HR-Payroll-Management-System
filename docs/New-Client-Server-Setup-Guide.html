@@ -353,7 +353,7 @@ SMTP_PASS=app-password-here</pre>
     <li>It lists the branches on GitHub and suggests the <b>newest</b> one (e.g. <code>B12</code>; <code>main</code> is old), downloads the code to <code>/www/wwwroot/hr-payroll</code>, installs the packages and builds the web app (5–10 minutes the first time).</li>
     <li>It asks for the domain, contact e-mail, company name, internal port and the database name, user and password, then writes <code>.env</code> with new random backup and MFA keys. An existing <code>.env</code> is never overwritten.</li>
     <li>It creates the database tables and offers the first administrator (e-mail and a password of at least 12 characters).</li>
-    <li>It ends with a <b>Next steps in aaPanel</b> box with the exact values for the Node project, Mapping, SSL, firewall, Cron and DNS.</li>
+    <li>It ends with a <b>Next steps in aaPanel</b> box with the exact values in the order to do them: DNS first (SSL needs it), then the Node project, Mapping, SSL, firewall and Cron.</li>
   </ol>
   <div class="warn"><b>Already running an install that was uploaded by hand?</b>Run <code>setup</code> anyway (your live install <code>/www/wwwroot/hr-payroll</code> is like this). It builds a fresh copy in <code>hr-payroll.new</code> while the site keeps running, copies your <code>.env</code> into it, then swaps the folders and keeps the old one as <code>hr-payroll.before-git-&lt;date&gt;</code>. The database is not touched. Press <b>Restart</b> in aaPanel straight after.</div>
   <h3>Every update (always the same)</h3>
@@ -414,7 +414,7 @@ SMTP_PASS=app-password-here</pre>
     <li>Back in the terminal press Enter; the script checks access and continues.</li>
   </ol>
   <p><b>How a change reaches the server:</b> the developer commits and pushes to GitHub → you run <code>sudo bash /root/hrpayroll-server.sh update</code> → Restart in aaPanel. The server deploys the branch it is on (<code>bash … check</code> shows it). Push changes to that branch, or merge them into it, before updating.</p>
-  <p><b>If the update says "local changes conflict":</b> someone edited files on the server. See them with <code>git -C /www/wwwroot/hr-payroll status</code>; put the change in the repository instead, then <code>sudo git -C /www/wwwroot/hr-payroll checkout -- .</code> and update again. <code>.env</code> is not in Git and is never touched.</p>
+  <p><b>If the update lists "files changed by hand on the server":</b> someone edited program files on the server. The new version is a fresh copy from GitHub and will <b>not</b> contain those edits, so the update asks before going on (the default is No, which changes nothing). Put the change in the repository instead and update again; if you answer Yes, the edited files are kept in <code>hr-payroll.previous</code>. <code>.env</code> is not in Git: it is copied into the new version unchanged.</p>
   <p><b>Removing access:</b> delete the deploy key on GitHub. The server can then no longer download updates.</p>
   </div>
 </section>

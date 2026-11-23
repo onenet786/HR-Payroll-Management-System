@@ -32,7 +32,8 @@
 <table>
 <tr><th>What needs a second person</th><th>Where</th></tr>
 <tr><td>Changes to tax, EOBI, minimum wage and other legal rates</td><td>1. Statutory Config</td></tr>
-<tr><td>Salary increases and promotions</td><td>9. Salary Revisions, 12. Employee Lifecycle</td></tr>
+<tr><td>Salary increases and promotions (whoever prepared the draft cannot approve it — also for drafts created from a performance review)</td><td>9. Salary Revisions, 12. Employee Lifecycle</td></tr>
+<tr><td>Loans and salary advances (whoever entered the application cannot approve or reject it, and nobody can decide their own loan)</td><td>8. Loans &amp; Advances</td></tr>
 <tr><td>Transfers, probation, resignations and terminations</td><td>12. Employee Lifecycle</td></tr>
 <tr><td>Attendance corrections and manual attendance entries</td><td>7. Attendance</td></tr>
 <tr><td>Bonuses, arrears and other one-time payroll items</td><td>10. Payroll Processing</td></tr>
@@ -40,11 +41,12 @@
 <tr><td>Final settlements (a third person marks them paid)</td><td>11. Gratuity &amp; Settlement</td></tr>
 <tr><td>Resetting someone's two-step verification (MFA)</td><td>User Management</td></tr>
 </table>
+<p class="small">In the <b>Lite edition</b> (for small companies run by one owner, where two-person checking is switched off) the same person may prepare and approve these items.</p>
 
 <h3>The three ways to use the system</h3>
 <table>
 <tr><th>App</th><th>Who uses it</th><th>Where to read</th></tr>
-<tr><td><b>Web portal</b> — opened in Chrome, Edge or another browser</td><td>Administrators, HR, payroll, managers</td><td>Parts A–E, H–J</td></tr>
+<tr><td><b>Web portal</b> — opened in Chrome, Edge or another browser</td><td>Administrators, HR, payroll, managers. Employees who sign in here get their own self-service screens (the same as the phone app).</td><td>Parts A–E, H–J (employees: Part F)</td></tr>
 <tr><td><b>Mobile app</b> — "Bin Ishaq HR Suite" on Android</td><td>Employees (and phones/tablets used as a kiosk)</td><td>Part F</td></tr>
 <tr><td><b>Attendance kiosk</b> — Windows program "Bin Ishaq Attendance Kiosk"</td><td>Placed at the entrance; employees use it to punch in and out</td><td>Part G</td></tr>
 </table>
@@ -56,7 +58,7 @@
 <tr><td><b>Super Admin</b></td><td>Everything, including users, roles and legal rates. Keep this role for one or two trusted people.</td><td>All</td></tr>
 <tr><td><b>HR Manager</b></td><td>Employees, recruitment, performance, assets, holidays, leave, attendance, biometric devices, loans, salary revisions, employee lifecycle.</td><td>A, C, D, H, J</td></tr>
 <tr><td><b>Payroll Specialist</b></td><td>Payroll runs, payslips, bank files, statutory returns, loans, salary revisions, gratuity and settlements.</td><td>A, E, H, J</td></tr>
-<tr><td><b>Employee</b></td><td>Uses only the mobile app: own attendance (when allowed), leave requests and own payslips.</td><td>F</td></tr>
+<tr><td><b>Employee</b></td><td>Only their own information: today's status, own attendance punch (when allowed), leave requests, own payslips and notices — in the mobile app, or in a web browser, which shows the same self-service screens instead of the HR portal.</td><td>F</td></tr>
 <tr><td><b>Kiosk Terminal</b></td><td>A special account used only to switch on an attendance kiosk. It cannot see any other data.</td><td>G</td></tr>
 </table>
 <p>The menu each permission opens:</p>
@@ -113,6 +115,14 @@
 <h3>Forgot your password?</h3>
 <figure><img src="shots/02-forgot.png"><figcaption><b>Forgot Password?</b> explains that passwords are reset by your HR or system administrator.</figcaption></figure>
 <p>For security, passwords are <b>not</b> reset by email. Contact your HR or system administrator. After confirming who you are, they set a new password for you in <span class="ui">User Management</span> → <span class="ui">Edit</span> → <span class="ui">Reset password</span> (see section B5). Then sign in with the new password.</p>
+<h3>Changing your own password</h3>
+<p>Every user — staff and employees — can change their own password at any time.</p>
+<ol class="steps">
+  <li>In the web portal, open <span class="ui">My Security</span> at the top of the page and click <span class="ui">Change password</span>. (Employees using the self-service screens click the <span class="ui">Change password</span> button there.)</li>
+  <li>Type your <span class="ui">Current password</span>, then the <span class="ui">New password</span> (at least <b>12 characters</b>) and type it again in <span class="ui">Repeat new password</span>.</li>
+  <li>Click <span class="ui">Save new password</span>. You see <span class="msg">Password changed.</span></li>
+</ol>
+<div class="box note"><span class="t">Good to know</span><p>You stay signed in on the device you used, but your other signed-in computers and phones are signed out and must sign in with the new password. Remembered devices also ask for your two-step verification code again at the next sign-in.</p></div>
 <h3>Signing out</h3>
 <p>Click <span class="ui">Logout</span> at the top right of the screen. Always sign out on shared computers.</p>
 <h3>Problems signing in</h3>

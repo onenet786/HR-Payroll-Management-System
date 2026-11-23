@@ -3,12 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { DateField } from './DateField';
 import { RequiredMark, RequiredNote } from './RequiredMark';
 import { formatDisplayDate } from '../utils/dateFormat';
 import { Plus, Briefcase, ChevronRight, X } from 'lucide-react';
-import { JobPosting, JobApplication, AppStage, Department, Branch } from '../types';
+import { JobPosting, JobApplication, AppStage, Department, Branch, Designation } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 import ListSearch from './ListSearch';
 import { matchesSearch } from '../data/listSearch';
@@ -19,6 +19,7 @@ interface RecruitmentModuleProps {
   applications: JobApplication[];
   departments: Department[];
   branches: Branch[];
+  designations?: Designation[];
   canManage: boolean;
   onAddPosting: (posting: JobPosting) => void;
   onUpdatePosting: (posting: JobPosting) => void;
@@ -41,8 +42,12 @@ const STATUS_COLORS: Record<JobPosting['status'], string> = {
 
 function PKR(n?: number) { return n != null ? 'PKR ' + n.toLocaleString('en-PK') : '—'; }
 
+/** An "Open" posting whose closing date has passed is treated as closed, without needing a manual edit. */
+function isExpired(job: JobPosting, today: string) { return job.status === 'Open' && !!job.closingDate && job.closingDate < today; }
+function displayStatus(job: JobPosting, today: string) { return isExpired(job, today) ? 'Closed (expired)' : job.status; }
+
 export function RecruitmentModule({
-  jobPostings, applications, departments, branches, canManage,
+  jobPostings, applications, departments, branches, designations = [], canManage,
   onAddPosting, onUpdatePosting, onAddApplication, onUpdateApplication, onOnboardApplicant
 }: RecruitmentModuleProps) {
   const [activeTab, setActiveTab] = useState<'postings' | 'pipeline'>('postings');
@@ -74,7 +79,8 @@ export function RecruitmentModule({
   const pipelineApps = (selectedJobId
     ? applications.filter(a => a.jobPostingId === selectedJobId)
     : applications).filter(a => matchesSearch(search, a.applicantName, a.applicantEmail, a.applicantPhone, a.cnic, a.stage, getJobTitle(a.jobPostingId)));
-  const shownJobs = jobPostings.filter(job => matchesSearch(search, job.title, job.status, job.jobType, getDeptName(job.departmentId), getBranchName(job.branchId), job.qualificationRequired));
+  const today = localDateStr();
+  const shownJobs = jobPostings.filter(job => matchesSearch(search, job.title, displayStatus(job, today), job.jobType, getDeptName(job.departmentId), getBranchName(job.branchId), job.qualificationRequired));
 
   const handleAddJob = () => {
     if (!jobForm.title || !jobForm.closingDate) return;
@@ -98,7 +104,21 @@ export function RecruitmentModule({
 
   const appDetail = appDetailId ? applications.find(a => a.id === appDetailId) : null;
 
-  const openCount = jobPostings.filter(j => j.status === 'Open').length;
+  const openCount = jobPostings.filter(j => j.status === 'Open' && !isExpired(j, today)).length;
+
+  // Escape closes the top-most open modal, the same as its Cancel / close button.
+  const modalOpen = !!appDetailId || showJobForm || showAppForm;
+  useEffect(() => {
+    if (!modalOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      if (showAppForm) setShowAppForm(false);
+      else if (showJobForm) { setShowJobForm(false); setJobForm(emptyJob); }
+      else setAppDetailId(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
   const totalApps = applications.length;
   const hiredCount = applications.filter(a => a.stage === 'Hired').length;
   const pendingInterviews = applications.filter(a => a.stage === 'Interview Scheduled').length;
@@ -165,14 +185,15 @@ export function RecruitmentModule({
             <div className="text-center py-12 text-slate-500 text-sm">{search.trim() ? `No job postings match “${search.trim()}”.` : 'No job postings yet.'}</div>
           ) : shownJobs.map(job => {
             const appCount = applications.filter(a => a.jobPostingId === job.id).length;
-            const statusColor = STATUS_COLORS[job.status];
+            const expired = isExpired(job, today);
+            const statusColor = expired ? STATUS_COLORS.Closed : STATUS_COLORS[job.status];
             return (
               <div key={job.id} className="bg-slate-50 border border-slate-200 rounded-2xl p-4 hover:border-slate-300 transition">
                 <div className="flex justify-between items-start">
                   <div className="flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
                       <h3 className="text-sm font-bold text-slate-900">{job.title}</h3>
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-lg bg-${statusColor}-50 text-${statusColor}-700 border border-${statusColor}-200`}>{job.status}</span>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-lg bg-${statusColor}-50 text-${statusColor}-700 border border-${statusColor}-200`} title={expired ? `Closing date ${formatDisplayDate(job.closingDate)} has passed` : undefined}>{displayStatus(job, today)}</span>
                       <span className="text-[10px] font-bold px-2 py-0.5 rounded-lg bg-slate-100 text-slate-600">{job.jobType}</span>
                     </div>
                     <div className="text-xs text-slate-500 mt-1">
@@ -186,11 +207,11 @@ export function RecruitmentModule({
                   <div className="ml-4 text-right flex-shrink-0">
                     <div className="text-lg font-bold text-blue-700">{appCount}</div>
                     <div className="text-[10px] text-slate-500">applicants</div>
-                    <div className="text-[10px] text-slate-500 mt-2">Closes {formatDisplayDate(job.closingDate)}</div>
+                    <div className="text-[10px] text-slate-500 mt-2">{expired ? 'Closed' : 'Closes'} {formatDisplayDate(job.closingDate)}</div>
                     {canManage && job.status === 'Open' && (
                       <div className="flex gap-1 mt-2 justify-end">
-                        <button onClick={() => onUpdatePosting({ ...job, status: 'On Hold' })}
-                          className="text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-1 rounded-lg hover:bg-amber-500/20 transition">Hold</button>
+                        {!expired && <button onClick={() => onUpdatePosting({ ...job, status: 'On Hold' })}
+                          className="text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-1 rounded-lg hover:bg-amber-500/20 transition">Hold</button>}
                         <button onClick={() => onUpdatePosting({ ...job, status: 'Filled' })}
                           className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-lg hover:bg-emerald-500/20 transition">Filled</button>
                       </div>
@@ -333,6 +354,7 @@ export function RecruitmentModule({
                 </div>
                 {[
                   { label: 'Department', key: 'departmentId', type: 'select', opts: departments.map(d => ({ v: d.id, l: d.name })) },
+                  { label: 'Designation (post)', key: 'designationId', type: 'select', opts: [{ v: '', l: '— Not set —' }, ...designations.filter(d => !d.departmentId || d.departmentId === jobForm.departmentId).map(d => ({ v: d.id, l: d.title }))] },
                   { label: 'Branch', key: 'branchId', type: 'select', opts: branches.map(b => ({ v: b.id, l: b.name })) },
                   { label: 'Job Type', key: 'jobType', type: 'select', opts: JOB_TYPES.map(t => ({ v: t, l: t })) },
                   { label: 'Status', key: 'status', type: 'select', opts: JOB_STATUSES.map(s => ({ v: s, l: s })) }

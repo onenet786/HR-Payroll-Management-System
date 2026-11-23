@@ -107,7 +107,7 @@ export function computeHrKpis(inputs: KpiInputs, filters: KpiFilters): HrKpis {
   const postingIds = new Set(postings.map(posting => posting.id));
   const applications = (inputs.jobApplications || []).filter(application => postingIds.has(application.jobPostingId));
   // Vacancies still being recruited for that had been posted by the given date.
-  const openVacancies = (asOf: string) => postings.filter(posting => posting.postedDate <= asOf && (posting.status === 'Open' || posting.status === 'On Hold')).reduce((sum, posting) => sum + (posting.vacancies || 0), 0);
+  const openVacancies = (asOf: string) => postings.filter(posting => posting.postedDate <= asOf && (!posting.closingDate || posting.closingDate >= asOf) && (posting.status === 'Open' || posting.status === 'On Hold')).reduce((sum, posting) => sum + (posting.vacancies || 0), 0);
 
   const activeNow = employees.filter(employee => employedOn(employee, monthEnd(month)));
   const activePrevious = employees.filter(employee => employedOn(employee, monthEnd(previous.key)));

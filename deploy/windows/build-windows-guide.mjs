@@ -21,7 +21,7 @@ renderGuide(root, {
 <h2>What gets installed</h2>
 <p>Everything comes from one package (<code>HRPayroll-Windows-Setup-&lt;version&gt;.zip</code>). The server needs <b>no internet access</b> to install and nothing else has to be installed first.</p>
 ${table(['Part', 'What it is', 'Where'], [
-  ['<b>HR Payroll Database</b> (service <code>HRPayrollDB</code>)', 'Built-in PostgreSQL 16 database engine. Listens <b>only on this server</b> (localhost), port 5433. Pre-tuned for an HR system (about 256 MB memory).', '<code>C:\\HRPayroll\\runtime\\pgsql</code>, data in <code>C:\\HRPayrollData\\pgdata</code>'],
+  ['<b>HR Payroll Database</b> (service <code>HRPayrollDB</code>)', 'Built-in PostgreSQL 16 database engine. Listens <b>only on this server</b> (localhost), port 5433. Its memory is sized to this server during setup: about one fifth of the RAM for its cache (one tenth when SQL Server runs on the same server), never less than 256 MB or more than 4 GB.', '<code>C:\\HRPayroll\\runtime\\pgsql</code>, data in <code>C:\\HRPayrollData\\pgdata</code>'],
   ['<b>HR Payroll Application</b> (service <code>HRPayrollApp</code>)', 'The HR &amp; Payroll web application (Node.js). Starts after the database, restarts by itself if it stops.', '<code>C:\\HRPayroll\\app\\&lt;version&gt;</code>'],
   ['<b>HR Payroll Nightly Backup</b> (scheduled task)', 'Encrypted database backup every night, 14 kept, optional copy to a network share.', '<code>C:\\HRPayrollData\\backups</code>'],
   ['Firewall rule "HR Payroll Application"', 'Opens the application port for Domain and Private networks only.', 'Windows Defender Firewall'],

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { SearchableSelect } from './SearchableSelect';
 import { DateField } from './DateField';
 import { RequiredMark, RequiredNote } from './RequiredMark';
@@ -60,6 +60,13 @@ export function GratuityModule({ settlements, employees, statConfig, canManage, 
     pendingSalaryDays: 0,
     notes: ''
   });
+
+  useEffect(() => {
+    if (!showCalc) return;
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape' && !event.defaultPrevented) setShowCalc(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [showCalc]);
 
   const selectedEmp = useMemo(() => employees.find(e => e.id === calcForm.employeeId), [employees, calcForm.employeeId]);
 
@@ -184,11 +191,11 @@ export function GratuityModule({ settlements, employees, statConfig, canManage, 
                         <div className="flex gap-1">
                           {s.status === 'Pending' && (
                             <button disabled={makerChecker && s.createdById === currentUserAccount.id} title={makerChecker && s.createdById === currentUserAccount.id ? 'Another payroll user must process this settlement.' : 'Process settlement'} onClick={() => onUpdateSettlement({ ...s, status: 'Processed', processedAt: new Date().toISOString(), processedById: currentUserAccount.id })}
-                              className="text-[10px] font-bold text-blue-700 bg-blue-50 px-2 py-1 rounded-lg hover:bg-blue-500/20 transition">Process</button>
+                              className="text-[10px] font-bold text-blue-700 bg-blue-50 px-2 py-1 rounded-lg hover:bg-blue-500/20 transition disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-blue-50">Process</button>
                           )}
                           {s.status === 'Processed' && (
                             <button disabled={makerChecker && (s.createdById === currentUserAccount.id || s.processedById === currentUserAccount.id)} title={makerChecker && s.createdById === currentUserAccount.id ? 'Settlement maker cannot pay it.' : makerChecker && s.processedById === currentUserAccount.id ? 'Settlement processor cannot pay it.' : 'Mark settlement paid'} onClick={() => onUpdateSettlement({ ...s, status: 'Paid', paidDate: localDateStr(), paidById: currentUserAccount.id })}
-                              className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-lg hover:bg-emerald-500/20 transition">Mark Paid</button>
+                              className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-lg hover:bg-emerald-500/20 transition disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-emerald-50">Mark Paid</button>
                           )}
                         </div>
                       )}
@@ -301,7 +308,7 @@ export function GratuityModule({ settlements, employees, statConfig, canManage, 
                 <button onClick={() => setShowCalc(false)}
                   className="flex-1 bg-white hover:bg-slate-100 text-slate-900 text-sm font-bold py-2.5 rounded-xl transition">Cancel</button>
                 <button onClick={handleSave} disabled={!selectedEmp}
-                  className="flex-1 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-bold py-2.5 rounded-xl transition">
+                  className="flex-1 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-emerald-600 text-white text-sm font-bold py-2.5 rounded-xl transition">
                   Save Settlement
                 </button>
               </div>

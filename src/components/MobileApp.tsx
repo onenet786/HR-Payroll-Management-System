@@ -109,6 +109,7 @@ export function MobileApp({
   const [faceStatus, setFaceStatus] = useState('Center your face inside the oval.');
   const [selectedAction, setSelectedAction] = useState<MobileAttendanceAction>('workday-in');
   const [completedAction, setCompletedAction] = useState<MobileAttendanceAction | null>(null);
+  const [completedMethod, setCompletedMethod] = useState<'Biometric' | 'Camera'>('Camera');
   const [punchReason, setPunchReason] = useState({ category: 'Work from home', note: '', clientName: '' });
   const facePunchBusyRef = useRef(false);
   const autoFaceStableFramesRef = useRef(0);
@@ -369,6 +370,7 @@ export function MobileApp({
     const isOutAction = selectedAction === 'workday-out' || selectedAction === 'visit-out';
     await onSimulatePunch(currentEmp.id, isOutAction ? '' : timeStr, isOutAction ? timeStr : '', 'Mobile GPS', lat, lon, accuracy, locationCapturedAt, locationAddress, details);
     setCompletedAction(selectedAction);
+    setCompletedMethod(details.verificationMethod === 'Biometric' ? 'Biometric' : 'Camera');
     setPunchStep('done');
     setBiometricStatus('success');
     triggerWaToast(`✅ ${currentEmp.fullName}: ${actionLabel(selectedAction)} recorded at ${timeStr} via ${method}`);
@@ -817,7 +819,11 @@ export function MobileApp({
                 </div>
 
                 {/* Captured selfie */}
-                {capturedPhoto ? (
+                {completedMethod === 'Biometric' ? (
+                  <div className="bg-slate-800/60 border border-slate-700/50 rounded-2xl p-4 text-center text-[10px] text-slate-300">
+                    Identity verified by this phone's fingerprint / screen lock <span className="text-emerald-400">✓ Saved</span>
+                  </div>
+                ) : capturedPhoto ? (
                   <div className="rounded-2xl overflow-hidden border border-slate-700/50 bg-slate-800">
                     <img src={capturedPhoto} alt="Attendance selfie" className="w-full -scale-x-100" />
                     <div className="px-3 py-1.5 text-[9px] text-slate-400 flex justify-between">

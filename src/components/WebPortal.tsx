@@ -120,17 +120,26 @@ export const deriveCompanyPrefix = (
   return companyInitialsPrefix(company?.name || company?.legalName || fallback);
 };
 
+// Keeps the field as +923 followed by up to 9 digits. Handles typing after the +923 already in the box, and a whole
+// number typed or pasted in any common form (+92 321…, 0092…, 0321…, 321…). A real number never has 9 right after
+// +923 (operator codes are 30x-35x), so a 9 there means the person is typing the +92 prefix again.
+const nationalBody = (digits: string): string => {
+  let d = digits;
+  if (d.startsWith('0092')) d = d.slice(4);
+  else if (d.startsWith('92')) d = d.slice(2);
+  else if (d.startsWith('0')) d = d.slice(1);
+  if (d.startsWith('3')) d = d.slice(1);
+  return d === '9' ? '' : d;
+};
 export const formatPakMobileNumber = (raw: string): string => {
-  let digits = (raw || '').replace(/\D/g, '');
-  if (digits.startsWith('923')) {
-    digits = digits.slice(3);
-  } else if (digits.startsWith('03')) {
-    digits = digits.slice(2);
-  } else if (digits.startsWith('3')) {
-    digits = digits.slice(1);
-  }
-  const clean9 = digits.slice(0, 9);
-  return clean9.length > 0 ? `+923${clean9}` : '+923';
+  const value = (raw || '').trim();
+  let body: string;
+  if (value.startsWith('+923')) {
+    const rest = value.slice(4);
+    const restDigits = rest.replace(/\D/g, '');
+    body = /^\s*[+9]/.test(rest) || (restDigits.startsWith('0') && restDigits.length >= 11) ? nationalBody(restDigits) : restDigits;
+  } else body = nationalBody(value.replace(/\D/g, ''));
+  return `+923${body.slice(0, 9)}`;
 };
 
 export const isValidPakMobileNumber = (val: string): boolean => {
@@ -215,7 +224,7 @@ export interface WebPortalProps {
   onRecordParallelRun: (runId: string, record: Omit<ParallelRunRecord, 'comparedAt' | 'comparedById' | 'comparedBy'>) => void | Promise<void>;
   onRecordBankAdvice: (runId: string, checksum: string, employeeCount: number, total: number, profile: PayrollRun['bankAdviceProfile'], batch?: { batchReference: string; controlHash: string; verified: boolean }) => void | Promise<void>;
   onSendPayslips: (runId: string) => Promise<{ sent: number; skipped: number; failed: Array<{ employeeId: string; error: string }> }>;
-  onApplyLeave: (leave: LeaveRequest) => void;
+  onApplyLeave: (leave: LeaveRequest) => void | Promise<boolean | void>;
   onAddAttendance: (log: AttendanceLog) => void;
   branches: Branch[];
   companies: Company[];
@@ -407,8 +416,8 @@ const TAB_WORKFLOW_META: Record<PortalTab, {
     guideContent: 'Evaluate team members against measurable objectives and link appraisal scores directly into annual compensation reviews.'
   },
   assets: {
-    heading: 'Assets block an exit until they are back.',
-    help: 'What the company owns and who has it. When someone leaves, their assets appear on the settlement checklist automatically.',
+    heading: 'Get assets back before a final settlement.',
+    help: 'What the company owns and who has it. While an asset is still assigned to an employee, their final settlement cannot be processed or paid: mark it returned first.',
     guideTitle: 'Guide for Asset Management',
     guideContent: 'Not on the payroll chain, but step 11 waits for it. Every company laptop, phone, or credential issued to staff is tracked here and must be cleared prior to final settlement payout.'
   },
@@ -456,7 +465,7 @@ const TAB_WORKFLOW_META: Record<PortalTab, {
   },
   gratuity: {
     heading: 'Offboarding final settlements, gratuity entitlement, and clearance checklist.',
-    help: 'Assets block an exit until they are back. Compute final settlements, gratuity entitlements, and leave encashment clearances.',
+    help: 'A final settlement cannot be processed or paid while company assets are still assigned to the employee. Compute final settlements, gratuity entitlements, and leave encashment clearances.',
     guideTitle: 'Guide for Gratuity & Settlement',
     guideContent: 'Step 11 of 12. Offboard exiting personnel with full final settlement calculation including gratuity (30 days basic pay per completed year of service) and unutilized leave encashment.'
   },
@@ -1057,6 +1066,20 @@ export function WebPortal({
   const [mfaEnabledLocally, setMfaEnabledLocally] = useState(false);
   const [mfaEnrollmentError, setMfaEnrollmentError] = useState('');
   const [showMfaRecoveryForm, setShowMfaRecoveryForm] = useState(false);
+  const [passwordForm, setPasswordForm] = useState<{ current: string; next: string; confirm: string; error: string; saving: boolean } | null>(null);
+  const submitPasswordChange = async () => {
+    if (!passwordForm) return;
+    const fail = (error: string) => setPasswordForm(previous => previous && { ...previous, error, saving: false });
+    if (!passwordForm.current) return fail('Enter your current password.');
+    if (passwordForm.next.length < 12) return fail('The new password must be at least 12 characters.');
+    if (passwordForm.next !== passwordForm.confirm) return fail('The two new passwords do not match.');
+    setPasswordForm({ ...passwordForm, error: '', saving: true });
+    try {
+      const result = await authenticatedApiRequest('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword: passwordForm.current, newPassword: passwordForm.next }) }) as { otherSessionsSignedOut?: number };
+      setPasswordForm(null);
+      showToast(`Password changed.${result?.otherSessionsSignedOut ? ` ${result.otherSessionsSignedOut} other session(s) were signed out.` : ''}`);
+    } catch (error) { fail(error instanceof Error ? error.message : 'The password could not be changed.'); }
+  };
   const [mfaRecoveryReason, setMfaRecoveryReason] = useState('');
   const [mfaRecoveryError, setMfaRecoveryError] = useState('');
   const [mfaRecoverySubmitting, setMfaRecoverySubmitting] = useState(false);
@@ -1723,7 +1746,7 @@ export function WebPortal({
       return;
     }
 
-    if (!isValidPakMobileNumber(newEmpForm.contactNumber)) {
+    if (!isValidPakMobileNumber(formatPakMobileNumber(newEmpForm.contactNumber))) {
       alert('Mobile Contact must start with +923 followed by exactly 9 digits (e.g. +923214444444).');
       return;
     }
@@ -1760,7 +1783,7 @@ export function WebPortal({
       employeeCode: newCode,
       fullName: newEmpForm.fullName,
       email: newEmpForm.email,
-      contactNumber: newEmpForm.contactNumber,
+      contactNumber: formatPakMobileNumber(newEmpForm.contactNumber),
       cnic: newEmpForm.cnic,
       cnicExpiryDate: newEmpForm.cnicExpiryDate || undefined,
       drivingLicenceExpiryDate: newEmpForm.drivingLicenceExpiryDate || undefined,
@@ -1832,7 +1855,7 @@ export function WebPortal({
       return;
     }
 
-    if (!isValidPakMobileNumber(editEmpForm.contactNumber)) {
+    if (!isValidPakMobileNumber(formatPakMobileNumber(editEmpForm.contactNumber))) {
       alert('Mobile Contact must start with +923 followed by exactly 9 digits (e.g. +923214444444).');
       return;
     }
@@ -1880,7 +1903,7 @@ export function WebPortal({
       employeeCode: editedCode,
       fullName: editEmpForm.fullName,
       email: editEmpForm.email,
-      contactNumber: editEmpForm.contactNumber,
+      contactNumber: formatPakMobileNumber(editEmpForm.contactNumber),
       cnic: editEmpForm.cnic,
       cnicExpiryDate: editEmpForm.cnicExpiryDate || undefined,
       drivingLicenceExpiryDate: editEmpForm.drivingLicenceExpiryDate || undefined,
@@ -2062,7 +2085,7 @@ export function WebPortal({
     setShowAddAttendanceModal(false);
   };
 
-  const handleCreateLeaveSubmit = (e: React.SyntheticEvent<HTMLFormElement>) => {
+  const handleCreateLeaveSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!newLeaveForm.employeeId || !newLeaveForm.startDate || !newLeaveForm.endDate || !newLeaveForm.reason) {
       alert('Kindly fill in all fields.');
@@ -2090,7 +2113,8 @@ export function WebPortal({
       approvedBy: currentUserAccount.username,
       approvedOn: todayStr
     };
-    onApplyLeave(leave);
+    // The leave balance is checked when saving; on a refusal the form stays open so the dates can be corrected.
+    if (await onApplyLeave(leave) === false) return;
     setShowAddLeaveModal(false);
     setNewLeaveForm({
       employeeId: '',
@@ -2185,7 +2209,7 @@ export function WebPortal({
   const companyNeedsFix = features.incomeTax && !primaryCompany?.ntn && !primaryCompany?.taxRegistrationNumber;
   const pendingLoansCount = loanAdvances.filter(item => item.status === 'Pending').length;
   const pendingLifecycleCount = lifecycleRequests.filter(item => item.status === 'Pending').length;
-  const openPostingsCount = jobPostings.filter(item => item.status === 'Open').length;
+  const openPostingsCount = jobPostings.filter(item => item.status === 'Open' && (!item.closingDate || item.closingDate >= todayStr)).length;
   const megaItem = (tab: PortalTab, english: string, urdu: string, extra: { fix?: boolean; count?: number; info?: string } = {}): MegaItem[] => {
     if (!hasPermission(tab)) return [];
     const step = FLOW_STEP_OF[tab];
@@ -2552,8 +2576,10 @@ export function WebPortal({
                         showToast(`${result.revoked} trusted device(s) removed. A code will be asked at the next sign-in.`);
                       } catch (error) { alert(error instanceof Error ? error.message : 'Trusted devices could not be removed.'); }
                     }} className="text-emerald-800 underline hover:text-emerald-950" title="Lost phone or shared device: every remembered device must enter a code again">Stop trusting my devices</button>
+                    <button type="button" onClick={() => setPasswordForm({ current: '', next: '', confirm: '', error: '', saving: false })} className="text-slate-700 underline hover:text-emerald-800" title="Choose a new password for your own account">Change password</button>
                     {!showMfaRecoveryForm && <button type="button" onClick={() => setShowMfaRecoveryForm(true)} className="text-slate-700 underline hover:text-rose-700" title="Lost or replacing your authenticator device">Request MFA reset</button>}
                   </div>}
+                  {!mfaEnabled && <div className="flex shrink-0 items-center gap-3 text-[11px] font-semibold"><button type="button" onClick={() => setPasswordForm({ current: '', next: '', confirm: '', error: '', saving: false })} className="text-slate-700 underline hover:text-emerald-800" title="Choose a new password for your own account">Change password</button></div>}
                   {!mfaEnabled && !mfaSetupChoice && <button type="button" onClick={() => setMfaSetupChoice('choose')} className="shrink-0 rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2">Set up MFA</button>}
                 </div>
                 {!mfaEnabled && mfaSetupChoice === 'choose' && <div className="border-t border-amber-200 bg-white/85 p-4"><h3 className="text-sm font-bold text-slate-900">Choose your MFA method</h3><p className="mt-1 text-xs text-slate-600">Select one method. Only the selected method will be required when you sign in.</p><div className="mt-3 grid gap-3 sm:grid-cols-2"><button type="button" onClick={beginMfaEnrollment} className="rounded-xl border border-slate-300 bg-white p-4 text-left hover:border-emerald-500"><b className="text-sm text-slate-900">Authenticator app</b><span className="mt-1 block text-xs text-slate-600">Use a QR code with Google or Microsoft Authenticator, Authy, or another compatible app.</span></button><button type="button" onClick={beginEmailMfaEnrollment} className="rounded-xl border border-slate-300 bg-white p-4 text-left hover:border-emerald-500"><b className="text-sm text-slate-900">Email verification</b><span className="mt-1 block text-xs text-slate-600">Receive a one-time code at your registered email address for each sign-in.</span></button></div><button type="button" onClick={() => setMfaSetupChoice(null)} className="mt-3 text-xs font-semibold text-slate-600 underline">Cancel</button></div>}
@@ -2581,6 +2607,20 @@ export function WebPortal({
                   {mfaEnrollmentError && <p role="alert" className="mt-3 text-xs font-medium text-rose-700">{mfaEnrollmentError}</p>}
                 </div>}
                 {emailMfaEnrollment && <div className="border-t border-amber-200 bg-white/85 p-4"><div className="max-w-xl space-y-3"><h3 className="text-sm font-bold text-slate-900">Confirm email MFA</h3><p className="text-xs text-slate-600">A six-digit setup code was sent to <strong>{emailMfaEnrollment.email}</strong>. Enter it to enable email verification as your MFA method.</p><input aria-label="Email verification code" aria-required="true" value={mfaEmailCode} onChange={event => setMfaEmailCode(event.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" autoComplete="one-time-code" maxLength={6} placeholder="Email verification code" className="w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm tracking-[0.2em]" /><div className="flex gap-2"><button type="button" disabled={mfaEmailCode.length !== 6} onClick={confirmEmailMfaEnrollment} className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-bold text-white disabled:opacity-50">Confirm email MFA</button><button type="button" onClick={() => { setEmailMfaEnrollment(null); setMfaEmailCode(''); setMfaSetupChoice(null); setMfaEnrollmentError(''); }} className="px-2 text-xs font-semibold text-slate-600 underline">Cancel</button></div></div>{mfaEnrollmentError && <p role="alert" className="mt-3 text-xs font-medium text-rose-700">{mfaEnrollmentError}</p>}</div>}
+                {passwordForm && <form onSubmit={event => { event.preventDefault(); void submitPasswordChange(); }} className="border-t border-slate-200 bg-white/85 p-4">
+                  <h3 className="text-sm font-bold text-slate-900">Change my password</h3>
+                  <p className="mt-1 text-xs text-slate-600">At least 12 characters. A short sentence you can remember works well. Your other signed-in devices will be signed out.</p>
+                  <div className="mt-3 grid max-w-3xl gap-3 sm:grid-cols-3">
+                    <label className="text-xs font-bold text-slate-700">Current password<input type="password" autoComplete="current-password" value={passwordForm.current} onChange={event => setPasswordForm({ ...passwordForm, current: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-normal" /></label>
+                    <label className="text-xs font-bold text-slate-700">New password<input type="password" autoComplete="new-password" value={passwordForm.next} onChange={event => setPasswordForm({ ...passwordForm, next: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-normal" /></label>
+                    <label className="text-xs font-bold text-slate-700">Repeat new password<input type="password" autoComplete="new-password" value={passwordForm.confirm} onChange={event => setPasswordForm({ ...passwordForm, confirm: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-normal" /></label>
+                  </div>
+                  <div className="mt-3 flex gap-2">
+                    <button type="submit" disabled={passwordForm.saving} className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-bold text-white disabled:opacity-50">{passwordForm.saving ? 'Saving…' : 'Save new password'}</button>
+                    <button type="button" onClick={() => setPasswordForm(null)} className="px-2 text-xs font-semibold text-slate-600 underline">Cancel</button>
+                  </div>
+                  {passwordForm.error && <p role="alert" className="mt-2 text-xs font-medium text-rose-700">{passwordForm.error}</p>}
+                </form>}
                 {mfaEnabled && showMfaRecoveryForm && <div className="border-t border-emerald-200 bg-white/70 p-4">
                   {<div className="max-w-xl space-y-2"><label htmlFor="mfa-recovery-reason" className="block text-xs font-bold text-slate-800">MFA recovery reason<RequiredMark /></label><textarea id="mfa-recovery-reason" aria-required="true" value={mfaRecoveryReason} onChange={event => setMfaRecoveryReason(event.target.value)} maxLength={500} rows={2} placeholder="Describe how your identity can be independently verified." className="w-full rounded-lg border border-slate-300 p-2 text-xs" /><div className="flex gap-2"><button type="button" disabled={mfaRecoverySubmitting} onClick={() => submitMfaRecoveryRequest()} className="rounded-lg bg-rose-700 px-3 py-2 text-xs font-bold text-white disabled:opacity-50">Submit recovery request</button><button type="button" onClick={() => { setShowMfaRecoveryForm(false); setMfaRecoveryError(''); }} className="px-2 text-xs font-semibold text-slate-600 underline">Cancel</button></div>{mfaRecoveryError && <p role="alert" className="text-xs font-medium text-rose-700">{mfaRecoveryError}</p>}</div>}
                 </div>}
@@ -4677,6 +4717,7 @@ export function WebPortal({
                     onAddSalaryRevision={onAddSalaryRevision}
                     makerChecker={dualControl}
                     branches={localBranches}
+                    designations={designations}
                   />
                 </motion.div>
               )}
@@ -4718,6 +4759,7 @@ export function WebPortal({
                     applications={jobApplications}
                     departments={departments}
                     branches={branches}
+                    designations={designations}
                     canManage={userPermissions.includes('manage_employees')}
                     onAddPosting={onAddJobPosting}
                     onUpdatePosting={onUpdateJobPosting}
@@ -4727,7 +4769,9 @@ export function WebPortal({
                       // Carry what recruitment already knows into the onboarding form; HR completes the rest.
                       const department = localDepartments.find(item => item.id === posting?.departmentId);
                       const branchId = posting?.branchId || department?.branchId || '';
-                      const designationId = localDesignations.find(item => item.departmentId === department?.id)?.id || '';
+                      // The posting's own designation when it names one (and it still exists); otherwise the department's first.
+                      const designationId = localDesignations.find(item => item.id === posting?.designationId)?.id
+                        || localDesignations.find(item => item.departmentId === department?.id)?.id || '';
                       setNewEmpForm({ ...blankNewEmployeeForm(), fullName: app.applicantName, email: app.applicantEmail, contactNumber: app.applicantPhone || '',
                         cnic: app.cnic || '', branchId, departmentId: department?.id || '', designationId,
                         wageTypeId: (activeWageTypes.find(item => item.calculationBasis === 'Monthly') || activeWageTypes[0])?.id || '', basicSalary: app.offerAmount || app.expectedSalary || 0 });
@@ -4985,20 +5029,22 @@ export function WebPortal({
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
                         <span>Mobile Contact:<RequiredMark /></span>
-                        <span className={`text-[10px] font-mono ${isValidPakMobileNumber(newEmpForm.contactNumber) ? 'text-emerald-600 font-bold' : 'text-slate-400'}`}>
-                          {isValidPakMobileNumber(newEmpForm.contactNumber) ? '✓ Valid (9 digits)' : `${Math.max(0, 9 - (newEmpForm.contactNumber.replace(/\D/g, '').slice(3).length))} digits left`}
+                        <span className={`text-[10px] font-mono ${isValidPakMobileNumber(formatPakMobileNumber(newEmpForm.contactNumber)) ? 'text-emerald-600 font-bold' : 'text-slate-400'}`}>
+                          {isValidPakMobileNumber(formatPakMobileNumber(newEmpForm.contactNumber)) ? '✓ Valid (9 digits)' : `${Math.max(0, 9 - (formatPakMobileNumber(newEmpForm.contactNumber).length - 4))} digits left`}
                         </span>
                       </label>
                       <div className="relative">
                         <input
                           type="text" required
                           aria-label="Mobile Contact Number"
-                          maxLength={13}
-                          placeholder="+923XXXXXXXXX"
+                          maxLength={20}
+                          inputMode="tel"
+                          placeholder="+923XXXXXXXXX or 03XX-XXXXXXX"
                           value={newEmpForm.contactNumber}
-                          onChange={(e) => setNewEmpForm({ ...newEmpForm, contactNumber: formatPakMobileNumber(e.target.value) })}
+                          onChange={(e) => setNewEmpForm({ ...newEmpForm, contactNumber: e.target.value.replace(/[^\d+\s-]/g, '') })}
+                          onBlur={() => newEmpForm.contactNumber.replace(/\D/g, '') && setNewEmpForm({ ...newEmpForm, contactNumber: formatPakMobileNumber(newEmpForm.contactNumber) })}
                           className={`w-full h-9 px-3 py-1.5 border rounded-lg font-mono text-xs text-slate-900 bg-white focus:outline-none transition-all placeholder:text-slate-400 ${
-                            isValidPakMobileNumber(newEmpForm.contactNumber) 
+                            isValidPakMobileNumber(formatPakMobileNumber(newEmpForm.contactNumber)) 
                               ? 'border-emerald-500 focus:ring-2 focus:ring-emerald-500/20' 
                               : 'border-slate-300 focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500'
                           }`}
@@ -5782,20 +5828,22 @@ export function WebPortal({
                     <div>
                       <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
                         <span>Mobile Contact:<RequiredMark /></span>
-                        <span className={`text-[10px] font-mono ${isValidPakMobileNumber(editEmpForm.contactNumber) ? 'text-indigo-600 font-bold' : 'text-slate-400'}`}>
-                          {isValidPakMobileNumber(editEmpForm.contactNumber) ? '✓ Valid (9 digits)' : `${Math.max(0, 9 - (editEmpForm.contactNumber.replace(/\D/g, '').slice(3).length))} digits left`}
+                        <span className={`text-[10px] font-mono ${isValidPakMobileNumber(formatPakMobileNumber(editEmpForm.contactNumber)) ? 'text-indigo-600 font-bold' : 'text-slate-400'}`}>
+                          {isValidPakMobileNumber(formatPakMobileNumber(editEmpForm.contactNumber)) ? '✓ Valid (9 digits)' : `${Math.max(0, 9 - (formatPakMobileNumber(editEmpForm.contactNumber).length - 4))} digits left`}
                         </span>
                       </label>
                       <div className="relative">
                         <input
                           type="text" required
                           aria-label="Mobile Contact Number"
-                          maxLength={13}
-                          placeholder="+923XXXXXXXXX"
+                          maxLength={20}
+                          inputMode="tel"
+                          placeholder="+923XXXXXXXXX or 03XX-XXXXXXX"
                           value={editEmpForm.contactNumber}
-                          onChange={(e) => setEditEmpForm({ ...editEmpForm, contactNumber: formatPakMobileNumber(e.target.value) })}
+                          onChange={(e) => setEditEmpForm({ ...editEmpForm, contactNumber: e.target.value.replace(/[^\d+\s-]/g, '') })}
+                          onBlur={() => editEmpForm.contactNumber.replace(/\D/g, '') && setEditEmpForm({ ...editEmpForm, contactNumber: formatPakMobileNumber(editEmpForm.contactNumber) })}
                           className={`w-full h-9 px-3 py-1.5 border rounded-lg font-mono text-xs text-slate-900 bg-white focus:outline-none transition-all placeholder:text-slate-400 ${
-                            isValidPakMobileNumber(editEmpForm.contactNumber) 
+                            isValidPakMobileNumber(formatPakMobileNumber(editEmpForm.contactNumber)) 
                               ? 'border-indigo-500 focus:ring-2 focus:ring-indigo-500/20' 
                               : 'border-slate-300 focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500'
                           }`}
@@ -7249,7 +7297,7 @@ export function WebPortal({
               <div className="text-[10.5px] font-bold uppercase tracking-wider text-slate-400 px-1 py-1">Pages &amp; Compliance Workflow</div>
               {searchFilteredPages.map(page => (
                 <button
-                  key={page.tab}
+                  key={`${page.tab}|${page.label}`}
                   type="button"
                   onClick={() => {
                     setActiveTab(page.tab);
@@ -7271,9 +7319,12 @@ export function WebPortal({
                       key={emp.id}
                       type="button"
                       onClick={() => {
+                        // Show this person in the directory (search filled in) and open their record.
+                        setEmployeeSearch(emp.employeeCode || emp.fullName);
                         setActiveTab('employees');
                         setShowQuickSearch(false);
                         setSearchQuery('');
+                        if (userPermissions.includes('manage_employees')) openEditEmployee(emp);
                       }}
                       className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-100 flex items-center justify-between text-sm text-slate-800 transition"
                     >
