@@ -447,7 +447,18 @@ drop_old_trust() {
 code_is_root_owned() {
   [ "$(stat -c %u "$APP_DIR" 2>/dev/null)" = 0 ] || return 1
   [ ! -e "$APP_DIR/node_modules" ] || [ "$(stat -c %u "$APP_DIR/node_modules")" = 0 ] || return 1
-  [ -z "$(find "$APP_DIR" -path "$APP_DIR/node_modules" -prune -o ! -uid 0 -print -quit 2>/dev/null)" ]
+  # Data folders inside the app folder (documents, backups) belong to the app user on purpose: skip them.
+  local prune=(-path "$APP_DIR/node_modules") d
+  while IFS= read -r d; do
+    d="$(readlink -m "$d")"
+    case "$d" in "$APP_DIR"/*) prune+=(-o -path "$d") ;; esac
+  done < <(data_dirs)
+  [ -z "$(find "$APP_DIR" \( "${prune[@]}" \) -prune -o ! -uid 0 -print -quit 2>/dev/null)" ]
+}
+
+# Lists (up to 10) files in the app folder that do not belong to root, for the check message.
+not_root_owned() {
+  find "$APP_DIR" -path "$APP_DIR/node_modules" -prune -o ! -uid 0 -printf '     %u  %p\n' 2>/dev/null | head -10
 }
 
 run_backup() {   # quiet=1 for cron
@@ -735,7 +746,8 @@ cmd_check() {
   find_node
   local problems=0 port url code
   if [ "$(id -u)" -eq 0 ] && ! code_is_root_owned; then
-    warn "Files in $APP_DIR do not all belong to root (an older install, or something changed them)."
+    warn "Files in $APP_DIR do not all belong to root (an older install, or something changed them). First ones:"
+    not_root_owned
     echo "     root does not run Git or Node from a folder another user can change. Fix it with: sudo bash $0 update"
     echo "     (FORCE=1 in front rebuilds even when there is no new code). The other checks are skipped."
     return 1
