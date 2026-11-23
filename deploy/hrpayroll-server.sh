@@ -461,6 +461,12 @@ not_root_owned() {
   find "$APP_DIR" -path "$APP_DIR/node_modules" -prune -o ! -uid 0 -printf '     %u  %p\n' 2>/dev/null | head -10
 }
 
+# Fills the named array with the command prefix that runs a program as the app user (empty when not root).
+as_app_user() {
+  local -n _as="$1"; _as=()
+  if [ "$(id -u)" -eq 0 ] && id "$RUN_USER" >/dev/null 2>&1 && command -v runuser >/dev/null 2>&1; then _as=(runuser -u "$RUN_USER" --); fi
+}
+
 run_backup() {   # quiet=1 for cron
   database_ready || { warn "No DATABASE_URL in .env: backup skipped."; return 1; }
   [ -n "$(get_env "$ENV_FILE" BACKUP_ENCRYPTION_KEY)" ] || { warn "No BACKUP_ENCRYPTION_KEY in .env: backup skipped."; return 1; }
@@ -470,8 +476,7 @@ run_backup() {   # quiet=1 for cron
   info "Database backup (encrypted)"
   # The backup folder belongs to the app user, so the backup runs as that user too: root never writes into a folder
   # www controls. The code it runs is root-owned (fix_owner).
-  local as=()
-  if [ "$(id -u)" -eq 0 ] && id "$RUN_USER" >/dev/null 2>&1 && command -v runuser >/dev/null 2>&1; then as=(runuser -u "$RUN_USER" --); fi
+  local as=(); as_app_user as
   if (cd "$APP_DIR" && "${as[@]}" env PG_DUMP_PATH="${dump:-pg_dump}" "$NODE_BIN/node" scripts/postgres-backup.cjs); then
     ok "Backup written to $(get_env "$ENV_FILE" BACKUP_DIR || echo "$APP_DIR/backups")"
   else
@@ -745,23 +750,28 @@ cmd_check() {
   need_installed
   find_node
   local problems=0 port url code
+  # aaPanel gives a Node project's folder to its run user (www) when it starts or restarts the app, so the code is
+  # often www-owned between updates. That is reported, not fatal: root then runs no Git in the folder, and the
+  # database check runs as www. "update" takes the code back for root before it runs Git, npm or migrations.
+  local rooted=1
   if [ "$(id -u)" -eq 0 ] && ! code_is_root_owned; then
-    warn "Files in $APP_DIR do not all belong to root (an older install, or something changed them). First ones:"
-    not_root_owned
-    echo "     root does not run Git or Node from a folder another user can change. Fix it with: sudo bash $0 update"
-    echo "     (FORCE=1 in front rebuilds even when there is no new code). The other checks are skipped."
-    return 1
+    rooted=0
+    warn "The app folder belongs to $RUN_USER again (aaPanel does this when it restarts the app). Fine for running;"
+    echo "     \"update\" takes it back for root before changing anything. GitHub comparison skipped."
   fi
-  ok "Code: branch $(current_branch), commit $(git -C "$APP_DIR" log -1 --format='%h %ci %s')"
-  if git -C "$APP_DIR" fetch --quiet origin "$(current_branch)" 2>/dev/null; then
-    local behind; behind="$(git -C "$APP_DIR" rev-list --count HEAD.."origin/$(current_branch)")"
-    [ "$behind" = 0 ] && ok "No newer code on GitHub" || warn "$behind newer commit(s) on GitHub: run  bash $0 update"
-  else
-    warn "Cannot reach GitHub with the deploy key (bash $0 key)"
+  if [ "$rooted" = 1 ]; then
+    ok "Code: branch $(current_branch), commit $(git -C "$APP_DIR" log -1 --format='%h %ci %s')"
+    if git -C "$APP_DIR" fetch --quiet origin "$(current_branch)" 2>/dev/null; then
+      local behind; behind="$(git -C "$APP_DIR" rev-list --count HEAD.."origin/$(current_branch)")"
+      [ "$behind" = 0 ] && ok "No newer code on GitHub" || warn "$behind newer commit(s) on GitHub: run  bash $0 update"
+    else
+      warn "Cannot reach GitHub with the deploy key (bash $0 key)"
+    fi
   fi
   [ -f "$ENV_FILE" ] && ok ".env present" || { warn ".env is missing"; problems=$((problems + 1)); }
   [ -f "$APP_DIR/dist/index.html" ] && ok "Web app built ($(stat -c %y "$APP_DIR/dist/index.html" | cut -d. -f1))" || { warn "dist/ is missing: run  bash $0 update"; problems=$((problems + 1)); }
-  if database_ready && (cd "$APP_DIR" && timeout 30 node -e '
+  local as=(); as_app_user as
+  if database_ready && (cd "$APP_DIR" && "${as[@]}" timeout 30 "$NODE_BIN/node" -e '
       require("dotenv").config({ path: [".env.local", ".env"], quiet: true });
       const { Pool } = require("pg"); const p = new Pool({ connectionString: process.env.DATABASE_URL });
       p.query("SELECT count(*)::int n FROM schema_migrations").then(r => { console.log("     migrations applied: " + r.rows[0].n); return p.end(); })
@@ -813,9 +823,7 @@ cmd_admin() {
 cmd_backup() {
   need_installed
   find_node
-  if [ "$(id -u)" -eq 0 ] && ! code_is_root_owned; then
-    die "Files in $APP_DIR do not all belong to root; root will not run code from there. Run once: sudo bash $0 update"
-  fi
+  # The backup runs as the app user (run_backup), so the folder's owner does not matter here.
   run_backup
 }
 
