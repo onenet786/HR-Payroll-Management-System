@@ -13,9 +13,10 @@ function authorizeCameraAttempt({ payload = {}, terminal = {}, terminalId, chall
     authorization.code === code &&
     authorization.expiresAt >= now() &&
     !!payload?.meta?.outReason;
-  // Multi-Face walk-through has no liveness check at all (a photo of a colleague is recognised like a face), so it is
-  // accepted only when an administrator enabled it on this terminal; the punch is then marked for HR review
-  // (savePunch). Everything else needs a server-issued active liveness challenge validated here, in the main process.
+  // Multi-Face walk-through has no active challenge; it is accepted only when an administrator enabled it on this
+  // terminal, and the punch handler then requires the passive live check (blink, no phone / screen / print around the
+  // face, a head with shoulders; windows-kiosk/passive-liveness.cjs). Everything else needs a server-issued active
+  // liveness challenge validated here, in the main process.
   const isMultiFace = payload?.mode === 'multi-face';
   if (isMultiFace && !authorizedReasonRetry && terminal?.allowMultiFaceMode !== true) {
     return { ok: false, message: 'Multi-Face walk-through is turned off on this kiosk. Use the 1-on-1 live face check or fingerprint.', liveness: { ok: true, summary: {} }, multiFaceDisabled: true };

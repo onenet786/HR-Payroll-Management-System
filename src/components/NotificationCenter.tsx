@@ -26,6 +26,9 @@ const TYPE_ICONS: Record<AppNotification['type'], string> = {
   loan_approved: '🏦', loan_rejected: '🚫', asset_assigned: '💻',
   review_due: '⭐', holiday_reminder: '🎉', system: '🔔'
 };
+/** Notices addressed to HR only (server/kiosk.cjs security alerts). */
+const HR_TEAM_TARGET = 'hr-team';
+
 const TYPE_LABELS: Record<AppNotification['type'], string> = {
   leave_approved: 'Leave Approved', leave_rejected: 'Leave Rejected',
   payroll_processed: 'Payroll', loan_approved: 'Loan Approved',
@@ -69,7 +72,9 @@ export function NotificationCenter({
 
   // HR (canManage) sees every notice, including ones sent to a single employee, so it can follow them up;
   // everyone else sees notices for everyone and those addressed to them. "Unread" is always the viewer's own inbox.
-  const addressedToMe = (n: AppNotification) => !n.targetEmployeeId || !currentEmployeeId || n.targetEmployeeId === currentEmployeeId;
+  // 'hr-team' notices (e.g. a kiosk that blocked a photo held up to the camera) reach only HR: the server never sends
+  // them to employees, so whoever receives one is its audience.
+  const addressedToMe = (n: AppNotification) => !n.targetEmployeeId || n.targetEmployeeId === HR_TEAM_TARGET || !currentEmployeeId || n.targetEmployeeId === currentEmployeeId;
   const isRead = (n: AppNotification) => {
     if (!addressedToMe(n)) return n.readBy.includes(n.targetEmployeeId!); // read by the employee it was sent to
     return currentEmployeeId ? n.readBy.includes(currentEmployeeId) : n.readBy.length > 0;
@@ -290,7 +295,7 @@ export function NotificationCenter({
                     <div className="flex items-center gap-3 mt-2 text-[11px] text-slate-500">
                       <span>{timeAgo(n.createdAt)}</span>
                       {n.targetEmployeeId && (
-                        <span className="text-slate-600 font-medium">→ {getEmpName(n.targetEmployeeId)}</span>
+                        <span className="text-slate-600 font-medium">→ {n.targetEmployeeId === HR_TEAM_TARGET ? 'HR team' : getEmpName(n.targetEmployeeId)}</span>
                       )}
                       {n.readBy.length > 0 && <span>{n.readBy.length} read</span>}
                       {!mine && <span className={read ? 'text-emerald-700' : 'text-amber-700'}>{read ? 'Seen by employee' : 'Not yet seen by employee'}</span>}

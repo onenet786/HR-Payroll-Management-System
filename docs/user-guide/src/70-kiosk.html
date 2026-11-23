@@ -58,9 +58,9 @@
 <tr><td>Require employee code before fingerprint scan</td><td>Employees type their code, then scan their finger (extra safety).</td></tr>
 <tr><td>Automatically verify and punch by face</td><td>The face check starts by itself when one face stays in the oval. Recommended on.</td></tr>
 <tr><td>Enable kiosk fullscreen mode on startup</td><td>Fills the whole screen at start-up.</td></tr>
-<tr><td>Allow Multi-Face walk-through mode <b>LOW ASSURANCE</b></td><td><b>Off by default.</b> When on, the Camera tab also offers Multi-Face Stream, which recognises several people at once <b>without</b> the live head-turn check — so a photo of a colleague could be recognised. Every punch made this way is sent to HR for review (Needs Review). Keep it off unless you really need walk-through punching.</td></tr>
+<tr><td>Allow Multi-Face walk-through mode <b>PASSIVE LIVE CHECK</b></td><td><b>Off by default.</b> When on, the Camera tab also offers Multi-Face Stream, which recognises several people walking past. Instead of the head-turn check it uses a <b>passive live check</b>: each face must <b>blink</b>, must <b>not be shown on a phone, screen or printed photo</b>, and must have <b>its own head and shoulders</b> in view. A face shown on a phone or screen is refused and HR gets a high-priority notification. A video of a person blinking can still pass, so the 1-on-1 check stays the strictest.</td></tr>
 <tr><td>Allow unverified fingerprint bridge</td><td>Keep <b>off</b>. Only for an older URU4500Bridge.exe, or one running as a Windows service, that cannot prove it was started by this kiosk (see section G6). Not recommended.</td></tr>
-<tr><td>IP camera URL</td><td>Leave empty. Network cameras cannot prove a real person is present, so camera punching is blocked when this is set. Use the PC's webcam.</td></tr>
+<tr><td>IP camera URL</td><td>Optional. For live face punching use an <b>rtsp://</b> address (needs FFmpeg on the kiosk PC). Hikvision: <span class="ui">rtsp://CAMERA-IP:554/Streaming/Channels/101</span> (main stream). Mount the camera at head height with people passing <b>3–4 m</b> away and set <b>Zoom 2–3</b>, so each face is at least about 60 pixels wide. A snapshot (…/picture) address only attaches a photo.</td></tr>
 </table>
 <p>The footer has <span class="ui">Check Biometric Driver Host</span> and <span class="ui">Test Scanner</span> (tests the fingerprint reader without recording attendance). Further down, <b>Sync Target</b> shows the <b>Kiosk version</b> and server address.</p>
 <div class="box danger"><span class="t">Warning — Clear Local Cache</span><p>The <b>Danger Zone</b> button <span class="ui">Clear Local Cache</span> permanently deletes punches stored on this PC that have not been sent yet. Use it only when your IT person asks, and after a successful Sync. It needs the admin PIN.</p></div>
@@ -82,7 +82,7 @@
 <h3>With your face — one at a time (1-on-1 Challenge, the normal way)</h3>
 <p>This is the default face mode: one person at a time, with the head-turn ("liveness") check. See the steps further below.</p>
 <h3>With your face — several people at once (Multi-Face Stream, only if switched on)</h3>
-<div class="box important"><span class="t">Important — off unless an administrator allows it</span><p>Multi-Face Stream appears only after <b>Allow Multi-Face walk-through mode</b> is switched on in Settings. It has no live face check, so <b>every</b> punch made this way goes to HR for review in 7. Attendance before the month can be locked.</p></div>
+<div class="box important"><span class="t">Important — off unless an administrator allows it</span><p>Multi-Face Stream appears only after <b>Allow Multi-Face walk-through mode</b> is switched on in Settings. Each face must blink once while it is in view; a face shown on a phone, screen or printed photo is refused, nothing is recorded and HR is notified (the photo stays on the kiosk, in its event log).</p></div>
 <figure><img src="shots/81-kiosk-camera-multi.png"><figcaption><b>Camera tab, Multi-Face Stream.</b> Each face gets a box with a name and status. (The picture was taken without a webcam.)</figcaption></figure>
 <ol class="steps">
   <li>On the <span class="ui">Camera</span> tab choose <span class="ui">Multi-Face Stream (Boxes)</span>.</li>
@@ -97,6 +97,8 @@
 <tr><td>Ambiguous · Enter Code</td><td>Your face looks too similar to someone else's. Type your employee code, then look at the camera.</td></tr>
 <tr><td>Not recognized</td><td>No match, or the face matched someone already shown on screen. Step forward one at a time.</td></tr>
 <tr><td>Look at camera · Hold still</td><td>Face turned away, too small or moving.</td></tr>
+<tr><td>Blink to confirm</td><td>Look at the camera and blink once. The kiosk punches only a face it has seen blink.</td></tr>
+<tr><td>Face the camera</td><td>The kiosk could not confirm a real person (for example a phone or photo near the face, or the shoulders hidden behind someone). Step forward on your own and face the camera.</td></tr>
 <tr><td>Sync kiosk in Settings</td><td>The kiosk has no employee data. Press Sync or register it.</td></tr>
 </table>
 <h3>1-on-1 Challenge — step by step</h3>

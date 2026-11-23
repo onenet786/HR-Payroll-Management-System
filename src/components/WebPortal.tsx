@@ -2403,7 +2403,7 @@ export function WebPortal({
   // The bell counts what is addressed to this user (or to everyone); other employees' personal notices
   // (e.g. "your salary was paid") stay in the Notification Center for HR but are not this user's to-do.
   const readerKey = currentUserAccount?.employeeId || currentUserAccount?.username || '';
-  const unreadNotificationCount = notifications.filter(n => (!n.targetEmployeeId || n.targetEmployeeId === currentUserAccount?.employeeId) && !(n.readBy || []).includes(readerKey)).length;
+  const unreadNotificationCount = notifications.filter(n => (!n.targetEmployeeId || n.targetEmployeeId === 'hr-team' || n.targetEmployeeId === currentUserAccount?.employeeId) && !(n.readBy || []).includes(readerKey)).length;
 
   const searchFilteredPages = SEARCHABLE_PAGES.filter(p =>
     tabEnabled(p.tab) && (!searchQuery || p.label.toLowerCase().includes(searchQuery.toLowerCase()) || p.category.toLowerCase().includes(searchQuery.toLowerCase()))

@@ -1232,6 +1232,7 @@ function identifyInQueue(task) {
 // Every camera tile on screen (two with an entrance and an exit camera) runs its own detection and face trackers.
 function startMultiFaceLoop() {
   stopMultiFaceLoop();
+  window.prepareFaceScene?.();
   multiFaceTimer = setInterval(() => {
     cameraTiles().forEach((tile, index) => {
       if (tileBusy[index]) return;
@@ -1252,6 +1253,28 @@ function stopMultiFaceLoop() {
     const ctx = canvas?.getContext('2d');
     if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
   }
+}
+
+// ─── Multi-Face passive live check (blink) ──────────────────────────────────
+// Blink scores (0 open .. 1 closed) of each tracked face over the last 4 s. The same open -> closed -> open rule is
+// checked again by the main process (windows-kiosk/passive-liveness.cjs) before a punch is saved.
+const MULTI_FACE_MIN_PX = 56;
+const BLINK_RISE = 0.25, BLINK_CLOSED = 0.45, BLINK_MAX_MS = 1500, BLINK_KEEP_MS = 4000;
+function recordBlink(tracker, score, now) {
+  if (!Number.isFinite(score)) return;
+  tracker.blinks = [...(tracker.blinks || []).filter(item => now - item.t <= BLINK_KEEP_MS), { t: now, s: score }].slice(-60);
+}
+function blinkSeen(tracker) {
+  // A rise of the score and a fall back (a smiling or squinting face already scores ~0.3 with open eyes).
+  const list = tracker.blinks || [];
+  for (let j = 1; j < list.length - 1; j += 1) {
+    const peak = list[j];
+    if (peak.s < BLINK_CLOSED) continue;
+    const before = list.slice(0, j).some(item => peak.t - item.t <= BLINK_MAX_MS && peak.s - item.s >= BLINK_RISE);
+    const after = list.slice(j + 1).some(item => item.t - peak.t <= BLINK_MAX_MS && peak.s - item.s >= BLINK_RISE);
+    if (before && after) return true;
+  }
+  return false;
 }
 
 async function runMultiFaceStep(tile) {
@@ -1278,7 +1301,9 @@ async function runMultiFaceStep(tile) {
   }
 
   const now = Date.now();
-  const validFaces = (detectedFaces || []).filter(f => f && f.box && f.box.width >= 0.08 && f.box.height >= 0.08);
+  // Face size in pixels of the analysed frame, not a share of it: a wide IP camera (or one with digital zoom) shows a
+  // usable face at a smaller share of the picture than a close webcam. Below ~56 px the face is too small to recognise.
+  const validFaces = (detectedFaces || []).filter(f => f && f.box && f.box.width * vw >= MULTI_FACE_MIN_PX && f.box.height * vh >= MULTI_FACE_MIN_PX);
 
   // Clean stale trackers (faces not seen for 800ms)
   for (const [id, tracker] of multiFaceTrackers.entries()) {
@@ -1312,6 +1337,7 @@ async function runMultiFaceStep(tile) {
       tracker.box = box;
       tracker.lastSeen = now;
       tracker.stableFrames = (tracker.stableFrames || 0) + 1;
+      recordBlink(tracker, face.blink, now);
     } else {
       const id = nextTrackId++;
       tracker = {
@@ -1325,7 +1351,9 @@ async function runMultiFaceStep(tile) {
         employeeName: '',
         employeeCode: '',
         isPunching: false,
+        blinks: [],
       };
+      recordBlink(tracker, face.blink, now);
       multiFaceTrackers.set(id, tracker);
     }
 
@@ -1347,7 +1375,11 @@ async function runMultiFaceStep(tile) {
       }
 
       if (tracker.status !== 'matched' && tracker.status !== 'cooldown') {
-        if (tracker.stableFrames >= 3 && now >= (tracker.retryAfter || 0)) {
+        if (tracker.stableFrames >= 3 && now >= (tracker.retryAfter || 0) && !blinkSeen(tracker)) {
+          // Passive live check: a printed photo or a still picture cannot blink.
+          tracker.status = 'verifying';
+          tracker.statusText = 'Blink to confirm';
+        } else if (tracker.stableFrames >= 3 && now >= (tracker.retryAfter || 0)) {
           tracker.isPunching = true;
           tracker.status = 'verifying';
           tracker.statusText = 'Verifying…';
@@ -1357,12 +1389,16 @@ async function runMultiFaceStep(tile) {
               const result = await identifyInQueue(async () => {
                 const descriptor = await captureStableDescriptor(() => tracker.box, video);
                 const evidence = await captureEvidence(video).catch(() => null);
+                // Scene around the face (phone / screen / print, head and shoulders), measured on this frame.
+                const scene = window.measureFaceScene ? await window.measureFaceScene(video, tracker.box).catch(() => null) : null;
+                const startedAt = tracker.blinks[0]?.t || Date.now();
+                const passiveProof = scene && { v: 1, blink: tracker.blinks.map(item => ({ t: item.t - startedAt, s: item.s })), scene };
                 const code = el.codeInput?.value?.trim() || '';
                 // Employees already shown on another face in view cannot be matched again.
                 const excludeEmployeeIds = [...multiFaceTrackers.values()]
                   .filter(other => other !== tracker && other.matchedEmployeeId && Date.now() - other.lastSeen < 1500)
                   .map(other => other.matchedEmployeeId);
-                const payload = { mode: 'multi-face', code, descriptor, evidence, excludeEmployeeIds, meta: cameraMeta(tile) };
+                const payload = { mode: 'multi-face', code, descriptor, evidence, excludeEmployeeIds, passiveProof, meta: cameraMeta(tile) };
                 const response = await api.punchCamera(payload);
                 // Claim the employee before the next face is identified (a checkout-reason prompt may follow).
                 if (response?.employee) tracker.matchedEmployeeId = response.employee.id || response.employee.employeeCode;
@@ -1374,7 +1410,16 @@ async function runMultiFaceStep(tile) {
                 outReason => api.punchCamera({ ...punchPayload, cameraAuthorization: result.response.cameraAuthorization, meta: { ...punchPayload.meta, outReason } })
               );
 
-              if (finalResult?.employee) {
+              if (finalResult?.needBlink || finalResult?.refused) {
+                // Blink not seen by the main process, or a photo / screen / missing body: never punched. The text
+                // does not say which check failed.
+                tracker.status = finalResult.needBlink ? 'verifying' : 'unknown';
+                tracker.statusText = finalResult.needBlink ? 'Blink to confirm' : 'Face the camera';
+                if (finalResult.needBlink) tracker.blinks = [];
+                tracker.matchedEmployeeCode = null;
+                tracker.matchedEmployeeId = null;
+                tracker.retryAfter = Date.now() + (finalResult.refused ? 4000 : 600);
+              } else if (finalResult?.employee) {
                 const emp = finalResult.employee;
                 const empCode = emp.employeeCode || emp.id;
                 tracker.matchedEmployeeCode = empCode;
@@ -2758,9 +2803,9 @@ async function saveSettings() {
       tone: 'danger',
       eyebrow: 'Security Exception',
       title: 'Allow Multi-Face walk-through?',
-      message: 'Multi-Face mode punches people as they walk past without a live face check, so a printed or phone photo of a colleague can be recognised.',
-      detail: 'Every Multi-Face punch is sent to HR for review. The 1-on-1 live face check stays available.',
-      confirmLabel: 'Allow Low-Assurance Mode',
+      message: 'Multi-Face mode punches people as they walk past. Each face must blink, must not be shown on a phone, screen or printed photo, and must have its own head and shoulders in view.',
+      detail: 'A face shown on a phone or screen is refused and HR is alerted. A video of a person blinking can still pass: for the strictest check use the 1-on-1 live face check, which stays available.',
+      confirmLabel: 'Allow Multi-Face',
       cancelLabel: 'Keep Off',
       showCancel: true,
     });

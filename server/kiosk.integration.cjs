@@ -347,3 +347,42 @@ test('administrators create setup codes in the web portal; a code registers up t
   assert.equal((await call('POST', '/api/kiosk/register', { setupToken: token2 })).status, 401, 'cancelled code');
   await pool.query(`DELETE FROM users WHERE id='u-kt-admin2'`);
 });
+
+test('a kiosk reports a blocked photo / screen attempt as an HR-only notification, once per alert', async () => {
+  const { createSession } = require('./sessions.cjs');
+  const ua = 'KioskAlertTest/1.0';
+  const fakeRequest = { ip: '127.0.0.1', get: name => (name.toLowerCase() === 'user-agent' ? ua : undefined) };
+  const registered = (await call('POST', '/api/kiosk/register', { email: 'u-kiosk', password: 'Kiosk-Pass-2026', terminalName: 'Gate A' })).body;
+  const auth = { 'x-kiosk-token': registered.deviceToken };
+  const alert = { id: 'alert-1700000000000-abc123', at: new Date().toISOString(), kind: 'spoof-device', employeeId: 'e-kt-1', employeeName: 'Kiosk e-kt-1', employeeCode: 'ONS-KT-e-kt-1', device: 'cell phone', cameraName: 'Entrance', evidenceId: 'ev-1' };
+
+  assert.equal((await call('POST', '/api/kiosk/security-alert', { alert })).status, 401, 'device key required');
+  const first = await call('POST', '/api/kiosk/security-alert', { alert }, auth);
+  assert.equal(first.status, 201);
+  assert.equal((await call('POST', '/api/kiosk/security-alert', { alert }, auth)).status, 200, 'a resend does not duplicate');
+  const rows = (await pool.query(`SELECT target_employee_id, priority, data FROM notifications WHERE id=$1`, [first.body.id])).rows;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].target_employee_id, 'hr-team');
+  assert.equal(rows[0].data.targetEmployeeId, 'hr-team');
+  assert.equal(rows[0].priority, 'high');
+  assert.match(rows[0].data.message, /Gate A .*Kiosk e-kt-1 \(ONS-KT-e-kt-1\).*mobile phone/);
+
+  for (const bad of [{ ...alert, id: 'x/../1' }, { ...alert, kind: 'other' }, { ...alert, device: 'cup' }, { ...alert, employeeId: '' }, { ...alert, at: '2001-01-01T00:00:00Z' }]) {
+    assert.equal((await call('POST', '/api/kiosk/security-alert', { alert: bad }, auth)).status, 400, JSON.stringify(bad).slice(0, 60));
+  }
+
+  // HR reads it; an employee's own notification list never contains it.
+  const hr = { authorization: `Bearer ${await createSession('u-kiosk-hr', fakeRequest)}`, 'user-agent': ua };
+  const hrList = await call('GET', '/api/documents/notifications', null, hr);
+  assert.equal(hrList.status, 200);
+  assert.ok(hrList.body.documents.some(doc => doc.document_id === first.body.id), 'HR sees the alert');
+  await pool.query(`DELETE FROM users WHERE id='u-kt-emp'`);
+  await pool.query(`INSERT INTO users(id, email, username, role_id, status, data) VALUES('u-kt-emp','u-kt-emp@test.local','u-kt-emp','role-employee','Active',$1::jsonb)`,
+    [JSON.stringify({ id: 'u-kt-emp', email: 'u-kt-emp@test.local', username: 'u-kt-emp', roleId: 'role-employee', status: 'Active', employeeId: 'e-kt-1' })]);
+  const employeeUser = { authorization: `Bearer ${await createSession('u-kt-emp', fakeRequest)}`, 'user-agent': ua };
+  const own = await call('GET', '/api/documents/notifications', null, employeeUser);
+  assert.ok(!(own.body.documents || []).some(doc => doc.document_id === first.body.id), 'employees never see HR alerts');
+  assert.notEqual((await call('GET', `/api/documents/notifications/${first.body.id}`, null, employeeUser)).status, 200);
+  await pool.query(`DELETE FROM notifications WHERE id LIKE 'kiosk-alert-%'`);
+  await pool.query(`DELETE FROM users WHERE id='u-kt-emp'`);
+});

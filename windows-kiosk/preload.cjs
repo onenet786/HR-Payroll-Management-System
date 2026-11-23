@@ -10,7 +10,27 @@ function invokeCameraPunch(payload = {}) {
     challengeId: String(payload.livenessProof.challengeId || '').slice(0, 128),
     observations: Array.isArray(observations) ? observations.map(item => ({ at: Number(item?.at), yaw: Number(item?.yaw), centerX: Number(item?.centerX), centerY: Number(item?.centerY), scale: Number(item?.scale) })) : undefined,
   });
-  return ipcRenderer.invoke('kiosk:punch-camera', { ...payload, livenessProof });
+  return ipcRenderer.invoke('kiosk:punch-camera', { ...payload, livenessProof, passiveProof: isMultiFace ? passiveProofOf(payload.passiveProof) : undefined });
+}
+
+// Multi-Face passive live check measurements (decided in the main process, windows-kiosk/passive-liveness.cjs):
+// only numbers and the known device labels pass, with fixed limits.
+function passiveProofOf(proof) {
+  if (!proof || typeof proof !== 'object') return undefined;
+  const n = value => Number(value);
+  const box = b => b && { x: n(b.x), y: n(b.y), w: n(b.w), h: n(b.h) };
+  const pt = p => p && { x: n(p.x), y: n(p.y), v: n(p.v) };
+  const scene = proof.scene || {};
+  return {
+    v: n(proof.v),
+    blink: (Array.isArray(proof.blink) ? proof.blink.slice(-120) : []).map(item => ({ t: n(item?.t), s: n(item?.s) })),
+    scene: {
+      face: box(scene.face),
+      devices: (Array.isArray(scene.devices) ? scene.devices.slice(0, 20) : []).map(item => ({ label: String(item?.label || '').slice(0, 20), score: n(item?.score), box: box(item?.box) })),
+      bodies: (Array.isArray(scene.bodies) ? scene.bodies.slice(0, 10) : []).map(item => ({ nose: pt(item?.nose), ls: pt(item?.ls), rs: pt(item?.rs) })),
+      bodyRegionCut: scene.bodyRegionCut === true,
+    },
+  };
 }
 
 contextBridge.exposeInMainWorld('kioskApi', {

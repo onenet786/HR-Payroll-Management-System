@@ -176,6 +176,52 @@ router.get('/sync/:collection', requireKiosk, async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
+// A Multi-Face kiosk refused a punch because the face was shown on a phone, screen or print. The kiosk keeps the
+// evidence photo; HR gets a high-priority notification addressed to the HR team (targetEmployeeId 'hr-team', so
+// employees never see it). Idempotent per kiosk alert id, and limited to 30 alerts per kiosk per hour.
+const ALERT_DEVICES = new Set(['cell phone', 'tv', 'laptop', 'book']);
+const DEVICE_WORDS = { 'cell phone': 'mobile phone', tv: 'screen', laptop: 'laptop screen', book: 'printed photo or paper' };
+const text = (value, max = 120) => String(value ?? '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, max);
+router.post('/security-alert', requireKiosk, async (req, res, next) => {
+  try {
+    const alert = req.body?.alert;
+    if (!alert || typeof alert !== 'object' || Array.isArray(alert)) return res.status(400).json({ error: 'Invalid alert.' });
+    if (typeof alert.id !== 'string' || !/^alert-[A-Za-z0-9-]{1,60}$/.test(alert.id)) return res.status(400).json({ error: 'Invalid alert id.' });
+    if (alert.kind !== 'spoof-device' || !ALERT_DEVICES.has(alert.device)) return res.status(400).json({ error: 'Unknown alert kind.' });
+    if (!safeId(alert.employeeId)) return res.status(400).json({ error: 'Alert is missing the employee.' });
+    const at = Date.parse(typeof alert.at === 'string' ? alert.at : '');
+    if (!Number.isFinite(at) || Math.abs(Date.now() - at) > 8 * 86_400_000) return res.status(400).json({ error: 'Alert time is outside the allowed window.' });
+    const id = `kiosk-alert-${req.kiosk.deviceId}-${alert.id}`.slice(0, 240);
+    const prefix = `kiosk-alert-${req.kiosk.deviceId}-`;
+    const recent = await pool.query(`SELECT count(*)::int AS n FROM notifications WHERE left(id, $2) = $1 AND created_at > now() - interval '1 hour'`, [prefix, prefix.length]);
+    if (recent.rows[0].n >= 30) return res.status(429).json({ error: 'Too many alerts from this kiosk; the rest stay in its event log.' });
+    const kioskName = (await pool.query(`SELECT name FROM kiosk_devices WHERE id=$1`, [req.kiosk.deviceId])).rows[0]?.name || 'Kiosk';
+    const employee = (await pool.query(`SELECT data FROM employees WHERE id=$1`, [alert.employeeId])).rows[0]?.data || {};
+    const who = text(employee.fullName || alert.employeeName || 'an employee');
+    const code = text(employee.employeeCode || alert.employeeCode, 40);
+    const when = new Date(at).toLocaleString('en-GB', { timeZone: 'Asia/Karachi', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+    const data = {
+      id,
+      type: 'system',
+      priority: 'high',
+      title: 'Kiosk blocked a photo / screen attempt',
+      message: `${text(kioskName)} (${text(alert.cameraName, 60) || 'camera'}) refused a punch for ${who}${code ? ` (${code})` : ''} at ${when}: the face was shown on a ${DEVICE_WORDS[alert.device]}. `
+        + `Nothing was recorded. The evidence photo is kept on the kiosk${alert.evidenceId ? ` (${text(alert.evidenceId, 60)})` : ''}: check who was at the camera.`,
+      targetEmployeeId: 'hr-team',
+      createdAt: new Date().toISOString(),
+      readBy: [],
+      source: 'kiosk-security',
+      kioskDeviceId: req.kiosk.deviceId,
+      employeeId: alert.employeeId,
+    };
+    const inserted = await pool.query(
+      `INSERT INTO notifications(id, target_employee_id, type, priority, data) VALUES($1,'hr-team','system','high',$2) ON CONFLICT (id) DO NOTHING`,
+      [id, data]);
+    if (inserted.rowCount) await audit(req, 'kiosk_spoof_alert', id, { employeeId: alert.employeeId, device: alert.device });
+    res.status(inserted.rowCount ? 201 : 200).json({ ok: true, id });
+  } catch (error) { next(error); }
+});
+
 router.post('/punch', requireKiosk, async (req, res, next) => {
   try {
     const { collection, documentId, data, deviceSentAt, queued } = req.body || {};

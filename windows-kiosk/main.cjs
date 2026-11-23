@@ -24,6 +24,7 @@ const {
 } = require('./attendance-rules.cjs');
 const { FACE_IDENTIFY_THRESHOLD, FACE_VERIFY_THRESHOLD, FACE_STRONG_DISTANCE, normalizeFaceDescriptor, identifyFace } = require('./face-match.cjs');
 const { parseSetupCode, normalizeServerAddress, orderedPortalUrls, tryPortalUrls } = require('./setup-code.cjs');
+const { evaluatePassiveLiveness } = require('./passive-liveness.cjs');
 const { createAdminGuard } = require('./admin-pin.cjs');
 const { newBridgeSecret, clientHandshake, verifyBridgeProof, parseHttpResponseHead } = require('./bridge-auth.cjs');
 
@@ -923,8 +924,11 @@ async function performSyncNow() {
   if (!report.reachable) report.errors.push('attendance server unreachable (offline); punches stay queued');
   if (report.reachable && !report.notRegistered) store.lastSync = new Date().toISOString();
   store.lastSyncReport = report;
-  writeStore(store);
+  // Alerts are read from the file as written here, so this sync's save cannot drop or resend them.
+  delete store.pendingAlerts;
+  writeStore({ ...store, pendingAlerts: readStore().pendingAlerts || [] });
   addEvent('sync', 'Kiosk sync completed', report);
+  sendPendingAlerts().catch(() => undefined);
   return { report, store };
 }
 
@@ -1465,7 +1469,7 @@ ipcMain.handle('kiosk:save-settings', async (_event, submitted) => {
     allowUnverifiedBridge: !!settings.allowUnverifiedBridge,
   });
   writeStore(store);
-  for (const [field, label] of [['allowCodeOnlyPunch', 'Code-only attendance'], ['allowMultiFaceMode', 'Multi-Face walk-through (no liveness, punches sent for review)'], ['allowUnverifiedBridge', 'Unverified fingerprint bridge']]) {
+  for (const [field, label] of [['allowCodeOnlyPunch', 'Code-only attendance'], ['allowMultiFaceMode', 'Multi-Face walk-through (passive live check: blink, no phone or screen, head and shoulders)'], ['allowUnverifiedBridge', 'Unverified fingerprint bridge']]) {
     if (!!before[field] !== !!store.terminal[field]) addEvent('security', `${label} ${store.terminal[field] ? 'enabled' : 'disabled'}`);
   }
 
@@ -1696,6 +1700,41 @@ function rendererPunchMeta(payload) {
   return outReason ? { outReason } : {};
 }
 
+// Security alerts for HR (a photo or screen held up to a Multi-Face camera). Sent straight away when the server is
+// reachable, otherwise kept (max 50) and sent with the next sync. The evidence photo stays on this kiosk.
+function queueSecurityAlert(alert) {
+  const store = readStore();
+  const item = { id: `alert-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, at: new Date().toISOString(), ...alert };
+  store.pendingAlerts = [...(store.pendingAlerts || []), item].slice(-50);
+  writeStore(store);
+  sendPendingAlerts().catch(() => undefined);
+}
+
+let sendingAlerts = false;
+async function sendPendingAlerts() {
+  if (sendingAlerts || !readDeviceRegistration()) return 0;
+  sendingAlerts = true;
+  let sent = 0;
+  try {
+    for (const item of [...(readStore().pendingAlerts || [])]) {
+      try {
+        await portalRequest('POST', '/api/kiosk/security-alert', { alert: item });
+      } catch (error) {
+        // No HTTP answer (offline) or a server error: keep it for the next sync. A refusal (4xx) is final.
+        const status = Number(error?.statusCode);
+        if (!(status >= 400 && status < 500)) break;
+      }
+      const store = readStore();
+      store.pendingAlerts = (store.pendingAlerts || []).filter(other => other.id !== item.id);
+      writeStore(store);
+      sent += 1;
+    }
+  } finally {
+    sendingAlerts = false;
+  }
+  return sent;
+}
+
 // Evidence ids the renderer passes must be photos this process saved (kiosk:save-evidence) in the last 2 minutes.
 function savedEvidence(store, evidence) {
   const id = typeof evidence?.id === 'string' ? evidence.id : '';
@@ -1728,6 +1767,12 @@ ipcMain.handle('kiosk:punch-camera', async (_event, payload) => {
   const liveness = authorization.liveness;
   // Decided by authorizeCameraAttempt from the terminal settings, never by the renderer's mode alone.
   const multiFace = liveness.summary?.method === 'multi-face-walkthrough';
+  // Multi-Face passive live check (windows-kiosk/passive-liveness.cjs): blink, no phone/screen/print around the face,
+  // and a head with shoulders that belongs to the face. No blink yet is not an attack: the person is asked to blink.
+  const passive = multiFace ? evaluatePassiveLiveness(payload.passiveProof) : null;
+  if (passive && !passive.ok && !['device', 'no-body'].includes(passive.code)) {
+    return { ok: false, needBlink: passive.code === 'blink', message: passive.message };
+  }
   const employees = mergeEmployeeBiometricTemplates(store.employees || [], store.biometricTemplates || []);
   let typedEmployee = payload.code ? findEmployeeByCode(employees, payload.code) : null;
   let crossBranch = false;
@@ -1780,6 +1825,19 @@ ipcMain.handle('kiosk:punch-camera', async (_event, payload) => {
   const employee = match.employee;
   if (employee.status === 'Terminated') return { ok: false, message: 'This employee account is terminated.' };
   if (employee.status === 'Suspended') return { ok: false, message: 'This employee account is suspended.' };
+  if (passive && !passive.ok) {
+    const evidence = savedEvidence(store, payload.evidence);
+    const camera = authorization.camera;
+    const what = passive.code === 'device' ? `a ${passive.device.label} (photo or screen) around the face` : 'no head and shoulders belonging to the face';
+    addEvent('security', `Multi-Face punch refused for ${employee.fullName || employee.employeeCode}: ${what}.`, { employeeId: employee.id, evidenceId: evidence?.id || null, cameraId: camera?.id || '' });
+    if (passive.spoof) {
+      queueSecurityAlert({
+        kind: 'spoof-device', employeeId: employee.id, employeeName: employee.fullName || '', employeeCode: employee.employeeCode || '',
+        device: passive.device.label, cameraName: camera?.name || (camera ? 'IP camera' : 'Webcam'), evidenceId: evidence?.id || '',
+      });
+    }
+    return { ok: false, refused: true, spoofSuspected: !!passive.spoof, message: passive.message };
+  }
 
   // Direction and camera identity come from the terminal's settings (resolved by authorizeCameraAttempt), not the payload.
   const camera = authorization.camera;
@@ -1793,7 +1851,7 @@ ipcMain.handle('kiosk:punch-camera', async (_event, payload) => {
     threshold: matchThreshold,
     recognizedBy: crossBranch ? 'cross-branch-code-face-liveness' : typedEmployee ? 'camera-code-face-liveness' : 'camera-face-liveness',
     crossBranch,
-    livenessMethod: multiFace ? 'multi-face-walkthrough' : 'active-turn-v1',
+    livenessMethod: multiFace ? 'multi-face-passive-v1' : 'active-turn-v1',
   });
   if (result?.needsOutReason) {
     const token = require('crypto').randomBytes(24).toString('hex');
