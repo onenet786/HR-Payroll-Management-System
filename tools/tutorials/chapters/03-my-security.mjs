@@ -113,8 +113,26 @@ export default {
     },
     {
       say: {
-        en: 'Passwords are managed by your administrator, never by an email link. If you forget yours, or think someone knows it, ask the administrator. They open Users, Roles and Permissions.',
-        ur: 'پاس ورڈ ایڈمنسٹریٹر سنبھالتا ہے، ای میل لنک کے ذریعے کبھی نہیں۔ اگر آپ پاس ورڈ بھول جائیں یا شک ہو کہ کسی کو معلوم ہے تو ایڈمنسٹریٹر سے کہیں۔ وہ "Users, Roles & Permissions" کھولتا ہے۔',
+        en: 'To change your own password, click Change password in the banner. Type your current password, then the new one twice, at least twelve characters. Your other signed-in devices are signed out. We click Cancel.',
+        ur: 'اپنا پاس ورڈ خود بدلنے کے لیے بینر میں "Change password" پر کلک کریں۔ موجودہ پاس ورڈ لکھیں، پھر نیا پاس ورڈ دو بار، کم از کم بارہ حروف۔ دوسرے آلات سے آپ لاگ آؤٹ ہو جاتے ہیں۔ ہم "Cancel" پر کلک کرتے ہیں۔',
+      },
+      caption: {
+        en: 'Change password: current password, then the new one twice (at least 12 characters). Other devices are signed out.',
+        ur: '"Change password": موجودہ پاس ورڈ، پھر نیا پاس ورڈ دو بار (کم از کم 12 حروف)۔ دوسرے آلات سے لاگ آؤٹ ہو جاتے ہیں۔',
+      },
+      do: async h => {
+        await h.click('Change password', { after: 900 });
+        await h.point({ text: 'Change my password' }, { hold: 900 });
+        await h.point({ label: 'Current password' }, { hold: 800 });
+        await h.point({ label: 'New password', exact: true }, { hold: 800 });
+        await h.point({ label: 'Repeat new password' }, { hold: 800 });
+        await h.click(page => page.locator('form', { hasText: 'Change my password' }).getByRole('button', { name: 'Cancel' }), { after: 600 });
+      },
+    },
+    {
+      say: {
+        en: 'If you forget your password, or think someone knows it, ask your administrator; there is no email reset link. The administrator opens Users, Roles and Permissions.',
+        ur: 'اگر آپ پاس ورڈ بھول جائیں یا شک ہو کہ کسی کو معلوم ہے تو ایڈمنسٹریٹر سے کہیں؛ ای میل سے ری سیٹ کا کوئی لنک نہیں ہے۔ ایڈمنسٹریٹر "Users, Roles & Permissions" کھولتا ہے۔',
       },
       do: async h => { await h.nav('Setup & Administration', 'Users, Roles & Permissions'); },
     },

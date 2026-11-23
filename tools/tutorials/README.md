@@ -16,8 +16,10 @@ Output: `dist-tutorials/English/` and `dist-tutorials/Urdu/` (not committed): `N
   is the production bundle) and run `server.cjs` from a folder whose `.env` points `DATABASE_URL` at the demo database,
   with `NODE_ENV=production DEBUG=false PORT=8090 MFA_ENFORCE_PRIVILEGED=false`.
 - Microsoft Edge, `ffmpeg`/`ffprobe` on PATH, `playwright-core` (found in the npx cache or via `PLAYWRIGHT_CORE`).
-- Windows voices: Microsoft Hazel (English) and Microsoft Uzma (Urdu:
-  `Add-WindowsCapability -Online -Name 'Language.TextToSpeech~~~ur-PK~0.0.1.0'`, as Administrator).
+- Voices: English uses the Windows voice Microsoft Hazel (`lib/tts.ps1`). Windows has **no Urdu voice**, so Urdu uses
+  Microsoft's online neural voice `ur-PK-UzmaNeural` through the Edge read-aloud service (`lib/edge_tts_batch.py`;
+  needs Python, `pip install edge-tts` and internet; only the narration text is sent). Override with
+  `TUTORIAL_UR_VOICE=edge:ur-PK-AsadNeural` (male) or any `edge:<voice>`. The Edge service is unofficial and may change.
 - `tools/tutorials/.cache/tutorial-base.dump`: snapshot of the demo database. Restore it before a full recording so
   every run starts from the same data:
   `pg_restore --clean --if-exists -d <demo database url> tools/tutorials/.cache/tutorial-base.dump`

@@ -135,8 +135,8 @@ export default {
     },
     {
       say: {
-        en: 'Important: the generated administrator password is shown only this once and is not saved anywhere. Write it down now, and change it at the first sign-in.',
-        ur: 'اہم: بنایا گیا ایڈمنسٹریٹر پاس ورڈ صرف ایک بار دکھایا جاتا ہے اور کہیں محفوظ نہیں ہوتا۔ اسے ابھی لکھ لیں، اور پہلی بار لاگ ان کرتے وقت تبدیل کریں۔',
+        en: 'Important: the generated administrator password is shown only this once and is not saved anywhere, not even in the setup log. Write it down now, and change it at the first sign-in. The OneNet vendor console password shown below it is for OneNet’s records only.',
+        ur: 'اہم: بنایا گیا ایڈمنسٹریٹر پاس ورڈ صرف ایک بار دکھایا جاتا ہے اور کہیں محفوظ نہیں ہوتا، سیٹ اپ لاگ میں بھی نہیں۔ اسے ابھی لکھ لیں، اور پہلی بار لاگ ان کرتے وقت تبدیل کریں۔ اس کے نیچے دکھایا گیا ون نیٹ وینڈر کنسول پاس ورڈ صرف ون نیٹ کے ریکارڈ کے لیے ہے۔',
       },
       do: async h => { await mark(h, 's-pw', 2600); },
     },
@@ -267,10 +267,10 @@ export default {
     },
     {
       say: {
-        en: 'Every PC and kiosk must trust the certificate once. Copy the folder C HRPayroll https-ca to the PC, then right-click Install-HRPayroll-CA dot cmd and choose Run as administrator.',
-        ur: 'نیا سرٹیفکیٹ ہر کمپیوٹر اور کیوسک پر ایک بار قابلِ اعتماد بنانا ضروری ہے۔ C HRPayroll https-ca فولڈر کمپیوٹر پر کاپی کریں، مثلاً یو ایس بی کے ذریعے۔ پھر Install-HRPayroll-CA.cmd پر رائٹ کلک کر کے "Run as administrator" منتخب کریں۔',
+        en: 'Every PC and kiosk must then trust the certificate. Copy the folder C HRPayroll https-ca to the PC, then right-click Install-HRPayroll-CA dot cmd and choose Run as administrator. Each run of Enable-Https makes a new certificate authority, so do this again whenever you run it.',
+        ur: 'پھر نیا سرٹیفکیٹ ہر کمپیوٹر اور کیوسک پر قابلِ اعتماد بنانا ضروری ہے۔ Enable-Https ہر بار نیا سرٹیفکیٹ اتھارٹی بناتا ہے، اس لیے جب بھی اسے چلائیں یہ دوبارہ کریں۔ C HRPayroll https-ca فولڈر کمپیوٹر پر کاپی کریں، مثلاً یو ایس بی کے ذریعے۔ پھر Install-HRPayroll-CA.cmd پر رائٹ کلک کر کے "Run as administrator" منتخب کریں۔',
       },
-      caption: { en: 'On every PC and kiosk (once): copy C:\\HRPayroll\\https-ca, right-click Install-HRPayroll-CA.cmd → Run as administrator.', ur: 'ہر PC اور کیوسک پر (ایک بار): C:\\HRPayroll\\https-ca کاپی کریں، Install-HRPayroll-CA.cmd پر رائٹ کلک ← "Run as administrator"۔' },
+      caption: { en: 'On every PC and kiosk (again after each Enable-Https run): copy C:\\HRPayroll\\https-ca, right-click Install-HRPayroll-CA.cmd → Run as administrator.', ur: 'ہر PC اور کیوسک پر (ہر بار Enable-Https چلانے کے بعد): C:\\HRPayroll\\https-ca کاپی کریں، Install-HRPayroll-CA.cmd پر رائٹ کلک ← "Run as administrator"۔' },
       do: async h => {
         await run(h, () => { window.sim.hide('#ps'); window.sim.pcMode(); window.sim.view('ca'); });
         await h.point({ css: '#f-cer' }, { hold: 700 });

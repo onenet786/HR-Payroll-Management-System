@@ -24,8 +24,11 @@
       $('stLocation').value = '';
       const ip = $('stIpCameraFields'); if (ip) ip.classList.add('hidden');
       tick(); setInterval(tick, 1000);
-      $('settingsBtn').onclick = kf.openSettings;
-      $('regBannerBtn').onclick = kf.openSettings;
+      // A new kiosk has no admin PIN: the first Settings open asks to set one (windows-kiosk/admin-pin.cjs).
+      $('settingsBtn').onclick = kf.askPin;
+      $('regBannerBtn').onclick = kf.askPin;
+      $('pinConfirm').onclick = () => { $('pinOverlay').classList.add('hidden'); kf.pinSet = true; kf.openSettings(); };
+      $('pinCancel').onclick = $('pinClose').onclick = () => $('pinOverlay').classList.add('hidden');
       $('settingsClose').onclick = kf.closeSettings;
       document.querySelectorAll('input[name=stRegMethod]').forEach(r => { r.onchange = kf.method; });
       $('stRegSetupCode').oninput = kf.preview;
@@ -33,6 +36,14 @@
       $('stStartBridge').onclick = () => { $('stStartBridge').textContent = 'Driver Host Ready'; };
       $('stCameraSource').onchange = () => $('stIpCameraFields')?.classList.toggle('hidden', $('stCameraSource').value !== 'ip');
       $('stSave').onclick = kf.save;
+    },
+    askPin() {
+      if (kf.pinSet) { kf.openSettings(); return; }
+      $('pinTitle').textContent = 'Set the admin PIN';
+      $('pinText').textContent = 'This kiosk has no admin PIN yet. Choose one now; it will be needed for Settings, Exit, clearing the local cache and removing the device key. Keep it away from employees.';
+      $('pinConfirmField').classList.remove('hidden');
+      $('pinOverlay').classList.remove('hidden');
+      setTimeout(() => $('pinInput').focus(), 50);
     },
     openSettings() { $('settingsOverlay').classList.remove('hidden'); },
     closeSettings() { $('settingsOverlay').classList.add('hidden'); },

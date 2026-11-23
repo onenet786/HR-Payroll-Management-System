@@ -16,6 +16,8 @@
   };
   const nowTime = () => { const d = new Date(); return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; };
 
+  const DEMO_PIN = '482915';
+  let adminUnlocked = false;
   const branch = { id: 'br-demo-hq', code: 'HQ', name: 'Head Office', city: 'Lahore' };
   const fp = n => Array.from({ length: n }, (_, i) => ({ template: `demo-template-${i + 1}` }));
   const employees = [
@@ -155,6 +157,17 @@
       };
     },
     getEvents: async () => clone(events),
+    // Admin PIN (windows-kiosk/admin-pin.cjs): this demo kiosk already has PIN 482915. Settings asks for it; closing
+    // Settings locks again, as on a real kiosk.
+    adminStatus: async () => ({ pinSet: true, unlocked: adminUnlocked, lockedUntil: null }),
+    adminUnlock: async pin => {
+      await sleep(250);
+      if (String(pin) !== DEMO_PIN) { addEvent('security', 'Wrong admin PIN entered'); return { ok: false, message: 'Wrong PIN.' }; }
+      adminUnlocked = true;
+      return { ok: true };
+    },
+    adminSetPin: async () => { addEvent('security', 'Admin PIN changed'); adminUnlocked = true; return { ok: true }; },
+    adminLock: async () => { adminUnlocked = false; return { ok: true }; },
     clearLocalAttendanceCache: async () => ({ ok: true, clearedCount: 0, discardedPendingCount: 0 }),
     saveSettings: async settings => {
       const { ipCameras = [], ...rest } = settings || {};

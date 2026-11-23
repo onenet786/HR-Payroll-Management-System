@@ -2563,7 +2563,11 @@ async function openSettings() {
     el.stSyncInfo.textContent = [
       `Kiosk version: ${kioskState.appVersion || 'unknown'}`,
       kioskState.deviceRegistration?.clientName ? `Client: ${kioskState.deviceRegistration.clientName}` : null,
-      `Portal: ${kioskState.deviceRegistration?.portalUrl || st.portalUrl}${kioskState.deviceRegistration?.usingFallback ? ' (fallback address)' : ''}`,
+      // Before registration the kiosk has no client server of its own; the built-in default is only a placeholder and
+      // is replaced by the address from the setup code (or typed server address) when the kiosk is registered.
+      kioskState.deviceRegistration?.registered
+        ?`Portal: ${kioskState.deviceRegistration.portalUrl}${kioskState.deviceRegistration.usingFallback ? ' (fallback address)' : ''}`
+        : 'Portal: not registered yet. Register this kiosk below (setup code or server address) to connect it to the client\'s server.',
       (st.portalUrls || []).length > 1 ? `Server addresses: ${st.portalUrls.join(', ')}` : null,
       `Collections: ${(st.collections || []).join(', ')}`,
       `Store: ${kioskState.storePath || '—'}`,

@@ -125,46 +125,48 @@ export default {
     },
     {
       say: {
-        en: 'Here are the requests waiting for a decision. Check the amount, the number of months and the reason.',
-        ur: 'یہ وہ درخواستیں ہیں جن پر فیصلہ ہونا ہے۔ رقم، مہینوں کی تعداد اور وجہ دیکھ لیں۔',
+        en: 'Zainab’s request is now waiting for a decision. Because you entered it yourself, the card says that another authorized user must approve or reject it. One person can never both enter and approve a loan.',
+        ur: 'زینب کی درخواست اب فیصلے کی منتظر ہے۔ چونکہ یہ آپ نے خود درج کی ہے، کارڈ بتاتا ہے کہ اسے کوئی دوسرا مجاز صارف منظور یا مسترد کرے گا۔ ایک ہی شخص کبھی قرض درج اور منظور دونوں نہیں کر سکتا۔',
       },
       do: async h => {
-        await h.point(page => card(page, 'Medical treatment of mother', 'Approve & Disburse').getByText(/Monthly installment/), { hold: 2400 });
+        await h.point(page => page.getByText(/You entered this application/).first(), { hold: 2600 });
       },
     },
     {
       say: {
-        en: 'To approve, click Approve and Disburse. The money is marked as paid today, the employee gets a notification, and the request becomes an active advance.',
-        ur: 'منظوری کے لیے "Approve & Disburse" پر کلک کریں۔ رقم آج کی تاریخ میں ادا شدہ درج ہو جاتی ہے، ملازم کو اطلاع مل جاتی ہے، اور درخواست ایک فعال ایڈوانس بن جاتی ہے۔',
-      },
-      caption: { en: 'To approve, click Approve & Disburse: paid today, the employee is notified, and it becomes an active advance.', ur: 'منظوری کے لیے "Approve & Disburse" پر کلک کریں: آج ادا شدہ، ملازم کو اطلاع، اور ایڈوانس فعال۔' },
-      do: async h => {
-        await h.click(page => card(page, 'Medical treatment of mother', 'Approve & Disburse').getByRole('button', { name: 'Approve & Disburse' }), { after: 1500 });
-      },
-    },
-    {
-      say: {
-        en: 'Other pending requests, such as Naveed Akhtar\'s advance for a school admission fee, are decided the same way. Click Reject if the request cannot be allowed.',
-        ur: 'باقی زیرِ التوا درخواستیں، مثلاً نوید اختر کا اسکول داخلہ فیس کے لیے ایڈوانس، اسی طرح طے کی جاتی ہیں۔ اگر درخواست منظور نہیں ہو سکتی تو "Reject" پر کلک کریں۔',
-      },
-      do: async h => {
-        const reject = h.page.getByRole('button', { name: 'Reject', exact: true });
-        if (await reject.count()) await h.point(() => reject.first(), { hold: 2200 });
-        else await h.wait(2000);
-      },
-    },
-    {
-      say: {
-        en: 'Choose Active to see running loans. Zainab\'s advance is there with five thousand rupees a month. Each time payroll is processed, one instalment is deducted and the remaining balance goes down, until the advance closes by itself.',
-        ur: 'چلتے ہوئے قرضے دیکھنے کے لیے "Active" منتخب کریں۔ زینب کا ایڈوانس یہاں پانچ ہزار روپے ماہانہ کے ساتھ موجود ہے۔ ہر بار پے رول بننے پر ایک قسط کٹتی ہے اور باقی رقم کم ہوتی جاتی ہے، یہاں تک کہ ایڈوانس خود بند ہو جاتا ہے۔',
+        en: 'Naveed Akhtar sent his request from the phone app: fifteen thousand rupees for a school admission fee, repaid in three months. Check the amount, the number of months and the reason.',
+        ur: 'نوید اختر نے اپنی درخواست فون ایپ سے بھیجی ہے: اسکول داخلہ فیس کے لیے پندرہ ہزار روپے، تین مہینوں میں واپسی۔ رقم، مہینوں کی تعداد اور وجہ دیکھ لیں۔',
       },
       caption: {
-        en: 'Choose Active: Zainab\'s advance is there at PKR 5,000 a month. Each payroll run deducts one instalment until the advance closes by itself.',
-        ur: '"Active" منتخب کریں: زینب کا ایڈوانس 5,000 روپے ماہانہ کے ساتھ موجود ہے۔ ہر پے رول میں ایک قسط کٹتی ہے، یہاں تک کہ ایڈوانس خود بند ہو جائے۔',
+        en: 'Naveed Akhtar sent his request from the phone app: PKR 15,000 for a school admission fee, repaid in 3 months.',
+        ur: 'نوید اختر نے درخواست فون ایپ سے بھیجی: اسکول داخلہ فیس کے لیے 15,000 روپے، 3 مہینوں میں واپسی۔',
+      },
+      do: async h => {
+        await h.point(page => card(page, 'Child school admission fee', 'Approve & Disburse').getByText(/Monthly installment/), { hold: 2400 });
+      },
+    },
+    {
+      say: {
+        en: 'To approve, click Approve and Disburse. The money is marked as paid today, the employee gets a notification, and the request becomes an active advance. Click Reject if it cannot be allowed.',
+        ur: 'منظوری کے لیے "Approve & Disburse" پر کلک کریں۔ رقم آج کی تاریخ میں ادا شدہ درج ہو جاتی ہے، ملازم کو اطلاع مل جاتی ہے، اور درخواست فعال ایڈوانس بن جاتی ہے۔ منظور نہ ہو سکے تو "Reject" پر کلک کریں۔',
+      },
+      caption: { en: 'Approve & Disburse: paid today, the employee is notified, and it becomes an active advance. Reject if it cannot be allowed.', ur: '"Approve & Disburse": آج ادا شدہ، ملازم کو اطلاع، اور ایڈوانس فعال۔ منظور نہ ہو تو "Reject"۔' },
+      do: async h => {
+        await h.click(page => card(page, 'Child school admission fee', 'Approve & Disburse').getByRole('button', { name: 'Approve & Disburse' }), { after: 1500 });
+      },
+    },
+    {
+      say: {
+        en: 'Choose Active to see running loans. Naveed’s advance is there with five thousand rupees a month. Each time salary is paid, that instalment is deducted, never more than is still owed, until the advance closes by itself. After approval its terms cannot be changed.',
+        ur: 'چلتے ہوئے قرضے دیکھنے کے لیے "Active" منتخب کریں۔ نوید کا ایڈوانس یہاں پانچ ہزار روپے ماہانہ کے ساتھ موجود ہے۔ ہر بار تنخواہ ادا ہونے پر یہ قسط کٹتی ہے، کبھی باقی رقم سے زیادہ نہیں، یہاں تک کہ ایڈوانس خود بند ہو جائے۔ منظوری کے بعد اس کی شرائط نہیں بدلی جا سکتیں۔',
+      },
+      caption: {
+        en: 'Choose Active: Naveed’s advance at PKR 5,000 a month. Each salary payment deducts one instalment (never more than is owed) until it closes. Terms are fixed after approval.',
+        ur: '"Active" منتخب کریں: نوید کا ایڈوانس 5,000 روپے ماہانہ۔ ہر تنخواہ پر ایک قسط کٹتی ہے (باقی رقم سے زیادہ نہیں) یہاں تک کہ بند ہو جائے۔ منظوری کے بعد شرائط مقرر ہیں۔',
       },
       do: async h => {
         await h.click({ role: 'button', name: 'Active', exact: true }, { after: 800 });
-        await h.point(page => page.locator('div', { hasText: 'Medical treatment of mother' }).filter({ hasText: 'Monthly deduction' }).last(), { hold: 2600 });
+        await h.point(page => page.locator('div', { hasText: 'Child school admission fee' }).filter({ hasText: 'Monthly deduction' }).last(), { hold: 2600 });
       },
     },
   ],

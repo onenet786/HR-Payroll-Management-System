@@ -316,7 +316,16 @@ function withInstallId(store) {
   return store;
 }
 
-function writeStore(store) {
+// The admin PIN record is written only by the PIN guard. Every other write keeps the PIN record that is on disk now,
+// so a long sync that read the store before a PIN was set (or a wrong PIN was counted) cannot write the old copy back.
+function writeStore(store, { ownsAdminPin = false } = {}) {
+  if (!ownsAdminPin) {
+    try {
+      const onDisk = JSON.parse(fs.readFileSync(kioskStorePath(), 'utf8'));
+      if (onDisk && onDisk.adminPin !== undefined) store.adminPin = onDisk.adminPin;
+      else delete store.adminPin;
+    } catch { /* no store yet: nothing to keep */ }
+  }
   fs.mkdirSync(path.dirname(kioskStorePath()), { recursive: true });
   fs.writeFileSync(kioskStorePath(), JSON.stringify(store, null, 2));
 }
@@ -1278,7 +1287,7 @@ function markedAtThisKiosk(store, deviceId = readDeviceRegistration()?.deviceId 
 // lives in the kiosk store (adminPin), never in what is sent to the renderer.
 const adminGuard = createAdminGuard({
   readRecord: () => readStore().adminPin || null,
-  writeRecord: record => { const store = readStore(); store.adminPin = record; writeStore(store); },
+  writeRecord: record => { const store = readStore(); store.adminPin = record; writeStore(store, { ownsAdminPin: true }); },
 });
 const ADMIN_REQUIRED = { ok: false, adminRequired: true, message: 'Enter the admin PIN in Settings first.' };
 function requireAdmin(action) {
@@ -2211,6 +2220,9 @@ if (!gotLock) {
 }
 
 app.on('before-quit', () => {
+  // A quit the app itself starts (an installer or updater closing it, Windows shutdown) is allowed to close the
+  // locked window; staff can still only exit through Settings with the admin PIN.
+  quitAuthorized = true;
   if (autoSyncTimer) clearInterval(autoSyncTimer);
   if (driverWatchTimer) clearInterval(driverWatchTimer);
   if (bridgeProcess && !bridgeProcess.killed) bridgeProcess.kill();

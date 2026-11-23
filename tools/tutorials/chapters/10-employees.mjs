@@ -3,8 +3,8 @@
 // Photo and document are generated on the fly (no files needed): a drawn portrait PNG and a one-page PDF.
 const EMP = {
   name: 'Ayesha Khan', email: 'ayesha.khan@aljannatmall.local', cnic: '35202-5550123-4', cnicExpiry: '14-Aug-2032',
-  probation: '23-Feb-2027', mobile: '214567890', dob: '14-Aug-1998', salary: '85000',
-  bank: 'Meezan Bank Limited', account: '02010103456789', iban: 'PK36MEZN0002010103456789',
+  probation: '23-Feb-2027', mobile: '0321-4567890', dob: '14-Aug-1998', salary: '85000',
+  bank: 'Meezan Bank Limited', account: '02010103456789', iban: 'PK48MEZN0002010103456789',
 };
 
 // Searchable list: open it, type part of the name, click the option.
@@ -110,8 +110,8 @@ export default {
     },
     {
       say: {
-        en: 'Here you can correct any detail, such as a new phone number or bank account. We only look, so we close it without saving.',
-        ur: 'یہاں آپ کوئی بھی تفصیل درست کر سکتے ہیں، جیسے نیا فون نمبر یا بینک اکاؤنٹ۔ ہم صرف دیکھ رہے ہیں، اس لیے بغیر محفوظ کیے بند کر دیتے ہیں۔',
+        en: 'Here you can correct any detail, such as a new phone number or bank account. The salary is shown but cannot be changed here: a pay change goes through Salary Revisions, where a second person approves it. We only look, so we close it without saving.',
+        ur: 'یہاں آپ کوئی بھی تفصیل درست کر سکتے ہیں، جیسے نیا فون نمبر یا بینک اکاؤنٹ۔ تنخواہ نظر آتی ہے مگر یہاں نہیں بدلی جا سکتی: تنخواہ میں تبدیلی "Salary Revisions" سے ہوتی ہے، جہاں کوئی دوسرا شخص اسے منظور کرتا ہے۔ ہم صرف دیکھ رہے ہیں، اس لیے بغیر محفوظ کیے بند کر دیتے ہیں۔',
       },
       do: async h => {
         await h.point({ text: 'Edit Employee Record' }, { hold: 2200 });
@@ -161,12 +161,12 @@ export default {
     },
     {
       say: {
-        en: 'Further down, type her mobile number: plus nine two three is filled in for you, so type only the last nine digits. Then choose Female and enter her date of birth.',
-        ur: 'نیچے ان کا موبائل نمبر لکھیں: +923 خود لکھا جاتا ہے، اس لیے صرف آخری نو ہندسے لکھیں۔ پھر "Female" منتخب کریں اور تاریخ پیدائش درج کریں۔',
+        en: 'Further down, type her mobile number the way you normally write it, for example zero three two one, four five six seven eight nine zero. When you leave the box it is tidied to the plus nine two format. Then choose Female, enter her date of birth, and check the date of joining: it starts with today, so change it if she joined earlier.',
+        ur: 'نیچے ان کا موبائل نمبر ویسے ہی لکھیں جیسے عام طور پر لکھتے ہیں، مثلاً 0321-4567890۔ خانے سے نکلتے ہی یہ +92 والی شکل میں درست ہو جاتا ہے۔ پھر "Female" منتخب کریں، تاریخ پیدائش درج کریں، اور شمولیت کی تاریخ دیکھ لیں: یہ آج کی تاریخ سے شروع ہوتی ہے، اگر وہ پہلے شامل ہوئیں تو بدل دیں۔',
       },
       caption: {
-        en: 'Further down, type the mobile number: +923 is filled in for you, type only the last 9 digits. Choose Female and enter the date of birth.',
-        ur: 'نیچے موبائل نمبر لکھیں: +923 خود لکھا جاتا ہے، صرف آخری 9 ہندسے لکھیں۔ "Female" منتخب کریں اور تاریخ پیدائش درج کریں۔',
+        en: 'Type the mobile number as usual (e.g. 0321-4567890); it becomes +923214567890 when you leave the box. Choose Female, enter the date of birth, and check the Date of Joining (starts with today).',
+        ur: 'موبائل نمبر عام طریقے سے لکھیں (مثلاً 0321-4567890)؛ خانے سے نکلنے پر +923214567890 بن جاتا ہے۔ "Female" منتخب کریں، تاریخ پیدائش لکھیں، اور شمولیت کی تاریخ دیکھیں (آج سے شروع)۔',
       },
       do: async h => {
         await h.scrollTo({ label: 'Mobile Contact Number', exact: true });
@@ -174,6 +174,7 @@ export default {
         await h.select({ label: 'Gender', exact: true }, 'Female');
         await h.fill({ label: 'Date of Birth', exact: true }, EMP.dob, { delay: 60 });
         await h.press('Tab');
+        await h.point({ label: 'Date of Joining', exact: true }, { hold: 1400 });
       },
     },
     {
@@ -226,8 +227,8 @@ export default {
     },
     {
       say: {
-        en: 'Choose the bank the salary is paid into, then type the account number and the twenty-four character IBAN. The bank file for salary transfer is made from these details, so check them carefully.',
-        ur: 'وہ بینک منتخب کریں جس میں تنخواہ جائے گی، پھر اکاؤنٹ نمبر اور چوبیس حروف والا IBAN لکھیں۔ تنخواہ کی منتقلی کی بینک فائل انہی تفصیلات سے بنتی ہے، اس لیے انہیں غور سے چیک کریں۔',
+        en: 'Choose the bank the salary is paid into, then type the account number and the twenty-four character IBAN. The bank file for salary transfer is made from these details. The system checks the IBAN’s check digits, so most typing mistakes are caught before saving.',
+        ur: 'وہ بینک منتخب کریں جس میں تنخواہ جائے گی، پھر اکاؤنٹ نمبر اور چوبیس حروف والا IBAN لکھیں۔ تنخواہ کی منتقلی کی بینک فائل انہی تفصیلات سے بنتی ہے۔ سسٹم IBAN کے چیک ہندسے جانچتا ہے، اس لیے زیادہ تر ٹائپنگ کی غلطیاں محفوظ کرنے سے پہلے پکڑی جاتی ہیں۔',
       },
       do: async h => {
         await h.select({ label: 'Disbursal Bank', exact: true }, EMP.bank);
@@ -250,8 +251,8 @@ export default {
     },
     {
       say: {
-        en: 'Click Complete Onboarding. Her joining date is recorded as today.',
-        ur: '"Complete Onboarding" پر کلک کریں۔ ان کی شمولیت کی تاریخ آج کی تاریخ درج ہو جاتی ہے۔',
+        en: 'Click Complete Onboarding. Payroll, leave and gratuity count from the joining date you saw on the form.',
+        ur: '"Complete Onboarding" پر کلک کریں۔ پے رول، چھٹی اور گریجویٹی فارم میں درج شمولیت کی تاریخ سے شمار ہوتی ہیں۔',
       },
       do: async h => { await h.click('Complete Onboarding', { after: 1800 }); },
     },

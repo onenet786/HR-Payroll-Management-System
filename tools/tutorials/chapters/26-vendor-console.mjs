@@ -1,13 +1,8 @@
 // Chapter 26: the OneNet vendor console (edition and licence). Signs in on the normal sign-in page with login
-// "onenet" and the daily password OneNet + DDMonYYYY (Pakistan date). The edition is only previewed, never applied,
-// and the installation settings are not saved: the other chapters need the full edition.
-const today = (() => {
-  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Karachi', day: '2-digit', month: 'short', year: 'numeric' }).formatToParts(new Date());
-  const get = type => parts.find(part => part.type === type).value;
-  return { day: get('day'), month: get('month').slice(0, 3), year: get('year') };
-})();
-const PASSWORD = `OneNet${today.day}${today.month}${today.year}`;
-const SPOKEN = `${Number(today.day)} ${today.month} ${today.year}`;
+// "onenet" and the server's own console password (VENDOR_CONSOLE_PASSWORD in .env; the demo server uses the value
+// below, set by TUTORIAL_VENDOR_PASSWORD). The edition is only previewed, never applied, and the installation
+// settings are not saved: the other chapters need the full edition.
+const PASSWORD = process.env.TUTORIAL_VENDOR_PASSWORD || 'Demo-Vendor-Console-2026';
 
 const captionTop = h => h.page.evaluate(() => { const c = document.getElementById('tut-cap'); if (c) { c.style.top = '64px'; c.style.bottom = 'auto'; } });
 const captionBottom = h => h.page.evaluate(() => { const c = document.getElementById('tut-cap'); if (c) { c.style.top = ''; c.style.bottom = ''; } });
@@ -37,14 +32,14 @@ export default {
     },
     {
       say: {
-        en: `The password changes every day. It is OneNet, then today's date in Pakistan: two digits for the day, the first three letters of the month, and the year. Today that is OneNet ${SPOKEN}. Yesterday's and tomorrow's passwords also work, in case a clock is slightly off.`,
-        ur: `پاس ورڈ روزانہ بدلتا ہے۔ یہ "OneNet" کے بعد پاکستان کی آج کی تاریخ ہے: دن کے دو ہندسے، مہینے کے پہلے تین انگریزی حروف، اور سال۔ آج یہ "OneNet" ${SPOKEN} ہے۔ گھڑی میں معمولی فرق کی صورت میں کل اور آنے والے کل کا پاس ورڈ بھی چل جاتا ہے۔`,
+        en: 'Then type this server’s own console password. Every installation gets a different, random password when it is set up; OneNet keeps it in its records, not the client. On a Linux server, the setup script shows it again with the vendor command; on Windows it is in the settings file.',
+        ur: 'پھر اس سرور کا اپنا کنسول پاس ورڈ لکھیں۔ ہر انسٹالیشن کو سیٹ اپ کے وقت الگ، بے ترتیب پاس ورڈ ملتا ہے؛ اسے ون نیٹ اپنے ریکارڈ میں رکھتا ہے، کلائنٹ نہیں۔ لینکس سرور پر سیٹ اپ اسکرپٹ "vendor" کمانڈ سے اسے دوبارہ دکھاتا ہے؛ ونڈوز پر یہ سیٹنگز فائل میں ہوتا ہے۔',
       },
       caption: {
-        en: `The password changes daily: OneNet + today's Pakistan date as DDMonYYYY. Today: ${PASSWORD}. Yesterday's and tomorrow's passwords also work, in case a clock is slightly off.`,
-        ur: `پاس ورڈ روزانہ بدلتا ہے: "OneNet" + پاکستان کی آج کی تاریخ DDMonYYYY کی شکل میں۔ آج: ${PASSWORD}۔ گھڑی کے معمولی فرق کے لیے کل اور آنے والے کل کا پاس ورڈ بھی چلتا ہے۔`,
+        en: 'Type this server’s own console password (random per installation; Linux: sudo bash hrpayroll-server.sh vendor; Windows: config\\.env, VENDOR_CONSOLE_PASSWORD).',
+        ur: 'اس سرور کا اپنا کنسول پاس ورڈ لکھیں (ہر انسٹالیشن کا الگ؛ لینکس: sudo bash hrpayroll-server.sh vendor؛ ونڈوز: config\\.env میں VENDOR_CONSOLE_PASSWORD)۔',
       },
-      do: async h => { await h.fill({ css: 'input[type=password]' }, PASSWORD, { delay: 80 }); },
+      do: async h => { await h.fill({ css: 'input[type=password]' }, PASSWORD, { delay: 60 }); },
     },
     {
       say: {

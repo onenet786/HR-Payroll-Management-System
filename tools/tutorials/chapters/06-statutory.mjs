@@ -81,8 +81,8 @@ export default {
     },
     {
       say: {
-        en: 'When a new budget is announced, update the slabs here, or use Download CSV to keep a copy for your records.',
-        ur: 'نیا بجٹ آنے پر سلیب یہاں اپ ڈیٹ کریں، یا ریکارڈ کے لیے "Download CSV" سے ان کی نقل محفوظ کر لیں۔',
+        en: 'The built-in table is the Finance Act twenty twenty-six, for tax year twenty twenty-seven. When a new budget is announced, check the rates against FBR and update the slabs here; like every rate change, it needs a second person’s approval. Download CSV keeps a copy for your records.',
+        ur: 'پہلے سے موجود جدول فنانس ایکٹ 2026 کا ہے، ٹیکس سال 2027 کے لیے۔ نیا بجٹ آنے پر شرحیں ایف بی آر سے ملا کر یہاں سلیب اپ ڈیٹ کریں؛ ہر شرح کی تبدیلی کی طرح اس کے لیے بھی دوسرے شخص کی منظوری چاہیے۔ "Download CSV" ریکارڈ کے لیے نقل محفوظ کرتا ہے۔',
       },
       do: async h => {
         await h.point('Download CSV', { hold: 1300 });

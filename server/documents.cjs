@@ -325,10 +325,11 @@ async function authorizeWrite(client, name, table, id, identity, existing, next)
       } else return false;
     }
   }
-  // With maker-checker on, an existing employee's salary changes only through an approved salary revision (which
-  // sets it on the server); a direct edit of the employee record would skip the second person.
+  // With maker-checker on, an existing employee's pay (basic salary and the fixed monthly allowances) changes only
+  // through an approved salary revision; a direct edit of the employee record would skip the second person.
   if ((name === 'employees' || table === 'employees') && existing && dual
-    && salaryValue(next.basicSalary) !== salaryValue(existing.data?.basicSalary)) return false;
+    && ['basicSalary', 'houseRentAllowance', 'conveyanceAllowance', 'medicalAllowance', 'otherAllowances']
+      .some(field => salaryValue(next[field]) !== salaryValue(existing.data?.[field]))) return false;
   // Leave decisions: nobody approves or rejects their own leave (the lite edition's single owner excepted).
   if ((name === 'leaves' || table === 'leaves') && existing && existing.data.status === 'Pending' && next.status !== 'Pending'
     && dual && identity.employeeId && identity.employeeId === existing.data.employeeId) return false;
@@ -448,7 +449,6 @@ async function authorizeWrite(client, name, table, id, identity, existing, next)
       // A loan in repayment: its terms and decision are fixed; repayment only moves forward (fewer instalments
       // left, more repaid, Active to Closed), and an employee cannot change their own loan.
       const previous = existing.data;
-      if (identity.employeeId && identity.employeeId === previous.employeeId) return false;
       if (['employeeId', 'type', 'principalAmount', 'approvedAmount', 'totalInstallments', 'monthlyInstallment', 'reason', 'appliedOn', 'createdById', 'decidedById', 'approvedBy', 'approvedOn']
         .some(field => !sameJson(previous[field], next[field]))) return false;
       if (Number(next.remainingInstallments) > Number(previous.remainingInstallments) || Number(next.totalRepaid) < Number(previous.totalRepaid)) return false;
@@ -602,7 +602,8 @@ async function authorizeWrite(client, name, table, id, identity, existing, next)
     // be moved, and overtime cannot exceed the time actually between punch-in and punch-out.
     const before = existing.data;
     // A day started elsewhere (e.g. the kiosk) may be finished on the phone: that punch-out makes it a mobile record.
-    const mobilePunchOutOfOtherDay = before.method !== 'Mobile GPS' && !before.punchOut && Boolean(next.punchOut);
+    // A day started elsewhere (kiosk) and still open may get mobile additions: field visits, then the punch-out.
+    const mobilePunchOutOfOtherDay = before.method !== 'Mobile GPS' && before.method !== 'Manual' && !before.punchOut;
     if ((before.method !== 'Mobile GPS' && !mobilePunchOutOfOtherDay) || before.date !== next.date || (before.punchIn || '') !== (next.punchIn || '')) return false;
     if (before.punchOut && before.punchOut !== next.punchOut) return false;
     if (before.regularizationRequested === true && next.regularizationRequested !== true) return false;

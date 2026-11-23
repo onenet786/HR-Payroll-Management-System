@@ -2002,10 +2002,10 @@ export function WebPortal({
       ucTownId: selectedUcTown?.id,
       zone: selectedZone?.name ?? editEmpForm.zone,
       ucTown: selectedUcTown?.name ?? editEmpForm.ucTown,
-      houseRentAllowance: editEmpForm.houseRentAllowance > 0 ? Number(editEmpForm.houseRentAllowance) : undefined,
-      conveyanceAllowance: editEmpForm.conveyanceAllowance > 0 ? Number(editEmpForm.conveyanceAllowance) : undefined,
-      medicalAllowance: editEmpForm.medicalAllowance > 0 ? Number(editEmpForm.medicalAllowance) : undefined,
-      otherAllowances: editEmpForm.otherAllowances > 0 ? Number(editEmpForm.otherAllowances) : undefined,
+      houseRentAllowance: dualControl ? editingEmployee.houseRentAllowance : editEmpForm.houseRentAllowance > 0 ? Number(editEmpForm.houseRentAllowance) : undefined,
+      conveyanceAllowance: dualControl ? editingEmployee.conveyanceAllowance : editEmpForm.conveyanceAllowance > 0 ? Number(editEmpForm.conveyanceAllowance) : undefined,
+      medicalAllowance: dualControl ? editingEmployee.medicalAllowance : editEmpForm.medicalAllowance > 0 ? Number(editEmpForm.medicalAllowance) : undefined,
+      otherAllowances: dualControl ? editingEmployee.otherAllowances : editEmpForm.otherAllowances > 0 ? Number(editEmpForm.otherAllowances) : undefined,
       eobiEnabled: editEmpForm.eobiEnabled,
       fbrEnabled: editEmpForm.fbrEnabled,
       priorEmployerTaxableIncome: Number(editEmpForm.priorEmployerTaxableIncome) || 0,
@@ -6252,6 +6252,7 @@ export function WebPortal({
                         {features.incomeTax && <label className="flex items-center gap-1.5 cursor-pointer select-none bg-indigo-50 hover:bg-indigo-100/80 px-2 py-0.5 rounded border border-indigo-200 text-indigo-800 transition-colors" title="Check to enter target take-home pay and auto-calculate gross and FBR allowances">
                           <input
                             type="checkbox"
+                            disabled={dualControl}
                             checked={editEmpTakeHome}
                             onChange={(e) => {
                               const checked = e.target.checked;
@@ -6441,6 +6442,8 @@ export function WebPortal({
                                 aria-label="House Rent Allowance"
                                 placeholder="Rent"
                                 value={editEmpForm.houseRentAllowance}
+                                readOnly={dualControl}
+                                title={dualControl ? 'Change pay through Salary Revisions (needs a second approver).' : undefined}
                                 onChange={(e) => setEditEmpForm({ ...editEmpForm, houseRentAllowance: Number(e.target.value) })}
                                 className="w-full h-8 px-2 border border-slate-300 rounded-lg font-mono text-xs bg-white focus:ring-1 focus:ring-indigo-500"
                               />
@@ -6452,6 +6455,8 @@ export function WebPortal({
                                 aria-label="Conveyance Allowance"
                                 placeholder="Conv"
                                 value={editEmpForm.conveyanceAllowance}
+                                readOnly={dualControl}
+                                title={dualControl ? 'Change pay through Salary Revisions (needs a second approver).' : undefined}
                                 onChange={(e) => setEditEmpForm({ ...editEmpForm, conveyanceAllowance: Number(e.target.value) })}
                                 className="w-full h-8 px-2 border border-slate-300 rounded-lg font-mono text-xs bg-white focus:ring-1 focus:ring-indigo-500"
                               />
@@ -6463,6 +6468,8 @@ export function WebPortal({
                                 aria-label="Medical Allowance"
                                 placeholder="Med"
                                 value={editEmpForm.medicalAllowance}
+                                readOnly={dualControl}
+                                title={dualControl ? 'Change pay through Salary Revisions (needs a second approver).' : undefined}
                                 onChange={(e) => setEditEmpForm({ ...editEmpForm, medicalAllowance: Number(e.target.value) })}
                                 className="w-full h-8 px-2 border border-slate-300 rounded-lg font-mono text-xs bg-white focus:ring-1 focus:ring-indigo-500"
                               />
@@ -6474,6 +6481,8 @@ export function WebPortal({
                                 aria-label="Other Allowances"
                                 placeholder="Other"
                                 value={editEmpForm.otherAllowances}
+                                readOnly={dualControl}
+                                title={dualControl ? 'Change pay through Salary Revisions (needs a second approver).' : undefined}
                                 onChange={(e) => setEditEmpForm({ ...editEmpForm, otherAllowances: Number(e.target.value) })}
                                 className="w-full h-8 px-2 border border-slate-300 rounded-lg font-mono text-xs bg-white focus:ring-1 focus:ring-indigo-500"
                               />

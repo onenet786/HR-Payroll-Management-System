@@ -17,6 +17,13 @@ const KIOSK = 'http://kiosk.local/';
 const SETUP_CODE = 'HRK1.eyJ2IjoxLCJuIjoiQWxKYW5uYXQgTWFsbCIsInUiOlsiaHR0cHM6Ly9oZWFkb2ZmaWNlIl0sInQiOiJrc3RfOWYyYzQxZDdlOGEwNWIzNmMxZDQifQ';
 const FIT = '.shell{transform:scale(.83);transform-origin:50% 0}.overlay{bottom:150px}.overlay>*{transform:scale(.83)}';
 const inDialog = sel => ({ css: `#settingsDialog ${sel}` });
+// Settings, Exit and removing the device key need the kiosk's admin PIN (the demo kiosk uses 482915).
+async function enterPin(h) {
+  const overlay = h.page.locator('#pinOverlay');
+  try { await overlay.waitFor({ state: 'visible', timeout: 4000 }); } catch { return; }
+  await h.fill({ css: '#pinInput' }, '482915', { delay: 90 });
+  await h.click({ css: '#pinConfirm' }, { after: 1000 });
+}
 
 export default {
   id: '29',
@@ -69,13 +76,15 @@ export default {
     },
     {
       say: {
-        en: 'Camera recognises faces. The employee looks at the camera, a short live check stops anyone from using a photo, and the punch is saved with a snapshot as evidence.',
-        ur: 'کیمرہ چہرہ پہچانتا ہے۔ ملازم کیمرے کی طرف دیکھتا ہے، ایک مختصر لائیو جانچ تصویر کے ذریعے دھوکے کو روکتی ہے، اور حاضری ثبوت کی تصویر کے ساتھ محفوظ ہوتی ہے۔',
+        en: 'Camera recognises faces. The employee looks at the camera and turns the head as asked: this live check stops anyone from using a photo, and the punch is saved with a snapshot as evidence.',
+        ur: 'کیمرہ چہرہ پہچانتا ہے۔ ملازم کیمرے کی طرف دیکھتا ہے اور کہنے پر سر گھماتا ہے: یہ لائیو جانچ تصویر کے ذریعے دھوکے کو روکتی ہے، اور حاضری ثبوت کی تصویر کے ساتھ محفوظ ہوتی ہے۔',
       },
       do: async h => {
         await h.click({ css: '.mode-btn[data-mode="camera"]' }, { after: 1600 });
         await h.point({ css: '#cameraView' }, { hold: 1500 });
-        await h.point({ css: '#kioskCamModeBar' }, { hold: 900 });
+        // The 1-on-1 / multi-face bar shows only when multi-face mode is allowed in Settings (off by default).
+        const modeBar = h.page.locator('#kioskCamModeBar').filter({ visible: true });
+        if (await modeBar.count()) await h.point(() => modeBar, { hold: 900 }); else await h.wait(900);
       },
     },
     {
@@ -119,15 +128,25 @@ export default {
     },
     {
       say: {
-        en: 'Now the settings, for IT staff. Click the gear button. Server Registration shows that this kiosk is registered for AlJannat Mall, and the server it uses: https colon slash slash headoffice.',
-        ur: 'اب سیٹنگز، آئی ٹی عملے کے لیے۔ گیئر والے بٹن پر کلک کریں۔ "Server Registration" بتاتا ہے کہ یہ کیوسک الجنت مال کے لیے رجسٹرڈ ہے، اور یہ کون سا سرور استعمال کرتا ہے: https://headoffice ۔',
-      },
-      caption: {
-        en: 'Now the settings, for IT staff. Click the gear button. Server Registration shows this kiosk is registered for AlJannat Mall, and the server it uses: https://headoffice.',
-        ur: 'اب سیٹنگز، آئی ٹی عملے کے لیے۔ گیئر والے بٹن پر کلک کریں۔ "Server Registration" بتاتا ہے کہ یہ کیوسک الجنت مال کے لیے رجسٹرڈ ہے، اور اس کا سرور: https://headoffice ۔',
+        en: 'Now the settings, for IT staff. Click the gear button. The kiosk asks for its admin PIN, which IT sets the first time Settings is opened. The PIN is also needed to exit the kiosk or remove its device key, so keep it away from employees.',
+        ur: 'اب سیٹنگز، آئی ٹی عملے کے لیے۔ گیئر والے بٹن پر کلک کریں۔ کیوسک اپنا ایڈمن پن مانگتا ہے، جو آئی ٹی پہلی بار سیٹنگز کھولتے وقت مقرر کرتا ہے۔ یہی پن کیوسک بند کرنے یا اس کی ڈیوائس کلید ہٹانے کے لیے بھی چاہیے، اس لیے اسے ملازمین سے دور رکھیں۔',
       },
       do: async h => {
-        await h.click({ css: '#settingsBtn' }, { after: 1200 });
+        await h.click({ css: '#settingsBtn' }, { after: 1000 });
+        await h.point({ css: '#pinDialog' }, { hold: 1200 });
+        await enterPin(h);
+      },
+    },
+    {
+      say: {
+        en: 'Server Registration shows that this kiosk is registered for AlJannat Mall, and the server it uses: https colon slash slash headoffice.',
+        ur: '"Server Registration" بتاتا ہے کہ یہ کیوسک الجنت مال کے لیے رجسٹرڈ ہے، اور یہ کون سا سرور استعمال کرتا ہے: https://headoffice ۔',
+      },
+      caption: {
+        en: 'Server Registration shows this kiosk is registered for AlJannat Mall, and the server it uses: https://headoffice.',
+        ur: '"Server Registration" بتاتا ہے کہ یہ کیوسک الجنت مال کے لیے رجسٹرڈ ہے، اور اس کا سرور: https://headoffice ۔',
+      },
+      do: async h => {
         await h.point({ css: '#stRegStatus' }, { hold: 1200 });
         await h.point({ css: '#stRegServer' }, { hold: 1200 });
       },
@@ -150,7 +169,8 @@ export default {
         ur: '"Register now" پر کلک کریں۔ سب سے آسان طریقہ سیٹ اپ کوڈ ہے: ایڈمنسٹریٹر اسے ویب پورٹل میں "Kiosk Terminals" سے بناتا ہے۔ اسے پیسٹ کریں، تو کیوسک دکھاتا ہے کہ یہ کس کمپنی اور سرور کا ہے۔',
       },
       do: async h => {
-        await h.click({ css: '#regBannerBtn' }, { after: 1200 });
+        await h.click({ css: '#regBannerBtn' }, { after: 900 });
+        await enterPin(h);
         await h.point({ css: '#stRegSetupCode' }, { hold: 400 });
         await h.page.locator('#stRegSetupCode').fill(SETUP_CODE); // pasted, as from an e-mail
         await h.page.locator('#stRegSetupCode').dispatchEvent('input');
@@ -160,12 +180,12 @@ export default {
     },
     {
       say: {
-        en: 'The other way is a kiosk account. Choose Kiosk account email and password, and type the server address. On the office network that can be an address like 192.168.86.83:8080; otherwise use the full name, such as https colon slash slash headoffice.',
-        ur: 'دوسرا طریقہ کیوسک اکاؤنٹ ہے۔ "Kiosk account email & password" منتخب کریں، اور سرور کا ایڈریس لکھیں۔ دفتر کے نیٹ ورک پر یہ 192.168.86.83:8080 جیسا ایڈریس ہو سکتا ہے؛ ورنہ پورا نام لکھیں، مثلاً https://headoffice ۔',
+        en: 'The other way is a kiosk account. Choose Kiosk account email and password, and type the server address. On the office network that can be the server’s IP address, like 192.168.86.83:8080. A name such as headoffice must use https, for example https colon slash slash headoffice.',
+        ur: 'دوسرا طریقہ کیوسک اکاؤنٹ ہے۔ "Kiosk account email & password" منتخب کریں، اور سرور کا ایڈریس لکھیں۔ دفتر کے نیٹ ورک پر یہ سرور کا IP ایڈریس ہو سکتا ہے، جیسے 192.168.86.83:8080۔ headoffice جیسے نام کے ساتھ https ضروری ہے، مثلاً https://headoffice ۔',
       },
       caption: {
-        en: 'The other way is a kiosk account: choose "Kiosk account email & password" and type the server address, e.g. 192.168.86.83:8080 on the office network, or https://headoffice.',
-        ur: 'دوسرا طریقہ کیوسک اکاؤنٹ ہے: "Kiosk account email & password" منتخب کریں اور سرور کا ایڈریس لکھیں، مثلاً دفتر کے نیٹ ورک پر 192.168.86.83:8080، یا https://headoffice ۔',
+        en: 'The other way is a kiosk account: choose "Kiosk account email & password" and type the server address, e.g. the IP address 192.168.86.83:8080 on the office network; a name needs https, e.g. https://headoffice.',
+        ur: 'دوسرا طریقہ کیوسک اکاؤنٹ ہے: "Kiosk account email & password" منتخب کریں اور سرور کا ایڈریس لکھیں، مثلاً دفتر کے نیٹ ورک پر IP ایڈریس 192.168.86.83:8080؛ نام کے ساتھ https ضروری ہے، جیسے https://headoffice ۔',
       },
       do: async h => {
         await h.click({ css: 'label.reg-method:has(#stRegMethodAccount)' }, { after: 700 });
@@ -195,6 +215,16 @@ export default {
         await h.point({ css: '#stTerminalId' }, { hold: 900 });
         await h.fill({ css: '#stLocation' }, 'Main Entrance Gate-1 (Ground Floor)', { delay: 35 });
         await h.point({ css: '#stBranchId' }, { hold: 1100 });
+      },
+    },
+    {
+      say: {
+        en: 'Multi-face walk-through mode stays off unless you need it. It recognises several people at once without a live face check, so a photo could be recognised; that is why every punch made in this mode goes to HR for review.',
+        ur: '"Multi-Face" والا موڈ بند ہی رہنے دیں جب تک ضرورت نہ ہو۔ یہ ایک ساتھ کئی لوگوں کو بغیر زندہ چہرے کی جانچ کے پہچانتا ہے، اس لیے تصویر بھی پہچانی جا سکتی ہے؛ اسی لیے اس موڈ میں لگی ہر حاضری ایچ آر کے جائزے کے لیے جاتی ہے۔',
+      },
+      do: async h => {
+        await h.scrollTo({ css: 'label:has(#stAllowMultiFace)' });
+        await h.point({ css: 'label:has(#stAllowMultiFace)' }, { hold: 2200 });
       },
     },
     {

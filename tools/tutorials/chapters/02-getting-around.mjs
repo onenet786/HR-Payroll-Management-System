@@ -100,16 +100,16 @@ export default {
     },
     {
       say: {
-        en: 'Matching employees appear under Employees. Click the name: the Employee Directory opens. Type the name in its search box to list that person.',
-        ur: 'ملتے جلتے ملازمین "Employees" کے نیچے نظر آتے ہیں۔ نام پر کلک کریں تو "Employee Directory" کھل جاتی ہے۔ اس کے سرچ خانے میں نام لکھیں تو وہ شخص فہرست میں آ جاتا ہے۔',
+        en: 'Matching employees appear under Employees. Click the name: the person’s record opens straight away, and the Employee Directory behind it lists that person. Close the record with Cancel.',
+        ur: 'ملتے جلتے ملازمین "Employees" کے نیچے نظر آتے ہیں۔ نام پر کلک کریں تو اس شخص کا ریکارڈ فوراً کھل جاتا ہے، اور پیچھے "Employee Directory" میں وہی شخص نظر آتا ہے۔ ریکارڈ "Cancel" سے بند کریں۔',
       },
       do: async h => {
         await h.scrollTo({ text: 'Usman Tariq' });
         await h.point({ text: 'Usman Tariq' }, { hold: 900 });
         await h.click({ text: 'Usman Tariq' }, { after: 1500 });
-        await h.fill({ placeholder: 'Search name, code, CNIC' }, 'Usman', { delay: 90 });
-        await h.wait(1200);
-        await h.point({ css: 'table tbody tr:has-text("Usman Tariq")' }, { hold: 1500 });
+        await h.point({ text: 'Edit Employee Record' }, { hold: 1500 });
+        await h.click(page => page.locator('form', { hasText: 'Save Changes' }).getByRole('button', { name: 'Cancel', exact: true }), { after: 900 });
+        await h.point({ css: 'table tbody tr:has-text("Usman Tariq")' }, { hold: 1300 });
       },
     },
     {

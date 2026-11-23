@@ -74,6 +74,13 @@ export interface RegisterOptions {
    * scheduled working days; with calendar-day deduction a leave keeps covering the weekly off inside it.
    */
   offDaysBeforeLeave?: boolean;
+  /**
+   * Holiday rules the register was built with. 2 (current): recurring holidays repeat every year from the year
+   * entered and Optional holidays are working days. Registers locked before this was recorded used every holiday's
+   * own date as a day off; re-validation rebuilds them that way (`legacyHolidayDates`) so their hash still matches.
+   */
+  holidayRules?: 2;
+  legacyHolidayDates?: boolean;
 }
 
 /** A locked period also records the register options it was built with, so re-validation rebuilds the same register. */
@@ -82,11 +89,12 @@ export type AttendancePeriodWithOptions = AttendancePeriod & { registerOptions?:
 const storedRegisterOptions = (options: RegisterOptions): RegisterOptions => ({
   ...(options.noPunchDayStatus && { noPunchDayStatus: options.noPunchDayStatus }),
   ...(options.offDaysBeforeLeave && { offDaysBeforeLeave: true }),
+  holidayRules: 2,
 });
 
 export function buildAttendanceRegister(attendances: AttendanceLog[], employees: Employee[], leaves: LeaveRequest[], holidays: Holiday[], month: number, year: number, options: RegisterOptions = {}): AttendanceRegisterRow[] {
   const attendanceByEmployeeDay = new Map(attendances.filter(item => item.date.startsWith(`${year}-${String(month).padStart(2, '0')}`)).map(item => [`${item.employeeId}|${item.date}`, item]));
-  const holidayDates = holidayDatesForYear(holidays, year);
+  const holidayDates = options.legacyHolidayDates ? new Set(holidays.map(item => item.date)) : holidayDatesForYear(holidays, year);
   const lastDay = new Date(year, month, 0).getDate();
   const eligible = employees.filter(employee => employedDuring(employee, dayKey(year, month, 1), dayKey(year, month, lastDay)));
   return eligible.flatMap(employee => Array.from({ length: lastDay }, (_, offset) => {
@@ -186,7 +194,8 @@ export function isAttendancePeriodValid(period: AttendancePeriod | undefined, at
   if (!period || period.status !== 'Locked' || period.integrityHash !== attendanceIntegrityHash(attendances, period.periodMonth, period.periodYear)) return false;
   if (!inputs || !period.registerHash) return true;
   // Rebuild with the options used at lock time; periods locked before they were stored used the defaults.
-  const options = (period as AttendancePeriodWithOptions).registerOptions || {};
+  const stored = (period as AttendancePeriodWithOptions).registerOptions || {};
+  const options: RegisterOptions = stored.holidayRules === 2 ? stored : { ...stored, legacyHolidayDates: true };
   const rebuilt = buildAttendanceRegister(attendances, inputs.employees, inputs.leaves, inputs.holidays, period.periodMonth, period.periodYear, options);
   return hashRows(rebuilt) === period.registerHash;
 }

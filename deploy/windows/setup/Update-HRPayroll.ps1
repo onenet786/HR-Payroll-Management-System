@@ -52,7 +52,7 @@ if (Test-Path $envFile) {
   }
   # The OneNet vendor console needs this server's own password (the old date-based one no longer works).
   $envText = [IO.File]::ReadAllText($envFile)
-  if ($envText -notmatch '(?m)^\s*VENDOR_CONSOLE_PASSWORD\s*=\s*\S') {
+  if ($envText -notmatch '(?m)^[ \t]*VENDOR_CONSOLE_PASSWORD[ \t]*=[ \t]*\S') {
     $vb = New-Object byte[] 15; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($vb)
     $vendorPassword = [Convert]::ToBase64String($vb).Replace('+', 'A').Replace('/', 'b').TrimEnd('=')
     $envText = [regex]::Replace($envText, '(?m)^\s*VENDOR_CONSOLE_PASSWORD\s*=.*\r?\n?', '')

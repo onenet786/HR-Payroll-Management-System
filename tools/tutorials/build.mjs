@@ -24,7 +24,8 @@ const ONLY = opt('only') ? String(opt('only')).split(',') : null;
 const DRY = !!opt('dry');
 const MOVIE_ONLY = !!opt('movie');
 const BASE_URL = process.env.TUTORIAL_URL || 'http://localhost:8090/';
-const VOICE = LANG === 'ur' ? (process.env.TUTORIAL_UR_VOICE || 'ur-PK') : (process.env.TUTORIAL_EN_VOICE || 'Hazel');
+// Windows has no Urdu voice, so Urdu uses Microsoft's online neural voice (edge:<name>, lib/edge_tts_batch.py).
+const VOICE = LANG === 'ur' ? (process.env.TUTORIAL_UR_VOICE || 'edge:ur-PK-UzmaNeural') : (process.env.TUTORIAL_EN_VOICE || 'Hazel');
 const RATE = Number(process.env.TUTORIAL_RATE || (LANG === 'ur' ? 0.92 : 0.95));
 const W = 1600, H = 900;
 const cacheDir = path.join(root, 'tools', 'tutorials', '.cache');
@@ -77,7 +78,9 @@ function synthesize(items, chapterId) {
   const wavDir = path.join(cacheDir, 'tts', LANG);
   const listFile = path.join(workDir, `tts-items-${chapterId}.json`);
   fs.writeFileSync(listFile, JSON.stringify(items.map(({ id, text }) => ({ id, text }))), 'utf8');
-  const out = execFileSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(here, 'lib', 'tts.ps1'), '-Items', listFile, '-OutDir', wavDir, '-Voice', VOICE, '-Rate', String(RATE)], { encoding: 'utf8', maxBuffer: 1 << 26 });
+  const out = VOICE.startsWith('edge:')
+    ? execFileSync(process.env.PYTHON || 'python', [path.join(here, 'lib', 'edge_tts_batch.py'), listFile, wavDir, VOICE.slice(5), String(RATE)], { encoding: 'utf8', maxBuffer: 1 << 26 })
+    : execFileSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(here, 'lib', 'tts.ps1'), '-Items', listFile, '-OutDir', wavDir, '-Voice', VOICE, '-Rate', String(RATE)], { encoding: 'utf8', maxBuffer: 1 << 26 });
   return JSON.parse(out.trim().split('\n').pop());
 }
 

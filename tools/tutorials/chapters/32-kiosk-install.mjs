@@ -116,6 +116,18 @@ export default {
     },
     {
       say: {
+        en: 'The first time Settings is opened, the kiosk asks you to choose an admin PIN of six to twelve digits. Type it twice and keep it safe: it is needed for Settings, to exit the kiosk, to clear its local data and to remove its device key.',
+        ur: 'پہلی بار سیٹنگز کھولنے پر کیوسک چھ سے بارہ ہندسوں کا ایڈمن پن منتخب کرنے کو کہتا ہے۔ اسے دو بار لکھیں اور محفوظ رکھیں: یہ سیٹنگز، کیوسک بند کرنے، اس کا مقامی ڈیٹا صاف کرنے اور ڈیوائس کلید ہٹانے کے لیے چاہیے۔',
+      },
+      do: async h => {
+        await h.point(K('#pinDialog'), { hold: 1000 });
+        await h.fill(K('#pinInput'), '482915', { delay: 90 });
+        await h.fill(K('#pinConfirmInput'), '482915', { delay: 90 });
+        await h.click(K('#pinConfirm'), { after: 800 });
+      },
+    },
+    {
+      say: {
         en: 'In Kiosk Settings, first fill Terminal Configuration: a Terminal ID and the location, for example Head Office main gate. The server shows this name for the kiosk.',
         ur: '"Kiosk Settings" میں پہلے "Terminal Configuration" بھریں: ٹرمینل آئی ڈی اور جگہ، مثلاً ہیڈ آفس کا مین گیٹ۔ سرور پر کیوسک اسی نام سے نظر آتا ہے۔',
       },

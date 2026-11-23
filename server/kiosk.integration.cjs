@@ -255,6 +255,28 @@ test('a kiosk cannot overwrite what HR entered, reviewed or edited', async () =>
   assert.equal((await savedPunch('att-kt-manual')).data.method, 'Manual');
 });
 
+test('a phone-started day is finished at the kiosk; exits match whatever key order PostgreSQL stored', async () => {
+  await unlockMonth();
+  const token = (await call('POST', '/api/kiosk/register', { email: 'u-kiosk', password: 'Kiosk-Pass-2026' })).body.deviceToken;
+  // Punched in on the phone (field duty).
+  await pool.query(`INSERT INTO attendances(id, employee_id, date, status, data, version) VALUES('att-kt-gps','e-kt-1',$1,'Present',$2::jsonb,1) ON CONFLICT (id) DO NOTHING`,
+    [today, JSON.stringify({ id: 'att-kt-gps', employeeId: 'e-kt-1', date: today, method: 'Mobile GPS', punchIn: '09:00:00', status: 'Present', latitude: 31.5, longitude: 74.3 })]);
+  const out = await punch(token, 'att-kt-gps', { employeeId: 'e-kt-1', date: today, method: 'Camera', punchIn: '09:00:00', punchOut: '17:00:00', lastPunchAt: '17:00:00', outReason: 'Duty Off', status: 'Present', overtimeMinutes: 0 });
+  assert.equal(out.status, 200, JSON.stringify(out.body));
+  const gps = (await savedPunch('att-kt-gps')).data;
+  assert.equal(gps.punchOut, '17:00:00', 'the kiosk punch-out is recorded');
+  assert.equal(gps.method, 'Mobile GPS', 'the phone evidence stays');
+  assert.equal(gps.latitude, 31.5);
+
+  // A day with a recorded exit: the kiosk sends the break with its keys in a different order than jsonb stores them.
+  const base = { employeeId: 'e-kt-1', date: today, method: 'Camera', punchIn: '08:00:00', status: 'Present' };
+  const breakAsKiosk = { reason: 'Lunch Break', outAt: '13:00:00', returnAt: '13:40:00', outMethod: 'Camera', returnMethod: 'Camera' };
+  assert.equal((await punch(token, 'att-kt-break', { ...base, lastPunchAt: '13:40:00', breaks: [breakAsKiosk] })).status, 200);
+  const reordered = Object.fromEntries(Object.entries(breakAsKiosk).reverse());
+  const again = await punch(token, 'att-kt-break', { ...base, punchOut: '17:00:00', lastPunchAt: '17:00:00', outReason: 'Duty Off', breaks: [reordered] });
+  assert.equal(again.status, 200, JSON.stringify(again.body));
+});
+
 test('revoking a device or disabling the account cuts it off', async () => {
   const registered = (await call('POST', '/api/kiosk/register', { email: 'u-kiosk', password: 'Kiosk-Pass-2026' })).body;
   const auth = { 'x-kiosk-token': registered.deviceToken };

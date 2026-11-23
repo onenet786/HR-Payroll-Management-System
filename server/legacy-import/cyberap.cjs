@@ -462,7 +462,7 @@ function checkIntegrity(report, seen) {
 
 function addEmployeeWarnings(report) {
   if (report.employees.invalidCnic) report.warnings.push(`${report.employees.invalidCnic} active employees have no valid CNIC in CyberAP; they are imported with the CNIC blank.`);
-  if (report.employees.placeholderSalary) report.warnings.push(`${report.employees.placeholderSalary} active employees have no real basic salary in CyberAP (1.0 placeholder); they are imported with salary 0 and must be updated before the first payroll.`);
+  if (report.employees.placeholderSalary) report.warnings.push(`${report.employees.placeholderSalary} active employees have no real basic salary in CyberAP (1.0 placeholder); they are imported with salary 0 and must be updated before the first payroll (with maker-checker on, through Salary Revisions or the Salary Revision sheet upload, approved by a second user).`);
   if (report.employees.salaryWithheld) report.warnings.push(`${report.employees.salaryWithheld} active employees have their salary marked WITHHELD in CyberAP. This system has no salary hold: the flag is shown on each employee's form; check them before paying.`);
   if (report.employees.dailyAllowanceRates) report.warnings.push(`${report.employees.dailyAllowanceRates} active employees have a food or daily allowance in CyberAP. These are rates per day worked (e.g. PKR 50), so they are not added to the monthly allowances; they are shown on each employee's form for HR to set the monthly figure.`);
   if (report.employees.withFingerprint) report.warnings.push(`${report.employees.withFingerprint} fingerprints are DigitalPersona One Touch templates. The kiosk reads U.are.U ANSI templates, so they are archived and staff must be enrolled again at the kiosk.`);

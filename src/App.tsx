@@ -315,7 +315,13 @@ function HrApp() {
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    // Statutory / Company Options edits still waiting for the typing pause are saved first, while the session is
+    // still valid; afterwards the token is gone and the save would fail.
+    const waiting = [...typingSaves.current.values()];
+    typingSaves.current.clear();
+    waiting.forEach(item => clearTimeout(item.timer));
+    await Promise.allSettled(waiting.map(item => item.run()));
     // keepalive lets the sign-out request finish although the page reloads straight after.
     void authenticatedApiRequest('/api/auth/logout', { method: 'POST', body: '{}', keepalive: true }).catch(() => undefined);
     setAuthToken(null);
@@ -708,7 +714,7 @@ function HrApp() {
       try {
         await setDoc(doc(db, 'statutoryChangeRequests', request.id), cleanData(request));
       } catch (err) {
-        console.warn('PostgreSQL statutory change request delayed:');
+        alert(`The statutory change was not saved: ${err instanceof Error && err.message ? err.message : 'check the connection'}. Make the change again.`);
       }
     });
   };
@@ -730,7 +736,7 @@ function HrApp() {
         await Promise.all(nextSlabs.map(slab => setDoc(doc(db, 'taxSlabs', slab.id), cleanData(slab))));
         await Promise.all(removals.map(id => deleteDoc(doc(db, 'taxSlabs', id))));
       } catch (err) {
-        console.warn('PostgreSQL statutory config save delayed:');
+        alert(`The settings were not saved: ${err instanceof Error && err.message ? err.message : 'check the connection'}. Make the change again.`);
       }
     });
   };
@@ -2113,16 +2119,17 @@ function HrApp() {
   // ─── Loan & Advance Handlers ──────────────────────────────────────────────
   const handleApplyLoan = async (draft: LoanAdvance) => {
     const loan: LoanAdvance = { ...draft, status: 'Pending', createdById: currentUserAccount.id, createdBy: currentUserAccount.username };
+    try {
+      await setDoc(doc(db, 'loanAdvances', loan.id), cleanData(loan));
+    } catch (err) {
+      alert(`The application was not saved: ${err instanceof Error && err.message ? err.message : 'check the connection and try again'}.`);
+      return;
+    }
     setLoanAdvances(prev => {
       const updated = [...prev, loan];
       privacyStorage.setItem('hr_loans', JSON.stringify(updated));
       return updated;
     });
-    try {
-      await setDoc(doc(db, 'loanAdvances', loan.id), cleanData(loan));
-    } catch (err) {
-      console.warn('Database loan apply delayed:');
-    }
   };
 
   // Loan decisions are saved first and the employee is told; nobody can decide their own application.
@@ -2167,8 +2174,9 @@ function HrApp() {
       priority: 'medium',
     });
   };
-  const handleApproveLoan = (id: string) => decideLoan(id, 'Active');
-  const handleRejectLoan = (id: string) => decideLoan(id, 'Rejected');
+  // One decision at a time per loan: a double click would otherwise notify the employee twice.
+  const handleApproveLoan = (id: string) => withActionLock(`loan-${id}`, () => decideLoan(id, 'Active'));
+  const handleRejectLoan = (id: string) => withActionLock(`loan-${id}`, () => decideLoan(id, 'Rejected'));
 
   // ─── Salary Revision Handlers ─────────────────────────────────────────────
   const handleAddSalaryRevision = async (revision: SalaryRevision): Promise<boolean> => {

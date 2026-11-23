@@ -31,8 +31,8 @@ export default {
     },
     {
       say: {
-        en: 'There are three kinds of holiday. Public holidays are announced by the government, such as Pakistan Day. Company holidays are your own, such as an annual staff day. Optional holidays are for days you want on the calendar as well.',
-        ur: 'تعطیلات تین قسم کی ہیں۔ "Public" یعنی سرکاری تعطیلات حکومت اعلان کرتی ہے، جیسے یومِ پاکستان۔ "Company" تعطیلات آپ کی اپنی ہیں، جیسے سالانہ اسٹاف ڈے۔ "Optional" ان دنوں کے لیے ہیں جو آپ کیلنڈر پر بھی رکھنا چاہتے ہیں۔',
+        en: 'There are three kinds of holiday. Public holidays are announced by the government, such as Pakistan Day. Company holidays are your own, such as an annual staff day. Optional holidays, such as Easter or Diwali, are not days off for everyone: staff who take one apply for leave, and everyone else works and is paid as normal.',
+        ur: 'تعطیلات تین قسم کی ہیں۔ "Public" یعنی سرکاری تعطیلات حکومت اعلان کرتی ہے، جیسے یومِ پاکستان۔ "Company" تعطیلات آپ کی اپنی ہیں، جیسے سالانہ اسٹاف ڈے۔ "Optional" تعطیلات، جیسے ایسٹر یا دیوالی، سب کے لیے چھٹی نہیں ہوتیں: جو ملازم یہ چھٹی لے وہ چھٹی کی درخواست دیتا ہے، باقی سب معمول کے مطابق کام کرتے اور تنخواہ پاتے ہیں۔',
       },
       do: async h => {
         await h.point({ text: 'Public Holidays', exact: true }, { hold: 1600 });
@@ -42,12 +42,12 @@ export default {
     },
     {
       say: {
-        en: 'Below, the holidays of the chosen year are listed month by month. The small circular arrow next to a name means the holiday repeats every year on the same date.',
-        ur: 'نیچے منتخب سال کی تعطیلات مہینہ وار درج ہیں۔ کسی نام کے ساتھ چھوٹا گول تیر کا نشان ہو تو مطلب ہے کہ یہ تعطیل ہر سال اسی تاریخ کو آتی ہے۔',
+        en: 'Below, the holidays of the chosen year are listed month by month. The small circular arrow next to a name, as for Independence Day, means the holiday repeats every year on the same date, from the year it was entered.',
+        ur: 'نیچے منتخب سال کی تعطیلات مہینہ وار درج ہیں۔ کسی نام کے ساتھ چھوٹا گول تیر کا نشان ہو، جیسے یومِ آزادی کے ساتھ، تو مطلب ہے کہ یہ تعطیل درج ہونے والے سال سے ہر سال اسی تاریخ کو آتی ہے۔',
       },
       do: async h => {
-        await h.scrollTo({ text: 'Pakistan Day', exact: true });
-        await h.point(page => page.locator('div', { hasText: /^Pakistan Day$/ }).first(), { hold: 2600 });
+        await h.scrollTo({ text: 'Independence Day', exact: true });
+        await h.point(page => page.locator('div', { hasText: /^Independence Day$/ }).first(), { hold: 2600 });
       },
     },
     {

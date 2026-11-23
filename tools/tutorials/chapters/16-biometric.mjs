@@ -78,12 +78,13 @@ export default {
     },
     {
       say: {
-        en: 'The reader talks to the system through a small bridge program installed on that computer. Click Connect Bridge to connect. This demo computer has no reader, so the status stays Disconnected.',
-        ur: 'ریڈر اس کمپیوٹر پر انسٹال ایک چھوٹے "bridge" پروگرام کے ذریعے سسٹم سے بات کرتا ہے۔ جوڑنے کے لیے "Connect Bridge" پر کلک کریں۔ اس ڈیمو کمپیوٹر کے ساتھ ریڈر نہیں ہے، اس لیے اسٹیٹس "Disconnected" ہی رہتا ہے۔',
+        en: 'The reader talks to the system through a small bridge program installed on that computer. Click Connect Bridge to connect. This demo computer has no reader, so the status never turns to Connected.',
+        ur: 'ریڈر اس کمپیوٹر پر انسٹال ایک چھوٹے "bridge" پروگرام کے ذریعے سسٹم سے بات کرتا ہے۔ جوڑنے کے لیے "Connect Bridge" پر کلک کریں۔ اس ڈیمو کمپیوٹر کے ساتھ ریڈر نہیں ہے، اس لیے اسٹیٹس کبھی "Connected" نہیں ہوتا۔',
       },
       do: async h => {
         await h.point('Connect Bridge', { hold: 1600 });
-        await h.point({ text: 'Disconnected', exact: true }, { hold: 1600 });
+        // The page keeps retrying, so the status reads Connecting… or Disconnected depending on the moment.
+        await h.point(page => page.getByText(/^(Connecting…|Connecting\.\.\.|Disconnected)$/).first(), { hold: 1600 });
       },
     },
     {
@@ -169,21 +170,26 @@ export default {
     },
     {
       say: {
-        en: 'To add a new kiosk, OneNet support gives you a one-time setup code that starts with H R K 1. On the kiosk computer, open Settings, then Server Registration, paste the code and register. The code works once and expires.',
-        ur: 'نیا کیوسک جوڑنے کے لیے "OneNet" سپورٹ آپ کو ایک بار استعمال ہونے والا سیٹ اپ کوڈ دیتی ہے جو HRK1 سے شروع ہوتا ہے۔ کیوسک کمپیوٹر پر "Settings" کھولیں، پھر "Server Registration"، کوڈ پیسٹ کریں اور رجسٹر کریں۔ یہ کوڈ صرف ایک بار چلتا ہے اور کچھ وقت بعد ختم ہو جاتا ہے۔',
+        en: 'To add a new kiosk, an administrator creates a setup code here. Type a label, such as the branch, choose how many kiosks it may register and how long it stays valid, then click Create setup code. On the kiosk computer, open Settings, then Server Registration, and paste the code.',
+        ur: 'نیا کیوسک جوڑنے کے لیے ایڈمنسٹریٹر یہاں سیٹ اپ کوڈ بناتا ہے۔ کوئی لیبل لکھیں، مثلاً برانچ کا نام، منتخب کریں کہ یہ کتنے کیوسک رجسٹر کر سکتا ہے اور کتنی دیر چلے گا، پھر "Create setup code" پر کلک کریں۔ کیوسک کمپیوٹر پر "Settings" کھولیں، پھر "Server Registration"، اور کوڈ پیسٹ کریں۔',
       },
       caption: {
-        en: 'New kiosk: OneNet support gives a one-time setup code (HRK1…). On the kiosk: Settings → Server Registration → paste the code → register. It works once and expires.',
-        ur: 'نیا کیوسک: "OneNet" سپورٹ ایک بار کا سیٹ اپ کوڈ (HRK1…) دیتی ہے۔ کیوسک پر: "Settings" ← "Server Registration" ← کوڈ پیسٹ ← رجسٹر۔ یہ ایک بار چلتا ہے۔',
+        en: 'New kiosk: create a setup code here (label, how many kiosks, valid for) → Create setup code. On the kiosk: Settings → Server Registration → paste the code.',
+        ur: 'نیا کیوسک: یہاں سیٹ اپ کوڈ بنائیں (لیبل، کتنے کیوسک، مدت) ← "Create setup code"۔ کیوسک پر: "Settings" ← "Server Registration" ← کوڈ پیسٹ کریں۔',
       },
-      do: async h => { await h.point({ css: '#kiosk-devices-title' }, { hold: 1200 }); },
+      do: async h => {
+        await h.scrollTo(page => page.getByText('Create a setup code', { exact: true }));
+        await h.point(page => page.getByText('Create a setup code', { exact: true }), { hold: 900 });
+        await h.point({ placeholder: 'e.g. Mall 12 entrance' }, { hold: 900 });
+        await h.point(page => page.getByRole('button', { name: 'Create setup code' }), { hold: 1300 });
+      },
     },
     {
       say: {
-        en: 'The other way is written here: create a user with the Kiosk Terminal role, then sign in once with that account in the kiosk\'s Server Registration, together with the server address. Never use an administrator account on a kiosk.',
+        en: 'The other way is written here: create a user with the Kiosk Terminal role, then sign in once with that account in the kiosk’s Server Registration, together with the server address. Never use an administrator account on a kiosk.',
         ur: 'دوسرا طریقہ یہاں لکھا ہے: "Kiosk Terminal" رول والا ایک یوزر بنائیں، پھر کیوسک کی "Server Registration" میں سرور کے ایڈریس کے ساتھ اسی اکاؤنٹ سے ایک بار لاگ ان کریں۔ کیوسک پر کبھی ایڈمنسٹریٹر اکاؤنٹ استعمال نہ کریں۔',
       },
-      do: async h => { await h.point({ text: 'To add a kiosk:', exact: false }, { hold: 3000 }); },
+      do: async h => { await h.point(page => page.getByText(/To add a kiosk/).first(), { hold: 3000 }); },
     },
     {
       say: {

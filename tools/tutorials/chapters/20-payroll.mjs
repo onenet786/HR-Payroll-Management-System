@@ -115,8 +115,8 @@ export default {
     },
     {
       say: {
-        en: 'The Payroll Preview on the right shows each employee\'s gross pay, tax, EOBI, provident fund and net pay. Check it before approval. Click View Slip for Ayesha Siddiqui.',
-        ur: 'دائیں طرف "Payroll Preview" میں ہر ملازم کی مجموعی تنخواہ، ٹیکس، ای او بی آئی، پراویڈنٹ فنڈ اور خالص تنخواہ ہے۔ منظوری سے پہلے اسے چیک کریں۔ عائشہ صدیقی کے لیے "View Slip" پر کلک کریں۔',
+        en: 'The Payroll Preview on the right shows each employee\'s gross pay, tax, EOBI, provident fund and net pay. Check it before approval. Once a month has a payroll run, the preview shows the payslips that run saved, the same amounts as the bank file. Click View Slip for Ayesha Siddiqui.',
+        ur: 'دائیں طرف "Payroll Preview" میں ہر ملازم کی مجموعی تنخواہ، ٹیکس، ای او بی آئی، پراویڈنٹ فنڈ اور خالص تنخواہ ہے۔ منظوری سے پہلے اسے چیک کریں۔ جب کسی مہینے کا پے رول بن جائے تو پیش منظر وہی پے سلپس دکھاتا ہے جو اس رن میں محفوظ ہوئیں، یعنی بینک فائل والی رقمیں۔ عائشہ صدیقی کے لیے "View Slip" پر کلک کریں۔',
       },
       do: async h => {
         await h.point({ text: 'Net Wage (PKR)' }, { hold: 1200 });

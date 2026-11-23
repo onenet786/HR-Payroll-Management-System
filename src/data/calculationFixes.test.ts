@@ -94,12 +94,30 @@ test('7. a register locked with "no punch = Unpaid Leave" stays valid for payrol
   const inputs = { employees: [employee], leaves: [], holidays: [] };
   const period = createAttendancePeriod(attendances, [employee], [], [], 10, 2026, 'hr', '2026-11-02T00:00:00Z', undefined, { noPunchDayStatus: 'Unpaid Leave' });
   assert.equal(period.registerRows?.find(row => row.date === '2026-10-05')?.status, 'Unpaid Leave');
-  assert.deepEqual(period.registerOptions, { noPunchDayStatus: 'Unpaid Leave' });
+  assert.deepEqual(period.registerOptions, { noPunchDayStatus: 'Unpaid Leave', holidayRules: 2 });
   assert.equal(isAttendancePeriodValid(period, attendances, inputs), true);
   // Periods locked before the options were stored keep validating with the default register.
   const legacy = createAttendancePeriod(attendances, [employee], [], [], 10, 2026, 'hr', '2026-11-02T00:00:00Z');
   delete (legacy as { registerOptions?: unknown }).registerOptions;
   assert.equal(isAttendancePeriodValid(legacy, attendances, inputs), true);
+});
+
+test('registers locked under the old holiday rules still validate after the update (optional + recurring holidays)', () => {
+  const employee = { ...base, basicSalary: 104000 };
+  const attendances = fullMonth(employee, 10, 2026, [5]);
+  const holidays = [
+    { id: 'h-opt', name: 'Optional day', date: '2026-10-07', type: 'Optional' as const, isRecurring: false },
+    { id: 'h-rec', name: 'Old recurring', date: '2025-10-20', type: 'Public' as const, isRecurring: true },
+  ];
+  const inputs = { employees: [employee], leaves: [], holidays };
+  // What an install locked before the update holds: built with every holiday's own date, no options recorded.
+  const locked = createAttendancePeriod(attendances, [employee], [], holidays, 10, 2026, 'hr', '2026-11-02T00:00:00Z', undefined, { legacyHolidayDates: true });
+  delete (locked as { registerOptions?: unknown }).registerOptions;
+  assert.equal(isAttendancePeriodValid(locked, attendances, inputs), true, 'payroll must not be refused for a month locked before the update');
+  // A register locked now uses the new rules and validates with them.
+  const fresh = createAttendancePeriod(attendances, [employee], [], holidays, 10, 2026, 'hr', '2026-11-02T00:00:00Z');
+  assert.equal(isAttendancePeriodValid(fresh, attendances, inputs), true);
+  assert.equal(fresh.registerRows?.find(row => row.date === '2026-10-20')?.status !== undefined, true);
 });
 
 test('8. loan recovery is capped at the balance, skips future loans and is applied per loan at disbursement', () => {

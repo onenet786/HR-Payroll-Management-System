@@ -68,6 +68,10 @@ function latestEventInstant(record) {
   return Date.parse(`${record.date}T00:00:00Z`) + at * 1000 + nextDay - offset * 60_000;
 }
 
+// PostgreSQL jsonb stores object keys in its own order, so stored and incoming records are compared key-order-free.
+const canonicalJson = value => (Array.isArray(value) ? value.map(canonicalJson)
+  : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonicalJson(value[key])])) : value);
+const sameRecord = (left, right) => JSON.stringify(canonicalJson(left)) === JSON.stringify(canonicalJson(right));
 const minutesText = ms => `${Math.round(Math.abs(ms) / 60_000)} min`;
 
 // Reasons to put a kiosk punch in front of HR because its time cannot be trusted as sent. sentAt is the kiosk's clock
@@ -80,8 +84,10 @@ function timeFlags(record, { now, sentAt, queued }) {
   const instant = latestEventInstant(record);
   if (instant !== null) {
     if (instant - now > CLOCK_TOLERANCE_MS) flags.push(`Punch time is ${minutesText(instant - now)} later than the server's receive time`);
-    else if (!queued && now - instant > CLOCK_TOLERANCE_MS) flags.push(`Punch sent live but its time is ${minutesText(now - instant)} before the server's receive time`);
-    else if (queued && now - instant > LATE_UPLOAD_HOURS * 3_600_000) flags.push(`Punch reached the server ${Math.round((now - instant) / 3_600_000)} h after it was made (offline queue)`);
+    // A kiosk older than this server sends no deviceSentAt, so it cannot say whether a punch was live or queued:
+    // only the late-upload check applies to it.
+    else if (!queued && Number.isFinite(sentAt) && now - instant > CLOCK_TOLERANCE_MS) flags.push(`Punch sent live but its time is ${minutesText(now - instant)} before the server's receive time`);
+    else if ((queued || !Number.isFinite(sentAt)) && now - instant > LATE_UPLOAD_HOURS * 3_600_000) flags.push(`Punch reached the server ${Math.round((now - instant) / 3_600_000)} h after it was made (offline queue)`);
   }
   return flags;
 }
@@ -193,16 +199,17 @@ router.post('/punch', requireKiosk, async (req, res, next) => {
     if (existing?.punchIn && data.punchIn !== existing.punchIn) {
       return res.status(409).json({ error: 'The punch-in of this attendance record cannot be changed from a kiosk.' });
     }
-    if (existing && breaksOf(existing).some((item, index) => JSON.stringify(item) !== JSON.stringify(breaksOf(data)[index]))) {
+    if (existing && breaksOf(existing).some((item, index) => !sameRecord(item, breaksOf(data)[index]))) {
       return res.status(409).json({ error: 'Recorded exits on this attendance record cannot be changed from a kiosk.' });
     }
     // A record HR entered by hand (Manual, leave day, web punch) is never touched by a kiosk.
-    if (existing && !PUNCH_METHODS.has(existing.method)) {
+    if (existing && !PUNCH_METHODS.has(existing.method) && existing.method !== 'Mobile GPS') {
       return res.status(409).json({ error: 'This attendance record was entered by HR and cannot be changed from a kiosk.' });
     }
     // HR reviewed or edited the record (a decision, a reviewer, or any save since the kiosk's last write): the kiosk
     // may add only the day's progress; HR's status, times and decision stay as they are.
-    const hrTouched = !!existing && (existing.regularizationApproved !== undefined || !!existing.reviewedById
+    // A day started on the phone (Mobile GPS) keeps its mobile evidence: the kiosk adds only the day's progress.
+    const hrTouched = !!existing && (existing.method === 'Mobile GPS' || existing.regularizationApproved !== undefined || !!existing.reviewedById
       || (existing.kioskVersion !== undefined && Number(existing.kioskVersion) !== Number(row.version)));
     // A punch-out HR set or corrected is replaced only by a return from that exit (which records it as a break).
     if (hrTouched && existing.punchOut && data.punchOut !== existing.punchOut && breaksOf(data).length === breaksOf(existing).length) {

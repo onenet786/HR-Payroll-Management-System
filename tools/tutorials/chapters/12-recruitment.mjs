@@ -35,13 +35,22 @@ export default {
     },
     {
       say: {
-        en: 'Each job posting shows the department, vacancies, salary range and closing date. Hold pauses a posting, and Filled closes it once you have hired everyone you need.',
-        ur: 'ہر آسامی میں شعبہ، آسامیوں کی تعداد، تنخواہ کی حد اور آخری تاریخ نظر آتی ہے۔ "Hold" آسامی کو روک دیتا ہے، اور جب تمام مطلوبہ افراد بھرتی ہو جائیں تو "Filled" اسے بند کر دیتا ہے۔',
+        en: 'Each job posting shows the department, vacancies, salary range and closing date. A posting past its closing date shows Closed, expired, and no longer counts as an open position. On an open posting, Hold pauses it, and Filled closes it once you have hired everyone you need.',
+        ur: 'ہر آسامی میں شعبہ، آسامیوں کی تعداد، تنخواہ کی حد اور آخری تاریخ نظر آتی ہے۔ جس آسامی کی آخری تاریخ گزر جائے اس پر "Closed (expired)" لکھا آتا ہے اور وہ کھلی آسامیوں میں شمار نہیں ہوتی۔ کھلی آسامی پر "Hold" اسے روک دیتا ہے، اور جب تمام مطلوبہ افراد بھرتی ہو جائیں تو "Filled" اسے بند کر دیتا ہے۔',
+      },
+      caption: {
+        en: 'Each posting shows department, vacancies, salary range and closing date. Past its closing date it shows "Closed (expired)" and is not counted as open. Hold pauses an open posting; Filled closes it.',
+        ur: 'ہر آسامی میں شعبہ، تعداد، تنخواہ کی حد اور آخری تاریخ۔ آخری تاریخ گزرنے پر "Closed (expired)" اور کھلی آسامیوں میں شمار نہیں۔ "Hold" کھلی آسامی روکتا ہے؛ "Filled" بند کرتا ہے۔',
       },
       do: async h => {
-        await h.point(page => page.locator('div.rounded-2xl', { hasText: 'View Pipeline' }).first(), { hold: 2000 });
-        await h.point(page => page.getByRole('button', { name: 'Hold', exact: true }).first(), { hold: 1100 });
-        await h.point(page => page.getByRole('button', { name: 'Filled', exact: true }).first(), { hold: 1100 });
+        await h.point(page => page.locator('div.rounded-2xl', { hasText: 'View Pipeline' }).first(), { hold: 1600 });
+        const expired = h.page.getByText('Closed (expired)', { exact: true }).filter({ visible: true });
+        if (await expired.count()) await h.point(() => expired.first(), { hold: 1400 });
+        const hold = h.page.getByRole('button', { name: 'Hold', exact: true }).filter({ visible: true });
+        if (await hold.count()) await h.point(() => hold.first(), { hold: 1000 });
+        const filled = h.page.getByRole('button', { name: 'Filled', exact: true }).filter({ visible: true });
+        if (await filled.count()) await h.point(() => filled.first(), { hold: 1000 });
+        else await h.point(page => page.getByText('Filled', { exact: true }).first(), { hold: 1000 });
       },
     },
     {
