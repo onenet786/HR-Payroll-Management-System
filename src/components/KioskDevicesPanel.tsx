@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Copy, KeyRound, MonitorSmartphone } from 'lucide-react';
 import { authenticatedApiRequest } from '../data/postgresStore';
 import { formatDisplayDate } from '../utils/dateFormat';
+import { localDateStr } from '../data/localDate';
 
 interface KioskDevice {
   id: string;
@@ -27,9 +28,9 @@ interface NewSetupCode { id: string; code: string; expiresAt: string; maxUses: n
 const seen = (iso: string | null) => {
   if (!iso) return 'Never synced';
   const time = new Date(iso);
-  return `${formatDisplayDate(iso.slice(0, 10))} ${time.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`;
+  return `${formatDisplayDate(localDateStr(new Date(iso)))} ${time.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`;
 };
-const when = (iso: string) => `${formatDisplayDate(iso.slice(0, 10))} ${new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`;
+const when = (iso: string) => `${formatDisplayDate(localDateStr(new Date(iso)))} ${new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`;
 
 const codeState = (row: SetupCodeRow) => {
   if (row.revoked_at) return { text: 'Cancelled', live: false };
@@ -185,10 +186,10 @@ export default function KioskDevicesPanel() {
           <div key={device.id} className="flex flex-col gap-2 p-3 text-xs sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
               <div className="font-bold text-slate-900">{device.name} <span className="font-normal text-slate-500">· {device.username || 'deleted account'}</span></div>
-              <p className="mt-0.5 text-[11px] text-slate-500">Registered {formatDisplayDate(device.created_at.slice(0, 10))} · Last sync {seen(device.last_seen_at)}</p>
+              <p className="mt-0.5 text-[11px] text-slate-500">Registered {formatDisplayDate(localDateStr(new Date(device.created_at)))} · Last sync {seen(device.last_seen_at)}</p>
             </div>
             {device.revoked_at
-              ? <span className="shrink-0 rounded bg-slate-100 px-2 py-1 text-[10px] font-bold uppercase text-slate-500">Disconnected {formatDisplayDate(device.revoked_at.slice(0, 10))}</span>
+              ? <span className="shrink-0 rounded bg-slate-100 px-2 py-1 text-[10px] font-bold uppercase text-slate-500">Disconnected {formatDisplayDate(localDateStr(new Date(device.revoked_at)))}</span>
               : <button type="button" disabled={busyId === device.id} onClick={() => revoke(device)} className="shrink-0 rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-[11px] font-bold text-rose-800 hover:bg-rose-100 disabled:opacity-50">Disconnect</button>}
           </div>
         ))}

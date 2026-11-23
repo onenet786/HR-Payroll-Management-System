@@ -28,6 +28,7 @@ import {
 import { performActiveLiveness, randomLivenessOrder, type LivenessDirection } from '../utils/faceLiveness';
 import { getFaceLandmarker } from '../utils/faceLandmarker';
 import { loadFaceEmbedder } from '../utils/faceEmbedding';
+import { localDateStr } from '../data/localDate';
 type WsStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 type CaptureState = 'idle' | 'scanning' | 'captured' | 'error';
 type TabId = 'test' | 'enroll' | 'attendance';
@@ -80,7 +81,7 @@ const nowTimeStr = () => {
   const n = new Date();
   return [n.getHours(), n.getMinutes(), n.getSeconds()].map(v => String(v).padStart(2, '0')).join(':');
 };
-const todayStr = () => new Date().toISOString().split('T')[0];
+const todayStr = () => localDateStr();
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 // Quality ring SVG — animated circular progress

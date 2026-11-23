@@ -842,6 +842,9 @@ export interface LoanAdvance {
   appliedOn: string;
   approvedBy?: string;
   approvedOn?: string;
+  createdById?: string; // user who entered the application (maker)
+  createdBy?: string;
+  decidedById?: string; // user who approved or rejected it (checker)
 }
 
 // Salary Revision / Increment History

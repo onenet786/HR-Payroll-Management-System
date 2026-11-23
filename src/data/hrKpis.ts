@@ -1,4 +1,5 @@
 import type { AttendanceLog, Branch, Department, Employee, JobApplication, JobPosting, LeaveRequest, PerformanceReview } from '../types';
+import { localDateStr } from './localDate';
 
 /**
  * HR KPI figures for the operations dashboard: headcount, hires, attrition, attendance, diversity,
@@ -72,7 +73,7 @@ const leftBy = (employee: Employee, date: string) => employee.separationDate ? e
 export const employedOn = (employee: Employee, date: string) => Boolean(employee.dateOfJoining) && employee.dateOfJoining <= date && !leftBy(employee, date);
 
 export function computeHrKpis(inputs: KpiInputs, filters: KpiFilters): HrKpis {
-  const today = inputs.today || new Date().toISOString().slice(0, 10);
+  const today = inputs.today || localDateStr();
   const month = filters.month || monthKey(today);
   const inScope = (employee: Employee) => (!filters.departmentId || employee.departmentId === filters.departmentId) && (!filters.branchId || employee.branchId === filters.branchId);
   const employees = inputs.employees.filter(inScope);

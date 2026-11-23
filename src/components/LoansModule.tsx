@@ -12,11 +12,14 @@ import { RequiredMark, RequiredNote } from './RequiredMark';
 import { motion, AnimatePresence } from 'motion/react';
 import ListSearch from './ListSearch';
 import { matchesSearch } from '../data/listSearch';
+import { localDateStr } from '../data/localDate';
 
 interface LoansModuleProps {
   loanAdvances: LoanAdvance[];
   employees: Employee[];
   currentUserEmployeeId?: string;
+  currentUserId?: string;
+  makerChecker?: boolean;
   canApprove: boolean;
   onApplyLoan: (loan: LoanAdvance) => void;
   onApproveLoan: (id: string) => void;
@@ -32,7 +35,7 @@ const statusColors: Record<string, string> = {
 };
 
 export function LoansModule({
-  loanAdvances, employees, currentUserEmployeeId, canApprove,
+  loanAdvances, employees, currentUserEmployeeId, currentUserId, makerChecker = true, canApprove,
   onApplyLoan, onApproveLoan, onRejectLoan
 }: LoansModuleProps) {
   const [showApplyForm, setShowApplyForm] = useState(false);
@@ -64,7 +67,7 @@ export function LoansModule({
       totalRepaid: 0,
       reason: form.reason.trim(),
       status: 'Pending',
-      appliedOn: new Date().toISOString().split('T')[0]
+      appliedOn: localDateStr()
     };
     onApplyLoan(loan);
     setShowApplyForm(false);
@@ -190,7 +193,12 @@ export function LoansModule({
                 )}
 
                 {/* Approve/Reject for pending loans */}
-                {loan.status === 'Pending' && canApprove && (
+                {loan.status === 'Pending' && canApprove && makerChecker && ((loan.createdById && loan.createdById === currentUserId) || (currentUserEmployeeId && loan.employeeId === currentUserEmployeeId)) && (
+                  <div className="mt-3 pt-3 border-t border-slate-200 text-xs text-amber-700">
+                    {loan.createdById === currentUserId ? 'You entered this application' : 'This is your own application'}. Another authorized user must approve or reject it.
+                  </div>
+                )}
+                {loan.status === 'Pending' && canApprove && !(makerChecker && ((loan.createdById && loan.createdById === currentUserId) || (currentUserEmployeeId && loan.employeeId === currentUserEmployeeId))) && (
                   <div className="mt-3 flex gap-2 pt-3 border-t border-slate-200">
                     <div className="text-xs text-slate-500 flex-1">
                       Monthly installment: PKR {loan.monthlyInstallment.toLocaleString()} over {loan.totalInstallments} months

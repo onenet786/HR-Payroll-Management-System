@@ -13,6 +13,7 @@ import { SalaryRevision, Employee } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 import ListSearch from './ListSearch';
 import { matchesSearch } from '../data/listSearch';
+import { localDateStr } from '../data/localDate';
 
 interface SalaryRevisionModuleProps {
   salaryRevisions: SalaryRevision[];
@@ -38,7 +39,7 @@ export function SalaryRevisionModule({ salaryRevisions, employees, currentUserAc
   const [showSheet, setShowSheet] = useState(false);
   const [sheetText, setSheetText] = useState('');
   const [sheetName, setSheetName] = useState('');
-  const [sheetDefaults, setSheetDefaults] = useState({ effectiveDate: new Date().toISOString().split('T')[0], reason: '' });
+  const [sheetDefaults, setSheetDefaults] = useState({ effectiveDate: localDateStr(), reason: '' });
   const [bulk, setBulk] = useState<{ label: string; done: number; total: number; failed: number } | null>(null);
   const sheetPlan: SalarySheetPlan | null = sheetText
     ? planSalarySheet(sheetText, employees, { effectiveDate: sheetDefaults.effectiveDate, reason: sheetDefaults.reason.trim() || `Salary sheet ${sheetName}`.trim() })
@@ -100,7 +101,7 @@ export function SalaryRevisionModule({ salaryRevisions, employees, currentUserAc
   const approveAllDrafts = async () => {
     if (!approvableDrafts.length) return;
     if (!confirm(`Approve ${approvableDrafts.length} draft salary revisions? Each employee's basic salary changes to the new amount.`)) return;
-    const today = new Date().toISOString().split('T')[0];
+    const today = localDateStr();
     await runBulk('Approving revisions', approvableDrafts.map(r => ({ ...r, status: 'Approved' as const, approvedBy: currentUserAccount.username, approvedOn: today })));
   };
   const [filterEmpId, setFilterEmpId] = useState<string>('All');
@@ -109,7 +110,7 @@ export function SalaryRevisionModule({ salaryRevisions, employees, currentUserAc
   const [form, setForm] = useState({
     employeeId: employees[0]?.id || '',
     newSalary: 0,
-    effectiveDate: new Date().toISOString().split('T')[0],
+    effectiveDate: localDateStr(),
     reason: '',
     type: 'Annual Increment' as SalaryRevision['type']
   });
@@ -315,7 +316,7 @@ export function SalaryRevisionModule({ salaryRevisions, employees, currentUserAc
               </div>
               {revision.status === 'Draft' && <div className="mt-3 flex items-center justify-between rounded-xl border border-amber-200 bg-amber-50 p-3">
                 <p className="text-xs text-amber-700">{revision.sourcePerformanceReviewId ? 'Performance recommendation only.' : 'Awaiting independent approval.'} Approving updates the employee salary; back-dated revisions raise an arrears adjustment for months already processed.</p>
-                <button type="button" disabled={makerChecker && revision.createdById === currentUserAccount.id} title={makerChecker && revision.createdById === currentUserAccount.id ? 'Prepared by you; another authorized user must approve.' : 'Approve and apply'} onClick={() => onAddSalaryRevision({ ...revision, status: 'Approved', approvedBy: currentUserAccount.username, approvedOn: new Date().toISOString().split('T')[0] })} className="ml-4 shrink-0 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-40">Approve &amp; Apply</button>
+                <button type="button" disabled={makerChecker && revision.createdById === currentUserAccount.id} title={makerChecker && revision.createdById === currentUserAccount.id ? 'Prepared by you; another authorized user must approve.' : 'Approve and apply'} onClick={() => onAddSalaryRevision({ ...revision, status: 'Approved', approvedBy: currentUserAccount.username, approvedOn: localDateStr() })} className="ml-4 shrink-0 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-40">Approve &amp; Apply</button>
               </div>}
             </div>
           ))

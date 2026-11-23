@@ -65,9 +65,28 @@ export function evaluateAttendanceTimes(punchIn: string | undefined, punchOut: s
   return { status, workedMinutes, overtimeMinutes: Math.max(0, workedMinutes - overtimeThreshold) };
 }
 
+/**
+ * Company-wide paid days off in a year, as YYYY-MM-DD. A holiday marked "repeats annually" falls on the same day and
+ * month in every year from the year it was entered. Optional holidays are not days off for everyone: an employee who
+ * takes one applies for leave, so they stay normal working days here.
+ */
+export function holidayDatesForYear(holidays: Holiday[], year: number): Set<string> {
+  const dates = new Set<string>();
+  for (const item of holidays) {
+    if (!item?.date || item.type === 'Optional') continue;
+    const enteredYear = Number(item.date.slice(0, 4));
+    if (item.isRecurring && enteredYear <= year) {
+      const monthDay = item.date.slice(5);
+      // 29 February only exists in leap years.
+      if (monthDay !== '02-29' || new Date(year, 1, 29).getMonth() === 1) dates.add(`${year}-${monthDay}`);
+    } else if (enteredYear === year) dates.add(item.date);
+  }
+  return dates;
+}
+
 export function countScheduledWorkingDays(year: number, month: number, shift: Shift = DEFAULT_SHIFT, holidays: Holiday[] = []): number {
   const workingDays = new Set(shift.workingDays?.length ? shift.workingDays : DEFAULT_SHIFT.workingDays);
-  const holidayDates = new Set(holidays.map(item => item.date));
+  const holidayDates = holidayDatesForYear(holidays, year);
   const lastDay = new Date(year, month, 0).getDate();
   let total = 0;
   for (let day = 1; day <= lastDay; day += 1) {

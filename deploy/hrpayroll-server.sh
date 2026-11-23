@@ -208,7 +208,8 @@ set_env() {   # set_env FILE KEY VALUE   (replaces "KEY=..." or "# KEY=..." or a
     END { if (!done) print ENVIRON["KEY"] "=" ENVIRON["VALUE"] }
   ' "$file" > "$tmp" && cat "$tmp" > "$file" && rm -f "$tmp"
 }
-get_env() { grep -E "^$2=" "$1" 2>/dev/null | tail -1 | cut -d= -f2- || true; }
+# Reads KEY=value from an .env file; ignores Windows line endings (\r), surrounding quotes and trailing spaces.
+get_env() { grep -E "^$2=" "$1" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '\r' | sed -E 's/[[:space:]]+$//; s/^"(.*)"$/\1/; s/^'"'"'(.*)'"'"'$/\1/' || true; }
 urlencode() { node -e 'process.stdout.write(encodeURIComponent(process.argv[1]))' "$1"; }
 random_key() { node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("base64"))'; }
 

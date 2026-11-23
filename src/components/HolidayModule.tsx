@@ -86,7 +86,7 @@ export function HolidayModule({ holidays, onAddHoliday, onUpdateHoliday, onDelet
   // Filter by year and type
   const filtered = holidays
     .filter(h => {
-      const yearMatch = h.date.startsWith(String(filterYear)) || h.isRecurring;
+      const yearMatch = h.date.startsWith(String(filterYear)) || (h.isRecurring && Number(h.date.slice(0, 4)) <= Number(filterYear));
       const typeMatch = filterType === 'All' || h.type === filterType;
       return yearMatch && typeMatch && matchesSearch(search, h.name, h.type, h.date, h.description);
     })
@@ -268,6 +268,7 @@ export function HolidayModule({ holidays, onAddHoliday, onUpdateHoliday, onDelet
                       aria-label="Holiday type" className="w-full bg-white border border-slate-200 text-slate-900 text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500">
                       {HOLIDAY_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
                     </select>
+                    {form.type === 'Optional' && <p className="mt-1 text-[10px] text-amber-700">Not a day off for everyone: staff who take it apply for leave; others work and are paid normally.</p>}
                   </div>
                 </div>
 

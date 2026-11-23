@@ -3,6 +3,7 @@ import { FULL_EDITION, type EditionFeatures } from './edition';
 import { JURISDICTIONS } from './provincialCompliance';
 import { exportTemplatesFor } from './exportTemplates';
 import { complianceAlerts } from './complianceAlerts';
+import { localDateStr } from './localDate';
 
 export type ReadinessStatus = 'Ready' | 'Action needed' | 'Optional';
 export interface ReadinessItem { id: string; label: string; status: ReadinessStatus; detail: string; where: string }
@@ -27,7 +28,7 @@ export function goLiveReadiness(inputs: ReadinessInputs): ReadinessItem[] {
   const { statConfig, employees, branches, users, roles, payrollRuns } = inputs;
   const features = inputs.features || FULL_EDITION.features;
   const statutory = features.incomeTax || features.eobi || features.socialSecurity;
-  const today = inputs.today || new Date().toISOString().slice(0, 10);
+  const today = inputs.today || localDateStr();
   const items: ReadinessItem[] = [];
   const add = (id: string, label: string, ready: boolean, detail: string, where: string, optional = false) =>
     items.push({ id, label, status: ready ? 'Ready' : optional ? 'Optional' : 'Action needed', detail, where });

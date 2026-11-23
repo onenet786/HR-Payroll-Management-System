@@ -116,12 +116,12 @@ export function MobileApp({
   // Forms state
   const [leaveForm, setLeaveForm] = useState({
     leaveType: 'Casual' as 'Casual' | 'Sick' | 'Annual' | 'Unpaid',
-    startDate: new Date().toISOString().split('T')[0],
-    endDate: new Date(Date.now() + 86400000).toISOString().split('T')[0],
+    startDate: localDateStr(),
+    endDate: localDateStr(new Date(Date.now() + 86400000)),
     reason: ''
   });
   const [regForm, setRegForm] = useState({
-    date: new Date(Date.now() - 86400000).toISOString().split('T')[0],
+    date: localDateStr(new Date(Date.now() - 86400000)),
     reason: ''
   });
 

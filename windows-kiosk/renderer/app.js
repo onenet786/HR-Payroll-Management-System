@@ -3044,8 +3044,10 @@ function safeImageUrl(value) {
   return /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/i.test(url) && url.length <= 700000 ? url : '';
 }
 
+// Local calendar date: toISOString() is UTC and would give yesterday in Pakistan until 5 AM.
 function todayStr() {
-  return new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 }
 
 

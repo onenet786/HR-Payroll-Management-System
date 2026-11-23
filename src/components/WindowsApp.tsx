@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { Employee, AttendanceLog, LeaveRequest, StatutoryConfig } from '../types';
 import { captureBiometric } from '../utils/uru4500Bridge';
+import { localDateStr } from '../data/localDate';
 
 interface WindowsAppProps {
   employees: Employee[];
@@ -56,7 +57,7 @@ export function WindowsApp({
       const timeStr = [now.getHours(), now.getMinutes(), now.getSeconds()]
         .map(v => String(v).padStart(2, '0'))
         .join(':');
-      const today = now.toISOString().split('T')[0];
+      const today = localDateStr(now);
       const todayLogs = attendances.filter(a => a.employeeId === emp.id && a.date === today);
       const isCheckIn = todayLogs.length === 0 || !todayLogs[todayLogs.length - 1].punchOut;
 

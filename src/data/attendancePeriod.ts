@@ -1,4 +1,5 @@
 import type { AttendanceLog, AttendancePeriod, AttendanceRegisterRow, Employee, Holiday, LeaveRequest, PayrollRun } from '../types';
+import { holidayDatesForYear } from './attendanceRules';
 
 export type AttendanceLockIssue = {
   attendanceId: string;
@@ -72,7 +73,7 @@ export interface RegisterOptions {
 
 export function buildAttendanceRegister(attendances: AttendanceLog[], employees: Employee[], leaves: LeaveRequest[], holidays: Holiday[], month: number, year: number, options: RegisterOptions = {}): AttendanceRegisterRow[] {
   const attendanceByEmployeeDay = new Map(attendances.filter(item => item.date.startsWith(`${year}-${String(month).padStart(2, '0')}`)).map(item => [`${item.employeeId}|${item.date}`, item]));
-  const holidayDates = new Set(holidays.map(item => item.date));
+  const holidayDates = holidayDatesForYear(holidays, year);
   const lastDay = new Date(year, month, 0).getDate();
   const eligible = employees.filter(employee => employedDuring(employee, dayKey(year, month, 1), dayKey(year, month, lastDay)));
   return eligible.flatMap(employee => Array.from({ length: lastDay }, (_, offset) => {

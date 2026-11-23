@@ -1,6 +1,7 @@
 import type { Company, Employee, GratuitySettlement, LeaveRequest, LifecycleRequest, OnboardingChecklistItem, SalaryRevision, StatutoryConfig, WageType } from '../types';
 import { resolveWageBasis } from './masterData';
 import { leaveEntitlementFor } from './leavePolicy';
+import { localDateStr } from './localDate';
 
 export const ONBOARDING_ITEMS: Record<OnboardingChecklistItem, string> = {
   cnicCopy: 'CNIC copy on file', appointmentLetter: 'Signed appointment letter', bankVerified: 'Bank account verified',
@@ -147,7 +148,7 @@ export function dueSeparations(employees: Employee[], today: string): Employee[]
 const escapeHtml = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!);
 const longDate = (value?: string) => value ? new Date(`${value}T00:00:00`).toLocaleDateString('en-PK', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
 
-export function experienceLetterHtml(employee: Employee, designationTitle: string, departmentName: string, company?: Company, issuedOn = new Date().toISOString().slice(0, 10)): string {
+export function experienceLetterHtml(employee: Employee, designationTitle: string, departmentName: string, company?: Company, issuedOn = localDateStr()): string {
   const companyName = company?.legalName || company?.name || 'the Company';
   const separated = employee.status === 'Terminated' && employee.separationDate;
   const body = separated

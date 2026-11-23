@@ -12,6 +12,7 @@ import { CompanyAsset, Employee } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 import ListSearch from './ListSearch';
 import { matchesSearch } from '../data/listSearch';
+import { localDateStr } from '../data/localDate';
 
 interface AssetModuleProps {
   assets: CompanyAsset[];
@@ -52,7 +53,7 @@ export function AssetModule({ assets, employees, canManage, onAddAsset, onUpdate
 
   const emptyForm: Partial<CompanyAsset> = {
     assetTag: '', name: '', category: 'Laptop', condition: 'Good',
-    purchaseDate: new Date().toISOString().split('T')[0], purchaseCost: 0, status: 'Available'
+    purchaseDate: localDateStr(), purchaseCost: 0, status: 'Available'
   };
   const [form, setForm] = useState<Partial<CompanyAsset>>(emptyForm);
 
@@ -83,14 +84,14 @@ export function AssetModule({ assets, employees, canManage, onAddAsset, onUpdate
 
   const handleAssign = () => {
     if (!assignModal || !assignToId) return;
-    onUpdateAsset({ ...assignModal, assignedTo: assignToId, assignedDate: new Date().toISOString().split('T')[0], status: 'Assigned' });
+    onUpdateAsset({ ...assignModal, assignedTo: assignToId, assignedDate: localDateStr(), status: 'Assigned' });
     setAssignModal(null);
     setAssignToId('');
   };
 
   const handleReturn = () => {
     if (!returnModal) return;
-    onUpdateAsset({ ...returnModal, returnDate: new Date().toISOString().split('T')[0], status: 'Available', assignedTo: undefined, assignedDate: undefined });
+    onUpdateAsset({ ...returnModal, returnDate: localDateStr(), status: 'Available', assignedTo: undefined, assignedDate: undefined });
     setReturnModal(null);
   };
 

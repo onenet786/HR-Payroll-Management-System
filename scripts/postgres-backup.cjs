@@ -19,8 +19,12 @@ const encrypted = path.join(backupDir, `${base}.dump.enc`);
 const manifestPath = `${encrypted}.manifest.json`;
 const pgEnvironment = { ...process.env, PGHOST: parsed.hostname, PGPORT: parsed.port || '5432', PGUSER: decodeURIComponent(parsed.username), PGPASSWORD: decodeURIComponent(parsed.password), PGDATABASE: parsed.pathname.slice(1), PGSSLMODE: process.env.PG_SSL === 'true' ? 'require' : 'disable' };
 
+// Tolerate a PG_DUMP_PATH that carries a Windows line ending or quotes (e.g. an .env edited on Windows).
+const pgDumpPath = String(process.env.PG_DUMP_PATH || '').replace(/[\r\n]/g, '').trim().replace(/^(["'])(.*)\1$/, '$2') || 'pg_dump';
+process.env.PG_DUMP_PATH = pgDumpPath;
+
 try {
-  const dump = spawnSync(process.env.PG_DUMP_PATH || 'pg_dump', ['--format=custom', '--no-owner', '--no-acl', '--file', temporary], { env: pgEnvironment, stdio: 'inherit' });
+  const dump = spawnSync(pgDumpPath, ['--format=custom', '--no-owner', '--no-acl', '--file', temporary], { env: pgEnvironment, stdio: 'inherit' });
   if (dump.status !== 0) throw new Error(`${dump.error ? `could not start pg_dump at "${process.env.PG_DUMP_PATH || 'pg_dump'}" (${dump.error.code || dump.error.message}). Check PG_DUMP_PATH in .env points to an existing pg_dump that matches the server's PostgreSQL version.` : dump.signal ? `pg_dump was stopped by signal ${dump.signal}.` : `pg_dump failed with exit code ${dump.status}.`}`);
   encryptFile(temporary, encrypted);
   const stats = fs.statSync(encrypted);

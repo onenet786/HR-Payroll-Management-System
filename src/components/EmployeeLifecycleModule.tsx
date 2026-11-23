@@ -7,6 +7,7 @@ import type { Branch, Company, Department, Designation, Employee, LeaveRequest, 
 import ListSearch from './ListSearch';
 import { matchesSearch } from '../data/listSearch';
 import { annualLeaveBalance, experienceLetterHtml, MANUAL_ONBOARDING_ITEMS, ONBOARDING_ITEMS, onboardingStatus, openPrintableHtml } from '../data/lifecycle';
+import { localDateStr } from '../data/localDate';
 
 interface Props {
   employees: Employee[];
@@ -26,7 +27,7 @@ interface Props {
 }
 
 const TYPES: LifecycleRequestType[] = ['Probation Confirmation', 'Probation Extension', 'Transfer', 'Promotion', 'Resignation', 'Termination'];
-const emptyForm = { employeeId: '', type: 'Probation Confirmation' as LifecycleRequestType, effectiveDate: new Date().toISOString().slice(0, 10), reason: '', newBranchId: '', newDepartmentId: '', newDesignationId: '', newBasicSalary: '', newProbationEndDate: '', noticeDays: '0', leaveEncashDays: '0' };
+const emptyForm = { employeeId: '', type: 'Probation Confirmation' as LifecycleRequestType, effectiveDate: localDateStr(), reason: '', newBranchId: '', newDepartmentId: '', newDesignationId: '', newBasicSalary: '', newProbationEndDate: '', noticeDays: '0', leaveEncashDays: '0' };
 
 export function EmployeeLifecycleModule({ employees, branches, departments, designations, companies, lifecycleRequests, currentUserId, onCreate, onReview, onUpdateOnboarding, leaves, statConfig, makerChecker = true }: Props) {
   const [view, setView] = useState<'requests' | 'onboarding' | 'letters'>('requests');

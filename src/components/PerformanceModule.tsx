@@ -13,11 +13,12 @@ import { empAvatarUrl } from '../utils/avatar';
 import { motion, AnimatePresence } from 'motion/react';
 import ListSearch from './ListSearch';
 import { matchesSearch } from '../data/listSearch';
+import { localDateStr } from '../data/localDate';
 
 interface PerformanceModuleProps {
   reviews: PerformanceReview[];
   employees: Employee[];
-  currentUserAccount: { username: string; employeeId?: string };
+  currentUserAccount: { id: string; username: string; employeeId?: string };
   canManage: boolean;
   onAddReview: (review: PerformanceReview) => void;
   onUpdateReview: (review: PerformanceReview) => void;
@@ -57,7 +58,7 @@ export function PerformanceModule({ reviews, employees, currentUserAccount, canM
   const [form, setForm] = useState({
     employeeId: employees[0]?.id || '',
     period: 'H1-2026',
-    reviewDate: new Date().toISOString().split('T')[0],
+    reviewDate: localDateStr(),
     kpis: emptyKpis,
     strengths: '',
     areasOfImprovement: '',
@@ -138,7 +139,7 @@ export function PerformanceModule({ reviews, employees, currentUserAccount, canM
       return;
     }
     const employee = employees.find(item => item.id === review.employeeId);
-    const approvedOn = new Date().toISOString().split('T')[0];
+    const approvedOn = localDateStr();
     let salaryRevisionId = review.salaryRevisionId;
     if (approved && review.incrementRecommended && review.incrementPercent && employee && !salaryRevisionId) {
       salaryRevisionId = `rev-perf-${review.id}`;
@@ -156,6 +157,8 @@ export function PerformanceModule({ reviews, employees, currentUserAccount, canM
         approvedOn: '',
         type: 'Annual Increment',
         status: 'Draft',
+        createdById: currentUserAccount.id,
+        createdBy: currentUserAccount.username,
         sourcePerformanceReviewId: review.id,
       });
     }

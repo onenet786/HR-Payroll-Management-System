@@ -5,6 +5,7 @@ import { AlertTriangle, BarChart3, Briefcase, CalendarCheck, Lightbulb, Trending
 import type { AttendanceLog, Branch, Department, Employee, JobApplication, JobPosting, LeaveRequest, PerformanceReview } from '../types';
 import type { EditionFeatures } from '../data/edition';
 import { computeHrKpis, monthKey, type KpiMetric } from '../data/hrKpis';
+import { localDateStr } from '../data/localDate';
 // Charts are measured after the first render; starting at 1x1 (not the library's -1x-1) avoids a console warning.
 const CHART_START_SIZE = { width: 1, height: 1 };
 
@@ -84,7 +85,7 @@ function Donut({ data, total, centre }: { data: { label: string; value: number }
 
 /** KPI dashboard in the "HR KPI" style: filters, month-over-month tiles, charts and auto-generated insights, all from live records. */
 export function KpiDashboard({ employees, attendances, leaves, departments, branches, jobPostings, jobApplications, performanceReviews, features, pendingTasks }: Props) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localDateStr();
   const [month, setMonth] = useState(monthKey(today));
   const [departmentId, setDepartmentId] = useState('');
   const [branchId, setBranchId] = useState('');

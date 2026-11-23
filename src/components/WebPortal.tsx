@@ -79,6 +79,7 @@ import { authenticatedApiRequest } from '../data/postgresStore';
 import KioskDevicesPanel from './KioskDevicesPanel';
 import RolePermissionsPanel from './RolePermissionsPanel';
 import QRCode from 'qrcode';
+import { localDateStr } from '../data/localDate';
 
 const PAKISTAN_BANKS = [
   { name: 'Habib Bank Limited (HBL)', code: 'HABB' },
@@ -918,6 +919,7 @@ export function WebPortal({
     probationConfirmed: false,
     gender: 'Male',
     dateOfBirth: '',
+    dateOfJoining: localDateStr(),
     branchId: 'b1',
     departmentId: 'd1',
     designationId: 'ds1',
@@ -975,6 +977,7 @@ export function WebPortal({
     probationConfirmed: false,
     gender: 'Male',
     dateOfBirth: '1995-01-01',
+    dateOfJoining: '',
     branchId: 'b1',
     departmentId: 'd1',
     designationId: 'ds1',
@@ -1018,7 +1021,7 @@ export function WebPortal({
   const [viewImageModal, setViewImageModal] = useState<{ open: boolean; url: string; title: string; subtitle?: string } | null>(null);
   const [documentVaultEmployee, setDocumentVaultEmployee] = useState<Employee | null>(null);
   const [bankAdviceProfile, setBankAdviceProfile] = useState<string>('tpl-generic-csv');
-  const [bankValueDate, setBankValueDate] = useState(new Date().toISOString().slice(0, 10));
+  const [bankValueDate, setBankValueDate] = useState(localDateStr());
   const bankTemplates = exportTemplatesFor(statConfig, 'Bank Advice');
   const selectedBankTemplate = bankTemplates.find(item => item.id === bankAdviceProfile) || bankTemplates[0];
   const batchReferenceFor = (run: PayrollRun) => `${run.periodYear}${String(run.periodMonth).padStart(2, '0')}${run.id.replace(/[^A-Za-z0-9]/g, '').slice(-6).toUpperCase()}`;
@@ -1066,7 +1069,7 @@ export function WebPortal({
   // Settlement manual additions for offboarding
   const [settlementLeavesEncash, setSettlementLeavesEncash] = useState(10);
   const [settlementType, setSettlementType] = useState<GratuitySettlement['separationType']>('Resignation');
-  const [settlementDate, setSettlementDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [settlementDate, setSettlementDate] = useState(() => localDateStr());
   const [settlementNoticeDays, setSettlementNoticeDays] = useState(0);
   const [settlementReason, setSettlementReason] = useState('');
 
@@ -1497,7 +1500,7 @@ export function WebPortal({
 
 
   const [leavePeriodType, setLeavePeriodType] = useState<'daily' | 'weekly' | 'monthly' | 'yearly'>('daily');
-  const [selectedLeaveDate, setSelectedLeaveDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [selectedLeaveDate, setSelectedLeaveDate] = useState(() => localDateStr());
 
   // List search, one box per page
   const [employeeSearch, setEmployeeSearch] = useState('');
@@ -1567,7 +1570,7 @@ export function WebPortal({
   const [showAddAttendanceModal, setShowAddAttendanceModal] = useState(false);
   const [newAttendanceForm, setNewAttendanceForm] = useState({
     employeeId: '',
-    date: new Date().toISOString().split('T')[0],
+    date: localDateStr(),
     punchIn: '09:00',
     punchOut: '17:00',
     method: 'Manual' as const,
@@ -1578,8 +1581,8 @@ export function WebPortal({
   const [newLeaveForm, setNewLeaveForm] = useState({
     employeeId: '',
     leaveType: 'Casual' as const,
-    startDate: new Date().toISOString().split('T')[0],
-    endDate: new Date().toISOString().split('T')[0],
+    startDate: localDateStr(),
+    endDate: localDateStr(),
     reason: ''
   });
 
@@ -1587,7 +1590,7 @@ export function WebPortal({
   const totalCount = employees.length;
   const activeCount = employees.filter(e => e.status === 'Active').length;
   
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = localDateStr();
   const todayPunches = attendances.filter(a => a.date === todayStr);
   const presentToday = todayPunches.filter(p => p.status === 'Present' || p.status === 'Late').length;
   const attendanceRate = totalCount > 0 ? Math.round((presentToday / totalCount) * 100) : 0;
@@ -1684,7 +1687,7 @@ export function WebPortal({
       const activeDays = new Set(attendances.filter(item => item.employeeId === employee.id && ['Present', 'Late', 'Half Day'].includes(item.status)).map(item => item.date));
       for (let offset = 0; offset <= 24; offset += 1) {
         const end = new Date(`${todayStr}T00:00:00`); end.setDate(end.getDate() - offset);
-        const range = Array.from({ length: 7 }, (_, index) => { const day = new Date(end); day.setDate(day.getDate() - index); return day.toISOString().slice(0, 10); });
+        const range = Array.from({ length: 7 }, (_, index) => { const day = new Date(end); day.setDate(day.getDate() - index); return localDateStr(day); });
         if (range.every(date => activeDays.has(date))) return [{ id: `rest-${employee.id}-${range[0]}`, type: 'Weekly rest', tone: 'rose' as const, employee: employee.fullName, detail: `Seven consecutive attendance days ending ${range[0]}; verify statutory rest-day entitlement.` }];
       }
       return [];
@@ -1772,7 +1775,7 @@ export function WebPortal({
       probationConfirmedAt: newEmpForm.probationConfirmed ? new Date().toISOString() : undefined,
       gender: newEmpForm.gender,
       dateOfBirth: newEmpForm.dateOfBirth,
-      dateOfJoining: todayStr,
+      dateOfJoining: newEmpForm.dateOfJoining || todayStr,
       status: 'Active',
       wageTypeId: selectedWageType?.id,
       wageType: selectedWageType?.name ?? newEmpForm.wageType,
@@ -1892,6 +1895,7 @@ export function WebPortal({
       probationConfirmedAt: editEmpForm.probationConfirmed ? (editingEmployee.probationConfirmedAt || new Date().toISOString()) : undefined,
       gender: editEmpForm.gender,
       dateOfBirth: editEmpForm.dateOfBirth,
+      dateOfJoining: editEmpForm.dateOfJoining || editingEmployee.dateOfJoining,
       wageTypeId: selectedWageType?.id,
       wageType: selectedWageType?.name ?? editEmpForm.wageType,
       basicSalary: Number(editEmpForm.basicSalary),
@@ -1982,6 +1986,7 @@ export function WebPortal({
       probationConfirmed: Boolean(emp.probationConfirmedAt),
       gender: emp.gender,
       dateOfBirth: emp.dateOfBirth,
+      dateOfJoining: emp.dateOfJoining || '',
       branchId: resolvedBranchId,
       departmentId: resolvedDepartmentId,
       designationId: resolvedDesignationId,
@@ -4652,6 +4657,8 @@ export function WebPortal({
                     loanAdvances={loanAdvances}
                     employees={employees}
                     currentUserEmployeeId={loggedInUser?.employeeId}
+                    currentUserId={currentUserAccount.id}
+                    makerChecker={dualControl}
                     canApprove={userPermissions.includes('manage_payroll') || userPermissions.includes('manage_employees')}
                     onApplyLoan={onApplyLoan}
                     onApproveLoan={onApproveLoan}
@@ -5039,6 +5046,18 @@ export function WebPortal({
                         onChange={(e) => setNewEmpForm({ ...newEmpForm, dateOfBirth: e.target.value })}
                         className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg text-xs text-slate-900 bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all focus:outline-none"
                       />
+                    </div>
+                    <div>
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
+                        <span>Date of Joining:<RequiredMark /></span>
+                      </label>
+                      <DateField required
+                        aria-label="Date of Joining"
+                        value={newEmpForm.dateOfJoining}
+                        onChange={(e) => setNewEmpForm({ ...newEmpForm, dateOfJoining: e.target.value })}
+                        className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg text-xs text-slate-900 bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all focus:outline-none"
+                      />
+                      <p className="mt-1 text-[10px] text-slate-500">First working day. Payroll, leave, gratuity and service length count from this date.</p>
                     </div>
                   </div>
 
@@ -5824,6 +5843,18 @@ export function WebPortal({
                         onChange={(e) => setEditEmpForm({ ...editEmpForm, dateOfBirth: e.target.value })}
                         className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg text-xs text-slate-900 bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all focus:outline-none"
                       />
+                    </div>
+                    <div>
+                      <label className="block font-bold mb-1 text-slate-700 font-sans text-xs min-h-[1.25rem] flex items-center justify-between">
+                        <span>Date of Joining:<RequiredMark /></span>
+                      </label>
+                      <DateField required
+                        aria-label="Date of Joining"
+                        value={editEmpForm.dateOfJoining}
+                        onChange={(e) => setEditEmpForm({ ...editEmpForm, dateOfJoining: e.target.value })}
+                        className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg text-xs text-slate-900 bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all focus:outline-none"
+                      />
+                      <p className="mt-1 text-[10px] text-slate-500">First working day. Payroll, leave, gratuity and service length count from this date.</p>
                     </div>
 
                   <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4 items-start">

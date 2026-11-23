@@ -16,7 +16,7 @@ const { pool } = require('./db.cjs');
 const documentRoutes = require('./documents.cjs');
 
 const TABLES = ['notifications', 'company_assets', 'leaves', 'roles', 'users', 'companies', 'employees', 'branches', 'attendances', 'attendance_periods', 'payroll_runs', 'payroll_payslips', 'payroll_adjustments',
-  'stat_config', 'tax_slabs', 'statutory_change_requests', 'lifecycle_requests', 'salary_revisions', 'gratuity_settlements', 'hr_audit_log'];
+  'stat_config', 'tax_slabs', 'statutory_change_requests', 'lifecycle_requests', 'salary_revisions', 'loan_advances', 'gratuity_settlements', 'hr_audit_log'];
 const PERIOD = { month: 9, year: 2026, prefix: '2026-09', days: 30 };
 let server;
 let base;
@@ -206,6 +206,17 @@ test('lifecycle requests and salary revisions require a second user', async () =
   assert.equal(await put('u-maker', 'salaryRevisions', 'rev-1', { ...revision, status: 'Approved', approvedById: 'u-maker' }), 403);
   assert.equal(await put('u-checker', 'salaryRevisions', 'rev-1', { ...revision, status: 'Approved', approvedById: 'u-checker' }), 200);
   assert.equal((await current('employees', 'e1')).basicSalary, 110000, 'approval sets the salary');
+
+  assert.equal(await put('u-maker', 'salaryRevisions', 'rev-anon', { ...revision, createdById: undefined }), 403, 'a draft must name its maker');
+
+  // Loans: the user who entered an application cannot decide it, and a decision cannot change the terms.
+  const loan = { employeeId: 'e1', type: 'Loan', principalAmount: 50000, approvedAmount: 0, totalInstallments: 10, remainingInstallments: 10, monthlyInstallment: 5000, totalRepaid: 0, reason: 'Medical', status: 'Pending', appliedOn: '2026-10-01', createdById: 'u-maker' };
+  assert.equal(await put('u-maker', 'loanAdvances', 'loan-0', { ...loan, status: 'Active' }), 403, 'cannot create an active loan');
+  assert.equal(await put('u-maker', 'loanAdvances', 'loan-0', { ...loan, createdById: 'u-checker' }), 403, 'maker must be the caller');
+  assert.equal(await put('u-maker', 'loanAdvances', 'loan-1', loan), 200);
+  assert.equal(await put('u-maker', 'loanAdvances', 'loan-1', { ...loan, status: 'Active', decidedById: 'u-maker' }), 403, 'maker cannot approve');
+  assert.equal(await put('u-checker', 'loanAdvances', 'loan-1', { ...loan, principalAmount: 90000, status: 'Active', decidedById: 'u-checker' }), 403, 'approval cannot alter the terms');
+  assert.equal(await put('u-checker', 'loanAdvances', 'loan-1', { ...loan, status: 'Active', approvedAmount: 50000, decidedById: 'u-checker' }), 200);
 
   // A payroll user without rights to edit employee records can still apply an approved revision.
   const raise = { employeeId: 'e1', previousSalary: 110000, newSalary: 121000, effectiveDate: '2026-11-01', status: 'Draft', createdById: 'u-maker' };

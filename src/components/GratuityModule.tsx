@@ -13,6 +13,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import ListSearch, { NoSearchResults } from './ListSearch';
 import { matchesSearch } from '../data/listSearch';
 import { gratuityEntitlement } from '../data/lifecycle';
+import { localDateStr } from '../data/localDate';
 
 interface GratuityModuleProps {
   settlements: GratuitySettlement[];
@@ -53,7 +54,7 @@ export function GratuityModule({ settlements, employees, statConfig, canManage, 
   const [calcForm, setCalcForm] = useState({
     employeeId: employees[0]?.id || '',
     separationType: 'Resignation' as SeparationType,
-    lastWorkingDate: new Date().toISOString().split('T')[0],
+    lastWorkingDate: localDateStr(),
     encashableLeaveDays: 0,
     noticePayDays: 0,
     pendingSalaryDays: 0,
@@ -186,7 +187,7 @@ export function GratuityModule({ settlements, employees, statConfig, canManage, 
                               className="text-[10px] font-bold text-blue-700 bg-blue-50 px-2 py-1 rounded-lg hover:bg-blue-500/20 transition">Process</button>
                           )}
                           {s.status === 'Processed' && (
-                            <button disabled={makerChecker && (s.createdById === currentUserAccount.id || s.processedById === currentUserAccount.id)} title={makerChecker && s.createdById === currentUserAccount.id ? 'Settlement maker cannot pay it.' : makerChecker && s.processedById === currentUserAccount.id ? 'Settlement processor cannot pay it.' : 'Mark settlement paid'} onClick={() => onUpdateSettlement({ ...s, status: 'Paid', paidDate: new Date().toISOString().split('T')[0], paidById: currentUserAccount.id })}
+                            <button disabled={makerChecker && (s.createdById === currentUserAccount.id || s.processedById === currentUserAccount.id)} title={makerChecker && s.createdById === currentUserAccount.id ? 'Settlement maker cannot pay it.' : makerChecker && s.processedById === currentUserAccount.id ? 'Settlement processor cannot pay it.' : 'Mark settlement paid'} onClick={() => onUpdateSettlement({ ...s, status: 'Paid', paidDate: localDateStr(), paidById: currentUserAccount.id })}
                               className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-lg hover:bg-emerald-500/20 transition">Mark Paid</button>
                           )}
                         </div>

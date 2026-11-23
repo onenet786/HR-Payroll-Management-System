@@ -1986,7 +1986,8 @@ function HrApp() {
   };
 
   // ─── Loan & Advance Handlers ──────────────────────────────────────────────
-  const handleApplyLoan = async (loan: LoanAdvance) => {
+  const handleApplyLoan = async (draft: LoanAdvance) => {
+    const loan: LoanAdvance = { ...draft, status: 'Pending', createdById: currentUserAccount.id, createdBy: currentUserAccount.username };
     setLoanAdvances(prev => {
       const updated = [...prev, loan];
       privacyStorage.setItem('hr_loans', JSON.stringify(updated));
@@ -2007,11 +2008,15 @@ function HrApp() {
       alert('Maker-checker control: you cannot approve or reject your own loan or advance.');
       return;
     }
+    if (dualControl && loan.createdById && loan.createdById === currentUserAccount.id) {
+      alert('Maker-checker control: you entered this application, so another authorized user must approve or reject it.');
+      return;
+    }
     const today = todayStr();
     const approverName = loggedInUser?.username || 'HR Manager';
     const decision: Partial<LoanAdvance> = status === 'Active'
-      ? { status, approvedAmount: loan.approvedAmount || loan.principalAmount, approvedBy: approverName, approvedOn: today, disbursedDate: today }
-      : { status, approvedBy: approverName, approvedOn: today };
+      ? { status, approvedAmount: loan.approvedAmount || loan.principalAmount, approvedBy: approverName, approvedOn: today, disbursedDate: today, decidedById: currentUserAccount.id }
+      : { status, approvedBy: approverName, approvedOn: today, decidedById: currentUserAccount.id };
     try {
       await updateDoc(doc(db, 'loanAdvances', id), decision);
     } catch (err) {

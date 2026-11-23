@@ -1,4 +1,5 @@
 import type { Employee, PayrollRun, Payslip } from '../types';
+import { localDateStr } from './localDate';
 
 /**
  * Bank and statutory upload layouts differ per institution and change over time, so they are data,
@@ -107,7 +108,7 @@ export function renderExport(template: ExportTemplate, payslips: Payslip[], cont
 
   const fixedBatch: Record<string, string | number> = {
     batchReference: context.batchReference, period: `${context.run.periodYear}${String(context.run.periodMonth).padStart(2, '0')}`, valueDate: context.valueDate,
-    debitAccount: template.debitAccount || '', companyName: context.companyName, generatedOn: new Date().toISOString().slice(0, 10),
+    debitAccount: template.debitAccount || '', companyName: context.companyName, generatedOn: localDateStr(),
   };
   const dataLines = sheets.map((sheet, index) => {
     const values = { ...fixedBatch, ...rowValues(sheet, context.employees.find(item => item.id === sheet.employeeId), index) };

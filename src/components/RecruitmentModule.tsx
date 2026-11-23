@@ -12,6 +12,7 @@ import { JobPosting, JobApplication, AppStage, Department, Branch } from '../typ
 import { motion, AnimatePresence } from 'motion/react';
 import ListSearch from './ListSearch';
 import { matchesSearch } from '../data/listSearch';
+import { localDateStr } from '../data/localDate';
 
 interface RecruitmentModuleProps {
   jobPostings: JobPosting[];
@@ -54,7 +55,7 @@ export function RecruitmentModule({
   const emptyJob: Partial<JobPosting> = {
     title: '', departmentId: departments[0]?.id || '', branchId: branches[0]?.id || '',
     vacancies: 1, experienceRequired: '', qualificationRequired: '', salaryRange: '',
-    jobType: 'Full Time', postedDate: new Date().toISOString().split('T')[0],
+    jobType: 'Full Time', postedDate: localDateStr(),
     closingDate: '', status: 'Open', description: ''
   };
   const [jobForm, setJobForm] = useState<Partial<JobPosting>>(emptyJob);
@@ -62,7 +63,7 @@ export function RecruitmentModule({
   const emptyApp: Partial<JobApplication> = {
     jobPostingId: selectedJobId || '', applicantName: '', applicantEmail: '',
     applicantPhone: '', cnic: '', currentSalary: 0, expectedSalary: 0,
-    appliedDate: new Date().toISOString().split('T')[0], stage: 'Applied'
+    appliedDate: localDateStr(), stage: 'Applied'
   };
   const [appForm, setAppForm] = useState<Partial<JobApplication>>(emptyApp);
 

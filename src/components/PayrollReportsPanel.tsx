@@ -10,6 +10,7 @@ import {
 import { openPrintableHtml } from '../data/lifecycle';
 import { RequiredMark, RequiredNote } from './RequiredMark';
 import { FULL_EDITION, type EditionFeatures } from '../data/edition';
+import { localDateStr } from '../data/localDate';
 
 interface Props {
   employees: Employee[];
@@ -57,7 +58,7 @@ export function PayrollReportsPanel(props: Props) {
       alert(`${adjustment.type} of PKR ${adjustment.amount.toLocaleString()} raised for ${periodMonth}/${periodYear}. Another payroll user must approve it.`);
     } catch (error) { alert(error instanceof Error ? error.message : 'Correction could not be created.'); }
   };
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localDateStr();
   const deposits = taxDepositLines(payrollRuns, payrollPayslips);
   const outstanding = deposits.filter(line => line.status !== 'Deposited');
   const settlementsReady = gratuitySettlements.filter(item => item.status === 'Processed' && !payrollRuns.some(run => run.settlementId === item.id && run.status !== 'Cancelled'));
