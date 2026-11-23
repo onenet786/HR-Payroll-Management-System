@@ -22,3 +22,6 @@ windows-kiosk/renderer/faceapi/
 # Windows Server package build
 deploy/windows/.cache/
 deploy/windows/.stage/
+
+# Video tutorial recordings: voice cache, raw video, DB snapshot
+tools/tutorials/.cache/

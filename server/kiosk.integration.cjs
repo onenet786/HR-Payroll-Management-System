@@ -191,3 +191,37 @@ test('administrators list and disconnect terminals; kiosk accounts cannot', asyn
   assert.equal((await call('GET', '/api/kiosk/sync/branches', null, { 'x-kiosk-token': registered.deviceToken })).status, 401, 'disconnected');
   await pool.query(`DELETE FROM users WHERE id='u-kt-admin'`);
 });
+
+test('administrators create setup codes in the web portal; a code registers up to its limit', async () => {
+  const { createSession } = require('./sessions.cjs');
+  const ua = 'KioskCodeTest/1.0';
+  const fakeRequest = { ip: '127.0.0.1', get: name => (name.toLowerCase() === 'user-agent' ? ua : undefined) };
+  await pool.query(`DELETE FROM users WHERE id='u-kt-admin2'`);
+  await pool.query(`INSERT INTO users(id, email, username, role_id, status, data) VALUES('u-kt-admin2','u-kt-admin2@test.local','u-kt-admin2','role-admin','Active',$1::jsonb)`,
+    [JSON.stringify({ id: 'u-kt-admin2', email: 'u-kt-admin2@test.local', username: 'u-kt-admin2', roleId: 'role-admin', status: 'Active' })]);
+  const admin = { authorization: `Bearer ${await createSession('u-kt-admin2', fakeRequest)}`, 'user-agent': ua, origin: base };
+  const kioskUser = { authorization: `Bearer ${await createSession('u-kiosk', fakeRequest)}`, 'user-agent': ua };
+
+  assert.equal((await call('POST', '/api/kiosk-devices/setup-codes', { label: 'x' }, kioskUser)).status, 403, 'kiosk account cannot create codes');
+  const made = await call('POST', '/api/kiosk-devices/setup-codes', { label: 'Mall 12', maxUses: 1, expiresInHours: 24 }, admin);
+  assert.equal(made.status, 201);
+  assert.match(made.body.code, /^HRK1\./);
+  const payload = JSON.parse(Buffer.from(made.body.code.slice(5), 'base64url').toString('utf8'));
+  assert.ok(payload.u.length >= 1, 'the code carries the server address (from APP_URL, the domains, or the admin\'s own address)');
+
+  const first = await call('POST', '/api/kiosk/register', { setupToken: payload.t, terminalName: 'Mall 12 gate' });
+  assert.equal(first.status, 201);
+  assert.ok(first.body.deviceToken);
+  assert.equal((await call('POST', '/api/kiosk/register', { setupToken: payload.t })).status, 401, 'one registration only');
+
+  const listed = await call('GET', '/api/kiosk-devices/setup-codes', null, admin);
+  const row = listed.body.codes.find(code => code.id === made.body.id);
+  assert.equal(row.uses, 1);
+  assert.equal(row.token_hash, undefined, 'hash never listed');
+
+  const second = await call('POST', '/api/kiosk-devices/setup-codes', { label: 'Spare', maxUses: 3 }, admin);
+  assert.equal((await call('POST', `/api/kiosk-devices/setup-codes/${second.body.id}/revoke`, {}, admin)).body.revoked, true);
+  const token2 = JSON.parse(Buffer.from(second.body.code.slice(5), 'base64url').toString('utf8')).t;
+  assert.equal((await call('POST', '/api/kiosk/register', { setupToken: token2 })).status, 401, 'cancelled code');
+  await pool.query(`DELETE FROM users WHERE id='u-kt-admin2'`);
+});

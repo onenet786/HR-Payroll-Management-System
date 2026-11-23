@@ -177,6 +177,13 @@ adminRouter.post('/setup-codes', async (req, res, next) => {
     const { label, expiresInHours, maxUses } = req.body || {};
     const company = (await pool.query(`SELECT data->>'name' AS name FROM companies ORDER BY id LIMIT 1`)).rows[0]?.name || '';
     const urls = await installation.deviceUrls(pool, process.env.APP_URL);
+    // No address configured: use the one the administrator is using right now (the browser's Origin header),
+    // so the code still tells the kiosk where the server is.
+    if (!urls.length) {
+      const here = installation.originOf(req.get('origin') || '');
+      if (here) urls.push(here);
+    }
+    if (!urls.length) return res.status(400).json({ error: 'The server address is unknown. Set APP_URL in .env (or the domain in the installation settings), then try again.' });
     const created = await installation.createKioskSetupToken(pool, { label, expiresInHours, maxUses, createdBy: req.identity.uid, clientName: company, urls });
     await pool.query(`INSERT INTO hr_audit_log(actor_uid,actor_role_id,action,collection_name,document_id,new_data,correlation_id,source_ip) VALUES($1,$2,'kiosk_setup_code_created','kioskDevices',$3,$4::jsonb,$5,$6)`,
       [req.identity.uid, req.identity.roleId, created.id, JSON.stringify({ label, maxUses: created.maxUses, expiresAt: created.expiresAt }), req.correlationId, req.ip]);

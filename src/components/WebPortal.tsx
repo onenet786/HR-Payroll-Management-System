@@ -1650,6 +1650,7 @@ export function WebPortal({
       .filter(group => group.length > 1)
       .map(group => ({ type: 'Bank account' as const, employees: group })),
   ];
+  const previewRun = payrollRuns.find(run => run.periodMonth === payrollMonth && run.periodYear === payrollYear && run.status !== 'Cancelled');
   const payrollReleaseQueue = [...payrollRuns]
     .sort((left, right) => (right.periodYear - left.periodYear) || (right.periodMonth - left.periodMonth) || (right.createdAt || '').localeCompare(left.createdAt || ''))
     .slice(0, 6)
@@ -3827,7 +3828,7 @@ export function WebPortal({
                       <div className="flex justify-between items-center border-b border-slate-200 pb-3">
                         <div>
                           <h3 className="font-bold text-slate-800 text-xs uppercase tracking-wide font-mono">Payroll Preview ({new Date(payrollYear, payrollMonth - 1).toLocaleString('en-PK', { month: 'long', year: 'numeric' })})</h3>
-                          <p className="text-xs text-slate-400">Reflecting calculated deductions based on latest configured statutory parameters</p>
+                          <p className="text-xs text-slate-400">{previewRun ? `Showing the payslips saved by ${previewRun.title} (${previewRun.status}). Staff not in that run are calculated live.` : 'Reflecting calculated deductions based on latest configured statutory parameters'}</p>
                         </div>
                       </div>
                       <ListSearch value={payrollSearch} onChange={setPayrollSearch} placeholder="Search staff name, code, CNIC, department…" total={employees.length} shown={searchedEmployees(payrollSearch).length} />
@@ -3848,7 +3849,10 @@ export function WebPortal({
                           </thead>
                           <tbody className="divide-y divide-slate-200 text-slate-700 font-mono">
                             {searchedEmployees(payrollSearch).map(emp => {
-                              const sheet = computePayslipDetails(
+                              // Once the month has a live run, show the payslip that run saved (what the bank file pays);
+                              // a fresh calculation would leave out the one-time adjustments the run has already consumed.
+                              const savedSheet = previewRun ? payrollPayslips.find(item => item.payrollRunId === previewRun.id && item.employeeId === emp.id) : undefined;
+                              const sheet = savedSheet || computePayslipDetails(
                                 payrollEmployee(emp), payrollMonth, payrollYear, attendances, leaves, payrollStatConfig, taxSlabs, departments, designations, branches, loanAdvances, wageTypes, holidays, payrollPayslips, payrollAdjustments
                               );
                               return (

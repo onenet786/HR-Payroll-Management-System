@@ -159,7 +159,12 @@ if ($code -eq '200') {
   Say 'Done. The system now opens without the port number:' 'Green'
   foreach ($u in $install.urls) { if ($u -like "http://*:$appPort") { Say ('  ' + $u.Substring(0, $u.Length - ":$appPort".Length)) 'Green' } }
   Say "Addresses with :$appPort keep working (kiosks need no change)."
-  Say 'If another PC still cannot open it, check that its network is set to Private or Domain (not Public) on this server.'
+  $publicNets = @(Get-NetConnectionProfile -ErrorAction SilentlyContinue | Where-Object { $_.NetworkCategory -eq 'Public' })
+  if ($publicNets.Count) {
+    Say ("This server's network '" + (($publicNets | ForEach-Object { $_.InterfaceAlias }) -join "', '") + "' is set to Public, so other PCs are blocked.") 'Red'
+    Say '  Fix (office network, not a domain):  Set-NetConnectionProfile -InterfaceAlias "<name above>" -NetworkCategory Private' 'Yellow'
+    Say "  Or allow the HR Payroll ports on every network:  Set-NetFirewallRule -Group 'HR Payroll' -Profile Any" 'Yellow'
+  }
 } else {
   Say "Port 80 forwarding is set, but http://127.0.0.1/ answered '$code'. Run .\Enable-Port80.ps1 -Check and send the output." 'Red'
   exit 1

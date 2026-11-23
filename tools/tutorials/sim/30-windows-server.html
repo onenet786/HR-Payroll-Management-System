@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Windows Server setup (simulated)</title>
+<link rel="stylesheet" href="it-sim.css">
+<script src="it-sim.js"></script>
+</head>
+<body>
+<!-- Simulated Windows Server desktop for chapter 30. Text in the consoles is copied from deploy/windows/setup/*.ps1
+     (Setup.cmd -> Install-HRPayroll.ps1, the tools in C:\HRPayroll\tools, Update.cmd -> Update-HRPayroll.ps1). -->
+<div class="desk" id="desk">
+  <div class="wm" id="wm"><b>HEADOFFICE</b>Windows Server 2022 Standard<br>IP 192.168.86.83</div>
+  <div class="desk-icons">
+    <div class="desk-icon"><svg width="40" height="40" viewBox="0 0 20 18"><rect x="1" y="1" width="18" height="12" rx="1" fill="#3b8de0"/><rect x="7" y="14" width="6" height="2" fill="#bcd"/></svg>This PC</div>
+    <div class="desk-icon"><svg width="40" height="40" viewBox="0 0 24 24"><path d="M6 6h12l-1 15H7z" fill="#cfe3f7" stroke="#7aa6d1"/><path d="M4 6h16M10 3h4" stroke="#cfe3f7" stroke-width="2"/></svg>Recycle Bin</div>
+  </div>
+
+  <!-- File Explorer -->
+  <div class="win" id="exp" style="left:120px;top:44px;width:1180px;height:620px">
+    <div class="tbar"><span class="ttl">File Explorer</span><span class="ctl">&#8212;</span><span class="ctl">&#9744;</span><span class="ctl x">&#10005;</span></div>
+    <div class="body">
+      <div class="exp-ribbon"><span class="on">File</span><span>Home</span><span>Share</span><span>View</span></div>
+      <div class="exp-addr"><span class="nav">&#8592;</span><span class="nav">&#8594;</span><span class="nav">&#8593;</span><div class="path"></div><div class="search">Search</div></div>
+      <div class="exp-main">
+        <div class="exp-nav">
+          <div>&#9733; Quick access</div><div data-nav="desktop">Desktop</div><div data-nav="downloads">Downloads</div><div data-nav="pc">This PC</div>
+          <div data-nav="c">&nbsp;&nbsp;Local Disk (C:)</div><div data-nav="e">&nbsp;&nbsp;USB Drive (E:)</div><div>Network</div>
+        </div>
+        <div class="exp-list"><div class="hdr"><span>Name</span><span>Date modified</span><span>Type</span><span style="text-align:right">Size</span></div><div class="exp-rows"></div></div>
+      </div>
+      <div class="exp-status"></div>
+    </div>
+  </div>
+
+  <!-- cmd.exe window that Setup.cmd / Update.cmd / Install-HRPayroll-CA.cmd run in -->
+  <div class="win dark" id="con" style="left:70px;top:22px;width:1300px;height:706px">
+    <div class="tbar"><span class="ttl">Administrator: C:\Windows\System32\cmd.exe</span><span class="ctl">&#8212;</span><span class="ctl">&#9744;</span><span class="ctl x">&#10005;</span></div>
+    <div class="body"><div class="term" id="t-con"></div></div>
+  </div>
+
+  <!-- Windows PowerShell (Run as administrator) for the tools -->
+  <div class="win" id="ps" style="left:150px;top:30px;width:1290px;height:700px">
+    <div class="tbar"><span class="ttl">Administrator: Windows PowerShell</span><span class="ctl">&#8212;</span><span class="ctl">&#9744;</span><span class="ctl x">&#10005;</span></div>
+    <div class="body"><div class="term ps" id="t-ps"></div></div>
+  </div>
+
+  <!-- Browser -->
+  <div class="win" id="br" style="left:60px;top:18px;width:1480px;height:716px">
+    <div class="tbar" style="display:none"></div>
+    <div class="body">
+      <div class="br-tabs"><div class="br-tab"><span style="color:#0f766e">&#9679;</span><span id="br-tabtitle">HR &amp; Payroll</span><span style="margin-left:auto;color:#777">&#10005;</span></div></div>
+      <div class="br-bar"><span class="nav">&#8592;</span><span class="nav">&#8594;</span><span class="nav">&#10227;</span><div class="br-url" id="br-url"></div></div>
+      <div class="br-page"><img id="br-shot" alt=""></div>
+    </div>
+  </div>
+
+  <div class="ctx" id="ctx"></div>
+  <div class="uac-veil" id="uac">
+    <div class="uac">
+      <div class="top"><small>User Account Control</small><h3>Do you want to allow this app to make changes to your device?</h3></div>
+      <div class="mid"><svg width="40" height="40" viewBox="0 0 18 18"><rect x="1" y="2" width="16" height="14" rx="1.5" fill="#2b2b2b"/><rect x="1" y="2" width="16" height="3" fill="#cfd8e3"/><path d="M4 8l3 2-3 2" stroke="#fff" stroke-width="1.5" fill="none"/></svg>
+        <div><div class="app" style="font-size:16px">Windows Command Processor</div><div class="meta">Verified publisher: <span class="pub">Microsoft Windows</span><br>File origin: Hard drive on this computer</div></div></div>
+      <div class="btns"><button class="pri" id="uac-yes" onclick="sim.uacClose()">Yes</button><button onclick="sim.uacClose()">No</button></div>
+    </div>
+  </div>
+
+  <div class="taskbar">
+    <span class="tb"><svg width="18" height="18" viewBox="0 0 18 18"><path d="M1 3l7-1v7H1zM9 2l8-1v8H9zM1 10h7v7l-7-1zM9 10h8v8l-8-1z" fill="#5aa9ff"/></svg></span>
+    <span class="tb on">&#128193;</span><span class="tb">&#9638;</span>
+    <span class="clock">10:15 AM<br>11/23/2026</span>
+  </div>
+</div>
+
+<script>
+const V1 = '2026.11.08-0.0.15', V2 = '2026.11.23-0.0.16';
+const PW = 'Xk3vQ9pLm2Rt7wYb-7';
+const C = (t, c) => [t, c];
+
+const views = {
+  setup: { path: 'This PC > Local Disk (C:) > Setup', nav: 'c', rows: [
+    { id: 'f-zip', name: `HRPayroll-Windows-Setup-${V1}.zip`, icon: 'zip', date: '11/23/2026 9:58 AM', type: 'Compressed (zipped) Folder', size: '171,842 KB' },
+  ] },
+  extracted: { path: `This PC > Local Disk (C:) > Setup > HRPayroll-Windows-Setup-${V1}`, nav: 'c', rows: [
+    { id: 'f-docs', name: 'docs', icon: 'folder', date: '11/23/2026 10:01 AM', type: 'File folder' },
+    { id: 'f-payload', name: 'payload', icon: 'folder', date: '11/23/2026 10:01 AM', type: 'File folder' },
+    { id: 'f-setupdir', name: 'setup', icon: 'folder', date: '11/23/2026 10:01 AM', type: 'File folder' },
+    { id: 'f-manifest', name: 'manifest.json', icon: 'json', date: '11/23/2026 10:01 AM', type: 'JSON File', size: '2 KB' },
+    { id: 'f-readme', name: 'README.txt', icon: 'txt', date: '11/23/2026 10:01 AM', type: 'Text Document', size: '1 KB' },
+    { id: 'f-setupcmd', name: 'Setup.cmd', icon: 'cmd', date: '11/23/2026 10:01 AM', type: 'Windows Command Script', size: '1 KB' },
+    { id: 'f-updatecmd', name: 'Update.cmd', icon: 'cmd', date: '11/23/2026 10:01 AM', type: 'Windows Command Script', size: '1 KB' },
+  ] },
+  tools: { path: 'This PC > Local Disk (C:) > HRPayroll > tools', nav: 'c', rows: [
+    ['Enable-Https.ps1', 11], ['Enable-Port80.ps1', 8], ['hrpayroll-backup.ps1', 2], ['hrpayroll-common.ps1', 5], ['hrpayroll-restore.ps1', 2],
+    ['hrpayroll-status.ps1', 2], ['Reset-AdminPassword.ps1', 2], ['Uninstall-HRPayroll.ps1', 2], ['Update-HRPayroll.ps1', 4],
+  ].map(([name, kb]) => ({ id: `f-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`, name, icon: 'ps1', date: '11/23/2026 10:03 AM', type: 'Windows PowerShell Script', size: `${kb} KB` })) },
+  update: { path: `This PC > Local Disk (C:) > Setup > HRPayroll-Windows-Setup-${V2}`, nav: 'c', rows: [
+    { name: 'docs', icon: 'folder', date: '12/14/2026 6:12 PM', type: 'File folder' },
+    { name: 'payload', icon: 'folder', date: '12/14/2026 6:12 PM', type: 'File folder' },
+    { name: 'setup', icon: 'folder', date: '12/14/2026 6:12 PM', type: 'File folder' },
+    { name: 'manifest.json', icon: 'json', date: '12/14/2026 6:12 PM', type: 'JSON File', size: '2 KB' },
+    { name: 'README.txt', icon: 'txt', date: '12/14/2026 6:12 PM', type: 'Text Document', size: '1 KB' },
+    { name: 'Setup.cmd', icon: 'cmd', date: '12/14/2026 6:12 PM', type: 'Windows Command Script', size: '1 KB' },
+    { id: 'f-update2', name: 'Update.cmd', icon: 'cmd', date: '12/14/2026 6:12 PM', type: 'Windows Command Script', size: '1 KB' },
+  ] },
+  ca: { path: 'This PC > USB Drive (E:) > https-ca', nav: 'e', rows: [
+    { id: 'f-cer', name: 'HRPayroll-CA.cer', icon: 'cer', date: '12/14/2026 6:40 PM', type: 'Security Certificate', size: '2 KB' },
+    { id: 'f-cacmd', name: 'Install-HRPayroll-CA.cmd', icon: 'cmd', date: '12/14/2026 6:40 PM', type: 'Windows Command Script', size: '1 KB' },
+  ] },
+};
+sim.view = name => { sim.explorer('#exp', views[name]); sim.show('#exp'); };
+sim.browser = (url, secure) => {
+  document.getElementById('br-url').innerHTML = secure
+    ? `<span class="lock">&#128274;</span><span>${url}</span>`
+    : `<span class="warn">&#9888; Not secure</span><span style="color:#999">|</span><span>${url}</span>`;
+  sim.show('#br');
+};
+sim.setShot = src => { document.getElementById('br-shot').src = src; };
+sim.pcMode = () => { document.getElementById('desk').classList.add('pc'); document.getElementById('wm').innerHTML = '<b>ACCOUNTS-PC01</b>Windows 11 Pro &middot; office PC'; };
+
+// --- Setup.cmd -> Install-HRPayroll.ps1 ---------------------------------------------------------------------------
+sim.define('setup-start', [
+  { o: '' },
+  { o: `HR & Payroll - Windows Server setup  (version ${V1})`, c: 'c-green' },
+  { ask: 'Company name: ', a: 'AlJannat Mall', id: 'q-company' },
+  { ask: 'Administrator email (sign-in): ', a: 'hradmin@aljannatmall.local', id: 'q-email' },
+  { ask: 'Administrator name [Administrator]: ', a: 'HR Administrator' },
+]);
+sim.define('setup-edition', [
+  { ask: 'Edition: full (FBR, EOBI, PF...) or lite (small business) [full]: ', id: 'q-edition', wait: 900 },
+  { ask: 'Address users will open (e.g. https://hr.company.com), empty = http://<this server>: ', id: 'q-url', wait: 900 },
+]);
+sim.define('setup-folders', [
+  { o: '' },
+  { o: '    Disks on this server:' },
+  { o: '      C:       61.4 GB free of    126.9 GB   ', id: 'q-disk' },
+  { o: '' },
+  { o: '    Type a folder, or just a drive letter (e.g. D) to use the suggested folder name on that drive.' },
+  { ask: 'Program folder (application, database engine, settings, about 250 MB) [C:\\HRPayroll]: ', id: 'q-prog', wait: 900 },
+  { ask: 'Data folder (database, documents, backups, logs; grows over time) [C:\\HRPayrollData]: ', id: 'q-data', wait: 900 },
+]);
+sim.define('setup-confirm', [
+  { o: '' },
+  { o: '    Ready to install:', c: 'c-cyan' },
+  { lines: ['      Company        AlJannat Mall (full edition)', '      Administrator  hradmin@aljannatmall.local', '      Program        C:\\HRPayroll', '      Data           C:\\HRPayrollData'], id: 'q-ready' },
+  { ask: 'Install now? (Y/N) [Y]: ', a: 'Y', id: 'q-yes' },
+]);
+sim.define('setup-run1', [
+  { delay: 90 },
+  { o: '' }, { o: '==> Checking this server', c: 'c-cyan' },
+  { o: '    Windows: Microsoft Windows Server 2022 Standard' },
+  { o: '    Free space on C: 61.4 GB' },
+  { o: '' }, { o: '==> Copying files to C:\\HRPayroll', c: 'c-cyan', wait: 700 },
+  { o: `    Application ${V1}, Node.js v22.11.0, PostgreSQL 16.4` },
+  { o: '' }, { o: '==> Creating the embedded database', c: 'c-cyan', wait: 400 },
+  { delay: 30 },
+  { lines: [
+    '    The files belonging to this database system will be owned by user "Administrator".',
+    '    The database cluster will be initialized with locale "C".',
+    '    The default text search configuration will be set to "english".',
+    '    creating directory C:/HRPayrollData/pgdata ... ok',
+    '    creating subdirectories ... ok',
+    '    selecting default "max_connections" ... 100',
+    '    creating configuration files ... ok',
+    '    running bootstrap script ... ok',
+    '    performing post-bootstrap initialization ... ok',
+    '    syncing data to disk ... ok',
+    '    Success. You can now start the database server using:',
+  ] },
+  { delay: 90 },
+  { o: '    Database memory: cache 1638MB, planner 4095MB (RAM 16383 MB)' },
+  { o: '    waiting for service to start.... done', },
+  { o: '    Database hr_payroll on localhost:5433 (service: HR Payroll Database)', id: 'r-db' },
+]);
+sim.define('setup-run2', [
+  { delay: 80 },
+  { o: '' }, { o: '==> Writing the application settings', c: 'c-cyan' },
+  { o: '' }, { o: '==> Creating the tables and the first administrator', c: 'c-cyan' },
+  { delay: 28 },
+  { lines: ['001_initial.sql', '002_relational_tables.sql', '003_attendance_periods.sql', '004_payroll_adjustments.sql', '005_payroll_period_uniqueness.sql', '006_payslip_deliveries.sql',
+    '…', '024_legacy_import.sql', '025_managed_installation.sql', '026_reports_indexes.sql'].map(f => (f === '…' ? '    …' : `    Applied ${f}`)) },
+  { delay: 80 },
+  { o: '    Seeding official FBR Tax Slabs into PostgreSQL hr_documents...' },
+  { o: '    {"company":"created","administrator":"created","edition":"full","urls":["http://headoffice:8080","http://192.168.86.83:8080"],"clientDataImport":true}' },
+  { o: '' }, { o: '==> Starting the application', c: 'c-cyan', wait: 500 },
+  { o: '    2026-11-23 10:08:41,512 INFO  - Installing service \'HR Payroll Application (HRPayrollApp)\'...' },
+  { o: '    2026-11-23 10:08:41,705 INFO  - Service \'HR Payroll Application (HRPayrollApp)\' was installed successfully.', id: 'r-app' },
+  { o: '' }, { o: '==> Firewall and nightly backup', c: 'c-cyan' },
+  { o: '    Firewall: TCP 8080 allowed on Domain and Private networks.', id: 'r-fw' },
+  { o: '    Backup: every day at 01:30 to C:\\HRPayrollData\\backups.', id: 'r-backup' },
+  { o: '' }, { o: '==> Checking that HR & Payroll answers', c: 'c-cyan', wait: 900 },
+  { o: '    Health check OK.' },
+]);
+sim.define('setup-summary', [
+  { delay: 70 },
+  { o: '' },
+  { o: `HR & Payroll ${V1} is installed.`, c: 'c-green' },
+  { o: '' },
+  { o: 'Open:            http://headoffice:8080', c: 'c-green', id: 's-open' },
+  { o: 'Also reachable:  http://192.168.86.83:8080', c: 'c-green', id: 's-also' },
+  { o: 'Sign in:         hradmin@aljannatmall.local', c: 'c-green', id: 's-signin' },
+  { o: `Password:        ${PW}   (generated; change it at first sign-in)`, c: 'c-green', id: 's-pw' },
+  { o: '', c: 'c-green' },
+  { o: 'Program:         C:\\HRPayroll', c: 'c-green' },
+  { o: 'Data:            C:\\HRPayrollData  (database, documents, backups, logs)', c: 'c-green' },
+  { o: 'Settings:        C:\\HRPayroll\\config\\.env   <-- keep a copy OFF this server (backup key)', c: 'c-green', id: 's-env' },
+  { o: 'Services:        HR Payroll Database (localhost:5433), HR Payroll Application', c: 'c-green', id: 's-svc' },
+  { o: 'Tools:           C:\\HRPayroll\\tools  (status, backup, restore, update, uninstall)', c: 'c-green', id: 's-tools' },
+  { o: 'Setup log:       C:\\Users\\ADMINI~1\\AppData\\Local\\Temp\\hrpayroll-setup-20261123-100412.log', c: 'c-green' },
+  { o: '' },
+  { idle: 'Press any key to continue . . . ' },
+]);
+
+// --- Tools in C:\HRPayroll\tools (Windows PowerShell as administrator) -------------------------------------------
+const PS = 'PS C:\\HRPayroll\\tools> ';
+sim.define('ps-start', [
+  { o: 'Windows PowerShell' }, { o: 'Copyright (C) Microsoft Corporation. All rights reserved.' }, { o: '' },
+]);
+sim.define('ps-status', [
+  { cmd: '.\\hrpayroll-status.ps1', prompt: PS, id: 'p-status' },
+  { o: '' },
+  { o: `HR & Payroll ${V1} - AlJannat Mall`, c: 'c-green' },
+  { o: 'HR Payroll Database      Running (Automatic)', id: 'p-db' },
+  { o: 'HR Payroll Application   Running (Automatic)', id: 'p-app' },
+  { o: 'Health                   OK', id: 'p-health' },
+  { o: 'Addresses                http://headoffice:8080  http://192.168.86.83:8080' },
+  { o: 'Database size            41 MB' },
+  { o: 'Last backup              11/24/2026 1:30:07 AM (2.8 MB)', id: 'p-last' },
+  { o: 'Disk C                   58.9 GB free' },
+  { o: 'Logs                     C:\\HRPayrollData\\logs' },
+  { o: '' },
+]);
+sim.define('ps-backup', [
+  { cmd: '.\\hrpayroll-backup.ps1', prompt: PS },
+  { o: '2026-11-24 11:02:16  Backup OK. SHA-256: 6f1d0b7e9a24c3f58e0d2b71a9c4e6f03b8d5a2c7e19f4b6d0a3c8e5f7b2d419', id: 'p-bok' },
+  { o: '2026-11-24 11:02:19  Database quick optimisation done: 64 tables, 41.3 MB -> 41.1 MB; unused rows now 0.8%.' },
+  { o: '' },
+]);
+sim.define('ps-restore', [
+  { cmd: '.\\hrpayroll-restore.ps1 -BackupFile C:\\HRPayrollData\\backups\\hr-payroll-2026-11-23T20-30-00-512Z.dump.enc', prompt: PS, speed: 22 },
+  { o: 'This replaces the HR & Payroll database with hr-payroll-2026-11-23T20-30-00-512Z.dump.enc.', c: 'c-yellow' },
+  { ask: 'Type RESTORE to continue: ', a: 'RESTORE', id: 'p-restore' },
+  { o: 'Taking a safety backup of the current database first...' },
+  { o: '2026-11-24 11:05:40  Backup OK. SHA-256: 0b9e44c1d7a2f85e3c60b19d4a7f2e8c5d13b6a9f0e7c42d8b5a1f3e6c9d07b2' },
+  { o: 'Stopping the application...', wait: 600 },
+  { o: 'Restore finished (hr-payroll-2026-11-23T20-30-00-512Z.dump.enc).', c: 'c-green' },
+  { o: 'HR & Payroll is running again.', c: 'c-green' },
+  { o: '' },
+]);
+sim.define('ps-reset', [
+  { cmd: '.\\Reset-AdminPassword.ps1 -Email hradmin@aljannatmall.local', prompt: PS },
+  { ask: 'New password (at least 12 characters; leave empty to generate one): ', wait: 900 },
+  { o: '' },
+  { o: 'Password changed.', c: 'c-green' },
+  { o: '  Sign in:   hradmin@aljannatmall.local' },
+  { o: '  Password:  q7Rk2VbNw9Xe-41   (shown once - write it down, then change it after signing in)', c: 'c-yellow', id: 'p-newpw' },
+  { o: '  Address:   http://headoffice:8080' },
+  { o: '' },
+]);
+sim.define('ps-port80', [
+  { clear: true },
+  { cmd: '.\\Enable-Port80.ps1', prompt: PS },
+  { o: '' },
+  { o: `HR & Payroll ${V2} - application port 8080`, c: 'c-green' },
+  { o: 'Port 80 forwarding:  off' },
+  { o: 'Port 80 listener:    none', id: 'p-80free' },
+  { o: 'Port 80 now forwards to the application on port 8080.' },
+  { o: 'Firewall: TCP 80 allowed on Domain and Private networks.' },
+  { o: 'Restarting the HR Payroll Application service...', wait: 700 },
+  { o: '' },
+  { o: 'Done. The system now opens without the port number:', c: 'c-green' },
+  { o: '  http://headoffice', c: 'c-green', id: 'p-80url' },
+  { o: '  http://192.168.86.83', c: 'c-green' },
+  { o: 'Addresses with :8080 keep working (kiosks need no change).', id: 'p-80kiosk' },
+  { o: '' },
+]);
+sim.define('ps-https', [
+  { clear: true },
+  { cmd: '.\\Enable-Https.ps1', prompt: PS },
+  { o: '' },
+  { o: `HR & Payroll ${V2}`, c: 'c-green' },
+  { o: 'HTTPS:               off' },
+  { o: 'Server certificate:  none' },
+  { o: 'Addresses:           http://headoffice:8080  http://192.168.86.83:8080' },
+  { o: 'Creating the local certificate authority...', id: 'h-ca', wait: 500 },
+  { o: 'Issuing the server certificate for: headoffice, localhost, 192.168.86.83, 127.0.0.1', id: 'h-cert' },
+  { o: 'Restarting the HR Payroll Application service...', wait: 700 },
+  { o: '' },
+  { o: 'HTTPS is on.', c: 'c-green' },
+  { o: '  https://headoffice', c: 'c-green', id: 'h-url' },
+  { o: '  https://192.168.86.83', c: 'c-green' },
+  { o: 'Health over https://localhost: 200' },
+  { o: '' },
+  { o: "This server's network 'Ethernet' is set to Public, so other PCs are blocked.", c: 'c-red', id: 'h-public' },
+  { o: '  Fix (office network, not a domain):  Set-NetConnectionProfile -InterfaceAlias "<name above>" -NetworkCategory Private', c: 'c-yellow', id: 'h-fix' },
+  { o: "  Or allow the HR Payroll ports on every network:  Set-NetFirewallRule -Group 'HR Payroll' -Profile Any", c: 'c-yellow' },
+  { o: '' },
+  { o: 'On every PC and kiosk that opens the system (once):', c: 'c-yellow', id: 'h-every' },
+  { o: '  1. Copy the folder C:\\HRPayroll\\https-ca to the PC (USB or a shared folder).', c: 'c-yellow' },
+  { o: '  2. Right-click Install-HRPayroll-CA.cmd -> Run as administrator.', c: 'c-yellow' },
+  { o: '  3. Reopen the browser and open the https address above.', c: 'c-yellow' },
+  { o: '  (Domain networks: deploy HRPayroll-CA.cer by Group Policy -> Trusted Root Certification Authorities.)', c: 'c-yellow' },
+  { o: 'Kiosks: Settings -> Remove device key, then register again with https://headoffice (kiosk 1.0.44 or later).', c: 'c-yellow', id: 'h-kiosk' },
+  { o: 'Old http://...:8080 and http://<server>/ addresses now redirect to https.', c: 'c-yellow' },
+  { o: '' },
+]);
+sim.define('ps-private', [
+  { cmd: 'Set-NetConnectionProfile -InterfaceAlias "Ethernet" -NetworkCategory Private', prompt: PS, id: 'h-private' },
+  { cmd: 'Get-NetConnectionProfile | Select-Object InterfaceAlias, NetworkCategory', prompt: PS },
+  { o: '' }, { o: 'InterfaceAlias NetworkCategory' }, { o: '-------------- ---------------' }, { o: 'Ethernet               Private', id: 'h-private-ok' }, { o: '' },
+  { idle: PS },
+]);
+
+// --- Update.cmd -> Update-HRPayroll.ps1 ----------------------------------------------------------------------------
+sim.define('update', [
+  { clear: true },
+  { o: `HR & Payroll update: ${V1} -> ${V2}`, c: 'c-green', id: 'u-head' },
+  { o: '==> Safety backup' },
+  { o: '2026-12-14 18:14:03  Backup OK. SHA-256: 9c2e71a0f4d8b36e15c9a7d20f6b84e3a1c5d97f0b2e68a4c3d1f59e7b0a6c28' },
+  { o: '==> Copying the new version', wait: 600 },
+  { o: '==> Stopping the application' },
+  { o: '==> Database memory' },
+  { o: '    Database memory: cache 1638MB, planner 4095MB, work 32MB (server RAM 16383 MB, SQL Server present)' },
+  { o: '==> Database changes' },
+  { o: 'Applied 027_attendance_summary_indexes.sql' },
+  { o: '==> Starting', wait: 900 },
+  { o: `Updated to ${V2}.`, c: 'c-green', id: 'u-done' },
+  { o: '' },
+  { idle: 'Press any key to continue . . . ' },
+]);
+
+// --- Install-HRPayroll-CA.cmd on an office PC ----------------------------------------------------------------------
+sim.define('ca', [
+  { clear: true },
+  { o: 'Root "Trusted Root Certification Authorities"' },
+  { o: 'Signature matches Public Key' },
+  { o: 'Certificate "AlJannat Mall HR Payroll Local CA" added to store.', id: 'c-added' },
+  { o: 'CertUtil: -addstore command completed successfully.' },
+  { o: '' },
+  { o: 'Done. Close and reopen the browser, then open https://headoffice', id: 'c-done' },
+  { idle: 'Press any key to continue . . . ' },
+]);
+sim.explorer('#exp', views.setup);
+</script>
+</body>
+</html>

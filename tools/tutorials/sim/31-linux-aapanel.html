@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Linux server with aaPanel (simulated)</title>
+<link rel="stylesheet" href="it-sim.css">
+<script src="it-sim.js"></script>
+<style>
+  .scene { position: absolute; inset: 0; display: none; }
+  .scene.on { display: block; }
+  .frame { position: absolute; inset: 0; display: flex; flex-direction: column; background: #fff; }
+  .frame .br-page { background: #f3f5f7; }
+  .panel-app { position: relative; inset: auto; height: 100%; }
+  #pg-term .term { height: 596px; border-radius: 4px; }
+  .pg { display: none; } .pg.on { display: block; }
+  .kv { font-family: 'Cascadia Mono', Consolas, monospace; font-size: 13px; }
+  .gh { max-width: 900px; margin: 26px auto; background: #fff; border: 1px solid #d0d7de; border-radius: 6px; }
+  .gh h2 { margin: 0; padding: 16px 20px; font-size: 20px; font-weight: 600; border-bottom: 1px solid #d0d7de; }
+  .gh .f { padding: 14px 20px; font-size: 14px; }
+  .gh label { display: block; font-weight: 600; margin: 0 0 6px; }
+  .gh input[type=text], .gh textarea { width: 100%; border: 1px solid #d0d7de; border-radius: 6px; padding: 6px 10px; font: inherit; font-size: 14px; }
+  .gh textarea { height: 92px; font-family: 'Cascadia Mono', Consolas, monospace; font-size: 13px; }
+  .gh .btn { background: #1f883d; color: #fff; border: 1px solid #1a7f37; border-radius: 6px; padding: 6px 16px; font: inherit; font-size: 14px; font-weight: 600; }
+  .gh .crumb { color: #57606a; font-size: 14px; padding: 18px 0 0; max-width: 900px; margin: 0 auto; }
+  .gh .keyrow { display: flex; gap: 14px; align-items: center; padding: 14px 20px; border-top: 1px solid #d0d7de; font-size: 14px; }
+  .dns { max-width: 980px; margin: 28px auto; background: #fff; border: 1px solid #dfe3e8; border-radius: 8px; }
+  .dns h2 { margin: 0; padding: 16px 22px; font-size: 19px; border-bottom: 1px solid #eceff3; }
+  .dns .note { padding: 10px 22px; color: #555; font-size: 13.5px; }
+  .dns .add { display: grid; grid-template-columns: 110px 1fr 1fr 120px 110px; gap: 10px; padding: 12px 22px; align-items: end; font-size: 13px; color: #555; }
+  .dns .add input, .dns .add select { width: 100%; height: 32px; border: 1px solid #cfd5dc; border-radius: 4px; padding: 0 8px; font: inherit; font-size: 13.5px; color: #222; }
+</style>
+</head>
+<body>
+<!-- Simulated screens for chapter 31. Terminal text is copied from deploy/hrpayroll-server.sh (setup, update, check);
+     the server panel is a GENERIC mock of the aaPanel steps the script prints ("Next steps in aaPanel"). -->
+
+<!-- ===== server panel inside a browser window ===== -->
+<div class="scene on" id="sc-panel">
+  <div class="frame">
+    <div class="br-bar"><span class="nav">&#8592;</span><span class="nav">&#8594;</span><span class="nav">&#10227;</span><div class="br-url"><span class="lock">&#128274;</span><span>https://203.0.113.25:7800</span><span style="margin-left:auto;color:#5f6368;font-size:12.5px">aaPanel (server panel)</span></div></div>
+    <div class="br-page">
+      <div class="panel-app">
+        <div class="panel-side">
+          <div class="brand">aaPanel (server panel)<small>hr-server · Ubuntu 24.04</small></div>
+          <a data-pg="home" id="nav-home">&#8962; Home</a>
+          <a data-pg="node" id="nav-website">&#127760; Website</a>
+          <a data-pg="db" id="nav-databases">&#128451; Databases</a>
+          <a data-pg="security" id="nav-security">&#128737; Security</a>
+          <a data-pg="files" id="nav-files">&#128193; Files</a>
+          <a data-pg="term" id="nav-terminal">&#9000; Terminal</a>
+          <a data-pg="cron" id="nav-cron">&#9201; Cron</a>
+          <a>&#128722; App Store</a>
+          <a>&#9881; Settings</a>
+        </div>
+        <div class="panel-main">
+          <div class="panel-top"><b id="pg-title">Home</b><span style="margin-left:auto">203.0.113.25</span><span>root</span></div>
+          <div class="panel-content">
+
+            <div class="pg on" id="pg-home">
+              <div class="pcard"><div class="ph">Server</div><div class="pb" style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;font-size:13.5px">
+                <div><b>Ubuntu 24.04 LTS</b><br>hr-server</div><div><b>4 cores</b><br>CPU 6%</div><div><b>8 GB</b><br>RAM 31% used</div><div><b>160 GB SSD</b><br>/ 18% used</div>
+              </div></div>
+              <div class="pcard" style="margin-top:14px"><div class="ph">Installed software</div><div class="pb" style="font-size:13.5px">Nginx 1.26 · PostgreSQL 16 (PgSQL manager) · Node.js version manager · Fail2ban</div></div>
+            </div>
+
+            <div class="pg" id="pg-node">
+              <div class="ptabs"><span>PHP project</span><span>Java project</span><span class="on">Node project</span><span>Python project</span></div>
+              <div style="display:flex;gap:8px;margin-bottom:12px">
+                <button class="pbtn green" id="btn-addnode" onclick="psim.modal('m-addnode')">Add Node project</button>
+                <button class="pbtn" id="btn-nodever" onclick="psim.modal('m-nodever')">Node version manager</button>
+              </div>
+              <div class="pcard"><table class="ptable"><thead><tr><th>Name</th><th>Status</th><th>Port</th><th>Node version</th><th>Directory</th><th>SSL</th><th style="text-align:right">Actions</th></tr></thead>
+                <tbody id="node-rows"><tr><td colspan="7" style="color:#999;text-align:center;padding:26px">No Node projects yet</td></tr></tbody></table></div>
+            </div>
+
+            <div class="pg" id="pg-db">
+              <div class="ptabs"><span>MySQL</span><span>MongoDB</span><span>Redis</span><span class="on">PgSQL</span></div>
+              <div style="margin-bottom:12px"><button class="pbtn green" id="btn-adddb" onclick="psim.modal('m-db')">Add database</button></div>
+              <div class="pcard"><table class="ptable"><thead><tr><th>Database name</th><th>Username</th><th>Password</th><th>Access</th><th>Backup</th></tr></thead>
+                <tbody id="db-rows"><tr><td colspan="5" style="color:#999;text-align:center;padding:26px">No databases yet</td></tr></tbody></table></div>
+            </div>
+
+            <div class="pg" id="pg-files">
+              <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
+                <div class="br-url" style="max-width:520px;border-radius:3px;background:#fff;border:1px solid #d5d9de">/root</div>
+                <button class="pbtn green" id="btn-upload" onclick="psim.upload()">Upload</button><button class="pbtn">New</button>
+              </div>
+              <div class="pcard"><table class="ptable"><thead><tr><th>Name</th><th>Size</th><th>Modified</th><th>Permission</th><th>Owner</th></tr></thead>
+                <tbody id="file-rows"><tr><td>&#128193; .ssh</td><td>-</td><td>2026-11-20 09:12</td><td>700</td><td>root</td></tr></tbody></table></div>
+            </div>
+
+            <div class="pg" id="pg-term">
+              <div class="term linux" id="t-lx"></div>
+            </div>
+
+            <div class="pg" id="pg-security">
+              <div class="ptabs"><span class="on">Firewall</span><span>SSH</span><span>Fail2ban</span></div>
+              <div class="pcard"><table class="ptable"><thead><tr><th>Port</th><th>Protocol</th><th>Strategy</th><th>Note</th></tr></thead>
+                <tbody>
+                  <tr><td>22</td><td>TCP</td><td><span class="tag ok">Allow</span></td><td>SSH</td></tr>
+                  <tr id="fw-80"><td>80</td><td>TCP</td><td><span class="tag ok">Allow</span></td><td>HTTP (websites, Let's Encrypt)</td></tr>
+                  <tr id="fw-443"><td>443</td><td>TCP</td><td><span class="tag ok">Allow</span></td><td>HTTPS</td></tr>
+                  <tr><td>7800</td><td>TCP</td><td><span class="tag ok">Allow</span></td><td>Panel</td></tr>
+                </tbody></table></div>
+              <p style="color:#666;font-size:13px;margin-top:10px" id="fw-note">Port 8080 is not in the list: the HR app listens only on 127.0.0.1 and is reached through Nginx on 80/443.</p>
+            </div>
+
+            <div class="pg" id="pg-cron">
+              <div class="pcard"><div class="ph">Add scheduled task</div><div class="pb" style="max-width:900px">
+                <div class="prow"><span>Type of task</span><select id="cron-type"><option>Shell Script</option><option>Backup Site</option><option>Backup Database</option></select></div>
+                <div class="prow"><span>Name of task</span><input id="cron-name"></div>
+                <div class="prow"><span>Execution cycle</span><div style="display:flex;gap:8px"><select id="cron-cycle" style="width:150px"><option>Daily</option><option>Weekly</option><option>Monthly</option></select><input id="cron-hour" value="02" style="width:70px"> hour <input id="cron-min" value="30" style="width:70px"> minute</div></div>
+                <div class="prow"><span>Script content</span><textarea id="cron-script"></textarea></div>
+                <div class="prow"><span></span><div><button class="pbtn green" id="btn-cron" onclick="psim.addCron()">Add task</button></div></div>
+              </div></div>
+              <div class="pcard" style="margin-top:12px"><table class="ptable"><thead><tr><th>Name</th><th>Status</th><th>Cycle</th><th>Last run</th></tr></thead><tbody id="cron-rows"><tr><td colspan="4" style="color:#999;text-align:center">No tasks</td></tr></tbody></table></div>
+            </div>
+
+            <!-- modals -->
+            <div class="pmodal-veil" id="m-nodever"><div class="pmodal" style="width:620px"><div class="mh">Node version manager<span onclick="psim.close()">&#10005;</span></div><div class="mb">
+              <table class="ptable"><thead><tr><th>Version</th><th>Type</th><th style="text-align:right">Action</th></tr></thead><tbody>
+                <tr><td>v24.11.1</td><td>Current</td><td style="text-align:right"><button class="pbtn">Install</button></td></tr>
+                <tr><td>v22.12.0</td><td>LTS</td><td style="text-align:right" id="nv-22"><button class="pbtn green" id="btn-install22" onclick="psim.install22()">Install</button></td></tr>
+                <tr><td>v20.18.0</td><td>LTS</td><td style="text-align:right"><button class="pbtn">Install</button></td></tr>
+              </tbody></table></div></div></div>
+
+            <div class="pmodal-veil" id="m-db"><div class="pmodal" style="width:640px"><div class="mh">Add database (PgSQL)<span onclick="psim.close()">&#10005;</span></div><div class="mb">
+              <div class="prow"><span>Database name</span><input id="db-name"></div>
+              <div class="prow"><span>Username</span><input id="db-user"></div>
+              <div class="prow"><span>Password</span><input id="db-pass" type="text"></div>
+              <div class="prow"><span>Access permission</span><select><option>Local server</option></select></div>
+            </div><div class="mf"><button class="pbtn" onclick="psim.close()">Cancel</button><button class="pbtn green" id="btn-db-ok" onclick="psim.addDb()">Confirm</button></div></div></div>
+
+            <div class="pmodal-veil" id="m-addnode"><div class="pmodal"><div class="mh">Add Node project<span onclick="psim.close()">&#10005;</span></div><div class="mb">
+              <div class="prow"><span>Project directory</span><input id="np-dir"></div>
+              <div class="prow"><span>Project name</span><input id="np-name"></div>
+              <div class="prow"><span>Run opt / start command</span><input id="np-cmd"></div>
+              <div class="prow"><span>Project port</span><input id="np-port"></div>
+              <div class="prow"><span>Run user</span><select id="np-user"><option>www</option><option>root</option></select></div>
+              <div class="prow"><span>Node version</span><select id="np-node"><option>v22.12.0</option></select></div>
+              <div class="prow"><span>Start with system</span><span><span class="switch on"></span></span></div>
+            </div><div class="mf"><button class="pbtn" onclick="psim.close()">Cancel</button><button class="pbtn green" id="btn-np-ok" onclick="psim.addNode()">Confirm</button></div></div></div>
+
+            <div class="pmodal-veil" id="m-proj"><div class="pmodal" style="width:860px"><div class="mh">Project settings: hr-payroll<span onclick="psim.close()">&#10005;</span></div><div class="mb" style="display:flex;gap:18px;min-height:330px">
+              <div style="width:150px;border-right:1px solid #eee;font-size:13.5px">
+                <div class="ptab-v" data-t="map" id="tab-map" onclick="psim.ptab('map')" style="padding:8px 10px">Mapping</div>
+                <div class="ptab-v" data-t="ssl" id="tab-ssl" onclick="psim.ptab('ssl')" style="padding:8px 10px">SSL</div>
+                <div style="padding:8px 10px;color:#888">Logs</div>
+                <div style="padding:8px 10px;color:#888">Service</div>
+              </div>
+              <div style="flex:1">
+                <div id="pt-map">
+                  <div style="display:flex;gap:8px"><input id="map-domain" style="flex:1;height:32px;border:1px solid #d5d9de;border-radius:3px;padding:0 10px;font:inherit" placeholder="Domain, one per line"><button class="pbtn green" id="btn-map" onclick="psim.addMap()">Add</button></div>
+                  <table class="ptable" style="margin-top:12px"><thead><tr><th>Domain</th><th>Port</th></tr></thead><tbody id="map-rows"></tbody></table>
+                </div>
+                <div id="pt-ssl" style="display:none">
+                  <div class="ptabs"><span>Current certificate</span><span class="on">Let's Encrypt</span><span>Other certificate</span></div>
+                  <div style="font-size:13.5px;margin-bottom:10px">Domain: <label><input type="checkbox" id="ssl-dom" checked> hr.aljannatmall.com</label></div>
+                  <div style="font-size:13px;color:#666;margin-bottom:12px">Verification: file (the domain must already point at this server).</div>
+                  <button class="pbtn green" id="btn-ssl" onclick="psim.applySsl()">Apply</button>
+                  <div id="ssl-ok" style="display:none;margin-top:14px;font-size:13.5px"><span class="tag ok">Deployed</span> Let's Encrypt · valid until 2027-02-21 · renews automatically<div style="margin-top:12px" id="force-row">Force HTTPS <span class="switch" id="force-sw" onclick="this.classList.toggle('on')"></span></div></div>
+                </div>
+              </div>
+            </div></div></div>
+            <div class="toast" id="toast"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== GitHub deploy keys (generic) ===== -->
+<div class="scene" id="sc-gh">
+  <div class="frame">
+    <div class="br-bar"><span class="nav">&#8592;</span><span class="nav">&#8594;</span><span class="nav">&#10227;</span><div class="br-url"><span class="lock">&#128274;</span><span>github.com/onenet786/HR-Payroll-Management-System/settings/keys/new</span></div></div>
+    <div class="br-page" style="background:#f6f8fa">
+      <div class="crumb gh" style="border:0;background:none">onenet786 / HR-Payroll-Management-System &nbsp;›&nbsp; Settings &nbsp;›&nbsp; Deploy keys</div>
+      <div class="gh">
+        <h2>Add new deploy key</h2>
+        <div class="f"><label>Title</label><input type="text" id="gh-title"></div>
+        <div class="f"><label>Key</label><textarea id="gh-key" placeholder="Begins with 'ssh-rsa', 'ecdsa-sha2-nistp256', 'ssh-ed25519' …"></textarea></div>
+        <div class="f"><label style="font-weight:400"><input type="checkbox" id="gh-write"> <b>Allow write access</b></label><div style="color:#57606a;font-size:13px;margin-left:22px">Can this key be used to push to this repository? Deploy keys always have pull access.</div></div>
+        <div class="f"><button class="btn" id="gh-add" onclick="psim.ghAdd()">Add key</button></div>
+        <div class="keyrow" id="gh-added" style="display:none"><span style="font-size:22px">&#128273;</span><div><b>HR server (hr-server)</b><br><span class="kv">SHA256:3n9VZ0q1x7lYb2mC5... · Read-only · Added just now</span></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== domain provider DNS (generic) ===== -->
+<div class="scene" id="sc-dns">
+  <div class="frame">
+    <div class="br-bar"><span class="nav">&#8592;</span><span class="nav">&#8594;</span><span class="nav">&#10227;</span><div class="br-url"><span class="lock">&#128274;</span><span>Your domain provider — DNS management</span></div></div>
+    <div class="br-page">
+      <div class="dns">
+        <h2>DNS records — aljannatmall.com</h2>
+        <div class="note">Add the record at the company that manages your domain (registrar or DNS host).</div>
+        <div class="add">
+          <label>Type<select id="dns-type"><option>A</option><option>CNAME</option><option>TXT</option></select></label>
+          <label>Name / Host<input id="dns-host"></label>
+          <label>Value / Points to<input id="dns-value"></label>
+          <label>TTL<select><option>1 hour</option></select></label>
+          <button class="pbtn green" id="dns-save" onclick="psim.dnsSave()" style="height:32px">Save</button>
+        </div>
+        <table class="ptable" style="margin:6px 0 10px"><thead><tr><th style="padding-left:22px">Type</th><th>Name</th><th>Value</th><th>TTL</th></tr></thead>
+          <tbody id="dns-rows"><tr><td style="padding-left:22px">A</td><td>@</td><td>198.51.100.10</td><td>1 hour</td></tr><tr><td style="padding-left:22px">MX</td><td>@</td><td>mail.aljannatmall.com</td><td>1 hour</td></tr></tbody></table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== the finished site ===== -->
+<div class="scene" id="sc-site">
+  <div class="frame">
+    <div class="br-tabs"><div class="br-tab"><span style="color:#0f766e">&#9679;</span><span>HR &amp; Payroll</span><span style="margin-left:auto;color:#777">&#10005;</span></div></div>
+    <div class="br-bar"><span class="nav">&#8592;</span><span class="nav">&#8594;</span><span class="nav">&#10227;</span><div class="br-url" id="site-url"><span class="lock">&#128274;</span><span>hr.aljannatmall.com</span></div></div>
+    <div class="br-page"><img id="site-shot" alt=""></div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const G = t => [t, 'c-green'], Y = t => [t, 'c-yellow'], CY = t => [t, 'c-cyan'], B = t => [t, 'c-bold'];
+const ok = t => [G(' OK'), ` ${t}`], info = t => [CY('==>'), ` ${t}`], warn = t => [Y(' !!'), ` ${t}`];
+const P = [['onenetsol@hr-server', 'c-green'], ':', ['~', 'c-cyan'], '$ '];
+const SCRIPT = '/root/hrpayroll-server.sh';
+const NODE = 'v22.12.0';
+
+const psim = window.psim = {
+  scene(id) { document.querySelectorAll('.scene').forEach(s => s.classList.toggle('on', s.id === id)); },
+  page(name) {
+    psim.scene('sc-panel');
+    document.querySelectorAll('.pg').forEach(p => p.classList.toggle('on', p.id === `pg-${name}`));
+    document.querySelectorAll('.panel-side a').forEach(a => a.classList.toggle('on', a.dataset.pg === name));
+    $('pg-title').textContent = { home: 'Home', node: 'Website', db: 'Databases', security: 'Security', files: 'Files', term: 'Terminal — root@hr-server', cron: 'Cron' }[name];
+  },
+  modal(id) { psim.close(); $(id).classList.add('on'); },
+  close() { document.querySelectorAll('.pmodal-veil.on').forEach(m => m.classList.remove('on')); },
+  toast(text) { const t = $('toast'); t.textContent = text; t.classList.add('on'); setTimeout(() => t.classList.remove('on'), 1800); },
+  install22() { $('nv-22').innerHTML = '<span class="tag ok">Installed</span>'; psim.toast('Node v22.12.0 installed'); },
+  addDb() {
+    $('db-rows').innerHTML = `<tr id="db-row"><td>${$('db-name').value}</td><td>${$('db-user').value}</td><td>********</td><td>Local server</td><td>0 backups</td></tr>`;
+    psim.close(); psim.toast('Database created');
+  },
+  upload() { $('file-rows').insertAdjacentHTML('beforeend', '<tr id="file-sh"><td>&#128196; hrpayroll-server.sh</td><td>28.4 KB</td><td>2026-11-23 10:21</td><td>644</td><td>root</td></tr>'); psim.toast('Upload complete'); },
+  addNode() {
+    $('node-rows').innerHTML = `<tr id="np-row"><td><b>${$('np-name').value}</b></td><td><span class="tag ok">Running</span></td><td>${$('np-port').value}</td><td>${$('np-node').value}</td><td class="kv">${$('np-dir').value}</td><td id="np-ssl"><span class="tag off">Not set</span></td><td style="text-align:right"><button class="pbtn" id="btn-np-set" onclick="psim.modal('m-proj');psim.ptab('map')">Set</button> <button class="pbtn" id="btn-np-restart" onclick="psim.toast('Project restarted')">Restart</button></td></tr>`;
+    psim.close(); psim.toast('Project added and started');
+  },
+  ptab(t) {
+    $('pt-map').style.display = t === 'map' ? '' : 'none'; $('pt-ssl').style.display = t === 'ssl' ? '' : 'none';
+    document.querySelectorAll('.ptab-v').forEach(d => { d.style.background = d.dataset.t === t ? '#e7f7ea' : ''; d.style.color = d.dataset.t === t ? '#1a8c32' : ''; });
+  },
+  addMap() { $('map-rows').innerHTML = `<tr id="map-row"><td>${$('map-domain').value}</td><td>80</td></tr>`; $('map-domain').value = ''; psim.toast('Domain added'); },
+  applySsl() { $('ssl-ok').style.display = ''; $('np-ssl') && ($('np-ssl').innerHTML = '<span class="tag ok">Let\'s Encrypt</span>'); },
+  addCron() { $('cron-rows').innerHTML = `<tr id="cron-row"><td>${$('cron-name').value}</td><td><span class="tag ok">Running</span></td><td>Daily ${$('cron-hour').value}:${$('cron-min').value}</td><td>never</td></tr>`; psim.toast('Task added'); },
+  ghAdd() { $('gh-added').style.display = ''; },
+  dnsSave() { $('dns-rows').insertAdjacentHTML('afterbegin', `<tr id="dns-row" style="background:#effaf1"><td style="padding-left:22px">${$('dns-type').value}</td><td>${$('dns-host').value}</td><td>${$('dns-value').value}</td><td>1 hour</td></tr>`); },
+  setShot(src) { $('site-shot').src = src; },
+};
+document.querySelectorAll('.panel-side a[data-pg]').forEach(a => a.addEventListener('click', () => psim.page(a.dataset.pg)));
+psim.page('home');
+
+// ----- hrpayroll-server.sh setup -----
+sim.define('lx-login', [
+  { o: 'Welcome to Ubuntu 24.04.1 LTS (GNU/Linux 6.8.0-49-generic x86_64)' }, { o: '' },
+  { cmd: `sudo bash ${SCRIPT} setup`, prompt: P, id: 'lx-cmd' },
+  { ask: '[sudo] password for onenetsol: ', a: 'x', mask: ' ', speed: 1 },
+]);
+sim.define('lx-key', [
+  { ask: 'Repository address [git@github.com:onenet786/HR-Payroll-Management-System.git]: ', wait: 700 },
+  { o: ok(`Node.js ${NODE} from aaPanel (/www/server/nodejs/${NODE}/bin)`), id: 'lx-node' },
+  { o: info('Creating a deploy key (ed25519, no passphrase, used only for this repository)') },
+  { o: ok('Created /root/.ssh/hrpayroll_deploy_ed25519') },
+  { o: ok('Added host alias hrpayroll-github.com to /root/.ssh/config') },
+  { o: '' },
+  { o: [B('---------------- Public deploy key (copy the whole line) ----------------')] },
+  { o: 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK7v2qR9mXcL4pW0sHy8eTf3Nd6uJb1oZaQ5kVt2GxYw hrpayroll-deploy@hr-server', id: 'lx-pub' },
+  { o: [B('------------------------------------------------------------------------')] },
+  { o: '' },
+  { o: 'Add it to the private repository as a READ-ONLY deploy key:' },
+  { o: '  GitHub: github.com/onenet786/HR-Payroll-Management-System -> Settings -> Deploy keys -> Add deploy key' },
+  { o: '          Title: HR server (hr-server)   Key: the line above   [ ] Allow write access (leave OFF)', id: 'lx-keyhelp' },
+  { o: '' },
+  { idle: 'Press Enter after you have added the deploy key... ', id: 'lx-enter' },
+]);
+sim.define('lx-clone', [
+  { o: '' },
+  { o: info('Checking access to github.com:onenet786/HR-Payroll-Management-System.git') },
+  { o: ok('The server can read the repository'), id: 'lx-access' },
+  { o: info('Downloading the code into /www/wwwroot/hr-payroll'), wait: 500 },
+  { o: '     Branches on GitHub, newest first:' },
+  { o: '       B12  (2026-11-23)  feat: add Windows Server installation guide, helper scripts, and automated build tools', id: 'lx-b12' },
+  { o: '       B11  (2026-11-02)  fix: improve face detection quality checks and error messages' },
+  { o: '       main  (2026-10-02)  feat: payroll processing and payslips' },
+  { ask: 'Branch to deploy [B12]: ', wait: 700 },
+  { o: ok('Code is at commit 058de93 feat: add Windows Server installation guide, helper scripts, and automated build tools') },
+  { o: info('Installing Node packages (npm ci; a few minutes the first time)'), wait: 1200 },
+  { o: ok('Packages installed') },
+  { o: info('Building the web app (vite build)'), wait: 1000 },
+  { o: ok('Web app built (dist/)') },
+]);
+sim.define('lx-env', [
+  { o: info('Creating .env') },
+  { o: '' },
+  { o: [B('Server settings (press Enter to keep the value in brackets; you can change them later in /www/wwwroot/hr-payroll/.env)')] },
+  { ask: 'HR web address (domain), e.g. hr.yourcompany.com: ', a: 'hr.aljannatmall.com', id: 'lx-domain' },
+  { ask: 'Administrator / SSL contact e-mail: ', a: 'it@aljannatmall.com' },
+  { ask: 'Company name: ', a: 'AlJannat Mall' },
+  { ask: 'Internal port for the app [8080]: ', wait: 600, id: 'lx-port' },
+  { o: 'Database: it must already exist in aaPanel -> Databases -> PgSQL -> Add database' },
+  { o: '          (aaPanel creates a database user with the same name and the password you choose there).' },
+  { ask: '  Database name [hrpayroll]: ', wait: 500 },
+  { ask: '  Database user [hrpayroll]: ', wait: 500 },
+  { ask: '  Database password (from aaPanel; leave empty to fill in later): ', a: 'x', mask: ' ', speed: 1, wait: 400 },
+  { o: '' },
+  { o: ok('Database settings saved') },
+  { o: ok('Created .env with new random BACKUP_ENCRYPTION_KEY and MFA_ENCRYPTION_KEY') },
+  { o: warn('Keep a copy of /www/wwwroot/hr-payroll/.env OFF this server: without BACKUP_ENCRYPTION_KEY the backups cannot be restored.'), id: 'lx-envwarn' },
+]);
+sim.define('lx-migrate', [
+  { o: info('Updating the database (postgres-migrate)') },
+  { delay: 22 },
+  { lines: ['001_initial.sql', '002_relational_tables.sql', '003_attendance_periods.sql', '004_payroll_adjustments.sql', '005_payroll_period_uniqueness.sql', '006_payslip_deliveries.sql', '007_auth_sessions.sql', '008_mfa_totp.sql', '009_mfa_recovery_requests.sql', '010_mfa_email_verifications.sql', '011_mfa_email_login_codes.sql', '012_mfa_email_enrollments.sql', '013_repair_mfa_email_tables.sql', '014_employee_documents.sql', '015_governance_and_lifecycle.sql', '016_payroll_run_uniqueness_by_type.sql', '017_payslip_alert_deliveries.sql', '018_audit_log_action_names.sql', '019_mfa_trusted_devices.sql', '020_kiosk_devices.sql', '021_default_roles.sql', '022_auto_leave_attendance.sql', '023_app_settings.sql', '024_legacy_import.sql', '025_managed_installation.sql', '026_reports_indexes.sql'].map(f => `     Applied ${f}`) },
+  { delay: 55 },
+  { o: ok('Database is up to date'), id: 'lx-dbok' },
+  { ask: 'Create the first administrator now? (y/n) [y]: ', a: 'y' },
+  { o: '  First administrator (an existing account with the same e-mail is kept as it is).' },
+  { ask: '  Company name [AlJannat Mall]: ', wait: 400 },
+  { ask: '  Administrator name [Administrator]: ', a: 'HR Administrator' },
+  { ask: '  Administrator e-mail (used to sign in) [it@aljannatmall.com]: ', a: 'hradmin@aljannatmall.com' },
+  { ask: '  Edition: full (Pakistan compliance) or lite (small shop) [full]: ', wait: 400 },
+  { ask: '  Password (at least 12 characters): ', a: 'x', mask: ' ', speed: 1, wait: 300 },
+  { ask: '  Password again: ', a: 'x', mask: ' ', speed: 1, wait: 300 },
+  { o: '{"company":"created","administrator":"created","edition":"full","urls":["https://hr.aljannatmall.com"],"clientDataImport":false}' },
+  { o: ok("Administrator hradmin@aljannatmall.com is ready (if the account already existed, its password was NOT changed: use 'bash /root/hrpayroll-server.sh admin' -> reset)"), id: 'lx-admin' },
+  { o: ok('Files owned by www') },
+]);
+sim.define('lx-next', [
+  { clear: true },
+  { delay: 40 },
+  { o: [B('========================  Next steps in aaPanel  ========================')], id: 'nx-head' },
+  { o: '1. Node project  (Website -> Node project -> Add Node project)', id: 'nx-1' },
+  { o: '     Project directory : /www/wwwroot/hr-payroll' },
+  { o: '     Start command     : node server.cjs          (or "Run script: start")' },
+  { o: `     Node version      : ${NODE}` },
+  { o: '     Port              : 8080' },
+  { o: '     Run as user       : www' },
+  { o: '2. Mapping:   in the Node project, Mapping -> add hr.aljannatmall.com.', id: 'nx-2' },
+  { o: '3. SSL:       in the Node project, SSL -> Let\'s Encrypt -> apply, then turn on "Force HTTPS".', id: 'nx-3' },
+  { o: '4. Firewall:  aaPanel -> Security: ports 80 and 443 open; do NOT open port 8080 (the app listens on 127.0.0.1 only).', id: 'nx-4' },
+  { o: '5. Cron:      aaPanel -> Cron -> Add task -> Shell script, daily 02:30:', id: 'nx-5' },
+  { o: '                bash /root/hrpayroll-server.sh backup      (aaPanel Cron runs as root: no sudo here)' },
+  { o: '6. DNS:       at your domain provider, an A record:  hr.aljannatmall.com  ->  203.0.113.25', id: 'nx-6' },
+  { o: '7. Open https://hr.aljannatmall.com, sign in as the administrator.' },
+  { o: '' },
+  { o: 'Every update from now on:' },
+  { o: '     sudo bash /root/hrpayroll-server.sh update      then aaPanel -> Node project -> Restart', id: 'nx-upd' },
+  { o: [B('==========================================================================')] },
+  { idle: P },
+]);
+// ----- update / check -----
+sim.define('lx-update', [
+  { clear: true },
+  { cmd: `sudo bash ${SCRIPT} update`, prompt: P },
+  { o: ok(`Node.js ${NODE} from aaPanel (/www/server/nodejs/${NODE}/bin)`) },
+  { o: info('Checking GitHub for new code (branch B12; the live files are not touched)') },
+  { o: ok('New version: 058de93 -> 7c41a2e'), id: 'up-new' },
+  { o: '     7c41a2e fix: payslip PDF shows the bank account title' },
+  { o: '     b93d0f4 feat: leave balance carry-forward report' },
+  { o: info('Database backup (encrypted)') },
+  { o: 'Encrypted backup created: /www/hrpayroll-data/backups/hr-payroll-2026-12-14T07-02-18-406Z.dump.enc' },
+  { o: 'SHA-256: 4be1f0c9d27a83e65b0f19c4d7a2e85f3c60b19d4a7f2e8c5d13b6a9f0e7c42d' },
+  { o: ok('Backup written to /www/hrpayroll-data/backups'), id: 'up-backup' },
+  { o: info('Preparing the new version in /www/wwwroot/hr-payroll.new (the site keeps running)'), id: 'up-prep' },
+  { o: info('Installing Node packages (npm ci; a few minutes the first time)'), wait: 900 },
+  { o: ok('Packages installed') },
+  { o: info('Building the web app (vite build)'), wait: 800 },
+  { o: ok('Web app built (dist/)') },
+  { o: info('Updating the database (postgres-migrate)') },
+  { o: '     Applied 027_attendance_summary_indexes.sql' },
+  { o: ok('Database is up to date') },
+  { o: ok('Files owned by www') },
+  { o: info('Switching to the new version') },
+  { o: ok('Files owned by www') },
+  { o: ok('Version 7c41a2e is in place; the previous version is kept in /www/wwwroot/hr-payroll.previous') },
+  { o: '' },
+  { o: [B('Now restart the app: aaPanel -> Website -> Node project -> HR & Payroll -> Restart.')], id: 'up-restart' },
+  { o: `Then check it with:      sudo bash ${SCRIPT} check` },
+  { o: `If something is wrong:   sudo bash ${SCRIPT} rollback   (then Restart again)`, id: 'up-rollback' },
+  { idle: P },
+]);
+sim.define('lx-check', [
+  { clear: true },
+  { cmd: `sudo bash ${SCRIPT} check`, prompt: P },
+  { o: ok(`Node.js ${NODE} from aaPanel (/www/server/nodejs/${NODE}/bin)`) },
+  { o: ok('Code: branch B12, commit 7c41a2e 2026-12-14 11:48:02 +0500 fix: payslip PDF shows the bank account title') },
+  { o: ok('No newer code on GitHub') },
+  { o: ok('.env present') },
+  { o: ok('Web app built (2026-12-14 12:04:51)') },
+  { o: '     migrations applied: 27' },
+  { o: ok('Database reachable') },
+  { o: ok('App answers on port 8080') },
+  { o: ok('Public address works: https://hr.aljannatmall.com') },
+  { o: ok('Newest backup: hr-payroll-2026-12-14T07-02-18-406Z.dump.enc (2026-12-14 12:02:18)') },
+  { o: '' },
+  { o: [B('All checks passed.')], id: 'ck-ok' },
+  { idle: P },
+]);
+</script>
+</body>
+</html>

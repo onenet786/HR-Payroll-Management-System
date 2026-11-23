@@ -240,11 +240,19 @@ $cmd = @(
 )
 WriteUtf8 (Join-Path $exportDir 'Install-HRPayroll-CA.cmd') (($cmd -join "`r`n") + "`r`n")
 
-$check = & curl.exe -s -o NUL -m 10 -w '%{http_code}' "https://localhost/api/health" 2>$null
+$healthCode = & curl.exe -s --ssl-no-revoke -o NUL -m 10 -w '%{http_code}' "https://localhost/api/health" 2>$null
 Say ''
 Say 'HTTPS is on.' 'Green'
 foreach ($u in $httpsUrls) { Say "  $u" 'Green' }
-Say "Health over https://localhost: $check"
+Say "Health over https://localhost: $healthCode"
+# The firewall rules cover Domain and Private networks only; a network marked Public blocks other PCs.
+$publicNets = @(Get-NetConnectionProfile -ErrorAction SilentlyContinue | Where-Object { $_.NetworkCategory -eq 'Public' })
+if ($publicNets.Count) {
+  Say ''
+  Say ("This server's network '" + (($publicNets | ForEach-Object { $_.InterfaceAlias }) -join "', '") + "' is set to Public, so other PCs are blocked.") 'Red'
+  Say '  Fix (office network, not a domain):  Set-NetConnectionProfile -InterfaceAlias "<name above>" -NetworkCategory Private' 'Yellow'
+  Say "  Or allow the HR Payroll ports on every network:  Set-NetFirewallRule -Group 'HR Payroll' -Profile Any" 'Yellow'
+}
 Say ''
 Say 'On every PC and kiosk that opens the system (once):' 'Yellow'
 Say "  1. Copy the folder $exportDir to the PC (USB or a shared folder)." 'Yellow'

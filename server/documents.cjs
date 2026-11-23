@@ -416,13 +416,26 @@ async function authorizeWrite(client, name, table, id, identity, existing, next)
   }
   if (name === 'salaryRevisions' || table === 'salary_revisions') {
     if (!existing) {
-      if (next.status !== 'Draft' || (next.createdById && next.createdById !== identity.uid)) return false;
+      // createdById is required so the maker can always be identified for the maker-checker check below.
+      if (next.status !== 'Draft' || next.createdById !== identity.uid) return false;
     } else {
       const previous = existing.data;
       if (['employeeId', 'previousSalary', 'newSalary', 'effectiveDate', 'createdById'].some(field => previous[field] !== next[field])) return false;
       if (previous.status === 'Approved' && next.status !== 'Approved') return false;
       if (previous.status !== 'Approved' && next.status === 'Approved'
         && ((dual && previous.createdById && previous.createdById === identity.uid) || next.approvedById !== identity.uid)) return false;
+    }
+  }
+  if (name === 'loanAdvances' || table === 'loan_advances') {
+    if (!existing) {
+      // Every application records who entered it, so a different user can be required to decide it.
+      if (next.status !== 'Pending' || next.createdById !== identity.uid) return false;
+    } else if (existing.data.status === 'Pending' && next.status !== 'Pending') {
+      const previous = existing.data;
+      if (!['Active', 'Rejected'].includes(next.status) || next.decidedById !== identity.uid
+        || (identity.employeeId && identity.employeeId === previous.employeeId)
+        || (dual && previous.createdById && previous.createdById === identity.uid)
+        || ['employeeId', 'type', 'principalAmount', 'totalInstallments', 'reason', 'appliedOn', 'createdById'].some(field => previous[field] !== next[field])) return false;
     }
   }
   if ((name === 'gratuitySettlements' || table === 'gratuity_settlements') && ['Processed', 'Paid'].includes(next.status)

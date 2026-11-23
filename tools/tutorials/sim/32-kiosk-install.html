@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Kiosk installation (simulated)</title>
+<link rel="stylesheet" href="it-sim.css">
+<script src="it-sim.js"></script>
+<style>
+  #kiosk { position: absolute; inset: 0; width: 1600px; height: 900px; border: 0; display: none; z-index: 60; background: #0b1220; }
+  #kiosk.on { display: block; }
+  .nsis .content p { margin: 0 0 10px; line-height: 1.45; }
+  .nsis .done { display: flex; height: 342px; background: #fff; }
+  .nsis .done .side { width: 164px; background: linear-gradient(180deg, #0f766e, #064e3b); }
+  .nsis .done .txt { flex: 1; padding: 20px 22px; font-size: 13px; }
+  .nsis .done h2 { font-size: 17px; margin: 0 0 14px; font-weight: 600; }
+</style>
+</head>
+<body>
+<!-- Simulated kiosk PC for chapter 32: Explorer, the electron-builder NSIS setup (windows-kiosk/electron-builder.json +
+     installer.nsh) and, in #kiosk, the real kiosk screen markup (windows-kiosk/renderer/index.html, scripts removed). -->
+<div class="desk pc" id="desk">
+  <div class="wm"><b>GATE1-KIOSK</b>Windows 11 Pro &middot; branch gate PC</div>
+  <div class="desk-icons" id="icons">
+    <div class="desk-icon"><svg width="40" height="40" viewBox="0 0 24 24"><path d="M6 6h12l-1 15H7z" fill="#cfe3f7" stroke="#7aa6d1"/><path d="M4 6h16M10 3h4" stroke="#cfe3f7" stroke-width="2"/></svg>Recycle Bin</div>
+    <div class="desk-icon" id="kiosk-shortcut" style="display:none"><svg width="40" height="40" viewBox="0 0 18 18"><rect x="1" y="1" width="16" height="16" rx="3" fill="#0f766e"/><path d="M5 9.5l2.6 2.6L13 6.5" stroke="#fff" stroke-width="2" fill="none"/></svg>AlJannatMall Attendance Kiosk</div>
+  </div>
+
+  <div class="win" id="exp" style="left:120px;top:44px;width:1180px;height:600px">
+    <div class="tbar"><span class="ttl">File Explorer</span><span class="ctl">&#8212;</span><span class="ctl">&#9744;</span><span class="ctl x">&#10005;</span></div>
+    <div class="body">
+      <div class="exp-ribbon"><span class="on">File</span><span>Home</span><span>Share</span><span>View</span></div>
+      <div class="exp-addr"><span class="nav">&#8592;</span><span class="nav">&#8594;</span><span class="nav">&#8593;</span><div class="path"></div><div class="search">Search</div></div>
+      <div class="exp-main">
+        <div class="exp-nav"><div>&#9733; Quick access</div><div data-nav="desktop">Desktop</div><div data-nav="downloads">Downloads</div><div data-nav="pc">This PC</div><div data-nav="c">&nbsp;&nbsp;Local Disk (C:)</div><div data-nav="e">&nbsp;&nbsp;USB Drive (E:)</div></div>
+        <div class="exp-list"><div class="hdr"><span>Name</span><span>Date modified</span><span>Type</span><span style="text-align:right">Size</span></div><div class="exp-rows"></div></div>
+      </div>
+      <div class="exp-status"></div>
+    </div>
+  </div>
+
+  <div class="win dark" id="con" style="left:160px;top:60px;width:1150px;height:420px">
+    <div class="tbar"><span class="ttl">Administrator: C:\Windows\System32\cmd.exe</span><span class="ctl">&#8212;</span><span class="ctl">&#9744;</span><span class="ctl x">&#10005;</span></div>
+    <div class="body"><div class="term" id="t-con"></div></div>
+  </div>
+
+  <!-- NSIS wizard -->
+  <div class="win nsis" id="nsis" style="left:500px;top:120px">
+    <div class="tbar"><span class="ttl">AlJannatMall Attendance Kiosk Setup</span><span class="ctl">&#8212;</span><span class="ctl x">&#10005;</span></div>
+    <div class="body">
+      <div id="ns-dir">
+        <div class="head"><div><b>Choose Install Location</b><small>Choose the folder in which to install AlJannatMall Attendance Kiosk.</small></div><svg width="36" height="36" viewBox="0 0 18 18"><rect x="1" y="1" width="16" height="16" rx="3" fill="#0f766e"/><path d="M5 9.5l2.6 2.6L13 6.5" stroke="#fff" stroke-width="2" fill="none"/></svg></div>
+        <div class="content">
+          <p>Setup will install AlJannatMall Attendance Kiosk in the following folder. To install in a different folder, click Browse and select another folder. Click Install to start the installation.</p>
+          <div style="margin-top:26px;border:1px solid #c8c8c8;padding:12px 10px 14px">
+            <div style="margin:-20px 0 8px;background:#f0f0f0;display:inline-block;padding:0 4px">Destination Folder</div>
+            <div style="display:flex;gap:8px"><input type="text" id="ns-path" value="C:\Program Files\AlJannatMall Attendance Kiosk"><button style="height:24px;min-width:80px;font:inherit;font-size:12.5px">Browse...</button></div>
+          </div>
+          <p style="margin-top:26px">Space required: 498.6 MB<br>Space available: 186.2 GB</p>
+        </div>
+        <div class="foot"><button>&lt; Back</button><button class="pri" id="ns-install" onclick="ksim.install()">Install</button><button>Cancel</button></div>
+      </div>
+      <div id="ns-prog" style="display:none">
+        <div class="head"><div><b>Installing</b><small>Please wait while AlJannatMall Attendance Kiosk is being installed.</small></div><svg width="36" height="36" viewBox="0 0 18 18"><rect x="1" y="1" width="16" height="16" rx="3" fill="#0f766e"/><path d="M5 9.5l2.6 2.6L13 6.5" stroke="#fff" stroke-width="2" fill="none"/></svg></div>
+        <div class="content"><div id="ns-now">Extract: app.asar...</div><div class="bar"><i id="ns-bar"></i></div><div class="log" id="ns-log"></div></div>
+        <div class="foot"><button disabled>&lt; Back</button><button disabled>Next &gt;</button><button disabled>Cancel</button></div>
+      </div>
+      <div id="ns-done" style="display:none">
+        <div class="done"><div class="side"></div><div class="txt"><h2>Completing AlJannatMall Attendance Kiosk Setup</h2>
+          <p>AlJannatMall Attendance Kiosk has been installed on your computer.</p><p>Click Finish to close Setup.</p>
+          <label style="display:block;margin-top:26px" id="ns-run"><input type="checkbox" checked> Run AlJannatMall Attendance Kiosk</label></div></div>
+        <div class="foot"><button disabled>&lt; Back</button><button class="pri" id="ns-finish" onclick="ksim.finish()">Finish</button><button disabled>Cancel</button></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="ctx" id="ctx"></div>
+  <div class="uac-veil" id="uac">
+    <div class="uac">
+      <div class="top"><small>User Account Control</small><h3>Do you want to allow this app to make changes to your device?</h3></div>
+      <div class="mid"><svg width="40" height="40" viewBox="0 0 18 18"><rect x="1" y="1" width="16" height="16" rx="3" fill="#0f766e"/><path d="M5 9.5l2.6 2.6L13 6.5" stroke="#fff" stroke-width="2" fill="none"/></svg>
+        <div><div class="app" style="font-size:16px"></div><div class="meta">Publisher: <span class="pub"></span><br>File origin: Hard drive on this computer</div></div></div>
+      <div class="btns"><button class="pri" id="uac-yes" onclick="sim.uacClose()">Yes</button><button onclick="sim.uacClose()">No</button></div>
+    </div>
+  </div>
+  <div class="taskbar"><span class="tb"><svg width="18" height="18" viewBox="0 0 18 18"><path d="M1 3l7-1v7H1zM9 2l8-1v8H9zM1 10h7v7l-7-1zM9 10h8v8l-8-1z" fill="#5aa9ff"/></svg></span><span class="tb on">&#128193;</span><span class="clock">08:42 AM<br>11/23/2026</span></div>
+</div>
+<iframe id="kiosk" title="Kiosk"></iframe>
+
+<script>
+const KV = '1.0.44';
+const ksim = window.ksim = {
+  views: {
+    downloads: { path: 'This PC > Downloads', nav: 'downloads', rows: [
+      { id: 'f-setup', name: `AlJannatMall Attendance Kiosk Setup ${KV}.exe`, icon: 'exe', date: '11/23/2026 8:31 AM', type: 'Application', size: '214,906 KB' },
+      { name: 'URU4500 driver (DigitalPersona).zip', icon: 'zip', date: '11/22/2026 4:10 PM', type: 'Compressed (zipped) Folder', size: '38,112 KB' },
+    ] },
+    ca: { path: 'This PC > USB Drive (E:) > https-ca', nav: 'e', rows: [
+      { id: 'f-cer', name: 'HRPayroll-CA.cer', icon: 'cer', date: '11/23/2026 8:20 AM', type: 'Security Certificate', size: '2 KB' },
+      { id: 'f-cacmd', name: 'Install-HRPayroll-CA.cmd', icon: 'cmd', date: '11/23/2026 8:20 AM', type: 'Windows Command Script', size: '1 KB' },
+    ] },
+  },
+  view(name) { sim.explorer('#exp', ksim.views[name]); sim.show('#exp'); },
+  async install() {
+    document.getElementById('ns-dir').style.display = 'none'; document.getElementById('ns-prog').style.display = '';
+    const log = document.getElementById('ns-log'); const bar = document.getElementById('ns-bar'); const now = document.getElementById('ns-now');
+    const lines = [
+      'Stopping AlJannatMall Attendance Kiosk and the fingerprint bridge before removing the previous version...',
+      'Output folder: C:\\Program Files\\AlJannatMall Attendance Kiosk',
+      'Extract: AlJannatMall Attendance Kiosk.exe', 'Extract: resources\\app.asar', 'Extract: resources\\kiosk.env',
+      'Extract: resources\\uru4500-bridge\\URU4500Bridge.exe', 'Extract: resources\\uru4500-bridge\\DPUruNet.dll', 'Extract: resources\\uru4500-bridge\\sgfplib.dll',
+      'Registering the fingerprint bridge to start at every Windows login...',
+      'Create shortcut: C:\\Users\\Public\\Desktop\\AlJannatMall Attendance Kiosk.lnk',
+      'Create shortcut: Start Menu\\Programs\\AlJannatMall Attendance Kiosk.lnk', 'Completed',
+    ];
+    for (let i = 0; i < lines.length; i++) {
+      now.textContent = lines[i]; log.insertAdjacentHTML('beforeend', `<div${/Registering/.test(lines[i]) ? ' id="ns-bridge" style="font-weight:600"' : ''}>${lines[i]}</div>`);
+      log.scrollTop = log.scrollHeight; bar.style.width = `${Math.round(((i + 1) / lines.length) * 100)}%`;
+      await sim.sleep(/Registering/.test(lines[i]) ? 1100 : 300);
+    }
+    await sim.sleep(500);
+    document.getElementById('ns-prog').style.display = 'none'; document.getElementById('ns-done').style.display = '';
+    document.getElementById('kiosk-shortcut').style.display = '';
+  },
+  finish() { sim.hide('#nsis'); },
+  kiosk(src) { const f = document.getElementById('kiosk'); if (src) f.src = src; f.classList.add('on'); },
+};
+sim.define('ca', [
+  { clear: true },
+  { o: 'Root "Trusted Root Certification Authorities"' },
+  { o: 'Signature matches Public Key' },
+  { o: 'Certificate "AlJannat Mall HR Payroll Local CA" added to store.', id: 'c-added' },
+  { o: 'CertUtil: -addstore command completed successfully.' },
+  { o: '' },
+  { o: 'Done. Close and reopen the browser, then open https://headoffice' },
+  { idle: 'Press any key to continue . . . ' },
+]);
+ksim.view('ca');
+</script>
+</body>
+</html>
