@@ -13,12 +13,14 @@ const DIRECTION_LABELS = Object.freeze({ both: 'In & Out', in: 'In only', out: '
 const CAMERA_ZOOMS = Object.freeze([1, 1.5, 2, 2.5, 3]);
 
 const text = (value, max) => String(value ?? '').trim().slice(0, max);
+// "rstp://" (letters swapped) is the most common typo for rtsp://; fix it rather than fail with an unclear error.
+const cameraUrl = value => text(value, 512).replace(/^rstp:\/\//i, 'rtsp://');
 
 function cameraSlot(index, camera = {}) {
   return {
     id: `cam${index + 1}`,
     name: text(camera.name, 40) || `Camera ${index + 1}`,
-    url: text(camera.url, 512),
+    url: cameraUrl(camera.url),
     user: text(camera.user, 64),
     ...(camera.password?.value ? { password: camera.password } : {}),
     direction: CAMERA_DIRECTIONS.includes(camera.direction) ? camera.direction : 'both',

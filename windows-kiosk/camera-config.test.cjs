@@ -70,3 +70,9 @@ test('camera zoom is one of the offered steps and survives saving; anything else
   const merged = mergeSubmittedCameras([], [{ url: 'rtsp://a', user: 'k', password: 'p', zoom: '2.5' }], value => ({ encrypted: false, value }));
   assert.equal(merged[0].zoom, 2.5);
 });
+
+test('the common rstp:// typo is corrected to rtsp://', () => {
+  const { normalizeCameraSettings: normalize } = require('./camera-config.cjs');
+  const terminal = normalize({ cameraSource: 'ip', ipCameras: [{ url: 'rstp://192.168.86.36:554/Streaming/Channels/101' }] });
+  assert.equal(terminal.ipCameras[0].url, 'rtsp://192.168.86.36:554/Streaming/Channels/101');
+});

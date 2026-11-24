@@ -60,6 +60,11 @@ function attachLogin(client, user, password, finish) {
 /** Opens the URL; `finish(result)` settles exactly once. Returns the client (or null when the URL is invalid). */
 function openCamera({ url, user, password, request, finish }) {
   let client;
+  const scheme = (/^([a-z][a-z0-9+.-]*):/i.exec(String(url).trim())?.[1] || '').toLowerCase();
+  if (scheme !== 'http' && scheme !== 'https') {
+    finish({ ok: false, message: `Camera address must start with rtsp:// (live video, e.g. rtsp://192.168.1.45:554/Streaming/Channels/101) or http:// (snapshot)${scheme ? `, not ${scheme}://` : ''}.` });
+    return null;
+  }
   try {
     client = request({ url: String(url).trim(), method: 'GET', useSessionCookies: false });
   } catch (error) {
